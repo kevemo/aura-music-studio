@@ -1,0 +1,67 @@
+project_name: nothings-gonna-stop-us-now
+title: "Nothing's Gonna Stop Us Now — backing production"
+mode: backing_track
+rights_confirmed: true
+
+tempo_bpm: 96
+meter: "4/4"
+key: "F# Major"
+tuning: "reference acoustic arrangement described as half-step-down guitar tuning"
+total_measures: 107
+
+guide_command: "python ../../scripts/make_score_guide.py"
+
+sections:
+  - {name: Intro, start_measure: 1, end_measure: 8, energy: 0.50}
+  - {name: Verse 1, start_measure: 9, end_measure: 16, energy: 0.58}
+  - {name: Pre-Chorus 1, start_measure: 17, end_measure: 24, energy: 0.72}
+  - {name: Chorus 1, start_measure: 25, end_measure: 32, energy: 0.90}
+  - {name: Tag + Verse 2, start_measure: 33, end_measure: 44, energy: 0.62}
+  - {name: Pre-Chorus 2, start_measure: 45, end_measure: 53, energy: 0.76}
+  - {name: Chorus 2, start_measure: 54, end_measure: 61, energy: 0.94}
+  - {name: Bridge, start_measure: 62, end_measure: 71, energy: 0.80}
+  - {name: Solo / Lift, start_measure: 72, end_measure: 79, energy: 0.96}
+  - {name: Final Chorus, start_measure: 80, end_measure: 95, energy: 1.00}
+  - {name: Outro / Fade, start_measure: 96, end_measure: 107, energy: 0.86}
+
+prompt: >-
+  Build a convincing human pop-rock band suitable for a lead singer to perform over.
+  Prioritize lifelike acoustic/electric guitar articulation, a live drum-room sound,
+  warm bass, grand piano, tasteful 1980s-style synth/strings, and a large final build.
+  Include an original single-note lead-guitar countermelody and restrained wordless
+  backing singers, but keep the lead-vocal lane open.
+
+negative_prompt: >-
+  no lead vocal, no spoken lyrics, no cheap karaoke keyboard, no General MIDI character,
+  no robotic drums, no EDM production, no excessive distortion
+
+renderer:
+  preferred: [deapi, acestep_space, local_acestep]
+  model: acestep-v15-xl-turbo
+  cover_strength: 0.78
+  duration_limit_seconds: 300
+  max_attempts_per_host: 4
+  retry_seconds: 45
+
+production:
+  realistic_drums: true
+  fingered_bass: true
+  acoustic_guitar: true
+  electric_rhythm_guitars: true
+  piano: true
+  synths: true
+  strings: true
+  percussion: true
+  original_single_note_countermelody: true
+  wordless_backing_harmonies: true
+  leave_center_for_lead_vocal: true
+
+mix:
+  target_lufs: -14.0
+  true_peak_db: -1.0
+  vocal_space: true
+  backing_vocals_db: -8.0
+  lead_guitar_db: -9.0
+  export_mp3: true
+  export_wav: true
+  export_stems: true
