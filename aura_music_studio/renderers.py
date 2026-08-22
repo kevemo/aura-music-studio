@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 from gradio_client import Client, handle_file
 
+from .acestep_api import AceStepClient, AceStepRequest
 from .cloud_providers import ElevenMusicClient, MurekaClient
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
@@ -56,6 +57,59 @@ class BaseRenderer:
 
     def render(self, workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan) -> RenderResult:
         raise NotImplementedError
+
+
+class AceStepApiRenderer(BaseRenderer):
+    """Direct adapter for the official ACE-Step 1.5 async REST API."""
+
+    name = "acestep_api"
+
+    def available(self) -> bool:
+        return bool(os.getenv("AURA_ACESTEP_API_URL"))
+
+    def render(self, workspace, manifest, plan):
+        client = AceStepClient()
+        source = _source_or_guide(workspace, manifest)
+        duration = min(_target_duration(workspace, manifest, plan), 600)
+        lyrics = _lyrics(workspace, manifest)
+        task_type = "text2music"
+        src_audio = None
+        reference_audio = None
+
+        if manifest.mode in {"cover", "remix", "backing_track"} and source and source.exists():
+            task_type = "cover"
+            src_audio = str(source)
+        elif manifest.reference_audio:
+            ref = workspace.resolve_asset(manifest.reference_audio)
+            if ref and ref.exists():
+                reference_audio = str(ref)
+
+        request = AceStepRequest(
+            prompt=plan.render_prompt,
+            lyrics=lyrics,
+            task_type=task_type,
+            model=manifest.renderer.model,
+            bpm=round(plan.tempo_bpm) if plan.tempo_bpm else None,
+            key_scale=plan.key,
+            time_signature=plan.meter.split("/")[0],
+            audio_duration=float(duration),
+            thinking=task_type in {"text2music", "lego", "complete"},
+            use_format=True,
+            audio_format="wav",
+            inference_steps=8,
+            guidance_scale=7.0,
+            batch_size=1,
+            audio_cover_strength=manifest.renderer.cover_strength,
+            src_audio=src_audio,
+            reference_audio=reference_audio,
+        )
+        outputs = client.generate(request, workspace.work_dir / "acestep_api")
+        return RenderResult(
+            renderer=self.name,
+            audio_path=outputs[0],
+            audio_origin="neural",
+            metadata={"task_type": task_type, "api": client.base_url, "model": manifest.renderer.model},
+        )
 
 
 class DeapiRenderer(BaseRenderer):
@@ -264,6 +318,7 @@ def _target_duration(workspace: ProjectWorkspace | None, manifest: ProjectManife
 
 def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan) -> RenderResult:
     renderers = {
+        "acestep_api": AceStepApiRenderer(),
         "deapi": DeapiRenderer(),
         "eleven_music": ElevenMusicRenderer(),
         "mureka": MurekaRenderer(),
@@ -274,7 +329,7 @@ def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest,
     }
     requested = list(manifest.renderer.preferred)
     if manifest.mode in {"cover", "remix", "backing_track"}:
-        guide_first = ["local_acestep", "muser", "acestep_space", "deapi", "mureka", "eleven_music", "yue"]
+        guide_first = ["acestep_api", "local_acestep", "muser", "acestep_space", "deapi", "mureka", "eleven_music", "yue"]
         requested = [x for x in guide_first if x in requested] + [x for x in requested if x not in guide_first]
 
     errors = []
