@@ -30,35 +30,71 @@ jobs:
         id: guide
         run: |
           mkdir -p generated
+          rm -f generated/ace_step_render.* generated/final_real_band.* generated/validation_real_band.*
           AURA_GUIDE=generated/full_score_guide.wav python scripts/make_score_guide.py | tee generated/guide_log.txt
-          ffmpeg -y -hide_banner -loglevel error -i generated/full_score_guide.wav -t 30 generated/validation_source.wav
+          ffmpeg -y -hide_banner -loglevel error -i generated/full_score_guide.wav -t 12 generated/validation_source.wav
           ls -lh generated/full_score_guide.wav generated/validation_source.wav | tee -a generated/guide_log.txt
 
-      - name: Neural render validation
-        id: render
+      - name: Validate neural renderer on short clip
+        id: validate
         continue-on-error: true
         env:
           AURA_SOURCE: generated/validation_source.wav
           AURA_OUTDIR: generated
-          AURA_DURATION: '30'
-          AURA_MODEL: acestep-v15-xl-turbo
+          AURA_DURATION: '12'
+          AURA_MODEL: acestep-v15-turbo
           AURA_COVER_STRENGTH: '0.78'
+          AURA_MAX_ATTEMPTS: '6'
+          AURA_RETRY_SECONDS: '65'
         run: |
           set -o pipefail
-          python scripts/render_ace.py 2>&1 | tee generated/render_log.txt
+          python scripts/render_ace.py 2>&1 | tee generated/validation_render_log.txt
+          mv generated/ace_step_render.mp3 generated/validation_real_band.mp3
+
+      - name: Render full 107-measure neural production
+        id: full_render
+        if: steps.validate.outcome == 'success'
+        continue-on-error: true
+        env:
+          AURA_SOURCE: generated/full_score_guide.wav
+          AURA_OUTDIR: generated
+          AURA_DURATION: '267.5'
+          AURA_MODEL: acestep-v15-xl-turbo
+          AURA_COVER_STRENGTH: '0.80'
+          AURA_MAX_ATTEMPTS: '8'
+          AURA_RETRY_SECONDS: '70'
+        run: |
+          set -o pipefail
+          python scripts/render_ace.py 2>&1 | tee generated/full_render_log.txt
+          mv generated/ace_step_render.mp3 generated/final_real_band.mp3
+
+      - name: Create mastered WAV if full render exists
+        if: steps.full_render.outcome == 'success'
+        run: |
+          ffmpeg -y -hide_banner -loglevel error -i generated/final_real_band.mp3 \
+            -af "highpass=f=24,lowpass=f=18000,loudnorm=I=-14:TP=-1.0:LRA=10" \
+            -ar 48000 generated/final_real_band_master.wav
+          ffmpeg -y -hide_banner -loglevel error -i generated/final_real_band_master.wav \
+            -codec:a libmp3lame -b:a 320k generated/final_real_band_master_320.mp3
 
       - name: Record status
         if: always()
         run: |
           echo "guide=${{ steps.guide.outcome }}" > generated/render_status.txt
-          echo "render=${{ steps.render.outcome }}" >> generated/render_status.txt
+          echo "validation=${{ steps.validate.outcome }}" >> generated/render_status.txt
+          echo "full_render=${{ steps.full_render.outcome }}" >> generated/render_status.txt
           date -u +'%Y-%m-%dT%H:%M:%SZ' >> generated/render_status.txt
 
-      - name: Commit generated validation result and logs
+      - name: Remove large temporary guides before commit
+        if: always()
+        run: |
+          rm -f generated/full_score_guide.wav generated/validation_source.wav
+
+      - name: Commit neural outputs and logs
         if: always()
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
           git add generated/
-          git commit -m "ACE-Step score-guide neural render validation" || exit 0
+          git commit -m "Render Aura score-driven neural backing track" || exit 0
           git push
