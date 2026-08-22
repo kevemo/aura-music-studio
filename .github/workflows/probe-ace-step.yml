@@ -24,12 +24,24 @@ jobs:
           python - <<'PY' > generated/ace_api.txt
           from gradio_client import Client
           c = Client("ACE-Step/Ace-Step-v1.5")
-          print(c.view_api(all_endpoints=True, print_info=False))
+          print("SRC=", c.src)
+          print("CONFIG_KEYS=", sorted(c.config.keys()))
+          print("ENDPOINTS_TYPE=", type(c.endpoints))
+          print("ENDPOINTS_REPR=", repr(c.endpoints))
+          for i, ep in enumerate(c.endpoints.values() if isinstance(c.endpoints, dict) else c.endpoints):
+              print("--- ENDPOINT", i, "---")
+              print("api_name=", getattr(ep, "api_name", None))
+              print("fn_index=", getattr(ep, "fn_index", None))
+              print("repr=", repr(ep))
+              try:
+                  print("info=", ep.get_info())
+              except Exception as e:
+                  print("info_error=", type(e).__name__, str(e))
           PY
       - name: Commit probe result
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
           git add generated/ace_api.txt
-          git commit -m "Probe ACE-Step Space API" || exit 0
+          git commit -m "Probe ACE-Step Space API endpoints" || exit 0
           git push
