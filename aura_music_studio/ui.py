@@ -11,6 +11,7 @@ from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .mastering import master, translation_report
 from .pipeline import AuraPipeline
+from .producer import llm_plan
 from .rights import RightsLedger
 from .separation import StemSeparator
 from .voice import create_voice_profile
@@ -30,6 +31,18 @@ def _run_project(project_path: str):
 def _analyze(project_path: str):
     try:
         return json.dumps(AuraPipeline(Path(project_path)).analyze_only(), indent=2, default=str)
+    except Exception as exc:
+        return f"ERROR: {type(exc).__name__}: {exc}"
+
+
+def _producer(request: str, project_path: str):
+    try:
+        summary = {"project": project_path}
+        status = Path(project_path) / "aura_status.json"
+        if status.exists():
+            summary["status"] = json.loads(status.read_text(encoding="utf-8"))
+        plan = llm_plan(request, summary)
+        return plan.model_dump_json(indent=2)
     except Exception as exc:
         return f"ERROR: {type(exc).__name__}: {exc}"
 
@@ -56,7 +69,6 @@ def _create_song(title, concept, lyrics, generate_lyrics, genre, subgenre, mood,
         project = build_song_project(request, Path("projects"))
         if reference_file:
             record = AssetLibrary(project).ingest(Path(reference_file), kind="audio")
-            # Store the project-local copy as the actual reference.
             import yaml
             manifest_path = project / "project.yaml"
             manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
@@ -169,6 +181,14 @@ def build_ui() -> gr.Blocks:
             create_status = gr.Textbox(label="Status")
             created_path = gr.Textbox(label="Project folder")
             create_btn.click(_create_song, [title, concept, lyrics, generate_lyrics, genre, subgenre, mood, instruments, energy, bpm, key, duration, vocal_mode, reference, extra], [create_status, created_path])
+
+        with gr.Tab("💬 Aura Producer"):
+            producer_project = gr.Textbox(label="Current project", value="projects/nothings-gonna-stop-us-now")
+            producer_request = gr.Textbox(label="Tell Aura what to do", lines=5, placeholder="Make the chorus bigger, add wide guitars and backing harmonies; replace guitar from 1:20 to 1:35; master this like a modern rock record...")
+            producer_btn = gr.Button("Plan Studio Action", variant="primary")
+            producer_result = gr.Code(label="Aura Producer Plan", language="json")
+            producer_btn.click(_producer, [producer_request, producer_project], producer_result)
+            gr.Markdown("Producer Chat plans non-destructive operations first. Region replacement/extension is rendered only through configured **real-audio** generation engines.")
 
         with gr.Tab("🎚️ Produce / Backing Track"):
             project = gr.Textbox(label="Project folder", value="projects/nothings-gonna-stop-us-now")
