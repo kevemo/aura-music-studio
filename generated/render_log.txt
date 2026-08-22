@@ -1,0 +1,26 @@
+Loaded as API: https://ace-step-ace-step-v1-5.hf.space
+Calling ACE-Step model=acestep-v15-xl-turbo duration=30.0s cover_strength=0.78
+Traceback (most recent call last):
+  File "/home/runner/work/aura-music-studio/aura-music-studio/scripts/render_ace.py", line 86, in <module>
+    result = client.predict(*args, api_name="/generation_wrapper")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/gradio_client/client.py", line 502, in predict
+    ).result()
+      ^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/gradio_client/client.py", line 1509, in result
+    return super().result(timeout=timeout)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/gradio_client/client.py", line 1103, in _inner
+    predictions = _predict(*data, **kwargs)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/.local/lib/python3.12/site-packages/gradio_client/client.py", line 1225, in _predict
+    raise AppError(message=message, **result)
+gradio_client.exceptions.AppError: No GPU was available after 60s. <a style="white-space: nowrap;text-underline-offset: 2px;color: var(--body-text-color)" href="https://huggingface.co/join">Create a free account</a> to get a higher priority in ZeroGPU queues.

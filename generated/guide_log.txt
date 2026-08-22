@@ -1,0 +1,4 @@
+generated/full_score_guide.wav
+bars=107 duration= 267.5 seconds
+-rw-r--r-- 1 runner runner  46M Aug 22 18:37 generated/full_score_guide.wav
+-rw-r--r-- 1 runner runner 5.1M Aug 22 18:37 generated/validation_source.wav
