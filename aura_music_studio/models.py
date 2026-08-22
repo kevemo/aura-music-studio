@@ -14,11 +14,7 @@ class Section(BaseModel):
 
 
 class RendererConfig(BaseModel):
-    preferred: list[str] = Field(
-        default_factory=lambda: [
-            "deapi", "acestep_space", "muser", "local_acestep", "yue"
-        ]
-    )
+    preferred: list[str] = Field(default_factory=lambda: ["deapi", "acestep_space", "muser", "local_acestep", "yue"])
     model: str = "acestep-v15-xl-turbo"
     cover_strength: float = Field(default=0.78, ge=0.0, le=1.0)
     duration_limit_seconds: int = 300
@@ -31,9 +27,7 @@ class RendererConfig(BaseModel):
 
 
 class MixConfig(BaseModel):
-    mastering_preset: Literal[
-        "streaming", "pop", "rock", "acoustic", "ballad", "electronic", "hiphop", "cinematic", "karaoke"
-    ] = "streaming"
+    mastering_preset: Literal["streaming", "pop", "rock", "acoustic", "ballad", "electronic", "hiphop", "cinematic", "karaoke"] = "streaming"
     mastering_reference: str | None = None
     target_lufs: float = -14.0
     true_peak_db: float = -1.0
@@ -83,6 +77,7 @@ class ProjectManifest(BaseModel):
     guide_command: str | None = None
     prompt: str = ""
     negative_prompt: str = ""
+    project_dna: dict = Field(default_factory=dict)
     renderer: RendererConfig = Field(default_factory=RendererConfig)
     production: ProductionSpec = Field(default_factory=ProductionSpec)
     mix: MixConfig = Field(default_factory=MixConfig)
@@ -91,8 +86,7 @@ class ProjectManifest(BaseModel):
     def validate_rights(self):
         if self.mode in {"cover", "remix", "backing_track"} and not self.rights_confirmed:
             raise ValueError(
-                "rights_confirmed must be true for cover/remix/backing-track projects. "
-                "Aura only processes source material you have the right to use."
+                "rights_confirmed must be true for cover/remix/backing-track projects. Aura only processes source material you have the right to use."
             )
         if self.renderer.require_real_audio and self.renderer.allow_symbolic_guide_as_final:
             raise ValueError("Real-audio mode cannot allow a symbolic/MIDI guide to become the final master.")
