@@ -10,6 +10,7 @@ from .analysis import analyze_project
 from .arrangement import build_plan
 from .audio import finalize_render
 from .guide import ensure_score_guide
+from .layers import build_optional_layers, mix_layers
 from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 from .quality import evaluate_audio
@@ -41,20 +42,37 @@ class AuraPipeline:
             plan = build_plan(self.manifest, analysis)
             self.workspace.save_json("arrangement.json", plan.model_dump())
 
-            status["stage"] = "guide"
+            status["stage"] = "symbolic_control_guide"
             self._write_status(status)
             guide = ensure_score_guide(self.workspace, self.manifest)
             if guide:
                 status["guide"] = str(guide)
+                status["guide_note"] = "Control/reference only; never exported as finished music."
 
             status["stage"] = "real_audio_render_and_qc"
             self._write_status(status)
             render, qc, takes = self._render_with_quality_control(plan)
+
+            status["stage"] = "real_audio_layers"
+            self._write_status(status)
+            layers = build_optional_layers(render.audio_path, self.workspace, self.manifest, plan)
+            final_real_audio = mix_layers(render.audio_path, layers, self.workspace, self.manifest)
+            if layers:
+                render = RenderResult(
+                    renderer=render.renderer + "+dedicated_layers",
+                    audio_path=final_real_audio,
+                    audio_origin="hybrid",
+                    is_final_quality=True,
+                    metadata={**render.metadata, "dedicated_layers": {k: str(v) for k, v in layers.items()}},
+                )
+                qc = self._evaluate_final_real_audio(render.audio_path, plan)
+
             status["renderer"] = render.renderer
             status["real_audio_master"] = str(render.audio_path)
             status["audio_origin"] = render.audio_origin
             status["quality"] = qc
             status["takes"] = takes
+            status["dedicated_layers"] = {k: str(v) for k, v in layers.items()}
             self.workspace.save_json("render.json", {
                 "renderer": render.renderer,
                 "audio_path": str(render.audio_path),
@@ -63,9 +81,10 @@ class AuraPipeline:
                 "metadata": render.metadata,
                 "quality": qc,
                 "takes": takes,
+                "dedicated_layers": {k: str(v) for k, v in layers.items()},
             })
 
-            status["stage"] = "mastering_and_stems"
+            status["stage"] = "mastering_and_real_audio_stems"
             self._write_status(status)
             production_metadata = {
                 "project": self.manifest.model_dump(),
@@ -76,6 +95,7 @@ class AuraPipeline:
                 "renderer_metadata": render.metadata,
                 "quality_control": qc,
                 "takes": takes,
+                "dedicated_layers": {k: str(v) for k, v in layers.items()},
             }
             exports = finalize_render(
                 render.audio_path,
@@ -104,12 +124,23 @@ class AuraPipeline:
             self.workspace.log(status["traceback"], "failure.log")
             raise
 
-    def _render_with_quality_control(self, plan):
+    def _target_duration(self, plan) -> float | None:
         target_duration = self.manifest.target_duration_seconds
         if target_duration is None and self.manifest.total_measures and plan.tempo_bpm:
             beats_per_bar = int(self.manifest.meter.split("/")[0])
             target_duration = self.manifest.total_measures * beats_per_bar * 60.0 / plan.tempo_bpm
+        return target_duration
 
+    def _evaluate_final_real_audio(self, path: Path, plan) -> dict:
+        if path.name == "score_guide.wav" or "score_guide" in str(path):
+            raise RuntimeError("Aura refused a symbolic guide at the final-audio quality stage.")
+        qc = evaluate_audio(path, target_duration=self._target_duration(plan), target_bpm=plan.tempo_bpm)
+        if not qc["passes_basic_integrity"]:
+            raise RuntimeError(f"Final real-audio mix failed integrity QC: {qc}")
+        return qc
+
+    def _render_with_quality_control(self, plan):
+        target_duration = self._target_duration(plan)
         takes_dir = self.workspace.work_dir / "takes"
         takes_dir.mkdir(parents=True, exist_ok=True)
         attempts = max(1, self.manifest.renderer.quality_retries + 1)
