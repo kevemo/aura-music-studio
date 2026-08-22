@@ -1,9 +1,11 @@
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
 from gradio_client import Client, handle_file
+from gradio_client.exceptions import AppError
 
 SOURCE = Path(os.environ.get("AURA_SOURCE", "source.mp3")).resolve()
 OUTDIR = Path(os.environ.get("AURA_OUTDIR", "generated")).resolve()
@@ -11,6 +13,8 @@ OUTDIR.mkdir(parents=True, exist_ok=True)
 DURATION = float(os.environ.get("AURA_DURATION", "30"))
 MODEL = os.environ.get("AURA_MODEL", "acestep-v15-xl-turbo")
 COVER_STRENGTH = float(os.environ.get("AURA_COVER_STRENGTH", "0.78"))
+MAX_ATTEMPTS = int(os.environ.get("AURA_MAX_ATTEMPTS", "8"))
+RETRY_SECONDS = int(os.environ.get("AURA_RETRY_SECONDS", "70"))
 
 if not SOURCE.exists():
     raise FileNotFoundError(SOURCE)
@@ -42,8 +46,26 @@ args = [
 assert len(args) == 49
 
 client = Client("ACE-Step/Ace-Step-v1.5")
-print(f"Calling ACE-Step model={MODEL} duration={DURATION}s cover_strength={COVER_STRENGTH}")
-result = client.predict(*args, api_name="/generation_wrapper")
+result = None
+last_error = None
+for attempt in range(1, MAX_ATTEMPTS + 1):
+    print(f"ACE-Step attempt {attempt}/{MAX_ATTEMPTS}: model={MODEL} duration={DURATION}s strength={COVER_STRENGTH}", flush=True)
+    try:
+        result = client.predict(*args, api_name="/generation_wrapper")
+        print("ACE-Step generation returned successfully", flush=True)
+        break
+    except AppError as exc:
+        last_error = exc
+        msg = str(exc)
+        print(f"ACE-Step AppError: {msg}", flush=True)
+        if "No GPU was available" not in msg or attempt >= MAX_ATTEMPTS:
+            raise
+        print(f"ZeroGPU queue busy; retrying in {RETRY_SECONDS}s", flush=True)
+        time.sleep(RETRY_SECONDS)
+
+if result is None:
+    raise RuntimeError(f"ACE-Step failed after {MAX_ATTEMPTS} attempts: {last_error}")
+
 print("RESULT_TYPE", type(result).__name__)
 print("RESULT_LEN", len(result) if isinstance(result, (tuple, list)) else None)
 
