@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .acestep_api import ACE_TRACKS, AceStepClient
 from .models import ArrangementPlan, ProjectManifest
 from .project import ProjectWorkspace
 
@@ -35,11 +36,43 @@ def _run_layer(
         "AURA_METER": plan.meter,
         "AURA_LAYER": name,
         "AURA_OUTPUT": str(output),
+        "AURA_REAL_AUDIO_REQUIRED": "1",
     })
     subprocess.run(shlex.split(command), cwd=workspace.root, env=env, check=True)
     if not output.exists():
         raise RuntimeError(f"{name} layer command did not produce {output}")
+    if output.suffix.lower() in {".mid", ".midi"}:
+        output.unlink(missing_ok=True)
+        raise RuntimeError(f"Aura refused symbolic output for final layer {name}")
     return output
+
+
+def generate_complementary_layer(
+    base: Path,
+    workspace: ProjectWorkspace,
+    *,
+    track: str,
+    prompt: str,
+    start: float = 0.0,
+    end: float = -1,
+) -> Path:
+    """Generate one independent real-audio instrument/vocal track from the current backing context."""
+    track = track.strip().lower()
+    if track not in ACE_TRACKS:
+        raise ValueError(f"Unsupported complementary track: {track}")
+    if not os.getenv("AURA_ACESTEP_API_URL"):
+        raise RuntimeError("Complementary track generation requires the direct ACE-Step API or a dedicated layer adapter")
+    client = AceStepClient()
+    model = os.getenv("AURA_ACESTEP_TRACK_MODEL", "acestep-v15-base")
+    return client.add_track(
+        base,
+        workspace.work_dir / "layers" / f"ace_{track}",
+        track=track,
+        prompt=prompt,
+        model=model,
+        start=start,
+        end=end,
+    )
 
 
 def build_optional_layers(
@@ -48,35 +81,47 @@ def build_optional_layers(
     manifest: ProjectManifest,
     plan: ArrangementPlan,
 ) -> dict[str, Path]:
-    """Create independent real/neural audio layers when dedicated engines are configured.
-
-    If the main music generator already rendered these parts, Aura can skip these hooks. They exist for
-    higher-control workflows where harmonies/guitar need their own stems and independent mix levels.
-    """
+    """Create independent real/neural audio layers when high-control production is requested."""
     layers: dict[str, Path] = {}
     root = workspace.work_dir / "layers"
+
     if manifest.production.wordless_backing_harmonies:
         p = _run_layer(
             "AURA_DIFFSINGER_CMD",
             "backing_harmonies",
             root / "backing_harmonies.wav",
-            base,
-            workspace,
-            manifest,
-            plan,
+            base, workspace, manifest, plan,
         )
+        if not p and os.getenv("AURA_ACESTEP_API_URL"):
+            p = generate_complementary_layer(
+                base, workspace,
+                track="backing_vocals",
+                prompt=(
+                    "Natural wordless backing harmony singers, ooh and aah textures, tasteful thirds/fifths, "
+                    "strongest in choruses and final build, mixed as a supportive ensemble rather than a lead singer. "
+                    + plan.backing_vocal_brief
+                ),
+            )
         if p:
             layers["backing_harmonies"] = p
+
     if manifest.production.original_single_note_countermelody:
         p = _run_layer(
             "AURA_GUITAR_LAYER_CMD",
             "lead_guitar_countermelody",
             root / "lead_guitar_countermelody.wav",
-            base,
-            workspace,
-            manifest,
-            plan,
+            base, workspace, manifest, plan,
         )
+        if not p and os.getenv("AURA_ACESTEP_API_URL"):
+            p = generate_complementary_layer(
+                base, workspace,
+                track="guitar",
+                prompt=(
+                    "Expressive real electric lead guitar playing an original single-note countermelody and answer phrases, "
+                    "with bends, vibrato, slides and breathing space around the lead vocal; do not simply double the vocal melody. "
+                    + plan.countermelody_brief
+                ),
+            )
         if p:
             layers["lead_guitar_countermelody"] = p
     return layers
@@ -113,8 +158,7 @@ def mix_layers(
     output = workspace.work_dir / "neural_master_with_layers.wav"
     cmd += [
         "-filter_complex", ";".join(filters),
-        "-map", "[mix]",
-        "-c:a", "pcm_s24le", "-ar", "48000", str(output),
+        "-map", "[mix]", "-c:a", "pcm_s24le", "-ar", "48000", str(output),
     ]
     subprocess.run(cmd, check=True)
     return output
