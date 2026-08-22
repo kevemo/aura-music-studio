@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import math
 import shutil
 import subprocess
 from pathlib import Path
 
+from .automation import apply_track_automation
 from .effects import render_effects
 from .session import Clip, StudioSession, Track
 
@@ -65,39 +65,35 @@ def _mix_files(files: list[Path], output: Path, sample_rate: int) -> Path:
 def render_track(track: Track, session: StudioSession, project_root: Path, work_dir: Path) -> Path | None:
     if track.mute:
         return None
-    # Take lanes: highest lane wins for overlapping alternatives unless clips are explicitly muted.
     audio_clips = [c for c in track.clips if c.kind == "audio" and not c.muted]
     if not audio_clips:
         return None
+
+    # Alternate take lanes: the latest/highest lane is auditioned unless an older clip is explicitly committed.
     max_lane = max((c.take_lane for c in audio_clips), default=0)
     selected = [c for c in audio_clips if c.take_lane == max_lane or c.metadata.get("committed", False)]
     if not selected:
         selected = audio_clips
 
-    clip_files = []
-    for i, clip in enumerate(selected):
-        clip_files.append(_clip_audio(clip, project_root, work_dir / "clips" / f"{track.id}_{i:03d}.wav", session.sample_rate))
+    clip_files = [
+        _clip_audio(clip, project_root, work_dir / "clips" / f"{track.id}_{i:03d}.wav", session.sample_rate)
+        for i, clip in enumerate(selected)
+    ]
     dry = _mix_files(clip_files, work_dir / "tracks" / f"{track.id}_dry.wav", session.sample_rate)
+
+    # Static insert rack first, then continuous track fader/pan automation.
     processed = work_dir / "tracks" / f"{track.id}_processed.wav"
     render_effects(dry, processed, track.effects, sample_rate=session.sample_rate)
-
-    # Apply track fader/pan as waveform processing.
     final = work_dir / "tracks" / f"{track.id}_final.wav"
-    balance = max(-1.0, min(1.0, track.pan))
-    subprocess.run([
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(processed),
-        "-af", f"volume={track.volume_db}dB,stereotools=balance_in={balance}",
-        "-c:a", "pcm_f32le", "-ar", str(session.sample_rate), str(final),
-    ], check=True)
+    apply_track_automation(processed, final, track, expected_sample_rate=session.sample_rate)
     return final
 
 
 def render_session(session: StudioSession, project_root: Path, output: Path, work_dir: Path | None = None) -> Path:
     """Render a StudioSession to real waveform audio.
 
-    MIDI/lyrics/marker clips are deliberately not rendered here. MIDI is allowed to guide neural
-    generation, but the final session mix only contains waveform audio created by neural engines,
-    recordings, or approved hybrid processing.
+    MIDI/lyrics/marker clips are deliberately not rendered here. MIDI can guide neural generation,
+    but Final Master only contains waveform audio created by neural engines, recordings or approved hybrid processing.
     """
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required for Aura's real-audio session mixer")
@@ -114,7 +110,11 @@ def render_session(session: StudioSession, project_root: Path, output: Path, wor
     master_tracks = [t for t in session.tracks if t.role == "master"]
     output.parent.mkdir(parents=True, exist_ok=True)
     if master_tracks and master_tracks[0].effects:
-        render_effects(premaster, output, master_tracks[0].effects, sample_rate=session.sample_rate)
+        master_fx = work_dir / "master_fx.wav"
+        render_effects(premaster, master_fx, master_tracks[0].effects, sample_rate=session.sample_rate)
+        apply_track_automation(master_fx, output, master_tracks[0], expected_sample_rate=session.sample_rate)
+    elif master_tracks:
+        apply_track_automation(premaster, output, master_tracks[0], expected_sample_rate=session.sample_rate)
     else:
         subprocess.run([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(premaster),
