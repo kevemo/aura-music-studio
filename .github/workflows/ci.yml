@@ -1,0 +1,37 @@
+name: Aura Music Studio CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: System audio tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - name: Install Aura core + dev
+        run: pip install -e '.[dev]'
+      - name: Compile Python
+        run: python -m compileall -q aura_music_studio
+      - name: Tests
+        run: pytest -q
+      - name: Real-audio safety smoke test
+        run: |
+          python - <<'PY'
+          from aura_music_studio.models import ProjectManifest, RendererConfig
+          try:
+              ProjectManifest(project_name='bad', title='bad', rights_confirmed=True,
+                  renderer=RendererConfig(require_real_audio=True, allow_symbolic_guide_as_final=True))
+          except ValueError:
+              print('PASS: symbolic guide cannot become final master')
+          else:
+              raise SystemExit('FAIL: real-audio guard was bypassed')
+          PY
