@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect Boppy frontend network calls
+      - name: Find Boppy generate payload construction
         run: |
           mkdir -p generated/boppy
           python - <<'PY'
@@ -28,29 +28,17 @@ jobs:
           chunks=[]
           for src in srcs:
               url=urllib.parse.urljoin(base,src); txt=s.get(url,timeout=30).text
-              # Capture every fetch() site plus network-ish strings near create/generation code.
-              positions=[m.start() for m in re.finditer(r'fetch\(',txt)]
-              for j in positions:
-                  lo=max(0,j-1200); hi=min(len(txt),j+2400)
-                  sn=txt[lo:hi]
-                  if any(k in sn.lower() for k in ['generate','track','music','job','voice','lyrics','caption']):
-                      chunks.append(f'\n===== FETCH {url} @ {j} =====\n'+sn)
-              for needle in ['/generate','/jobs','/create','music-generation','generation']:
-                  start=0
-                  while True:
-                      j=txt.find(needle,start)
-                      if j<0: break
-                      lo=max(0,j-900); hi=min(len(txt),j+1500); sn=txt[lo:hi]
-                      if 'fetch' in sn or 'axios' in sn or 'POST' in sn or 'request' in sn:
-                          chunks.append(f'\n===== NEEDLE {needle} {url} @ {j} =====\n'+sn)
-                      start=j+len(needle)
-          (out/'network_contexts.txt').write_text('\n'.join(chunks[:300]),encoding='utf-8')
+              for pat in [r'(?<!function )\bik\(', r'\bok\(', r'jobId', r'inference_steps', r'guidance_scale', r'key_scale', r'time_signature']:
+                  for m in list(re.finditer(pat,txt))[:20]:
+                      j=m.start(); lo=max(0,j-1800); hi=min(len(txt),j+3200)
+                      chunks.append(f'\n===== {pat} {url} @ {j} =====\n'+txt[lo:hi])
+          (out/'payload_contexts.txt').write_text('\n'.join(chunks),encoding='utf-8')
           print('captured',len(chunks))
           PY
       - name: Commit probe
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add generated/boppy/network_contexts.txt
-          git commit -m "Inspect Boppy anonymous network calls" || exit 0
+          git add generated/boppy/payload_contexts.txt
+          git commit -m "Inspect Boppy generate payload" || exit 0
           git push
