@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,8 +10,9 @@ from .analysis import analyze_project
 from .arrangement import build_plan
 from .audio import finalize_render
 from .guide import ensure_score_guide
-from .models import ProjectManifest
+from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
+from .quality import evaluate_audio
 from .renderers import render_with_failover
 
 
@@ -45,15 +47,19 @@ class AuraPipeline:
             if guide:
                 status["guide"] = str(guide)
 
-            status["stage"] = "neural_render"
+            status["stage"] = "neural_render_and_qc"
             self._write_status(status)
-            render = render_with_failover(self.workspace, self.manifest, plan)
+            render, qc, takes = self._render_with_quality_control(plan)
             status["renderer"] = render.renderer
             status["neural_master"] = str(render.audio_path)
+            status["quality"] = qc
+            status["takes"] = takes
             self.workspace.save_json("render.json", {
                 "renderer": render.renderer,
                 "audio_path": str(render.audio_path),
                 "metadata": render.metadata,
+                "quality": qc,
+                "takes": takes,
             })
 
             status["stage"] = "mastering_and_stems"
@@ -64,6 +70,8 @@ class AuraPipeline:
                 "arrangement": plan.model_dump(),
                 "renderer": render.renderer,
                 "renderer_metadata": render.metadata,
+                "quality_control": qc,
+                "takes": takes,
             }
             exports = finalize_render(
                 render.audio_path,
@@ -91,6 +99,37 @@ class AuraPipeline:
             self._write_status(status)
             self.workspace.log(status["traceback"], "failure.log")
             raise
+
+    def _render_with_quality_control(self, plan):
+        target_duration = None
+        if self.manifest.total_measures and plan.tempo_bpm:
+            beats_per_bar = int(self.manifest.meter.split("/")[0])
+            target_duration = self.manifest.total_measures * beats_per_bar * 60.0 / plan.tempo_bpm
+
+        takes_dir = self.workspace.work_dir / "takes"
+        takes_dir.mkdir(parents=True, exist_ok=True)
+        attempts = max(1, self.manifest.renderer.quality_retries + 1)
+        candidates: list[tuple[float, RenderResult, dict]] = []
+        take_records = []
+
+        for index in range(1, attempts + 1):
+            render = render_with_failover(self.workspace, self.manifest, plan)
+            take_path = takes_dir / f"take_{index:02d}{render.audio_path.suffix.lower()}"
+            shutil.copy2(render.audio_path, take_path)
+            take_render = RenderResult(renderer=render.renderer, audio_path=take_path, metadata=render.metadata)
+            qc = evaluate_audio(take_path, target_duration=target_duration, target_bpm=plan.tempo_bpm)
+            record = {"take": index, "renderer": render.renderer, "path": str(take_path), **qc}
+            take_records.append(record)
+            candidates.append((qc["quality_score"], take_render, qc))
+            self.workspace.log(json.dumps(record, default=str), "quality.log")
+            if qc["passes_basic_integrity"] and qc["quality_score"] >= self.manifest.renderer.minimum_quality_score:
+                break
+
+        candidates.sort(key=lambda item: item[0], reverse=True)
+        _, best_render, best_qc = candidates[0]
+        if not best_qc["passes_basic_integrity"]:
+            raise RuntimeError(f"All neural takes failed Aura's integrity gate: {take_records}")
+        return best_render, best_qc, take_records
 
     def analyze_only(self) -> dict:
         analysis = analyze_project(self.workspace, self.manifest)
