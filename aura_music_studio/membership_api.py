@@ -64,6 +64,8 @@ def plans():
         "ownership_notice": OWNERSHIP_NOTICE,
         "approval_required": True,
         "approval_email": "elevatesoulsproductions@gmail.com",
+        "base_policy": "1 confirmed full track per day; unlimited regenerations until confirmation",
+        "pro_policy": "unlimited confirmed tracks and complete studio feature set",
     }
 
 
@@ -130,6 +132,45 @@ def me(request: Request):
     return profile
 
 
+@router.post("/projects/{project_name}/confirm-song")
+def confirm_song(project_name: str, request: Request):
+    token = session_token(request)
+    try:
+        member = memberships.from_session(token, require_active=True)
+        if member.plan.confirmed_songs_per_day == 0:
+            raise PermissionError("The Free tier does not include confirmed full tracks")
+        if member.plan.confirmed_songs_per_day is None:
+            # Pro is unlimited; confirmation is still recorded for project history but never gates another track.
+            try:
+                slot = store.confirm_song(member.user_id, project_name)
+            except ValueError:
+                return {
+                    "confirmed": True,
+                    "project": project_name,
+                    "plan": "pro",
+                    "daily_limit": None,
+                    "message": "Track confirmed. Pro remains unlimited.",
+                }
+        else:
+            slot = store.confirm_song(member.user_id, project_name)
+        return {
+            "confirmed": True,
+            "project": project_name,
+            "plan": member.plan.id,
+            "daily_limit": member.plan.confirmed_songs_per_day,
+            "slot": slot,
+            "message": (
+                "Track confirmed. This consumes today's Base full-track allowance."
+                if member.plan.id == "base"
+                else "Track confirmed. Pro remains unlimited."
+            ),
+        }
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/membership/review", response_class=HTMLResponse)
 def review_membership(token: str):
     request_item = store.membership_request_from_token(token)
@@ -172,7 +213,7 @@ def membership_decision(token: str = Form(...), decision: str = Form(...), decid
     if not before:
         raise HTTPException(404, "Membership request not found")
     try:
-        user = store.decide_membership(token, decision, decided_by)
+        store.decide_membership(token, decision, decided_by)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     approved = decision.lower() == "approve"
