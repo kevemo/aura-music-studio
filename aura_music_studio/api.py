@@ -8,12 +8,14 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .access_control import MembershipAccessMiddleware
 from .assets import AssetLibrary
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .mastering import master, translation_report
+from .membership_api import router as membership_router
 from .mixer import render_session
 from .pipeline import AuraPipeline
 from .producer import llm_plan
@@ -30,9 +32,11 @@ PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.4.1",
+    version="0.5.0",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first multi-model generative music studio API, powered by Aura.",
 )
+app.add_middleware(MembershipAccessMiddleware)
+app.include_router(membership_router)
 
 
 class ProducerRequest(BaseModel):
@@ -60,7 +64,8 @@ def health():
         "tagline": TAGLINE,
         "ai_producer": "Aura",
         "real_audio_only_final": True,
-        "api_version": "0.4.1",
+        "membership_tiers": ["free", "base", "pro"],
+        "api_version": "0.5.0",
     }
 
 
