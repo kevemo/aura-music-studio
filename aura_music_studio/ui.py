@@ -8,6 +8,7 @@ import gradio as gr
 from .advanced_ui import add_advanced_tabs
 from .assets import AssetLibrary
 from .autopilot import AuraAutopilot
+from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .mastering import master, translation_report
@@ -153,10 +154,11 @@ def _doctor():
 
 
 def build_ui() -> gr.Blocks:
-    with gr.Blocks(title="Aura Music Studio") as app:
+    with gr.Blocks(title=PRODUCT_NAME) as app:
         gr.Markdown(
-            "# 🎵 Aura Music Studio\n"
-            "**Real-audio-first generative production studio.** MIDI/notation may control performances, but Aura never exports them as the final master."
+            f"# 🎵 {PRODUCT_FULL_NAME}\n"
+            f"### {TAGLINE}\n\n"
+            f"**{AI_PRODUCER_NAME} is the studio's autonomous AI producer.** Real-audio-first generative production: MIDI/notation may control performances, but symbolic audio is never exported as the final master."
         )
 
         with gr.Tab("✨ Create Song"):
@@ -178,7 +180,7 @@ def build_ui() -> gr.Blocks:
             vocal_mode = gr.Radio(["ai_vocal", "instrumental", "approved_voice"], value="ai_vocal", label="Vocals")
             reference = gr.Audio(label="Optional style/reference audio you have the right to use", type="filepath")
             extra = gr.Textbox(label="Extra production direction", lines=3)
-            create_btn = gr.Button("Create Aura Project", variant="primary")
+            create_btn = gr.Button(f"Create {PRODUCT_NAME} Project", variant="primary")
             create_status = gr.Textbox(label="Status")
             created_path = gr.Textbox(label="Project folder")
             create_btn.click(_create_song, [title, concept, lyrics, generate_lyrics, genre, subgenre, mood, instruments, energy, bpm, key, duration, vocal_mode, reference, extra], [create_status, created_path])
@@ -189,7 +191,7 @@ def build_ui() -> gr.Blocks:
             producer_btn = gr.Button("Plan Studio Action", variant="primary")
             producer_result = gr.Code(label="Aura Producer Plan", language="json")
             producer_btn.click(_producer, [producer_request, producer_project], producer_result)
-            gr.Markdown("Producer Chat plans non-destructive operations first. Region replacement/extension is rendered only through configured **real-audio** generation engines.")
+            gr.Markdown("Aura plans non-destructive operations first. Region replacement/extension is rendered only through configured **real-audio** generation engines.")
 
         with gr.Tab("🎚️ Produce / Backing Track"):
             project = gr.Textbox(label="Project folder", value="projects/nothings-gonna-stop-us-now")
@@ -211,7 +213,7 @@ def build_ui() -> gr.Blocks:
             attestation = gr.Textbox(label="Rights confirmation", value="I confirm I have the right to use this material in this project.")
             tags = gr.Textbox(label="Tags", placeholder="guitar, sample, reference, verse idea")
             with gr.Row():
-                upload_btn = gr.Button("Add to Aura Library", variant="primary")
+                upload_btn = gr.Button("Add to Studio Library", variant="primary")
                 list_btn = gr.Button("List Project Assets")
             asset_status = gr.Code(label="Asset record", language="json")
             upload_btn.click(_upload, [upload_project, upload_file, upload_kind, rights_basis, attestation, tags], asset_status)
@@ -260,7 +262,7 @@ def build_ui() -> gr.Blocks:
             doctor_report = gr.Code(label="Installed engines / GPU / audio stack", language="json")
             doctor_btn.click(_doctor, outputs=doctor_report)
             gr.Markdown(
-                "Aura routes final music only through **real-audio generators, recorded audio, or hybrid audio paths**. "
+                f"{PRODUCT_NAME} routes final music only through **real-audio generators, recorded audio, or hybrid audio paths**. "
                 "Score/MIDI/MusicXML remain control layers and can never silently replace the final neural/recorded master."
             )
     return app
