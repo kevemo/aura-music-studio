@@ -10,6 +10,12 @@ import requests
 from pydantic import BaseModel, Field
 
 
+ACE_TRACKS = {
+    "vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard", "percussion",
+    "strings", "synth", "fx", "brass", "woodwinds",
+}
+
+
 class AceStepRequest(BaseModel):
     prompt: str = ""
     lyrics: str = ""
@@ -81,7 +87,6 @@ class AceStepClient:
         else:
             data["use_random_seed"] = True
             data["seed"] = -1
-        # Editing tasks do not use LM audio-code planning according to ACE-Step's API contract.
         if request.task_type in {"cover", "repaint", "extract"}:
             data["thinking"] = False
 
@@ -99,7 +104,6 @@ class AceStepClient:
                     raise FileNotFoundError(p)
                 h = p.open("rb"); handles.append(h); files["reference_audio"] = (p.name, h)
             if files:
-                # Multipart form values must be strings.
                 form = {k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in data.items()}
                 r = self.session.post(urljoin(self.base_url, "release_task"), data=form, files=files, timeout=120)
             else:
@@ -120,10 +124,7 @@ class AceStepClient:
     def wait(self, task_id: str) -> list[dict]:
         deadline = time.time() + self.timeout
         while time.time() < deadline:
-            r = self.session.post(
-                urljoin(self.base_url, "query_result"),
-                json={"task_id_list": [task_id]}, timeout=60,
-            )
+            r = self.session.post(urljoin(self.base_url, "query_result"), json={"task_id_list": [task_id]}, timeout=60)
             r.raise_for_status()
             payload = r.json()
             rows = payload.get("data") or []
@@ -163,12 +164,44 @@ class AceStepClient:
             model=model, bpm=bpm, key_scale=key,
         ), output_dir)[0]
 
-    def add_track(self, source: Path, output_dir: Path, *, prompt: str, model: str | None = None) -> Path:
+    def add_track(self, source: Path, output_dir: Path, *, track: str, prompt: str, model: str | None = None, start: float = 0.0, end: float = -1) -> Path:
+        track = track.strip().lower()
+        if track not in ACE_TRACKS:
+            raise ValueError(f"Unsupported ACE-Step Lego track: {track}. Choose from {sorted(ACE_TRACKS)}")
         return self.generate(AceStepRequest(
-            prompt=prompt, task_type="lego", src_audio=str(source), model=model, thinking=True,
+            prompt=prompt,
+            task_type="lego",
+            src_audio=str(source),
+            model=model,
+            thinking=True,
+            instruction=f"Generate the {track} track based on the audio context:",
+            repainting_start=start,
+            repainting_end=end,
         ), output_dir)[0]
 
-    def complete(self, source: Path, output_dir: Path, *, prompt: str, model: str | None = None) -> Path:
+    def extract_track(self, source: Path, output_dir: Path, *, track: str, model: str | None = None) -> Path:
+        track = track.strip().lower()
+        if track not in ACE_TRACKS:
+            raise ValueError(f"Unsupported ACE-Step Extract track: {track}. Choose from {sorted(ACE_TRACKS)}")
         return self.generate(AceStepRequest(
-            prompt=prompt, task_type="complete", src_audio=str(source), model=model, thinking=True,
+            task_type="extract",
+            src_audio=str(source),
+            model=model,
+            thinking=False,
+            instruction=f"Extract the {track} track from the audio:",
+        ), output_dir)[0]
+
+    def complete(self, source: Path, output_dir: Path, *, tracks: list[str], prompt: str, model: str | None = None) -> Path:
+        normalized = [x.strip().lower() for x in tracks]
+        invalid = [x for x in normalized if x not in ACE_TRACKS]
+        if invalid:
+            raise ValueError(f"Unsupported ACE-Step Complete tracks: {invalid}")
+        joined = ", ".join(normalized)
+        return self.generate(AceStepRequest(
+            prompt=prompt,
+            task_type="complete",
+            src_audio=str(source),
+            model=model,
+            thinking=True,
+            instruction=f"Complete the input track with {joined}:",
         ), output_dir)[0]
