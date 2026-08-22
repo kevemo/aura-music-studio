@@ -47,16 +47,19 @@ class AuraPipeline:
             if guide:
                 status["guide"] = str(guide)
 
-            status["stage"] = "neural_render_and_qc"
+            status["stage"] = "real_audio_render_and_qc"
             self._write_status(status)
             render, qc, takes = self._render_with_quality_control(plan)
             status["renderer"] = render.renderer
-            status["neural_master"] = str(render.audio_path)
+            status["real_audio_master"] = str(render.audio_path)
+            status["audio_origin"] = render.audio_origin
             status["quality"] = qc
             status["takes"] = takes
             self.workspace.save_json("render.json", {
                 "renderer": render.renderer,
                 "audio_path": str(render.audio_path),
+                "audio_origin": render.audio_origin,
+                "is_final_quality": render.is_final_quality,
                 "metadata": render.metadata,
                 "quality": qc,
                 "takes": takes,
@@ -69,6 +72,7 @@ class AuraPipeline:
                 "analysis": analysis.model_dump(),
                 "arrangement": plan.model_dump(),
                 "renderer": render.renderer,
+                "audio_origin": render.audio_origin,
                 "renderer_metadata": render.metadata,
                 "quality_control": qc,
                 "takes": takes,
@@ -101,8 +105,8 @@ class AuraPipeline:
             raise
 
     def _render_with_quality_control(self, plan):
-        target_duration = None
-        if self.manifest.total_measures and plan.tempo_bpm:
+        target_duration = self.manifest.target_duration_seconds
+        if target_duration is None and self.manifest.total_measures and plan.tempo_bpm:
             beats_per_bar = int(self.manifest.meter.split("/")[0])
             target_duration = self.manifest.total_measures * beats_per_bar * 60.0 / plan.tempo_bpm
 
@@ -114,11 +118,31 @@ class AuraPipeline:
 
         for index in range(1, attempts + 1):
             render = render_with_failover(self.workspace, self.manifest, plan)
+            if self.manifest.renderer.require_real_audio:
+                if render.audio_origin == "symbolic_guide" or not render.is_final_quality:
+                    raise RuntimeError(
+                        f"Aura refused {render.renderer}: symbolic/MIDI guide audio cannot be exported as the final track."
+                    )
+                if render.audio_path.name == "score_guide.wav" or "score_guide" in str(render.audio_path):
+                    raise RuntimeError("Aura refused to export the score/MIDI guide as finished music.")
+
             take_path = takes_dir / f"take_{index:02d}{render.audio_path.suffix.lower()}"
             shutil.copy2(render.audio_path, take_path)
-            take_render = RenderResult(renderer=render.renderer, audio_path=take_path, metadata=render.metadata)
+            take_render = RenderResult(
+                renderer=render.renderer,
+                audio_path=take_path,
+                audio_origin=render.audio_origin,
+                is_final_quality=render.is_final_quality,
+                metadata=render.metadata,
+            )
             qc = evaluate_audio(take_path, target_duration=target_duration, target_bpm=plan.tempo_bpm)
-            record = {"take": index, "renderer": render.renderer, "path": str(take_path), **qc}
+            record = {
+                "take": index,
+                "renderer": render.renderer,
+                "audio_origin": render.audio_origin,
+                "path": str(take_path),
+                **qc,
+            }
             take_records.append(record)
             candidates.append((qc["quality_score"], take_render, qc))
             self.workspace.log(json.dumps(record, default=str), "quality.log")
@@ -128,7 +152,7 @@ class AuraPipeline:
         candidates.sort(key=lambda item: item[0], reverse=True)
         _, best_render, best_qc = candidates[0]
         if not best_qc["passes_basic_integrity"]:
-            raise RuntimeError(f"All neural takes failed Aura's integrity gate: {take_records}")
+            raise RuntimeError(f"All real-audio takes failed Aura's integrity gate: {take_records}")
         return best_render, best_qc, take_records
 
     def analyze_only(self) -> dict:
