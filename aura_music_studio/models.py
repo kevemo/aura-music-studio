@@ -63,6 +63,7 @@ class ProjectManifest(BaseModel):
     key: str | None = None
     tuning: str | None = None
     total_measures: int | None = None
+    target_duration_seconds: int | None = Field(default=None, ge=3, le=600)
     sections: list[Section] = Field(default_factory=list)
     reference_audio: str | None = None
     score_file: str | None = None
