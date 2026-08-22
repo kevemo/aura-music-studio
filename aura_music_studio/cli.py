@@ -7,13 +7,14 @@ import typer
 from rich import print
 
 from .autopilot import AuraAutopilot
+from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 
-app = typer.Typer(help="Aura Music Studio — real-audio-first autonomous AI music production")
+app = typer.Typer(help=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Powered by {AI_PRODUCER_NAME}.")
 
 
 @app.command()
@@ -52,7 +53,7 @@ def create_song(
         vocal_mode="instrumental" if instrumental else "ai_vocal",
     )
     project = build_song_project(request, projects_root)
-    print(f"[bold green]Created {project}[/bold green]")
+    print(f"[bold green]Created {PRODUCT_NAME} project: {project}[/bold green]")
 
 
 @app.command("producer-plan")
@@ -106,20 +107,20 @@ def autopilot(
     if once:
         print(json.dumps(worker.run_once(force=force), indent=2, default=str))
     else:
-        print(f"[bold green]Aura Autopilot watching {worker.inbox}[/bold green]")
+        print(f"[bold green]{AI_PRODUCER_NAME} Autopilot watching {worker.inbox}[/bold green]")
         worker.serve_forever()
 
 
 @app.command()
 def ui(host: str = "0.0.0.0", port: int = 7860):
-    """Launch the Aura Music Studio web UI."""
+    """Launch The Live Sound Studio web UI."""
     from .ui import build_ui
     build_ui().launch(server_name=host, server_port=port)
 
 
 @app.command()
 def serve(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
-    """Launch Aura's REST API for desktop/web/mobile front ends."""
+    """Launch The Live Sound Studio REST API for desktop/web/mobile front ends."""
     import uvicorn
     uvicorn.run("aura_music_studio.api:app", host=host, port=port, reload=reload)
 
