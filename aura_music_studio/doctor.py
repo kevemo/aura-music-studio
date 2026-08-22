@@ -29,15 +29,29 @@ def _gpu() -> dict:
         return {"available": False, "details": str(exc)}
 
 
+def _acestep_api_status() -> dict:
+    url = os.getenv("AURA_ACESTEP_API_URL")
+    if not url:
+        return {"configured": False, "reachable": False, "url": None}
+    try:
+        from .acestep_api import AceStepClient
+        client = AceStepClient(base_url=url)
+        return {"configured": True, "reachable": client.health(), "url": client.base_url}
+    except Exception as exc:
+        return {"configured": True, "reachable": False, "url": url, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def system_report() -> dict:
     gpu = _gpu()
+    ace_api = _acestep_api_status()
     api_renderers = {
         "deapi": bool(os.getenv("DEAPI_API_KEY")),
         "eleven_music": bool(os.getenv("ELEVENLABS_API_KEY")),
         "mureka": bool(os.getenv("MUREKA_API_KEY")),
     }
     local_renderers = {
-        "local_acestep": bool(os.getenv("AURA_LOCAL_RENDER_CMD")),
+        "acestep_api": ace_api,
+        "local_acestep_command": bool(os.getenv("AURA_LOCAL_RENDER_CMD")),
         "muser": bool(os.getenv("AURA_MUSER_CMD")),
         "yue": bool(os.getenv("AURA_YUE_CMD")),
         "region_renderer": bool(os.getenv("AURA_REGION_RENDER_CMD")),
@@ -65,6 +79,7 @@ def system_report() -> dict:
     except Exception as exc:
         local_engine_status = [{"error": f"{type(exc).__name__}: {exc}"}]
 
+    command_ready = any(bool(v) for k, v in local_renderers.items() if k != "acestep_api")
     return {
         "python": sys.version.split()[0],
         "gpu": gpu,
@@ -96,7 +111,7 @@ def system_report() -> dict:
             "eleven_stems_available": api_renderers["eleven_music"],
         },
         "local_engines": local_engine_status,
-        "ready_for_local_gpu_neural_render": bool(gpu["available"] and any(local_renderers.values())),
+        "ready_for_local_gpu_neural_render": bool(gpu["available"] and (ace_api.get("reachable") or command_ready)),
         "ready_for_authenticated_hosted_neural_render": any(api_renderers.values()),
         "public_hosted_fallback_present": bool(public_spaces),
         "final_audio_policy": {
