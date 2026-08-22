@@ -18,30 +18,32 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Gradio client
         run: pip install --quiet --upgrade gradio_client
-      - name: Inspect ACE-Step API
+      - name: Inspect ACE-Step target endpoints
         run: |
           mkdir -p generated
           python - <<'PY' > generated/ace_api.txt
           from gradio_client import Client
           c = Client("ACE-Step/Ace-Step-v1.5")
+          wanted = {"/generation_wrapper", "/process_source_audio_wrapper", "/send_to_cover_handler"}
           print("SRC=", c.src)
-          print("CONFIG_KEYS=", sorted(c.config.keys()))
-          print("ENDPOINTS_TYPE=", type(c.endpoints))
-          print("ENDPOINTS_REPR=", repr(c.endpoints))
-          for i, ep in enumerate(c.endpoints.values() if isinstance(c.endpoints, dict) else c.endpoints):
-              print("--- ENDPOINT", i, "---")
-              print("api_name=", getattr(ep, "api_name", None))
-              print("fn_index=", getattr(ep, "fn_index", None))
-              print("repr=", repr(ep))
-              try:
-                  print("info=", ep.get_info())
-              except Exception as e:
-                  print("info_error=", type(e).__name__, str(e))
+          for ep in c.endpoints.values():
+              api = getattr(ep, "api_name", None)
+              if api in wanted:
+                  print("\n###", api, "fn_index=", getattr(ep, "fn_index", None))
+                  for attr in ["parameters_info", "returns_info", "dependency", "input_component_types", "output_component_types"]:
+                      try:
+                          print(attr, "=", repr(getattr(ep, attr)))
+                      except Exception as e:
+                          print(attr, "ERROR", type(e).__name__, str(e))
+                  try:
+                      print("get_info=", repr(ep.get_info()))
+                  except Exception as e:
+                      print("get_info ERROR", type(e).__name__, str(e))
           PY
       - name: Commit probe result
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
           git add generated/ace_api.txt
-          git commit -m "Probe ACE-Step Space API endpoints" || exit 0
+          git commit -m "Probe ACE-Step generation endpoint schema" || exit 0
           git push
