@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .lyrics import LyricRequest, generate_lyrics
+from .presets import get_preset, preset_dict
 
 
 class CreateSongRequest(BaseModel):
@@ -40,6 +41,8 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
     project = projects_root / slug
     input_dir = project / "input"
     input_dir.mkdir(parents=True, exist_ok=True)
+    preset = get_preset(request.genre)
+    instruments = request.instruments or list(preset.instruments)
 
     lyrics = request.lyrics.strip()
     if request.generate_lyrics and not lyrics:
@@ -56,14 +59,22 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
         (input_dir / "lyrics.txt").write_text(lyrics, encoding="utf-8")
 
     style_bits = [request.genre, request.subgenre, request.mood]
-    if request.instruments:
-        style_bits.append("instruments: " + ", ".join(request.instruments))
-    style_bits.append(f"energy {request.energy:.2f}")
-    style_bits.append("commercial studio production")
+    style_bits += [
+        "real performed-sounding instruments, not General MIDI",
+        "instruments: " + ", ".join(instruments),
+        f"energy {request.energy:.2f}",
+        f"arrangement: {preset.arrangement}",
+        f"drums: {preset.drum_style}",
+        f"bass: {preset.bass_style}",
+        f"vocal production: {preset.vocal_style}",
+        f"mix: {preset.mix_notes}",
+        f"typical genre tempo range {preset.default_bpm[0]}-{preset.default_bpm[1]} BPM",
+        "commercial studio production with believable human dynamics and transients",
+    ]
     if request.vocal_mode == "instrumental":
         style_bits += ["instrumental only", "no lead vocal"]
     elif request.vocal_mode == "approved_voice":
-        style_bits.append("render lead vocal through selected approved Aura Voice Profile")
+        style_bits.append("render lead vocal through selected consent-approved Aura Voice Profile")
     else:
         style_bits.append("natural expressive lead vocal")
     if request.extra_prompt:
@@ -90,6 +101,8 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "retry_seconds": 45,
             "quality_retries": 2,
             "minimum_quality_score": 0.55,
+            "require_real_audio": True,
+            "allow_symbolic_guide_as_final": False,
         },
         "production": {
             "realistic_drums": True,
@@ -113,6 +126,16 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "export_mp3": True,
             "export_wav": True,
             "export_stems": True,
+        },
+        "project_dna": {
+            "genre_preset": preset_dict(request.genre),
+            "requested_instruments": instruments,
+            "structure": request.structure,
+            "energy": request.energy,
+            "language": request.language,
+            "vocal_mode": request.vocal_mode,
+            "voice_profile_id": request.voice_profile_id,
+            "seed": request.seed,
         },
         "aura_create_request": request.model_dump(),
     }
