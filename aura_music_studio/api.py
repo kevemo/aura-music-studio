@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .assets import AssetLibrary
+from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
@@ -28,9 +29,9 @@ PROJECTS_ROOT = Path(os.getenv("AURA_PROJECTS_ROOT", "projects")).resolve()
 PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
-    title="Aura Music Studio API",
-    version="0.4.0",
-    description="Real-audio-first multi-model generative music studio API.",
+    title=f"{PRODUCT_NAME} API",
+    version="0.4.1",
+    description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first multi-model generative music studio API, powered by Aura.",
 )
 
 
@@ -53,7 +54,14 @@ def _session_path(project: Path) -> Path:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "real_audio_only_final": True, "api_version": "0.4.0"}
+    return {
+        "ok": True,
+        "product": PRODUCT_FULL_NAME,
+        "tagline": TAGLINE,
+        "ai_producer": "Aura",
+        "real_audio_only_final": True,
+        "api_version": "0.4.1",
+    }
 
 
 @app.get("/capabilities")
@@ -176,7 +184,9 @@ def sample_analyze(project_name: str, asset_id: str):
 @app.post("/projects/{project_name}/sample/generate")
 def sample_generate(project_name: str, request: SampleRequest):
     project = _project(project_name)
-    out = project / "output" / "samples" / f"Aura_{request.kind}_{len(list((project / 'output' / 'samples').glob('*.wav'))) + 1:03d}.wav"
+    out_dir = project / "output" / "samples"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"Aura_{request.kind}_{len(list(out_dir.glob('*.wav'))) + 1:03d}.wav"
     generated = generate_sample(request, out)
     return {"path": str(generated), "analysis": analyze_sample(generated).model_dump(), "audio_origin": "neural"}
 
@@ -188,6 +198,7 @@ def sample_loop(project_name: str, asset_id: str, bars: int, bpm: float):
     if record.kind != "audio":
         raise HTTPException(400, "Loop creation requires audio")
     out = project / "output" / "samples" / f"{Path(record.name).stem}_{bars}bar_{bpm:g}bpm.wav"
+    out.parent.mkdir(parents=True, exist_ok=True)
     make_loop(project / record.path, out, bars=bars, bpm=bpm)
     return {"path": str(out), "analysis": analyze_sample(out).model_dump()}
 
