@@ -118,14 +118,18 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "leave_center_for_lead_vocal": request.vocal_mode != "instrumental",
         },
         "mix": {
+            "mastering_preset": preset.master_preset,
             "target_lufs": -14.0,
             "true_peak_db": -1.0,
             "vocal_space": request.vocal_mode != "instrumental",
             "backing_vocals_db": -8.0,
             "lead_guitar_db": -9.0,
+            "separation_mode": "six_stems",
             "export_mp3": True,
             "export_wav": True,
+            "export_flac": True,
             "export_stems": True,
+            "export_translation_report": True,
         },
         "project_dna": {
             "genre_preset": preset_dict(request.genre),
