@@ -17,8 +17,10 @@ from .mixer import render_session
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .rights import RightsLedger
+from .samples import SampleRequest, analyze_sample, generate_sample, make_loop
 from .separation import StemSeparator
 from .session import StudioSession
+from .styles import StyleBlend, build_style_dna, style_prompt
 from .transcription import audio_to_midi
 from .voice import create_voice_profile
 
@@ -107,7 +109,6 @@ def get_session(project_name: str):
     path = _session_path(project)
     if path.exists():
         return StudioSession.load(path).model_dump()
-    # Create an empty non-destructive session without fabricating audio.
     session = StudioSession(name=project_name)
     session.add_track("Master", "master")
     session.save(path)
@@ -163,6 +164,44 @@ def assets(project_name: str):
     return [x.model_dump() for x in AssetLibrary(_project(project_name)).list()]
 
 
+@app.post("/projects/{project_name}/sample/analyze")
+def sample_analyze(project_name: str, asset_id: str):
+    project = _project(project_name)
+    record = AssetLibrary(project).get(asset_id)
+    if record.kind != "audio":
+        raise HTTPException(400, "Sample analysis requires audio")
+    return analyze_sample(project / record.path).model_dump()
+
+
+@app.post("/projects/{project_name}/sample/generate")
+def sample_generate(project_name: str, request: SampleRequest):
+    project = _project(project_name)
+    out = project / "output" / "samples" / f"Aura_{request.kind}_{len(list((project / 'output' / 'samples').glob('*.wav'))) + 1:03d}.wav"
+    generated = generate_sample(request, out)
+    return {"path": str(generated), "analysis": analyze_sample(generated).model_dump(), "audio_origin": "neural"}
+
+
+@app.post("/projects/{project_name}/sample/loop")
+def sample_loop(project_name: str, asset_id: str, bars: int, bpm: float):
+    project = _project(project_name)
+    record = AssetLibrary(project).get(asset_id)
+    if record.kind != "audio":
+        raise HTTPException(400, "Loop creation requires audio")
+    out = project / "output" / "samples" / f"{Path(record.name).stem}_{bars}bar_{bpm:g}bpm.wav"
+    make_loop(project / record.path, out, bars=bars, bpm=bpm)
+    return {"path": str(out), "analysis": analyze_sample(out).model_dump()}
+
+
+@app.post("/projects/{project_name}/style-blend")
+def style_blend(project_name: str, blend: StyleBlend):
+    project = _project(project_name)
+    dna = build_style_dna(blend)
+    dest = project / "work" / "style_dna.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(dna, indent=2), encoding="utf-8")
+    return {"style_dna": dna, "prompt": style_prompt(dna), "path": str(dest)}
+
+
 @app.post("/projects/{project_name}/separate")
 def separate(project_name: str, asset_id: str, mode: str = "six_stems"):
     project = _project(project_name)
@@ -192,9 +231,7 @@ def master_asset(project_name: str, asset_id: str, preset: str = "streaming", re
     source_record = library.get(asset_id)
     if source_record.kind != "audio":
         raise HTTPException(400, "Mastering requires an audio asset")
-    reference = None
-    if reference_asset_id:
-        reference = project / library.get(reference_asset_id).path
+    reference = project / library.get(reference_asset_id).path if reference_asset_id else None
     out = project / "output" / f"{Path(source_record.name).stem}_AuraMaster.wav"
     mastered, report = master(project / source_record.path, out, preset=preset, reference=reference)
     return {"path": str(mastered), "report": report, "translation": translation_report(mastered)}
