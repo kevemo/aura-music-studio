@@ -16,37 +16,41 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect Boppy frontend generation call
+      - name: Inspect Boppy frontend network calls
         run: |
           mkdir -p generated/boppy
           python - <<'PY'
           import re, requests, urllib.parse, pathlib
-          base='https://boppy.me'
-          out=pathlib.Path('generated/boppy')
+          base='https://boppy.me'; out=pathlib.Path('generated/boppy')
           s=requests.Session(); s.headers['User-Agent']='Mozilla/5.0'
-          html=s.get(base+'/', timeout=30).text
-          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)', html)
+          html=s.get(base+'/',timeout=30).text
+          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)',html)
           chunks=[]
           for src in srcs:
-              url=urllib.parse.urljoin(base,src)
-              txt=s.get(url,timeout=30).text
-              needles=['/api/v2/audio/music','deapi.ai','generateTrack','request_id','Authorization','Bearer','x-api-key','api_key']
-              for needle in needles:
+              url=urllib.parse.urljoin(base,src); txt=s.get(url,timeout=30).text
+              # Capture every fetch() site plus network-ish strings near create/generation code.
+              positions=[m.start() for m in re.finditer(r'fetch\(',txt)]
+              for j in positions:
+                  lo=max(0,j-1200); hi=min(len(txt),j+2400)
+                  sn=txt[lo:hi]
+                  if any(k in sn.lower() for k in ['generate','track','music','job','voice','lyrics','caption']):
+                      chunks.append(f'\n===== FETCH {url} @ {j} =====\n'+sn)
+              for needle in ['/generate','/jobs','/create','music-generation','generation']:
                   start=0
                   while True:
                       j=txt.find(needle,start)
                       if j<0: break
-                      lo=max(0,j-1800); hi=min(len(txt),j+2600)
-                      chunks.append(f'\n===== {url} :: {needle} @ {j} =====\n'+txt[lo:hi])
+                      lo=max(0,j-900); hi=min(len(txt),j+1500); sn=txt[lo:hi]
+                      if 'fetch' in sn or 'axios' in sn or 'POST' in sn or 'request' in sn:
+                          chunks.append(f'\n===== NEEDLE {needle} {url} @ {j} =====\n'+sn)
                       start=j+len(needle)
-                      if sum(1 for x in chunks if f':: {needle} @' in x)>=8: break
-          (out/'contexts.txt').write_text('\n'.join(chunks),encoding='utf-8')
-          print('contexts',len(chunks))
+          (out/'network_contexts.txt').write_text('\n'.join(chunks[:300]),encoding='utf-8')
+          print('captured',len(chunks))
           PY
       - name: Commit probe
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add generated/boppy/contexts.txt
-          git commit -m "Inspect Boppy generation request context" || exit 0
+          git add generated/boppy/network_contexts.txt
+          git commit -m "Inspect Boppy anonymous network calls" || exit 0
           git push
