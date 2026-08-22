@@ -3,18 +3,33 @@ name: Probe ACE-Step Space API
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'generated/**'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Install Gradio client
         run: pip install --quiet --upgrade gradio_client
       - name: Inspect ACE-Step API
         run: |
-          python - <<'PY'
+          mkdir -p generated
+          python - <<'PY' > generated/ace_api.txt
           from gradio_client import Client
           c = Client("ACE-Step/Ace-Step-v1.5")
           print(c.view_api(all_endpoints=True, print_info=False))
           PY
+      - name: Commit probe result
+        run: |
+          git config user.name "Aura Music Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add generated/ace_api.txt
+          git commit -m "Probe ACE-Step Space API" || exit 0
+          git push
