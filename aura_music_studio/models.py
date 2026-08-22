@@ -15,13 +15,17 @@ class Section(BaseModel):
 
 class RendererConfig(BaseModel):
     preferred: list[str] = Field(
-        default_factory=lambda: ["deapi", "acestep_space", "local_acestep"]
+        default_factory=lambda: [
+            "deapi", "acestep_space", "muser", "local_acestep", "yue"
+        ]
     )
     model: str = "acestep-v15-xl-turbo"
     cover_strength: float = Field(default=0.78, ge=0.0, le=1.0)
     duration_limit_seconds: int = 300
     max_attempts_per_host: int = 3
     retry_seconds: int = 45
+    quality_retries: int = 2
+    minimum_quality_score: float = Field(default=0.55, ge=0.0, le=1.0)
 
 
 class MixConfig(BaseModel):
