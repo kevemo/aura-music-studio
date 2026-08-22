@@ -1,0 +1,6 @@
+[youtube] Extracting URL: https://youtu.be/JG0-eJ4aGOY?si=uBTyWwp4ClfWdZEQ
+[youtube] JG0-eJ4aGOY: Downloading webpage
+[youtube] JG0-eJ4aGOY: Downloading android player API JSON
+[youtube] JG0-eJ4aGOY: Downloading ios player API JSON
+WARNING: [youtube] No title found in player responses; falling back to title from initial data. Other metadata may also be missing
+ERROR: [youtube] JG0-eJ4aGOY: Sign in to confirm you’re not a bot. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
