@@ -11,7 +11,17 @@ DEFAULT_ADMIN_EMAIL = "elevatesoulsproductions@gmail.com"
 
 
 def _public_url() -> str:
-    return (os.getenv("LSS_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
+    return (
+        os.getenv("LSS_PUBLIC_BASE_URL")
+        or os.getenv("LSS_PUBLIC_URL")
+        or "http://127.0.0.1:8000"
+    ).rstrip("/")
+
+
+def _truthy(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def send_email(to_address: str, subject: str, body: str) -> dict:
@@ -21,10 +31,11 @@ def send_email(to_address: str, subject: str, body: str) -> dict:
     the message was delivered. Production deployment should configure SMTP credentials.
     """
     host = (os.getenv("LSS_SMTP_HOST") or "").strip()
-    user = (os.getenv("LSS_SMTP_USER") or "").strip()
+    user = (os.getenv("LSS_SMTP_USERNAME") or os.getenv("LSS_SMTP_USER") or "").strip()
     password = os.getenv("LSS_SMTP_PASSWORD") or ""
     from_address = (os.getenv("LSS_SMTP_FROM") or user or DEFAULT_ADMIN_EMAIL).strip()
-    port = int(os.getenv("LSS_SMTP_PORT", "465"))
+    port = int(os.getenv("LSS_SMTP_PORT", "587"))
+    use_starttls = _truthy(os.getenv("LSS_SMTP_STARTTLS"), default=True)
 
     message = EmailMessage()
     message["From"] = from_address
@@ -40,14 +51,27 @@ def send_email(to_address: str, subject: str, body: str) -> dict:
         target.write_bytes(message.as_bytes())
         return {"sent": False, "delivery": "development_outbox", "path": str(target)}
 
-    with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
-        smtp.login(user, password)
-        smtp.send_message(message)
+    if port == 465 and not use_starttls:
+        with smtplib.SMTP_SSL(host, port, timeout=30) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(message)
+    else:
+        with smtplib.SMTP(host, port, timeout=30) as smtp:
+            smtp.ehlo()
+            if use_starttls:
+                smtp.starttls()
+                smtp.ehlo()
+            smtp.login(user, password)
+            smtp.send_message(message)
     return {"sent": True, "delivery": "smtp", "to": to_address}
 
 
 def notify_membership_request(*, approval_token: str, applicant_email: str, display_name: str, plan_id: str) -> dict:
-    admin_email = (os.getenv("LSS_ADMIN_APPROVAL_EMAIL") or DEFAULT_ADMIN_EMAIL).strip()
+    admin_email = (
+        os.getenv("LSS_MEMBERSHIP_APPROVAL_EMAIL")
+        or os.getenv("LSS_ADMIN_APPROVAL_EMAIL")
+        or DEFAULT_ADMIN_EMAIL
+    ).strip()
     review_url = f"{_public_url()}/membership/review?token={approval_token}"
     subject = f"{PRODUCT_FULL_NAME} membership request — {display_name}"
     body = f"""A new membership request needs approval.
