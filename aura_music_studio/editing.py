@@ -9,6 +9,7 @@ from pathlib import Path
 import soundfile as sf
 from pydantic import BaseModel, Field
 
+from .acestep_api import AceStepClient
 from .session import Clip, StudioSession
 
 
@@ -28,16 +29,9 @@ def duration(path: Path) -> float:
 
 
 def _run_external_region_generator(source: Path, output: Path, request: RegionEditRequest) -> Path:
-    """Call ACE-Step/The Muser/another configured real-audio region renderer.
-
-    The external command receives the source/context and must return waveform audio. Aura never
-    creates a MIDI/SoundFont fallback here because region edits are part of the final audio path.
-    """
     command = os.getenv("AURA_REGION_RENDER_CMD")
     if not command:
-        raise RuntimeError(
-            "Region generation needs AURA_REGION_RENDER_CMD (ACE-Step repaint/extend, The Muser, or another real-audio engine)."
-        )
+        raise RuntimeError("No external region renderer is configured")
     output.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env.update({
@@ -50,6 +44,7 @@ def _run_external_region_generator(source: Path, output: Path, request: RegionEd
         "AURA_EDIT_NEGATIVE_PROMPT": request.negative_prompt,
         "AURA_EDIT_STRENGTH": str(request.strength),
         "AURA_EDIT_TARGET_DURATION": "" if request.target_duration_seconds is None else str(request.target_duration_seconds),
+        "AURA_REAL_AUDIO_REQUIRED": "1",
     })
     subprocess.run(shlex.split(command), env=env, check=True)
     if not output.exists():
@@ -57,20 +52,8 @@ def _run_external_region_generator(source: Path, output: Path, request: RegionEd
     return output
 
 
-def _ffmpeg_cut(source: Path, output: Path, start: float, end: float | None) -> Path:
-    if not shutil.which("ffmpeg"):
-        raise RuntimeError("ffmpeg is required")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source), "-ss", str(max(0.0, start))]
-    if end is not None:
-        cmd += ["-t", str(max(0.0, end - start))]
-    cmd += ["-c:a", "pcm_s24le", str(output)]
-    subprocess.run(cmd, check=True)
-    return output
-
-
 def replace_region(source: Path, generated_region: Path, output: Path, start: float, end: float, crossfade_ms: int = 35) -> Path:
-    """Replace a time range with generated waveform audio and tiny edge fades."""
+    """Replace a time range with a generated region when the renderer returns region-only audio."""
     if end <= start:
         raise ValueError("end must be greater than start")
     if not shutil.which("ffmpeg"):
@@ -78,7 +61,6 @@ def replace_region(source: Path, generated_region: Path, output: Path, start: fl
     output.parent.mkdir(parents=True, exist_ok=True)
     target_len = end - start
     fade = min(crossfade_ms / 1000.0, target_len / 4.0)
-    # Trim/pad the neural replacement to the selected region; fades avoid hard waveform discontinuities.
     filter_complex = (
         f"[0:a]atrim=0:{start},asetpts=PTS-STARTPTS[p];"
         f"[1:a]atrim=0:{target_len},apad=pad_dur={target_len},atrim=0:{target_len},"
@@ -96,16 +78,35 @@ def replace_region(source: Path, generated_region: Path, output: Path, start: fl
 
 
 def generate_region_take(source: Path, request: RegionEditRequest, work_dir: Path, take_number: int) -> Path:
+    """Generate an alternate real-audio take while preserving the original as another lane."""
     work_dir.mkdir(parents=True, exist_ok=True)
-    generated = work_dir / f"generated_take_{take_number:02d}.wav"
-    _run_external_region_generator(source, generated, request)
+
     if request.operation in {"replace", "repaint", "variation"}:
         if request.end_seconds is None:
             raise ValueError("replace/repaint/variation requires end_seconds")
+        # Preferred path: ACE-Step's native repaint preserves non-selected context itself.
+        if os.getenv("AURA_ACESTEP_API_URL"):
+            client = AceStepClient()
+            rendered = client.repaint(
+                source,
+                work_dir / f"ace_repaint_{take_number:02d}",
+                prompt=request.prompt,
+                start=request.start_seconds,
+                end=request.end_seconds,
+                strength=request.strength,
+                model=os.getenv("AURA_ACESTEP_EDIT_MODEL") or None,
+            )
+            return rendered
+
+        # Generic external region engines may return only the replacement slice; splice it safely.
+        generated = work_dir / f"generated_region_{take_number:02d}.wav"
+        _run_external_region_generator(source, generated, request)
         committed = work_dir / f"committed_take_{take_number:02d}.wav"
         return replace_region(source, generated, committed, request.start_seconds, request.end_seconds)
-    # Extend generators are expected to return the extended complete track.
-    return generated
+
+    # Extension requires a renderer capable of returning the extended complete waveform.
+    generated = work_dir / f"extended_take_{take_number:02d}.wav"
+    return _run_external_region_generator(source, generated, request)
 
 
 def add_take_to_session(
