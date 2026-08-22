@@ -32,7 +32,9 @@ class CreateSongRequest(BaseModel):
     reference_audio: str | None = None
     reference_strength: float = Field(default=0.65, ge=0.0, le=1.0)
     seed: int | None = None
-    preferred_engines: list[str] = Field(default_factory=lambda: ["local_acestep", "muser", "acestep_space", "eleven_music", "mureka", "yue", "deapi"])
+    preferred_engines: list[str] = Field(default_factory=lambda: [
+        "acestep_api", "local_acestep", "muser", "deapi", "eleven_music", "mureka", "acestep_space", "yue"
+    ])
     extra_prompt: str = ""
 
 
