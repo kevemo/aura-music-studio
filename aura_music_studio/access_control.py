@@ -24,17 +24,27 @@ from .plans import (
     WAV_DOWNLOAD,
 )
 
-PUBLIC_PREFIXES = (
+# Exact website/account pages are public at the middleware boundary. Individual pages
+# (such as /dashboard) still resolve their own session and never expose another user's data.
+PUBLIC_EXACT = {
+    "/",
+    "/pricing",
+    "/signup",
+    "/signin",
+    "/signout",
+    "/dashboard",
     "/health",
     "/plans",
-    "/auth/",
     "/membership/review",
     "/membership/decision",
     "/membership/payment",
-    "/admin/",
     "/docs",
     "/redoc",
     "/openapi.json",
+}
+PUBLIC_PREFIXES = (
+    "/auth/",
+    "/admin/",
 )
 
 
@@ -76,7 +86,7 @@ def _required_feature(path: str, method: str) -> str | None:
 class MembershipAccessMiddleware(BaseHTTPMiddleware):
     """Server-side entitlement enforcement for the public product API.
 
-    UI state is never trusted. Even if a user calls an endpoint directly, the plan's
+    UI state is never trusted. Even if a member calls an endpoint directly, the plan's
     feature set and daily full-track policy are checked here.
     """
 
@@ -87,7 +97,11 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if request.method == "OPTIONS" or any(path == p or path.startswith(p) for p in PUBLIC_PREFIXES):
+        if (
+            request.method == "OPTIONS"
+            or path in PUBLIC_EXACT
+            or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES)
+        ):
             return await call_next(request)
 
         token = _token(request)
