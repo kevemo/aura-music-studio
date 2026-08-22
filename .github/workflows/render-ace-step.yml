@@ -1,0 +1,65 @@
+name: Render ACE-Step Backing Track
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/render_ace.py'
+      - '.github/workflows/render-ace-step.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python -m pip install --quiet --upgrade gradio_client yt-dlp
+
+      - name: Download 30-second reference validation clip
+        run: |
+          rm -f source.*
+          yt-dlp --no-playlist --download-sections '*0-30' -x --audio-format mp3 --audio-quality 0 -o 'source.%(ext)s' 'https://youtu.be/JG0-eJ4aGOY?si=uBTyWwp4ClfWdZEQ'
+          ls -lh source.mp3
+
+      - name: Neural render validation
+        id: render
+        continue-on-error: true
+        env:
+          AURA_SOURCE: source.mp3
+          AURA_OUTDIR: generated
+          AURA_DURATION: '30'
+          AURA_MODEL: acestep-v15-xl-turbo
+          AURA_COVER_STRENGTH: '0.72'
+        run: |
+          mkdir -p generated
+          set -o pipefail
+          python scripts/render_ace.py 2>&1 | tee generated/render_log.txt
+
+      - name: Record status
+        if: always()
+        run: |
+          if [ "${{ steps.render.outcome }}" = "success" ]; then
+            echo success > generated/render_status.txt
+          else
+            echo failed > generated/render_status.txt
+          fi
+          date -u +'%Y-%m-%dT%H:%M:%SZ' >> generated/render_status.txt
+
+      - name: Commit generated validation result and logs
+        if: always()
+        run: |
+          git config user.name "Aura Music Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add generated/
+          git commit -m "ACE-Step neural render validation" || exit 0
+          git push
