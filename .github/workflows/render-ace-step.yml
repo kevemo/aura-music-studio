@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/render_ace.py'
+      - 'scripts/make_score_guide.py'
       - '.github/workflows/render-ace-step.yml'
   workflow_dispatch:
 
@@ -14,7 +15,7 @@ permissions:
 jobs:
   render:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,29 +24,25 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg
-          python -m pip install --quiet --upgrade gradio_client yt-dlp
+          python -m pip install --quiet --upgrade gradio_client numpy soundfile
 
-      - name: Download 30-second reference validation clip
-        id: download
-        continue-on-error: true
+      - name: Build full 107-measure score guide
+        id: guide
         run: |
           mkdir -p generated
-          rm -f source.*
-          set -o pipefail
-          yt-dlp --no-playlist --js-runtimes node --extractor-args 'youtube:player_client=web,android,ios' --download-sections '*0-30' -x --audio-format mp3 --audio-quality 0 -o 'source.%(ext)s' 'https://youtu.be/JG0-eJ4aGOY?si=uBTyWwp4ClfWdZEQ' 2>&1 | tee generated/source_download_log.txt
-          test -f source.mp3
-          ls -lh source.mp3 | tee -a generated/source_download_log.txt
+          AURA_GUIDE=generated/full_score_guide.wav python scripts/make_score_guide.py | tee generated/guide_log.txt
+          ffmpeg -y -hide_banner -loglevel error -i generated/full_score_guide.wav -t 30 generated/validation_source.wav
+          ls -lh generated/full_score_guide.wav generated/validation_source.wav | tee -a generated/guide_log.txt
 
       - name: Neural render validation
         id: render
-        if: steps.download.outcome == 'success'
         continue-on-error: true
         env:
-          AURA_SOURCE: source.mp3
+          AURA_SOURCE: generated/validation_source.wav
           AURA_OUTDIR: generated
           AURA_DURATION: '30'
           AURA_MODEL: acestep-v15-xl-turbo
-          AURA_COVER_STRENGTH: '0.72'
+          AURA_COVER_STRENGTH: '0.78'
         run: |
           set -o pipefail
           python scripts/render_ace.py 2>&1 | tee generated/render_log.txt
@@ -53,7 +50,7 @@ jobs:
       - name: Record status
         if: always()
         run: |
-          echo "download=${{ steps.download.outcome }}" > generated/render_status.txt
+          echo "guide=${{ steps.guide.outcome }}" > generated/render_status.txt
           echo "render=${{ steps.render.outcome }}" >> generated/render_status.txt
           date -u +'%Y-%m-%dT%H:%M:%SZ' >> generated/render_status.txt
 
@@ -63,5 +60,5 @@ jobs:
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
           git add generated/
-          git commit -m "ACE-Step neural render validation diagnostics" || exit 0
+          git commit -m "ACE-Step score-guide neural render validation" || exit 0
           git push
