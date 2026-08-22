@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets / local configuration
+.env
+*.key
+
+# Local AI engines and model weights
+engines/
+models/
+checkpoints/
+*.ckpt
+*.safetensors
+*.pth
+*.pt
+*.onnx
+
+# Generated project audio
+projects/*/work/
+projects/*/output/
+projects/*/input/uploads/
+projects/*/input/assets/
+projects/*/input/voice_profiles/
+projects/*/.aura_rights/
+projects/*/assets.json
+projects/*/aura_status.json
+
+# Large audio/video
+*.wav
+*.flac
+*.mp3
+*.m4a
+*.aac
+*.ogg
+*.mp4
+*.mov
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
