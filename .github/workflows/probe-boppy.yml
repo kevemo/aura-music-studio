@@ -1,0 +1,56 @@
+name: Probe Boppy Anonymous ACE-Step Flow
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/probe-boppy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect Boppy frontend for anonymous generation endpoints
+        run: |
+          mkdir -p generated/boppy
+          python - <<'PY'
+          import re, requests, urllib.parse, pathlib
+          base='https://boppy.me'
+          out=pathlib.Path('generated/boppy')
+          s=requests.Session(); s.headers['User-Agent']='Mozilla/5.0'
+          html=s.get(base+'/', timeout=30).text
+          (out/'home.html').write_text(html, encoding='utf-8')
+          srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)', html)
+          print('scripts', len(srcs))
+          findings=[]
+          for i,src in enumerate(srcs):
+              url=urllib.parse.urljoin(base,src)
+              try:
+                  txt=s.get(url,timeout=30).text
+              except Exception as e:
+                  findings.append(f'ERROR {url} {e}')
+                  continue
+              if len(txt)>2000000: txt=txt[:2000000]
+              for pat in [r'https?://[^"\'` ]+', r'/api/[A-Za-z0-9_./?=&${}-]+', r'generate[A-Za-z0-9_/-]*', r'jobs?[A-Za-z0-9_/-]*']:
+                  for m in re.findall(pat,txt,re.I):
+                      if any(k in m.lower() for k in ['api','generate','music','job','deapi','song']): findings.append(f'{url}\t{m}')
+          uniq=[]; seen=set()
+          for x in findings:
+              if x not in seen:
+                  seen.add(x); uniq.append(x)
+          (out/'findings.txt').write_text('\n'.join(uniq[:2000]),encoding='utf-8')
+          print('\n'.join(uniq[:200]))
+          PY
+      - name: Commit probe
+        run: |
+          git config user.name "Aura Music Studio Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add generated/boppy/findings.txt
+          git commit -m "Probe Boppy anonymous ACE-Step endpoint" || exit 0
+          git push
