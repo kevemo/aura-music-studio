@@ -9,7 +9,6 @@ from urllib.parse import urljoin
 import requests
 from pydantic import BaseModel, Field
 
-
 ACE_TRACKS = {
     "vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard", "percussion",
     "strings", "synth", "fx", "brass", "woodwinds",
@@ -169,14 +168,9 @@ class AceStepClient:
         if track not in ACE_TRACKS:
             raise ValueError(f"Unsupported ACE-Step Lego track: {track}. Choose from {sorted(ACE_TRACKS)}")
         return self.generate(AceStepRequest(
-            prompt=prompt,
-            task_type="lego",
-            src_audio=str(source),
-            model=model,
-            thinking=True,
+            prompt=prompt, task_type="lego", src_audio=str(source), model=model, thinking=True,
             instruction=f"Generate the {track} track based on the audio context:",
-            repainting_start=start,
-            repainting_end=end,
+            repainting_start=start, repainting_end=end, inference_steps=32, guidance_scale=7.0,
         ), output_dir)[0]
 
     def extract_track(self, source: Path, output_dir: Path, *, track: str, model: str | None = None) -> Path:
@@ -184,11 +178,8 @@ class AceStepClient:
         if track not in ACE_TRACKS:
             raise ValueError(f"Unsupported ACE-Step Extract track: {track}. Choose from {sorted(ACE_TRACKS)}")
         return self.generate(AceStepRequest(
-            task_type="extract",
-            src_audio=str(source),
-            model=model,
-            thinking=False,
-            instruction=f"Extract the {track} track from the audio:",
+            task_type="extract", src_audio=str(source), model=model, thinking=False,
+            instruction=f"Extract the {track} track from the audio:", inference_steps=32, guidance_scale=7.0,
         ), output_dir)[0]
 
     def complete(self, source: Path, output_dir: Path, *, tracks: list[str], prompt: str, model: str | None = None) -> Path:
@@ -198,10 +189,6 @@ class AceStepClient:
             raise ValueError(f"Unsupported ACE-Step Complete tracks: {invalid}")
         joined = ", ".join(normalized)
         return self.generate(AceStepRequest(
-            prompt=prompt,
-            task_type="complete",
-            src_audio=str(source),
-            model=model,
-            thinking=True,
-            instruction=f"Complete the input track with {joined}:",
+            prompt=prompt, task_type="complete", src_audio=str(source), model=model, thinking=True,
+            instruction=f"Complete the input track with {joined}:", inference_steps=32, guidance_scale=7.0,
         ), output_dir)[0]
