@@ -65,6 +65,8 @@ class ProjectManifest(BaseModel):
     midi_file: str | None = None
     musicxml_file: str | None = None
     lyrics_file: str | None = None
+    guide_file: str | None = None
+    guide_command: str | None = None
     prompt: str = ""
     negative_prompt: str = ""
     renderer: RendererConfig = Field(default_factory=RendererConfig)
