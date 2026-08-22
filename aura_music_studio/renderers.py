@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 from gradio_client import Client, handle_file
 
+from .cloud_providers import ElevenMusicClient, MurekaClient
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 
@@ -40,6 +41,13 @@ def _first_audio(value) -> Path | None:
     return None
 
 
+def _lyrics(workspace: ProjectWorkspace, manifest: ProjectManifest) -> str:
+    path = workspace.resolve_asset(manifest.lyrics_file)
+    if path and path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
+
+
 class BaseRenderer:
     name = "base"
 
@@ -64,7 +72,7 @@ class DeapiRenderer(BaseRenderer):
         payload = {
             "model": os.getenv("DEAPI_MUSIC_MODEL", "AceStep_1_5_XL_Turbo_INT8"),
             "caption": plan.render_prompt,
-            "lyrics": "",
+            "lyrics": _lyrics(workspace, manifest),
             "duration": min(duration, manifest.renderer.duration_limit_seconds),
             "bpm": round(plan.tempo_bpm),
             "key": plan.key,
@@ -100,6 +108,54 @@ class DeapiRenderer(BaseRenderer):
         raise TimeoutError("deAPI generation timed out")
 
 
+class ElevenMusicRenderer(BaseRenderer):
+    name = "eleven_music"
+
+    def available(self) -> bool:
+        return bool(os.getenv("ELEVENLABS_API_KEY"))
+
+    def render(self, workspace, manifest, plan):
+        client = ElevenMusicClient()
+        lyrics = _lyrics(workspace, manifest)
+        duration = min(_target_duration(workspace, manifest, plan), 600)
+        prompt = plan.render_prompt
+        if lyrics:
+            prompt += "\n\nUse these user-supplied lyrics and section labels:\n" + lyrics
+        out = workspace.work_dir / "neural_master_eleven_music.mp3"
+        client.compose(
+            out,
+            prompt=prompt[:4100],
+            duration_seconds=duration,
+            instrumental=not bool(lyrics),
+            model=os.getenv("ELEVEN_MUSIC_MODEL", "music_v2"),
+            c2pa=True,
+        )
+        return RenderResult(renderer=self.name, audio_path=out, metadata={"model": os.getenv("ELEVEN_MUSIC_MODEL", "music_v2")})
+
+
+class MurekaRenderer(BaseRenderer):
+    name = "mureka"
+
+    def available(self) -> bool:
+        return bool(os.getenv("MUREKA_API_KEY"))
+
+    def render(self, workspace, manifest, plan):
+        client = MurekaClient()
+        lyrics = _lyrics(workspace, manifest)
+        if lyrics:
+            out = workspace.work_dir / "neural_master_mureka.mp3"
+            client.lyrics_to_song(
+                out,
+                lyrics=lyrics[:5000],
+                prompt=plan.render_prompt[:1024],
+                model=os.getenv("MUREKA_MODEL", "auto"),
+            )
+        else:
+            out = workspace.work_dir / "neural_master_mureka_instrumental.mp3"
+            client.instrumental(out, prompt=plan.render_prompt[:1024], model=os.getenv("MUREKA_MODEL", "auto"))
+        return RenderResult(renderer=self.name, audio_path=out, metadata={"model": os.getenv("MUREKA_MODEL", "auto")})
+
+
 class AceStepSpaceRenderer(BaseRenderer):
     name = "acestep_space"
 
@@ -113,7 +169,7 @@ class AceStepSpaceRenderer(BaseRenderer):
         for cycle in range(manifest.renderer.max_attempts_per_host):
             for host in hosts:
                 try:
-                    result = self._render_host(host, source, manifest, plan)
+                    result = self._render_host(host, source, workspace, manifest, plan)
                     src = _first_audio(result)
                     if not src:
                         raise RuntimeError("Space returned no downloadable local audio")
@@ -127,12 +183,13 @@ class AceStepSpaceRenderer(BaseRenderer):
                 time.sleep(manifest.renderer.retry_seconds)
         raise RuntimeError("All ACE-Step Spaces failed: " + " | ".join(errors[-8:]))
 
-    def _render_host(self, host: str, source: Path | None, manifest: ProjectManifest, plan: ArrangementPlan):
-        duration = min(_target_duration(None, manifest, plan), manifest.renderer.duration_limit_seconds)
+    def _render_host(self, host: str, source: Path | None, workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan):
+        duration = min(_target_duration(workspace, manifest, plan), manifest.renderer.duration_limit_seconds)
         mode = "cover" if source and source.exists() else "text2music"
         source_arg = handle_file(str(source)) if source and source.exists() else None
+        lyrics = _lyrics(workspace, manifest) or "[Instrumental]"
         args = [
-            manifest.renderer.model, mode, plan.render_prompt, "en", plan.render_prompt, "[Instrumental]",
+            manifest.renderer.model, mode, plan.render_prompt, "en", plan.render_prompt, lyrics,
             round(plan.tempo_bpm), plan.key or "", plan.meter.split("/")[0], "en",
             8, 7.0, True, "-1", None, duration, 1,
             source_arg, "", 0.0, -1,
@@ -158,11 +215,13 @@ class ExternalCommandRenderer(BaseRenderer):
     def render(self, workspace, manifest, plan):
         out = workspace.work_dir / self.output_name
         source = _source_or_guide(workspace, manifest)
+        lyrics_path = workspace.resolve_asset(manifest.lyrics_file)
         env = os.environ.copy()
         env.update({
             "AURA_PROJECT": str(workspace.root),
             "AURA_SOURCE": str(source) if source else "",
             "AURA_GUIDE": str(workspace.work_dir / "score_guide.wav"),
+            "AURA_LYRICS": str(lyrics_path) if lyrics_path and lyrics_path.exists() else "",
             "AURA_PROMPT": plan.render_prompt,
             "AURA_NEGATIVE_PROMPT": plan.negative_prompt,
             "AURA_BPM": str(plan.tempo_bpm),
@@ -186,6 +245,8 @@ def _source_or_guide(workspace: ProjectWorkspace, manifest: ProjectManifest) -> 
 
 
 def _target_duration(workspace: ProjectWorkspace | None, manifest: ProjectManifest, plan: ArrangementPlan) -> int:
+    if manifest.target_duration_seconds:
+        return int(manifest.target_duration_seconds)
     if manifest.total_measures and plan.tempo_bpm:
         beats_per_bar = int(manifest.meter.split("/")[0])
         return int(round(manifest.total_measures * beats_per_bar * 60.0 / plan.tempo_bpm))
@@ -204,15 +265,16 @@ def _target_duration(workspace: ProjectWorkspace | None, manifest: ProjectManife
 def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan) -> RenderResult:
     renderers = {
         "deapi": DeapiRenderer(),
+        "eleven_music": ElevenMusicRenderer(),
+        "mureka": MurekaRenderer(),
         "acestep_space": AceStepSpaceRenderer(),
         "local_acestep": ExternalCommandRenderer("local_acestep", "AURA_LOCAL_RENDER_CMD", "neural_master_local.wav"),
         "muser": ExternalCommandRenderer("muser", "AURA_MUSER_CMD", "neural_master_muser.wav"),
         "yue": ExternalCommandRenderer("yue", "AURA_YUE_CMD", "neural_master_yue.wav"),
     }
     requested = list(manifest.renderer.preferred)
-    # Cover/backing-track jobs benefit most from engines that can consume Aura's score/reference guide.
     if manifest.mode in {"cover", "remix", "backing_track"}:
-        guide_first = ["local_acestep", "muser", "acestep_space", "deapi", "yue"]
+        guide_first = ["local_acestep", "muser", "acestep_space", "deapi", "mureka", "eleven_music", "yue"]
         requested = [x for x in guide_first if x in requested] + [x for x in requested if x not in guide_first]
 
     errors = []
