@@ -1,0 +1,20 @@
+name: Probe ACE-Step Space API
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Gradio client
+        run: pip install --quiet --upgrade gradio_client
+      - name: Inspect ACE-Step API
+        run: |
+          python - <<'PY'
+          from gradio_client import Client
+          c = Client("ACE-Step/Ace-Step-v1.5")
+          print(c.view_api(all_endpoints=True, print_info=False))
+          PY
