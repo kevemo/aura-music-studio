@@ -31,14 +31,21 @@ class RendererConfig(BaseModel):
 
 
 class MixConfig(BaseModel):
+    mastering_preset: Literal[
+        "streaming", "pop", "rock", "acoustic", "ballad", "electronic", "hiphop", "cinematic", "karaoke"
+    ] = "streaming"
+    mastering_reference: str | None = None
     target_lufs: float = -14.0
     true_peak_db: float = -1.0
     vocal_space: bool = True
     backing_vocals_db: float = -8.0
     lead_guitar_db: float = -9.0
+    separation_mode: Literal["two_stems", "six_stems"] = "six_stems"
     export_mp3: bool = True
     export_wav: bool = True
+    export_flac: bool = False
     export_stems: bool = True
+    export_translation_report: bool = True
 
 
 class ProductionSpec(BaseModel):
