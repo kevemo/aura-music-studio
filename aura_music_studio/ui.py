@@ -5,6 +5,7 @@ from pathlib import Path
 
 import gradio as gr
 
+from .advanced_ui import add_advanced_tabs
 from .assets import AssetLibrary
 from .autopilot import AuraAutopilot
 from .creation import CreateSongRequest, build_song_project
@@ -245,6 +246,8 @@ def build_ui() -> gr.Blocks:
             master_status = gr.Code(label="Master report", language="json")
             mastered_file = gr.Audio(label="Mastered WAV")
             master_btn.click(_master, [master_project, master_audio, preset, master_reference], [master_status, mastered_file])
+
+        add_advanced_tabs()
 
         with gr.Tab("🤖 Autopilot"):
             inbox = gr.Textbox(label="Projects inbox", value="projects")
