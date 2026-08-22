@@ -26,6 +26,8 @@ class RendererConfig(BaseModel):
     retry_seconds: int = 45
     quality_retries: int = 2
     minimum_quality_score: float = Field(default=0.55, ge=0.0, le=1.0)
+    require_real_audio: bool = True
+    allow_symbolic_guide_as_final: bool = False
 
 
 class MixConfig(BaseModel):
@@ -85,6 +87,8 @@ class ProjectManifest(BaseModel):
                 "rights_confirmed must be true for cover/remix/backing-track projects. "
                 "Aura only processes source material you have the right to use."
             )
+        if self.renderer.require_real_audio and self.renderer.allow_symbolic_guide_as_final:
+            raise ValueError("Real-audio mode cannot allow a symbolic/MIDI guide to become the final master.")
         return self
 
 
@@ -114,4 +118,6 @@ class ArrangementPlan(BaseModel):
 class RenderResult(BaseModel):
     renderer: str
     audio_path: Path
+    audio_origin: Literal["neural", "recorded", "hybrid", "symbolic_guide"] = "neural"
+    is_final_quality: bool = True
     metadata: dict = Field(default_factory=dict)
