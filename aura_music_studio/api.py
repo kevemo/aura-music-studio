@@ -1,21 +1,26 @@
 from __future__ import annotations
 
+import json
 import os
-import shutil
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from .assets import AssetLibrary
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
+from .engine_manager import EngineManager
 from .mastering import master, translation_report
+from .mixer import render_session
 from .pipeline import AuraPipeline
+from .producer import llm_plan
+from .rights import RightsLedger
 from .separation import StemSeparator
+from .session import StudioSession
 from .transcription import audio_to_midi
 from .voice import create_voice_profile
-from .rights import RightsLedger
 
 PROJECTS_ROOT = Path(os.getenv("AURA_PROJECTS_ROOT", "projects")).resolve()
 PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -27,6 +32,10 @@ app = FastAPI(
 )
 
 
+class ProducerRequest(BaseModel):
+    request: str
+
+
 def _project(name: str) -> Path:
     p = (PROJECTS_ROOT / name).resolve()
     if PROJECTS_ROOT not in p.parents and p != PROJECTS_ROOT:
@@ -36,9 +45,13 @@ def _project(name: str) -> Path:
     return p
 
 
+def _session_path(project: Path) -> Path:
+    return project / "aura_session.json"
+
+
 @app.get("/health")
 def health():
-    return {"ok": True, "real_audio_only_final": True}
+    return {"ok": True, "real_audio_only_final": True, "api_version": "0.4.0"}
 
 
 @app.get("/capabilities")
@@ -46,10 +59,15 @@ def capabilities():
     return system_report()
 
 
+@app.get("/engines")
+def engines():
+    return EngineManager().status()
+
+
 @app.get("/projects")
 def list_projects():
     return [
-        {"name": p.name, "has_manifest": (p / "project.yaml").exists(), "status": str(p / "aura_status.json")}
+        {"name": p.name, "has_manifest": (p / "project.yaml").exists(), "has_session": _session_path(p).exists()}
         for p in sorted(PROJECTS_ROOT.iterdir()) if p.is_dir()
     ]
 
@@ -60,15 +78,59 @@ def create_song(request: CreateSongRequest):
     return {"project": project.name, "path": str(project)}
 
 
+@app.post("/projects/{project_name}/producer")
+def producer(project_name: str, request: ProducerRequest):
+    project = _project(project_name)
+    summary = {"project": project_name}
+    status = project / "aura_status.json"
+    if status.exists():
+        try:
+            summary["status"] = json.loads(status.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return llm_plan(request.request, summary).model_dump()
+
+
 @app.post("/projects/{project_name}/produce")
 def produce(project_name: str):
-    project = _project(project_name)
-    return AuraPipeline(project).run()
+    return AuraPipeline(_project(project_name)).run()
 
 
 @app.post("/projects/{project_name}/analyze")
 def analyze(project_name: str):
     return AuraPipeline(_project(project_name)).analyze_only()
+
+
+@app.get("/projects/{project_name}/session")
+def get_session(project_name: str):
+    project = _project(project_name)
+    path = _session_path(project)
+    if path.exists():
+        return StudioSession.load(path).model_dump()
+    # Create an empty non-destructive session without fabricating audio.
+    session = StudioSession(name=project_name)
+    session.add_track("Master", "master")
+    session.save(path)
+    return session.model_dump()
+
+
+@app.put("/projects/{project_name}/session")
+def put_session(project_name: str, session: StudioSession):
+    project = _project(project_name)
+    session.save(_session_path(project))
+    return {"saved": True, "session_id": session.id}
+
+
+@app.post("/projects/{project_name}/session/render")
+def mix_session(project_name: str):
+    project = _project(project_name)
+    path = _session_path(project)
+    if not path.exists():
+        raise HTTPException(404, "Studio session not found")
+    session = StudioSession.load(path)
+    output = project / "output" / "Aura_Session_Mix.wav"
+    render_session(session, project, output)
+    return {"path": str(output), "audio_origin": "real_audio_session_mix"}
 
 
 @app.post("/projects/{project_name}/assets")
@@ -89,10 +151,7 @@ async def upload_asset(
         while chunk := await file.read(1024 * 1024):
             f.write(chunk)
     record = AssetLibrary(project).ingest(
-        tmp,
-        kind=kind,
-        rights_basis=rights_basis,
-        attestation=attestation,
+        tmp, kind=kind, rights_basis=rights_basis, attestation=attestation,
         tags=[x.strip() for x in tags.split(",") if x.strip()],
     )
     tmp.unlink(missing_ok=True)
@@ -111,8 +170,7 @@ def separate(project_name: str, asset_id: str, mode: str = "six_stems"):
     record = library.get(asset_id)
     if record.kind != "audio":
         raise HTTPException(400, "Stem separation requires an audio asset")
-    source = project / record.path
-    stems = StemSeparator(project / "work" / "separation").separate(source, mode=mode)
+    stems = StemSeparator(project / "work" / "separation").separate(project / record.path, mode=mode)
     return {k: str(v) for k, v in stems.items()}
 
 
@@ -136,8 +194,7 @@ def master_asset(project_name: str, asset_id: str, preset: str = "streaming", re
         raise HTTPException(400, "Mastering requires an audio asset")
     reference = None
     if reference_asset_id:
-        ref_record = library.get(reference_asset_id)
-        reference = project / ref_record.path
+        reference = project / library.get(reference_asset_id).path
     out = project / "output" / f"{Path(source_record.name).stem}_AuraMaster.wav"
     mastered, report = master(project / source_record.path, out, preset=preset, reference=reference)
     return {"path": str(mastered), "report": report, "translation": translation_report(mastered)}
@@ -160,10 +217,7 @@ async def new_voice_profile(
             f.write(chunk)
     profile = create_voice_profile(
         RightsLedger(project / ".aura_rights"),
-        name=name,
-        owner_label=owner_label,
-        reference_files=[target],
-        consent_statement=consent_statement,
+        name=name, owner_label=owner_label, reference_files=[target], consent_statement=consent_statement,
     )
     return profile.model_dump()
 
