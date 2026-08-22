@@ -77,6 +77,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
         "tempo_bpm": request.bpm,
         "meter": request.meter,
         "key": request.key,
+        "target_duration_seconds": request.duration_seconds,
         "reference_audio": request.reference_audio,
         "lyrics_file": "input/lyrics.txt" if lyrics else None,
         "prompt": ". ".join(x for x in style_bits if x),
