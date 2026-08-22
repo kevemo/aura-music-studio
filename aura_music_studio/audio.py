@@ -6,8 +6,10 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+from .mastering import master, save_master_report, translation_report
 from .models import MixConfig
 from .project import ProjectWorkspace
+from .separation import StemSeparator
 
 
 def require_binary(name: str) -> str:
@@ -25,79 +27,52 @@ def transcode(source: Path, target: Path) -> Path:
         cmd += ["-codec:a", "libmp3lame", "-b:a", "320k"]
     elif target.suffix.lower() == ".wav":
         cmd += ["-c:a", "pcm_s24le", "-ar", "48000"]
+    elif target.suffix.lower() == ".flac":
+        cmd += ["-c:a", "flac", "-compression_level", "8", "-ar", "48000"]
     cmd.append(str(target))
     subprocess.run(cmd, check=True)
     return target
 
 
-def master_audio(source: Path, target: Path, mix: MixConfig) -> Path:
-    """Two-pass EBU R128-ish mastering via ffmpeg loudnorm.
-
-    This is intentionally conservative. Neural renderers should supply the musical performance;
-    Aura's master stage supplies delivery loudness, peak control and format consistency.
-    """
-    require_binary("ffmpeg")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    filter_chain = (
-        f"highpass=f=24,lowpass=f=19000,"
-        f"loudnorm=I={mix.target_lufs}:TP={mix.true_peak_db}:LRA=11,"
-        "alimiter=limit=0.95:attack=5:release=50"
-    )
-    subprocess.run([
-        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-        "-i", str(source), "-af", filter_chain,
-        "-c:a", "pcm_s24le", "-ar", "48000", str(target),
-    ], check=True)
-    return target
-
-
-def separate_stems(source: Path, workspace: ProjectWorkspace) -> list[Path]:
-    """Split with Demucs 6-source model when available.
-
-    htdemucs_6s provides drums, bass, vocals, guitar, piano and other. If Demucs is not installed,
-    Aura keeps the neural master and records that stem separation was skipped.
-    """
-    out_root = workspace.work_dir / "demucs"
-    out_root.mkdir(parents=True, exist_ok=True)
-    demucs = shutil.which("demucs")
-    if demucs:
-        cmd = [demucs, "-n", "htdemucs_6s", "--float32", "-o", str(out_root), str(source)]
-    else:
-        # python -m demucs works for pip-installed Demucs even when no console script is exposed.
-        try:
-            import demucs  # noqa: F401
-            cmd = ["python", "-m", "demucs", "-n", "htdemucs_6s", "--float32", "-o", str(out_root), str(source)]
-        except Exception:
-            workspace.log("Demucs unavailable; preserving stereo neural master only.", "stems.log")
-            return []
-    subprocess.run(cmd, check=True)
-    candidates = sorted(out_root.rglob("*.wav"))
-    workspace.log(f"Demucs created {len(candidates)} stem files.", "stems.log")
-    return candidates
-
-
-def normalize_stem_names(stems: list[Path], workspace: ProjectWorkspace) -> list[Path]:
+def normalize_stem_names(stems: dict[str, Path], workspace: ProjectWorkspace) -> list[Path]:
     target_dir = workspace.output_dir / "stems"
     target_dir.mkdir(parents=True, exist_ok=True)
-    mapping = {
-        "drums": "01_Drums.wav",
-        "bass": "02_Bass.wav",
-        "guitar": "03_Guitars.wav",
-        "piano": "04_Piano.wav",
-        "vocals": "05_Backing_Harmony_Vocals.wav",
-        "other": "06_Keys_Strings_Percussion_Other.wav",
+    ordering = [
+        "vocals", "instrumental", "drums", "bass", "guitar", "piano", "keys", "strings", "synth", "other"
+    ]
+    pretty = {
+        "vocals": "Vocals",
+        "instrumental": "Instrumental",
+        "drums": "Drums",
+        "bass": "Bass",
+        "guitar": "Guitars",
+        "piano": "Piano",
+        "keys": "Keys",
+        "strings": "Strings",
+        "synth": "Synths",
+        "other": "Other",
     }
     outputs = []
-    for stem in stems:
-        name = stem.stem.lower()
-        dest_name = mapping.get(name, f"Stem_{stem.name}")
-        dest = target_dir / dest_name
-        shutil.copy2(stem, dest)
+    for role in ordering:
+        stem = stems.get(role)
+        if not stem:
+            continue
+        index = len(outputs) + 1
+        dest = target_dir / f"{index:02d}_{pretty[role]}.wav"
+        transcode(stem, dest)
         outputs.append(dest)
     return outputs
 
 
-def make_bandlab_pack(workspace: ProjectWorkspace, master_wav: Path, master_mp3: Path | None, stems: list[Path], metadata: dict) -> Path:
+def make_bandlab_pack(
+    workspace: ProjectWorkspace,
+    master_wav: Path,
+    master_mp3: Path | None,
+    master_flac: Path | None,
+    stems: list[Path],
+    metadata: dict,
+    extra_files: list[Path] | None = None,
+) -> Path:
     zip_path = workspace.output_dir / f"{workspace.root.name}_BandLab_Pack.zip"
     manifest_path = workspace.output_dir / "production_metadata.json"
     manifest_path.write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
@@ -105,31 +80,78 @@ def make_bandlab_pack(workspace: ProjectWorkspace, master_wav: Path, master_mp3:
         z.write(master_wav, arcname=f"MASTER/{master_wav.name}")
         if master_mp3 and master_mp3.exists():
             z.write(master_mp3, arcname=f"MASTER/{master_mp3.name}")
+        if master_flac and master_flac.exists():
+            z.write(master_flac, arcname=f"MASTER/{master_flac.name}")
         for stem in stems:
             z.write(stem, arcname=f"STEMS/{stem.name}")
+        for extra in extra_files or []:
+            if extra.exists():
+                z.write(extra, arcname=f"REPORTS/{extra.name}")
         z.write(manifest_path, arcname="production_metadata.json")
         z.writestr(
             "IMPORT_TO_BANDLAB.txt",
-            "Import every stem at 0:00. All exported stems derive from the same neural master and stay time-aligned.\n"
-            "Keep the backing-harmony vocal stem below your lead vocal and adjust to taste.\n",
+            "Import every stem at 0:00. All exported stems are real/neural audio and time-aligned.\n"
+            "MIDI/score guides are never included as the final audio master.\n"
+            "Keep backing harmonies behind your lead vocal and rebalance stems to taste.\n",
         )
     return zip_path
 
 
 def finalize_render(source: Path, workspace: ProjectWorkspace, mix: MixConfig, metadata: dict) -> dict:
+    """Finalize only real/neural audio.
+
+    This function intentionally receives the post-neural render, not a symbolic/MIDI guide.
+    """
+    if source.name == "score_guide.wav" or "score_guide" in str(source):
+        raise RuntimeError("Refusing to master/export a symbolic score guide as final music")
+
+    reference = workspace.resolve_asset(mix.mastering_reference) if mix.mastering_reference else None
     master_wav = workspace.output_dir / "Aura_Final_Master.wav"
-    master_audio(source, master_wav, mix)
+    master_wav, master_report = master(
+        source,
+        master_wav,
+        preset=mix.mastering_preset,
+        target_lufs=mix.target_lufs,
+        true_peak_db=mix.true_peak_db,
+        reference=reference,
+    )
+    translation = translation_report(master_wav)
+    report_file = workspace.output_dir / "mastering_report.json"
+    save_master_report(master_wav, master_report, translation, report_file)
+
     master_mp3 = None
     if mix.export_mp3:
         master_mp3 = workspace.output_dir / "Aura_Final_Master.mp3"
         transcode(master_wav, master_mp3)
+
+    master_flac = None
+    if mix.export_flac:
+        master_flac = workspace.output_dir / "Aura_Final_Master.flac"
+        transcode(master_wav, master_flac)
+
     stems = []
+    separation_metadata = {}
     if mix.export_stems:
-        stems = normalize_stem_names(separate_stems(master_wav, workspace), workspace)
-    pack = make_bandlab_pack(workspace, master_wav, master_mp3, stems, metadata)
+        try:
+            separated = StemSeparator(workspace.work_dir / "separation").separate(master_wav, mode=mix.separation_mode)
+            separation_metadata = {k: str(v) for k, v in separated.items()}
+            stems = normalize_stem_names(separated, workspace)
+        except Exception as exc:
+            workspace.log(f"Advanced stem separation skipped: {type(exc).__name__}: {exc}", "stems.log")
+
+    metadata = dict(metadata)
+    metadata["mastering"] = master_report
+    metadata["translation"] = translation
+    metadata["separation"] = separation_metadata
+    pack = make_bandlab_pack(
+        workspace, master_wav, master_mp3, master_flac, stems, metadata,
+        extra_files=[report_file] if mix.export_translation_report else [],
+    )
     return {
         "master_wav": str(master_wav),
         "master_mp3": str(master_mp3) if master_mp3 else None,
+        "master_flac": str(master_flac) if master_flac else None,
         "stems": [str(x) for x in stems],
+        "mastering_report": str(report_file),
         "bandlab_pack": str(pack),
     }
