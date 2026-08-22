@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Inspect Boppy frontend for anonymous generation endpoints
+      - name: Inspect Boppy frontend generation call
         run: |
           mkdir -p generated/boppy
           python - <<'PY'
@@ -25,32 +25,28 @@ jobs:
           out=pathlib.Path('generated/boppy')
           s=requests.Session(); s.headers['User-Agent']='Mozilla/5.0'
           html=s.get(base+'/', timeout=30).text
-          (out/'home.html').write_text(html, encoding='utf-8')
           srcs=re.findall(r'<script[^>]+src=["\']([^"\']+)', html)
-          print('scripts', len(srcs))
-          findings=[]
-          for i,src in enumerate(srcs):
+          chunks=[]
+          for src in srcs:
               url=urllib.parse.urljoin(base,src)
-              try:
-                  txt=s.get(url,timeout=30).text
-              except Exception as e:
-                  findings.append(f'ERROR {url} {e}')
-                  continue
-              if len(txt)>2000000: txt=txt[:2000000]
-              for pat in [r'https?://[^"\'` ]+', r'/api/[A-Za-z0-9_./?=&${}-]+', r'generate[A-Za-z0-9_/-]*', r'jobs?[A-Za-z0-9_/-]*']:
-                  for m in re.findall(pat,txt,re.I):
-                      if any(k in m.lower() for k in ['api','generate','music','job','deapi','song']): findings.append(f'{url}\t{m}')
-          uniq=[]; seen=set()
-          for x in findings:
-              if x not in seen:
-                  seen.add(x); uniq.append(x)
-          (out/'findings.txt').write_text('\n'.join(uniq[:2000]),encoding='utf-8')
-          print('\n'.join(uniq[:200]))
+              txt=s.get(url,timeout=30).text
+              needles=['/api/v2/audio/music','deapi.ai','generateTrack','request_id','Authorization','Bearer','x-api-key','api_key']
+              for needle in needles:
+                  start=0
+                  while True:
+                      j=txt.find(needle,start)
+                      if j<0: break
+                      lo=max(0,j-1800); hi=min(len(txt),j+2600)
+                      chunks.append(f'\n===== {url} :: {needle} @ {j} =====\n'+txt[lo:hi])
+                      start=j+len(needle)
+                      if sum(1 for x in chunks if f':: {needle} @' in x)>=8: break
+          (out/'contexts.txt').write_text('\n'.join(chunks),encoding='utf-8')
+          print('contexts',len(chunks))
           PY
       - name: Commit probe
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add generated/boppy/findings.txt
-          git commit -m "Probe Boppy anonymous ACE-Step endpoint" || exit 0
+          git add generated/boppy/contexts.txt
+          git commit -m "Inspect Boppy generation request context" || exit 0
           git push
