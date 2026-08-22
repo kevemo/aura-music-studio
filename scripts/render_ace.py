@@ -13,8 +13,12 @@ OUTDIR.mkdir(parents=True, exist_ok=True)
 DURATION = float(os.environ.get("AURA_DURATION", "30"))
 MODEL = os.environ.get("AURA_MODEL", "acestep-v15-xl-turbo")
 COVER_STRENGTH = float(os.environ.get("AURA_COVER_STRENGTH", "0.78"))
-MAX_ATTEMPTS = int(os.environ.get("AURA_MAX_ATTEMPTS", "8"))
-RETRY_SECONDS = int(os.environ.get("AURA_RETRY_SECONDS", "70"))
+MAX_ATTEMPTS = int(os.environ.get("AURA_MAX_ATTEMPTS", "4"))
+RETRY_SECONDS = int(os.environ.get("AURA_RETRY_SECONDS", "45"))
+SPACE_CANDIDATES = [s.strip() for s in os.environ.get(
+    "AURA_SPACES",
+    "critesjosh/ace-step-music-studio,ACE-Step/Ace-Step-v1.5"
+).split(",") if s.strip()]
 
 if not SOURCE.exists():
     raise FileNotFoundError(SOURCE)
@@ -45,27 +49,34 @@ args = [
 ]
 assert len(args) == 49
 
-client = Client("ACE-Step/Ace-Step-v1.5")
 result = None
 last_error = None
-for attempt in range(1, MAX_ATTEMPTS + 1):
-    print(f"ACE-Step attempt {attempt}/{MAX_ATTEMPTS}: model={MODEL} duration={DURATION}s strength={COVER_STRENGTH}", flush=True)
-    try:
-        result = client.predict(*args, api_name="/generation_wrapper")
-        print("ACE-Step generation returned successfully", flush=True)
+winning_space = None
+for cycle in range(1, MAX_ATTEMPTS + 1):
+    for space in SPACE_CANDIDATES:
+        print(f"ACE-Step cycle {cycle}/{MAX_ATTEMPTS} host={space} model={MODEL} duration={DURATION}s strength={COVER_STRENGTH}", flush=True)
+        try:
+            client = Client(space)
+            result = client.predict(*args, api_name="/generation_wrapper")
+            winning_space = space
+            print(f"ACE-Step generation returned successfully from {space}", flush=True)
+            break
+        except Exception as exc:
+            last_error = exc
+            msg = str(exc)
+            print(f"ACE-Step host error [{space}]: {type(exc).__name__}: {msg}", flush=True)
+            # Continue to the next host for queue pressure, sleeping only between full cycles.
+            continue
+    if result is not None:
         break
-    except AppError as exc:
-        last_error = exc
-        msg = str(exc)
-        print(f"ACE-Step AppError: {msg}", flush=True)
-        if "No GPU was available" not in msg or attempt >= MAX_ATTEMPTS:
-            raise
-        print(f"ZeroGPU queue busy; retrying in {RETRY_SECONDS}s", flush=True)
+    if cycle < MAX_ATTEMPTS:
+        print(f"All ACE-Step hosts unavailable; retrying host pool in {RETRY_SECONDS}s", flush=True)
         time.sleep(RETRY_SECONDS)
 
 if result is None:
-    raise RuntimeError(f"ACE-Step failed after {MAX_ATTEMPTS} attempts: {last_error}")
+    raise RuntimeError(f"ACE-Step failed across {SPACE_CANDIDATES} after {MAX_ATTEMPTS} cycles: {last_error}")
 
+print("WINNING_SPACE", winning_space)
 print("RESULT_TYPE", type(result).__name__)
 print("RESULT_LEN", len(result) if isinstance(result, (tuple, list)) else None)
 
@@ -79,19 +90,22 @@ def serializable(v):
     return repr(v)
 
 with open(OUTDIR / "result.json", "w", encoding="utf-8") as f:
-    json.dump(serializable(result), f, indent=2)
+    json.dump({"winning_space": winning_space, "result": serializable(result)}, f, indent=2)
 
 items = result if isinstance(result, (tuple, list)) else [result]
 found = []
 for i, item in enumerate(items):
     candidates = []
-    if isinstance(item, str): candidates.append(item)
+    if isinstance(item, str):
+        candidates.append(item)
     elif isinstance(item, dict):
         for k in ("path", "name", "url"):
-            if item.get(k): candidates.append(item[k])
+            if item.get(k):
+                candidates.append(item[k])
     else:
         p = getattr(item, "path", None)
-        if p: candidates.append(p)
+        if p:
+            candidates.append(p)
     for c in candidates:
         try:
             p = Path(c)
