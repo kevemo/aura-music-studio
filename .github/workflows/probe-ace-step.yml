@@ -24,26 +24,22 @@ jobs:
           python - <<'PY' > generated/ace_api.txt
           from gradio_client import Client
           c = Client("ACE-Step/Ace-Step-v1.5")
-          wanted = {"/generation_wrapper", "/process_source_audio_wrapper", "/send_to_cover_handler"}
-          print("SRC=", c.src)
+          print("SRC", c.src)
           for ep in c.endpoints.values():
               api = getattr(ep, "api_name", None)
-              if api in wanted:
-                  print("\n###", api, "fn_index=", getattr(ep, "fn_index", None))
-                  for attr in ["parameters_info", "returns_info", "dependency", "input_component_types", "output_component_types"]:
-                      try:
-                          print(attr, "=", repr(getattr(ep, attr)))
-                      except Exception as e:
-                          print(attr, "ERROR", type(e).__name__, str(e))
-                  try:
-                      print("get_info=", repr(ep.get_info()))
-                  except Exception as e:
-                      print("get_info ERROR", type(e).__name__, str(e))
+              if api == "/generation_wrapper":
+                  print("API", api, "FN", getattr(ep, "fn_index", None))
+                  print("PARAM_COUNT", len(ep.parameters_info))
+                  for i,p in enumerate(ep.parameters_info):
+                      print("P", i, "name=", p.get("parameter_name"), "label=", repr(p.get("label")), "has_default=", p.get("parameter_has_default"), "default=", repr(p.get("parameter_default")), "component=", p.get("component"), "python_type=", repr(p.get("python_type")))
+                  dep = ep.dependency
+                  print("OUTPUT_IDS", dep.get("outputs"))
+                  print("OUTPUT_COUNT", len(dep.get("outputs", [])))
           PY
       - name: Commit probe result
         run: |
           git config user.name "Aura Music Studio Bot"
           git config user.email "actions@users.noreply.github.com"
           git add generated/ace_api.txt
-          git commit -m "Probe ACE-Step generation endpoint schema" || exit 0
+          git commit -m "Write compact ACE-Step generation schema" || exit 0
           git push
