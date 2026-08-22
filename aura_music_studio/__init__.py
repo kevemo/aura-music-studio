@@ -1,3 +1,3 @@
-"""Aura Music Studio — real-audio-first generative production platform."""
+"""The Live Sound Studio by Elevate Souls Productions, powered by Aura."""
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
