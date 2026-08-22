@@ -11,6 +11,8 @@ import numpy as np
 import soundfile as sf
 from pydantic import BaseModel, Field
 
+from .acestep_api import AceStepClient, AceStepRequest
+
 
 class SampleRequest(BaseModel):
     kind: str = Field(pattern="^(loop|one_shot|texture|fill|riff|transition)$")
@@ -57,7 +59,6 @@ def analyze_sample(path: Path) -> SampleAnalysis:
         if window > 32:
             a = mono[:window]
             b = mono[-window:]
-            # 1 = similar boundaries, useful as a rough seamless-loop indicator.
             denom = max(float(np.linalg.norm(a) * np.linalg.norm(b)), 1e-9)
             boundary = float(np.clip((np.dot(a, b) / denom + 1.0) / 2.0, 0.0, 1.0))
     except Exception:
@@ -102,7 +103,6 @@ def make_loop(source: Path, output: Path, *, bars: int, bpm: float, crossfade_ms
     ratio = current / target
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required")
-    # atempo supports 0.5-2 per stage; factor into safe stages.
     factors = []
     remaining = ratio
     while remaining > 2:
@@ -121,14 +121,14 @@ def make_loop(source: Path, output: Path, *, bars: int, bpm: float, crossfade_ms
     return output
 
 
-def generate_sample(request: SampleRequest, output: Path) -> Path:
-    """Generate a REAL-AUDIO sample through a configured neural sample/layer engine."""
-    command = os.getenv("AURA_SAMPLE_RENDER_CMD") or os.getenv("AURA_LAYER_RENDER_CMD")
-    if not command:
-        raise RuntimeError("Configure AURA_SAMPLE_RENDER_CMD or AURA_LAYER_RENDER_CMD with a neural real-audio generator")
-    duration = request.duration_seconds
+def _target_duration(request: SampleRequest) -> float:
     if request.bars and request.bpm:
-        duration = request.bars * 4 * 60.0 / request.bpm
+        return request.bars * 4 * 60.0 / request.bpm
+    return request.duration_seconds
+
+
+def _generate_external(request: SampleRequest, output: Path, command: str) -> Path:
+    duration = _target_duration(request)
     output.parent.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env.update({
@@ -150,3 +150,53 @@ def generate_sample(request: SampleRequest, output: Path) -> Path:
         output.unlink(missing_ok=True)
         raise RuntimeError("Aura refused a MIDI sample as generated audio")
     return output
+
+
+def _generate_acestep(request: SampleRequest, output: Path) -> Path:
+    duration = _target_duration(request)
+    generation_duration = max(10.0, duration)  # ACE-Step's documented generation floor is 10 seconds.
+    kind_direction = {
+        "loop": "a clean loopable musical phrase with stable groove and no long intro or ending",
+        "one_shot": "an isolated one-shot sound/event near the beginning with no musical lead-in",
+        "texture": "an evolving production texture",
+        "fill": "a focused musical fill suitable for dropping into an arrangement",
+        "riff": "a focused instrumental riff with a clear beginning",
+        "transition": "a production transition/riser/downlifter style event",
+    }[request.kind]
+    prompt = f"{kind_direction}. {request.prompt}"
+    if request.instrument:
+        prompt += f" Instrument: {request.instrument}."
+    client = AceStepClient()
+    raw = client.generate(AceStepRequest(
+        prompt=prompt,
+        lyrics="[Instrumental]",
+        task_type="text2music",
+        model=os.getenv("AURA_ACESTEP_SAMPLE_MODEL") or os.getenv("AURA_ACESTEP_TRACK_MODEL") or "acestep-v15-base",
+        bpm=round(request.bpm) if request.bpm else None,
+        key_scale=request.key,
+        audio_duration=generation_duration,
+        thinking=True,
+        audio_format="wav",
+        seed=request.seed,
+        batch_size=1,
+    ), output.parent / ".ace_sample")[0]
+    if duration < generation_duration - .01:
+        return slice_sample(raw, output, 0.0, duration)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(raw, output)
+    return output
+
+
+def generate_sample(request: SampleRequest, output: Path) -> Path:
+    """Generate a real-waveform sample through the best configured neural path."""
+    sample_cmd = os.getenv("AURA_SAMPLE_RENDER_CMD")
+    if sample_cmd:
+        return _generate_external(request, output, sample_cmd)
+    if os.getenv("AURA_ACESTEP_API_URL"):
+        return _generate_acestep(request, output)
+    layer_cmd = os.getenv("AURA_LAYER_RENDER_CMD")
+    if layer_cmd:
+        return _generate_external(request, output, layer_cmd)
+    raise RuntimeError(
+        "No real-audio Sample Lab renderer is available. Start/configure ACE-Step API or set AURA_SAMPLE_RENDER_CMD/AURA_LAYER_RENDER_CMD."
+    )
