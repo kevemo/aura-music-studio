@@ -1,6 +1,8 @@
-# Aura Music Studio
+# Elevate Souls Productions Presents: The Live Sound Studio
 
-**Aura Music Studio v0.4** is a real-audio-first, model-agnostic AI music creation and production platform. It is being designed as a generative DAW/orchestrator rather than a single text-to-song model: realistic backing tracks, original songs, lyrics-to-song, reference/cover/remix workflows, sample generation, vocal harmonies, consent-based voice profiles, stem separation, multitrack editing, mixing, mastering and DAW-ready export all share one project state.
+## Music Making for Professionals
+
+**The Live Sound Studio v0.4.1** is a real-audio-first, model-agnostic AI music creation and production platform from Elevate Souls Productions. **Aura** is the internal autonomous AI producer/orchestrator. The studio is designed as a generative DAW rather than a single text-to-song model: realistic backing tracks, original songs, lyrics-to-song, reference/cover/remix workflows, sample generation, vocal harmonies, consent-based voice profiles, stem separation, multitrack editing, mixing, mastering and DAW-ready export all share one project state.
 
 ## Real-audio guarantee
 
@@ -36,9 +38,8 @@ If no real-audio renderer succeeds, Aura **fails the project rather than substit
 - Non-destructive replace / repaint / variation / extend
 - Neural complementary-layer generation
 - Real-audio multitrack mix engine
-- Track fader, pan and effect racks
-- Automation-capable session schema
-- **Aura Producer Chat**: natural-language request -> structured studio operation plan
+- Track fader, pan, effect racks and automation
+- **Aura Producer**: natural-language request -> structured studio operation plan
 - Project DNA and generation history
 
 ### Sample Lab
@@ -83,7 +84,7 @@ If no real-audio renderer succeeds, Aura **fails the project rather than substit
 - Mureka adapter
 - Best-of-N generation / integrity and quality gates
 - Renderer failover
-- Autopilot project worker
+- Aura Autopilot project worker
 - Local engine manager (`engines/` stays outside Git history)
 - FastAPI backend for future desktop/mobile/web clients
 
@@ -140,4 +141,11 @@ The repository includes a 107-measure, 96-BPM backing-track project under `proje
 
 ## Hardware
 
-The Aura core/API/UI can run without a GPU. High-quality local neural generation depends on the chosen engine/model and normally requires a suitable NVIDIA CUDA GPU. Hosted authenticated providers can be configured instead. Public ZeroGPU/Space endpoints are treated as **best-effort fallback**, not guaranteed production capacity.
+The Live Sound Studio core/API/UI can run without a GPU. High-quality local neural generation depends on the chosen engine/model and normally requires a suitable GPU. Hosted or free-first GPU routes can be configured independently of the studio code.
+
+---
+
+**Product:** The Live Sound Studio  
+**Presented by:** Elevate Souls Productions  
+**AI producer:** Aura  
+**Tagline:** Music Making for Professionals
