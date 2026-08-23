@@ -13,6 +13,7 @@ from .guide import ensure_score_guide
 from .layers import build_optional_layers, mix_layers
 from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
+from .provenance import build_provenance, write_provenance
 from .quality import evaluate_audio
 from .renderers import render_with_failover
 
@@ -63,7 +64,10 @@ class AuraPipeline:
                     audio_path=final_real_audio,
                     audio_origin="hybrid",
                     is_final_quality=True,
-                    metadata={**render.metadata, "dedicated_layers": {k: str(v) for k, v in layers.items()}},
+                    metadata={
+                        **render.metadata,
+                        "dedicated_layers": {k: str(v) for k, v in layers.items()},
+                    },
                 )
                 qc = self._evaluate_final_real_audio(render.audio_path, plan)
 
@@ -73,16 +77,19 @@ class AuraPipeline:
             status["quality"] = qc
             status["takes"] = takes
             status["dedicated_layers"] = {k: str(v) for k, v in layers.items()}
-            self.workspace.save_json("render.json", {
-                "renderer": render.renderer,
-                "audio_path": str(render.audio_path),
-                "audio_origin": render.audio_origin,
-                "is_final_quality": render.is_final_quality,
-                "metadata": render.metadata,
-                "quality": qc,
-                "takes": takes,
-                "dedicated_layers": {k: str(v) for k, v in layers.items()},
-            })
+            self.workspace.save_json(
+                "render.json",
+                {
+                    "renderer": render.renderer,
+                    "audio_path": str(render.audio_path),
+                    "audio_origin": render.audio_origin,
+                    "is_final_quality": render.is_final_quality,
+                    "metadata": render.metadata,
+                    "quality": qc,
+                    "takes": takes,
+                    "dedicated_layers": {k: str(v) for k, v in layers.items()},
+                },
+            )
 
             status["stage"] = "mastering_and_real_audio_stems"
             self._write_status(status)
@@ -104,22 +111,42 @@ class AuraPipeline:
                 production_metadata,
             )
 
-            status.update({
-                "stage": "complete",
-                "success": True,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-                "exports": exports,
-            })
+            status["stage"] = "provenance"
+            self._write_status(status)
+            provenance = build_provenance(
+                self.workspace,
+                manifest=self.manifest.model_dump(),
+                renderer=render.renderer,
+                renderer_metadata=render.metadata,
+                audio_origin=render.audio_origin,
+                quality_control=qc,
+                exports=exports,
+            )
+            provenance_path = write_provenance(self.workspace, provenance)
+            exports["provenance"] = str(provenance_path)
+
+            status.update(
+                {
+                    "stage": "complete",
+                    "success": True,
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                    "exports": exports,
+                    "provenance_sha256": provenance["integrity"]["canonical_sha256"],
+                    "provenance_signed": provenance["integrity"]["signed"],
+                }
+            )
             self._write_status(status)
             return status
         except Exception as exc:
-            status.update({
-                "stage": "failed",
-                "success": False,
-                "error": f"{type(exc).__name__}: {exc}",
-                "traceback": traceback.format_exc(),
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-            })
+            status.update(
+                {
+                    "stage": "failed",
+                    "success": False,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "traceback": traceback.format_exc(),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
             self._write_status(status)
             self.workspace.log(status["traceback"], "failure.log")
             raise
