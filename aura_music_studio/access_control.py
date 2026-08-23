@@ -37,7 +37,9 @@ PUBLIC_EXACT = {
     "/health", "/plans", "/membership/review", "/membership/decision",
     "/membership/payment", "/docs", "/redoc", "/openapi.json",
 }
-PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner")
+# Privacy endpoints authenticate themselves with a valid session but deliberately do not require
+# an active paid/free entitlement, so pending/past-due members can still export/delete their data.
+PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/")
 
 
 def _token(request: Request) -> str | None:
