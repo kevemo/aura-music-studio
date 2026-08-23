@@ -96,7 +96,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
         "prompt": ". ".join(x for x in style_bits if x),
         "renderer": {
             "preferred": request.preferred_engines,
-            "model": "acestep-v15-xl-turbo",
+            "model": "acestep-v15-turbo",
             "cover_strength": request.reference_strength,
             "duration_limit_seconds": request.duration_seconds,
             "max_attempts_per_host": 3,
