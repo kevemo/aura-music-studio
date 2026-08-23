@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import unquote
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -15,6 +16,7 @@ from .plans import (
     AURA_SPEECH,
     BASIC_CREATE,
     BASIC_MASTERING,
+    BASIC_TIMELINE,
     FULL_TRACK,
     HARMONY_ARCHITECT,
     IMAGE_GENERATION,
@@ -39,12 +41,18 @@ PUBLIC_EXACT = {
     "/", "/pricing", "/signup", "/signin", "/signout", "/dashboard", "/studio",
     "/health", "/plans", "/membership/review", "/membership/decision",
     "/membership/payment", "/docs", "/redoc", "/openapi.json", "/favicon.webp",
+    "/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/service-worker.js",
+    "/ai-music-studio", "/ai-song-generator", "/backing-track-maker", "/stem-splitter",
+    "/ai-mastering", "/ai-vocal-studio",
 }
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
 # an active paid/free entitlement, so pending/past-due members can still export/delete their data.
-# Brand assets and localization remain public so unauthenticated landing/auth pages can load and
-# switch language before sign-in. ESP creator/agent/admin products keep their own ESP-role gates.
-PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/localization/")
+# Brand assets/localization/public node coordination have their own boundaries. ESP creator/agent/
+# admin products keep their own ESP-role gates and never rely on ordinary Studio plan entitlements.
+PUBLIC_PREFIXES = (
+    "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    "/localization/",
+)
 
 
 def _token(request: Request) -> str | None:
@@ -74,6 +82,8 @@ def _required_feature(path: str, method: str) -> str | None:
         return PRODUCER_CHAT
     if path.endswith("/produce") or path.endswith("/render-jobs"):
         return FULL_TRACK
+    if "/daw/" in path or path.endswith("/daw"):
+        return BASIC_TIMELINE
     if path.endswith("/region-edit"):
         return REGION_REPAINT
     if path.endswith("/add-generated-track"):
@@ -109,6 +119,41 @@ def _required_feature(path: str, method: str) -> str | None:
     return None
 
 
+def _base_daw_project_requires_pro(path: str) -> bool:
+    """Detect advanced DAW state left by a previous Pro membership.
+
+    Base may keep every project file after downgrade, but multitrack, take lanes, automation,
+    auxiliary routing and frozen-track state remain Pro-only and cannot be operated through Base.
+    """
+    if "/projects/" not in path or "/daw" not in path:
+        return False
+    try:
+        encoded = path.split("/projects/", 1)[1].split("/daw", 1)[0]
+        project_name = unquote(encoded).strip("/")
+        if not project_name:
+            return False
+        from .tenant_storage import project_path
+        from .session import StudioSession
+
+        project = project_path(project_name, must_exist=True)
+        session_file = project / "aura_session.json"
+        if not session_file.is_file():
+            return False
+        session = StudioSession.load(session_file)
+        ordinary = [track for track in session.tracks if track.role not in {"master", "bus"}]
+        buses = [track for track in session.tracks if track.role == "bus"]
+        if len(ordinary) > 1 or buses:
+            return True
+        for track in ordinary:
+            if track.automation or track.sends or track.metadata.get("frozen"):
+                return True
+            if any(clip.take_lane > 0 for clip in track.clips if clip.kind == "audio"):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 class MembershipAccessMiddleware(BaseHTTPMiddleware):
     """Server-side membership, entitlement and tenant-boundary enforcement."""
 
@@ -142,9 +187,20 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                     status_code=403,
                 )
 
+            if not member.plan.has(MULTITRACK_DAW) and _base_daw_project_requires_pro(path):
+                return JSONResponse(
+                    {
+                        "detail": "This project contains Pro multitrack, take-lane, automation, routing or frozen-track state. Upgrade to Pro to reopen its advanced DAW session.",
+                        "plan": member.plan.id,
+                        "upgrade_required": True,
+                        "project_preserved": True,
+                    },
+                    status_code=403,
+                )
+
             if path.endswith("/download"):
-                # Generated video/image downloads are already bound to their generation entitlement
-                # and tenant-specific job records. Audio/stem downloads use format-specific rules.
+                # Generated visual/Aura downloads are already bound to generation entitlement and
+                # tenant-specific job/attachment records. Audio and stem downloads use format rules.
                 if path.startswith("/api/video/") or path.startswith("/api/image/") or path.startswith("/api/aura/attachments/"):
                     return await call_next(request)
                 requested = (request.query_params.get("path") or "").lower()
