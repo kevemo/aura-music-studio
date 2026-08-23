@@ -74,6 +74,14 @@ AUDIO_TO_MIDI_CONTROL = "audio_to_midi_control"
 NEURAL_AMP = "neural_amp"
 SPATIAL_AUDIO = "spatial_audio"
 VIDEO_SYNC = "video_sync"
+VIDEO_GENERATION = "video_generation"
+ADVANCED_VIDEO_GENERATION = "advanced_video_generation"
+VIDEO_DIRECTOR = "video_director"
+VIDEO_TO_VIDEO = "video_to_video"
+VIDEO_EXTENDED_DURATION = "video_extended_duration"
+VIDEO_HIGH_QUALITY = "video_high_quality"
+VIDEO_PROVIDER_CONTROL = "video_provider_control"
+VIDEO_ADVANCED_EXPORT = "video_advanced_export"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
@@ -107,6 +115,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     BACKING_TRACK,
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
+    VIDEO_GENERATION,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -135,6 +144,13 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     NEURAL_AMP,
     SPATIAL_AUDIO,
     VIDEO_SYNC,
+    ADVANCED_VIDEO_GENERATION,
+    VIDEO_DIRECTOR,
+    VIDEO_TO_VIDEO,
+    VIDEO_EXTENDED_DURATION,
+    VIDEO_HIGH_QUALITY,
+    VIDEO_PROVIDER_CONTROL,
+    VIDEO_ADVANCED_EXPORT,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
 })
@@ -147,7 +163,7 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and uploads unlock on Base."
+            "starter FX, basic Aura Tune and basic mastering. Full music and video creation unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -158,9 +174,10 @@ PLANS: dict[str, Plan] = {
         name="Base",
         monthly_price_usd=Decimal("4.99"),
         description=(
-            "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
-            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools and project revision history."
+            "Core Live Sound Studio creation: one confirmed full track every day with unlimited regenerations until confirmation, "
+            "upload-to-song production, MP3/WAV, standard instruments and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
+            "cleanup, backing tracks, harmony tools, revision history and standard AI video creation including text-to-video, "
+            "image-to-video, music-video, lyric-video, visualizer and social-video workflows."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -171,11 +188,12 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
-            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
+            "The complete professional Live Sound Studio. Includes unlimited full-track creation plus advanced controls across every "
+            "music and video workflow: expanded instruments, multitrack build-around production, full FX banks, Aura AI FX Designer, "
+            "owner-approved plugin racks, advanced Aura Tune, detailed stem downloads, multitrack DAW, take lanes, automation, deep "
+            "revision history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, consent-approved voice "
+            "duplication, neural amp processing, spatial audio, Aura Video Director, video-to-video transformation, extended video "
+            "duration, high-quality rendering, provider controls, advanced video exports, music/video sync and priority processing."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
