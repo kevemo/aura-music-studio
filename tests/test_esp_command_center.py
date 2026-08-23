@@ -104,6 +104,7 @@ def test_role_gates_keep_agent_training_away_from_creator_only_accounts():
 def test_training_progress_and_usage_are_tracked(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(store)
+    SubscriptionLedger(store)  # Real app startup initializes subscription/revenue tables before the owner dashboard.
     _signup, approved = _approve_esp(store, esp, "progress@example.com", "creator")
 
     esp.set_progress(approved["id"], "creator-companion", 75)
