@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import tempfile
 from pathlib import Path
@@ -73,18 +72,14 @@ def _bundle_path(job_id: str) -> Path:
 
 
 def _public_claim(job: dict) -> dict:
-    payload = {}
-    try:
-        payload = json.loads(job.get("payload_json") or "{}")
-    except Exception:
-        pass
+    # Private lyrics/production payload is intentionally omitted here. It travels only inside the
+    # authenticated, checksummed project bundle downloaded by the node that owns this lease.
     return {
         "id": job["id"],
         "job_type": job["job_type"],
         "project_name": job["project_name"],
         "priority": job["priority"],
         "attempts": job["attempts"],
-        "payload": payload if isinstance(payload, dict) else {},
         "bundle_url": f"/node-coordinator/jobs/{job['id']}/bundle",
         "lease_url": f"/node-coordinator/jobs/{job['id']}/lease",
         "result_url": f"/node-coordinator/jobs/{job['id']}/result",
