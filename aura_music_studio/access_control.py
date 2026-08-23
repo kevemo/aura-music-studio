@@ -41,9 +41,11 @@ PUBLIC_EXACT = {
     "/ai-mastering", "/ai-vocal-studio",
 }
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
-# an active paid/free entitlement, so pending/past-due members can still export/delete their data.
-# Brand assets must also remain public so unauthenticated landing/auth pages can load the ESP identity.
-PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/")
+# an active paid/free entitlement. Brand assets remain public. ESP compute-node endpoints bypass
+# member authentication because every node operation performs its own node-specific credential check.
+PUBLIC_PREFIXES = (
+    "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+)
 
 
 def _token(request: Request) -> str | None:
