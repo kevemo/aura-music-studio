@@ -15,6 +15,7 @@ from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
 from aura_music_studio.system_api import router as system_router
+from aura_music_studio.take_api import router as take_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular advanced routers share the core app's authentication, plan enforcement and tenant isolation.
@@ -28,6 +29,7 @@ app.include_router(production_portal_router)
 app.include_router(production_suite_router)
 app.include_router(revision_router)
 app.include_router(revision_portal_router)
+app.include_router(take_router)
 app.include_router(source_detection_router)
 app.include_router(system_router)
 
