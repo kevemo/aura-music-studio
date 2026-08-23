@@ -42,9 +42,6 @@ PUBLIC_EXACT = {
     "/ai-music-studio", "/ai-song-generator", "/backing-track-maker", "/stem-splitter",
     "/ai-mastering", "/ai-vocal-studio",
 }
-# Privacy endpoints authenticate themselves with a valid session but deliberately do not require
-# an active paid/free entitlement. Brand assets remain public. ESP compute-node endpoints bypass
-# member authentication because every node operation performs its own node-specific credential check.
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
 )
@@ -108,9 +105,8 @@ def _required_feature(path: str, method: str) -> str | None:
 def _base_daw_project_requires_pro(path: str) -> bool:
     """Detect advanced DAW state left by a previous Pro membership.
 
-    The current user's tenant context is already established before this helper runs. Base may keep the
-    project and its files, but multitrack, take-lane and automation state cannot be operated through the
-    Base timeline after downgrade.
+    Base may keep every project file after downgrade, but multitrack, take lanes, automation,
+    auxiliary routing and frozen-track state remain Pro-only and cannot be operated through Base.
     """
     if "/projects/" not in path or "/daw" not in path:
         return False
@@ -127,17 +123,17 @@ def _base_daw_project_requires_pro(path: str) -> bool:
         if not session_file.is_file():
             return False
         session = StudioSession.load(session_file)
-        tracks = [track for track in session.tracks if track.role != "master"]
-        if len(tracks) > 1:
+        ordinary = [track for track in session.tracks if track.role not in {"master", "bus"}]
+        buses = [track for track in session.tracks if track.role == "bus"]
+        if len(ordinary) > 1 or buses:
             return True
-        for track in tracks:
-            if track.automation:
+        for track in ordinary:
+            if track.automation or track.sends or track.metadata.get("frozen"):
                 return True
             if any(clip.take_lane > 0 for clip in track.clips if clip.kind == "audio"):
                 return True
         return False
     except Exception:
-        # Normal route handlers retain responsibility for malformed/missing project responses.
         return False
 
 
@@ -177,7 +173,7 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
             if not member.plan.has(MULTITRACK_DAW) and _base_daw_project_requires_pro(path):
                 return JSONResponse(
                     {
-                        "detail": "This project contains Pro multitrack, take-lane or automation state. Upgrade to Pro to reopen its advanced DAW session.",
+                        "detail": "This project contains Pro multitrack, take-lane, automation, routing or frozen-track state. Upgrade to Pro to reopen its advanced DAW session.",
                         "plan": member.plan.id,
                         "upgrade_required": True,
                         "project_preserved": True,

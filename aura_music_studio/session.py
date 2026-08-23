@@ -29,6 +29,14 @@ class Effect(BaseModel):
     parameters: dict[str, float | str | bool] = Field(default_factory=dict)
 
 
+class Send(BaseModel):
+    """Parallel post-fader send from a source track to an auxiliary bus."""
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    bus_track_id: str
+    level_db: float = Field(default=-18.0, ge=-60.0, le=12.0)
+    enabled: bool = True
+
+
 class Clip(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     name: str
@@ -49,17 +57,19 @@ class Track(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     name: str
     role: Literal[
-        "master", "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard",
+        "master", "bus", "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard",
         "strings", "synth", "percussion", "brass", "woodwinds", "fx", "midi", "other"
     ] = "other"
     clips: list[Clip] = Field(default_factory=list)
     effects: list[Effect] = Field(default_factory=list)
     automation: list[AutomationLane] = Field(default_factory=list)
+    sends: list[Send] = Field(default_factory=list)
     volume_db: float = 0.0
     pan: float = Field(default=0.0, ge=-1.0, le=1.0)
     mute: bool = False
     solo: bool = False
     color: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class Marker(BaseModel):

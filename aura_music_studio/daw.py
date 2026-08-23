@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
 import soundfile as sf
 
-from .session import AutomationLane, AutomationPoint, Clip, StudioSession, Track
+from .session import AutomationLane, AutomationPoint, Clip, Effect, Send, StudioSession, Track
 
 
 SESSION_FILE = "aura_session.json"
@@ -48,7 +49,7 @@ def session_duration(session: StudioSession) -> float:
 
 
 def public_session(session: StudioSession) -> dict:
-    """Browser-safe DAW state. Source paths and private metadata never leave the server."""
+    """Browser-safe DAW state. Source paths/private metadata never leave the server."""
     tracks = []
     for track in session.tracks:
         clips = []
@@ -67,6 +68,7 @@ def public_session(session: StudioSession) -> dict:
                 "take_lane": clip.take_lane,
                 "committed": bool(clip.metadata.get("committed", False)),
                 "generated": bool(clip.metadata.get("generated", False)),
+                "frozen_render": bool(clip.metadata.get("frozen_render", False)),
             })
         tracks.append({
             "id": track.id,
@@ -80,6 +82,9 @@ def public_session(session: StudioSession) -> dict:
             "clips": clips,
             "automation": [lane.model_dump() for lane in track.automation],
             "effect_count": len(track.effects),
+            "sends": [send.model_dump() for send in track.sends],
+            "frozen": bool(track.metadata.get("frozen", False)),
+            "bus_preset": track.metadata.get("bus_preset") if track.role == "bus" else None,
         })
     return {
         "id": session.id,
@@ -95,6 +100,7 @@ def public_session(session: StudioSession) -> dict:
         "markers": [marker.model_dump() for marker in session.markers],
         "tracks": tracks,
         "source_paths_exposed": False,
+        "private_track_metadata_exposed": False,
     }
 
 
@@ -169,6 +175,37 @@ def set_clip_fades(session: StudioSession, clip_id: str, fade_in: float, fade_ou
     clip.fade_out = max(0.0, min(float(fade_out), maximum))
     session.touch()
     return clip
+
+
+def crossfade_clips(session: StudioSession, left_clip_id: str, right_clip_id: str, duration: float) -> tuple[Clip, Clip]:
+    """Create a non-destructive equal-time overlap using clip fades.
+
+    The source files are untouched. The right clip is positioned to overlap the tail of the left clip,
+    and both clip fade values are set to the requested crossfade duration.
+    """
+    if left_clip_id == right_clip_id:
+        raise ValueError("Crossfade requires two different clips")
+    left_track, left = find_clip(session, left_clip_id)
+    right_track, right = find_clip(session, right_clip_id)
+    if left_track.id != right_track.id:
+        raise ValueError("Crossfade clips must be on the same track")
+    if left.kind != "audio" or right.kind != "audio":
+        raise ValueError("Crossfade requires real audio clips")
+    if left.take_lane != right.take_lane:
+        raise ValueError("Crossfade clips must be on the same take lane")
+    requested = float(duration)
+    maximum = min(left.duration / 2.0, right.duration / 2.0)
+    if requested <= 0.001 or maximum <= 0.001:
+        raise ValueError("Crossfade duration is too short")
+    if requested > maximum:
+        raise ValueError(f"Crossfade cannot exceed {maximum:.3f} seconds for these clips")
+    if right.start < left.start:
+        raise ValueError("The right crossfade clip must start at or after the left clip")
+    right.start = max(0.0, left.start + left.duration - requested)
+    left.fade_out = requested
+    right.fade_in = requested
+    session.touch()
+    return left, right
 
 
 def trim_clip(
@@ -252,6 +289,156 @@ def set_track_mix(
         track.mute = bool(mute)
     if solo is not None:
         track.solo = bool(solo)
+    session.touch()
+    return track
+
+
+def create_bus(session: StudioSession, name: str, preset: str = "clean") -> Track:
+    preset = (preset or "clean").strip().lower()
+    if preset not in {"clean", "reverb", "delay"}:
+        raise ValueError("Unknown bus preset")
+    bus = session.add_track((name or f"Aura {preset.title()} Bus")[:100], "bus")
+    bus.metadata["bus_preset"] = preset
+    if preset == "reverb":
+        bus.effects.append(Effect(type="reverb", parameters={"predelay_ms": 28.0, "mix": 0.24}))
+    elif preset == "delay":
+        bus.effects.append(Effect(type="delay", parameters={"delay_ms": 320.0, "feedback": 0.28}))
+    session.touch()
+    return bus
+
+
+def delete_bus(session: StudioSession, bus_track_id: str) -> bool:
+    try:
+        bus = session.find_track(bus_track_id)
+    except KeyError:
+        return False
+    if bus.role != "bus":
+        raise ValueError("Only auxiliary bus tracks can be removed through the bus API")
+    session.tracks = [track for track in session.tracks if track.id != bus_track_id]
+    for track in session.tracks:
+        track.sends = [send for send in track.sends if send.bus_track_id != bus_track_id]
+    session.touch()
+    return True
+
+
+def set_send(
+    session: StudioSession,
+    source_track_id: str,
+    bus_track_id: str,
+    *,
+    level_db: float = -18.0,
+    enabled: bool = True,
+) -> Send:
+    source = session.find_track(source_track_id)
+    bus = session.find_track(bus_track_id)
+    if source.role in {"master", "bus"}:
+        raise ValueError("Only ordinary audio tracks can send to an auxiliary bus")
+    if bus.role != "bus":
+        raise ValueError("Send destination must be an auxiliary bus")
+    level = max(-60.0, min(12.0, float(level_db)))
+    existing = next((send for send in source.sends if send.bus_track_id == bus_track_id), None)
+    if existing is None:
+        existing = Send(bus_track_id=bus_track_id, level_db=level, enabled=bool(enabled))
+        source.sends.append(existing)
+    else:
+        existing.level_db = level
+        existing.enabled = bool(enabled)
+    session.touch()
+    return existing
+
+
+def remove_send(session: StudioSession, source_track_id: str, send_id: str) -> bool:
+    source = session.find_track(source_track_id)
+    before = len(source.sends)
+    source.sends = [send for send in source.sends if send.id != send_id]
+    if len(source.sends) == before:
+        return False
+    session.touch()
+    return True
+
+
+def _safe_track_name(value: str) -> str:
+    clean = re.sub(r"[^A-Za-z0-9._-]+", "_", value or "Track").strip("._")
+    return clean[:100] or "Track"
+
+
+def bounce_track(project: Path, session: StudioSession, track_id: str) -> Path:
+    """Render one editable track to a private member output without mutating the session."""
+    from .mixer import render_track
+
+    track = session.find_track(track_id)
+    if track.role in {"master", "bus"}:
+        raise ValueError("Bounce an ordinary audio track, not the master or an auxiliary bus")
+    rendered = render_track(track, session, project, project / "work" / "daw_bounce" / uuid4().hex)
+    if rendered is None:
+        raise ValueError("Track has no audible real audio to bounce")
+    audio, sr = sf.read(rendered, always_2d=True, dtype="float32")
+    output = project / "output" / "daw" / "bounces" / f"{_safe_track_name(track.name)}_{uuid4().hex[:8]}_Bounce.wav"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(output, audio, sr, subtype="PCM_24")
+    return output
+
+
+def freeze_track(project: Path, session: StudioSession, track_id: str) -> Track:
+    """Render a track to waveform and replace its editable processors with a reversible frozen clip."""
+    from .mixer import render_track
+
+    track = session.find_track(track_id)
+    if track.role in {"master", "bus"}:
+        raise ValueError("Only ordinary audio tracks can be frozen")
+    if track.metadata.get("frozen"):
+        raise ValueError("Track is already frozen")
+    rendered = render_track(track, session, project, project / "work" / "freeze_render" / uuid4().hex)
+    if rendered is None:
+        raise ValueError("Track has no audible real audio to freeze")
+
+    freeze_state = {
+        "clips": [clip.model_dump() for clip in track.clips],
+        "effects": [effect.model_dump() for effect in track.effects],
+        "automation": [lane.model_dump() for lane in track.automation],
+        "volume_db": track.volume_db,
+        "pan": track.pan,
+    }
+    freeze_dir = project / "work" / "freeze"
+    freeze_dir.mkdir(parents=True, exist_ok=True)
+    frozen_path = freeze_dir / f"{track.id}_{uuid4().hex[:8]}_Frozen.wav"
+    audio, sr = sf.read(rendered, always_2d=True, dtype="float32")
+    sf.write(frozen_path, audio, sr, subtype="PCM_24")
+    duration = float(len(audio) / sr) if sr else 0.0
+    if duration <= 0.01:
+        raise ValueError("Frozen track render is empty")
+
+    relative = frozen_path.resolve().relative_to(project.resolve()).as_posix()
+    track.metadata["freeze_state"] = freeze_state
+    track.metadata["frozen"] = True
+    track.clips = [Clip(
+        name=f"{track.name} — Frozen",
+        kind="audio",
+        source=relative,
+        start=0.0,
+        duration=duration,
+        metadata={"real_audio": True, "frozen_render": True},
+    )]
+    track.effects = []
+    track.automation = []
+    track.volume_db = 0.0
+    track.pan = 0.0
+    session.touch()
+    return track
+
+
+def thaw_track(session: StudioSession, track_id: str) -> Track:
+    track = session.find_track(track_id)
+    state = track.metadata.get("freeze_state")
+    if not track.metadata.get("frozen") or not isinstance(state, dict):
+        raise ValueError("Track is not frozen")
+    track.clips = [Clip.model_validate(item) for item in state.get("clips", [])]
+    track.effects = [Effect.model_validate(item) for item in state.get("effects", [])]
+    track.automation = [AutomationLane.model_validate(item) for item in state.get("automation", [])]
+    track.volume_db = float(state.get("volume_db", 0.0))
+    track.pan = max(-1.0, min(1.0, float(state.get("pan", 0.0))))
+    track.metadata.pop("freeze_state", None)
+    track.metadata.pop("frozen", None)
     session.touch()
     return track
 
