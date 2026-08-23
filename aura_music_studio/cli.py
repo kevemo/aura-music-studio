@@ -16,6 +16,7 @@ from .jobs import AuraJobWorker
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .public_address import PublicAddressManager
+from .self_host_setup import initialize_self_host
 
 app = typer.Typer(help=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Powered by {AI_PRODUCER_NAME}.")
 
@@ -102,6 +103,33 @@ def engines(
 def doctor():
     """Check the complete Studio: engines, queue, web, speech, security and provenance."""
     print(json.dumps(system_report(), indent=2, default=str))
+
+
+@app.command("self-host-init")
+def self_host_init(
+    provider: str = typer.Option("direct", "--provider", help="none, direct, freedns or duckdns"),
+    hostname: str | None = typer.Option(None, "--hostname", help="Public free hostname for FreeDNS/other DNS"),
+    duckdns_subdomain: str | None = typer.Option(None, "--duckdns-subdomain", help="DuckDNS subdomain without .duckdns.org"),
+    env_path: Path = typer.Option(Path(".env"), "--env", help="Deployment environment file to create/update"),
+):
+    """Generate safe self-host settings and owner/provenance secrets without collecting DDNS tokens on CLI."""
+    result = initialize_self_host(
+        provider=provider,
+        hostname=hostname,
+        duckdns_subdomain=duckdns_subdomain,
+        env_path=env_path,
+    )
+    payload = result.__dict__.copy()
+    generated_key = payload.pop("admin_key", None)
+    print(json.dumps(payload, indent=2, default=str))
+    if generated_key:
+        print("\n[bold yellow]New ESP owner admin key — store this safely; it is shown once here:[/bold yellow]")
+        print(generated_key)
+    if result.missing_private_settings:
+        print("\n[yellow]Private settings still required in .env:[/yellow]")
+        for item in result.missing_private_settings:
+            print(f"- {item}")
+    print(f"\n[bold green]Next: {result.next_command}[/bold green]")
 
 
 @app.command("public-address")
