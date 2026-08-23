@@ -15,6 +15,7 @@ from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
+from .engineering_api import router as engineering_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
 from .mixer import render_session
@@ -34,13 +35,14 @@ PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.5.2",
-    description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first multi-model generative music studio API, powered by Aura.",
+    version="0.6.0",
+    description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
 app.include_router(web_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
+app.include_router(engineering_router)
 
 
 class ProducerRequest(BaseModel):
@@ -71,7 +73,9 @@ def health():
         "membership_tiers": ["free", "base", "pro"],
         "customer_portal": True,
         "owner_portal": True,
-        "api_version": "0.5.2",
+        "spoken_aura": True,
+        "advanced_engineering_api": True,
+        "api_version": "0.6.0",
     }
 
 
