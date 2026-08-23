@@ -20,13 +20,11 @@ RESULT_ALLOWED_PREFIXES = (
     "output/",
     "work/",
 )
+# Remote compute may update DAW/session state and generated work, but source project manifests,
+# asset ownership indexes and rights ledgers remain authoritative on the ESP coordinator.
 RESULT_ALLOWED_ROOT_FILES = {
     "aura_session.json",
     "aura_status.json",
-    "project.yaml",
-    "project.yml",
-    "project.json",
-    "assets.json",
 }
 
 
@@ -153,7 +151,6 @@ def build_result_bundle(project: Path, job_id: str, destination: Path) -> dict:
             for source in sorted(root.rglob("*")):
                 if source.is_file() and not source.is_symlink():
                     rel = source.relative_to(project).as_posix()
-                    # Never return revision snapshots from a worker.
                     if rel.startswith("work/revisions/"):
                         continue
                     candidates.append((rel, source))
