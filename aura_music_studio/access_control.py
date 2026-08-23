@@ -36,6 +36,9 @@ PUBLIC_EXACT = {
     "/", "/pricing", "/signup", "/signin", "/signout", "/dashboard", "/studio",
     "/health", "/plans", "/membership/review", "/membership/decision",
     "/membership/payment", "/docs", "/redoc", "/openapi.json", "/favicon.webp",
+    "/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/service-worker.js",
+    "/ai-music-studio", "/ai-song-generator", "/backing-track-maker", "/stem-splitter",
+    "/ai-mastering", "/ai-vocal-studio",
 }
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
 # an active paid/free entitlement, so pending/past-due members can still export/delete their data.
