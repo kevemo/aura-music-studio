@@ -16,6 +16,7 @@ from .plans import (
     BASIC_CREATE,
     BASIC_MASTERING,
     FULL_TRACK,
+    HARMONY_ARCHITECT,
     MP3_DOWNLOAD,
     MULTITRACK_DAW,
     NEURAL_AMP,
@@ -56,6 +57,10 @@ def _required_feature(path: str, method: str) -> str | None:
         return PRODUCER_CHAT
     if path.endswith("/produce") or path.endswith("/render-jobs"):
         return FULL_TRACK
+    if path.endswith("/harmonies"):
+        return HARMONY_ARCHITECT
+    if path.endswith("/voice-convert") or path.endswith("/voice-profiles") or path.endswith("/voices"):
+        return APPROVED_VOICE_DUPLICATION
     if path.endswith("/restore"):
         return AUDIO_CLEANUP
     if path.endswith("/neural-amp"):
@@ -70,8 +75,6 @@ def _required_feature(path: str, method: str) -> str | None:
         return SAMPLE_LAB
     if path.endswith("/style-blend"):
         return STYLE_DNA
-    if path.endswith("/voice-profiles"):
-        return APPROVED_VOICE_DUPLICATION
     if path.endswith("/transcribe"):
         return AUDIO_TO_MIDI_CONTROL
     if "/session" in path:
@@ -132,8 +135,6 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
 
-            # Legacy synchronous rendering still supports the same Base daily-slot policy.
-            # The newer /render-jobs endpoint performs its own slot check before enqueueing.
             project_id = None
             base_slot = None
             if request.method == "POST" and path.endswith("/produce"):
