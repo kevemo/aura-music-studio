@@ -6,6 +6,7 @@ Run locally:
 
 from aura_music_studio.api import app
 from aura_music_studio.brand_ui import router as brand_router
+from aura_music_studio.compute_node_api import router as compute_node_router
 from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
@@ -26,9 +27,10 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular advanced routers share the core app's authentication, plan enforcement and tenant isolation.
-# Brand/discovery routes are public. Owner backup routes perform their own owner-cookie check.
+# Brand/discovery routes are public. Owner routes and compute-node routes perform their own authentication.
 app.include_router(brand_router)
 app.include_router(discovery_router)
+app.include_router(compute_node_router)
 app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
