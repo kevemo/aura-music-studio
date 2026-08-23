@@ -36,6 +36,8 @@ ADVANCED_INSTRUMENT_SELECTOR = "advanced_instrument_selector"
 BASIC_FX = "basic_fx"
 STANDARD_FX = "standard_fx"
 ADVANCED_FX = "advanced_fx"
+AI_FX_DESIGNER = "ai_fx_designer"
+PLUGIN_RACK = "plugin_rack"
 BASIC_AUTOTUNE = "basic_autotune"
 STANDARD_AUTOTUNE = "standard_autotune"
 ADVANCED_AUTOTUNE = "advanced_autotune"
@@ -108,6 +110,8 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     UNLIMITED_CONFIRMED_SONGS,
     ADVANCED_INSTRUMENT_SELECTOR,
     ADVANCED_FX,
+    AI_FX_DESIGNER,
+    PLUGIN_RACK,
     ADVANCED_AUTOTUNE,
     FLAC_DOWNLOAD,
     ADVANCED_MASTERING,
@@ -163,10 +167,11 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, full FX "
-            "banks, advanced/custom Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes and automation, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
+            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
+            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
+            "Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes and automation, advanced/reference/album mastering, "
+            "Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, "
+            "immersive spatial audio, video/music sync and all enabled export formats."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
