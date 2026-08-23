@@ -1,0 +1,29 @@
+use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "Aura Search"
+
+search:
+  safe_search: 1
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  # This service is intentionally not published to the public host network by docker-compose.
+  # The key protects SearXNG internals; replace it in a hardened production image if the
+  # search service is ever exposed separately.
+  secret_key: "esp-live-sound-studio-internal-searxng"
+  limiter: false
+  image_proxy: false
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 10.0
