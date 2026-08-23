@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import mimetypes
+from pathlib import Path
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .mixer import selected_audio_clips
@@ -25,7 +30,7 @@ def _member(request: Request):
     return member
 
 
-def _session(project_name: str) -> tuple[StudioSession, object, object]:
+def _session(project_name: str) -> tuple[StudioSession, Path, Path]:
     try:
         project = project_path(project_name, must_exist=True)
     except (ValueError, FileNotFoundError) as exc:
@@ -43,7 +48,7 @@ def _track(session: StudioSession, track_id: str):
         raise HTTPException(404, "Track not found") from exc
 
 
-def _public_track(track) -> dict:
+def _public_track(track, project_name: str) -> dict:
     lanes: dict[int, list[dict]] = {}
     for clip in track.clips:
         if clip.kind != "audio":
@@ -51,7 +56,6 @@ def _public_track(track) -> dict:
         lanes.setdefault(int(clip.take_lane), []).append({
             "clip_id": clip.id,
             "name": clip.name,
-            "source": clip.source,
             "start": clip.start,
             "duration": clip.duration,
             "source_offset": clip.source_offset,
@@ -62,6 +66,7 @@ def _public_track(track) -> dict:
             "generated": bool(clip.metadata.get("generated", False)),
             "generation_id": clip.metadata.get("generation_id"),
             "instrument_type": clip.metadata.get("instrument_type"),
+            "preview_url": f"/projects/{quote(project_name, safe='')}/takes/audio/{quote(clip.id, safe='')}",
         })
     rendered = selected_audio_clips(track)
     return {
@@ -75,19 +80,46 @@ def _public_track(track) -> dict:
     }
 
 
+def _clip_source(project: Path, session: StudioSession, clip_id: str) -> Path:
+    clip = next((c for t in session.tracks for c in t.clips if c.id == clip_id and c.kind == "audio"), None)
+    if not clip or not clip.source:
+        raise HTTPException(404, "Take audio not found")
+    source = Path(clip.source)
+    if not source.is_absolute():
+        source = project / source
+    source = source.resolve()
+    root = project.resolve()
+    if root not in source.parents or not source.is_file():
+        raise HTTPException(404, "Take audio not found")
+    return source
+
+
 @router.get("/projects/{project_name}/takes")
 def list_takes(project_name: str, request: Request):
     _member(request)
     session, _, _ = _session(project_name)
-    tracks = [_public_track(track) for track in session.tracks if any(c.kind == "audio" for c in track.clips)]
+    tracks = [_public_track(track, project_name) for track in session.tracks if any(c.kind == "audio" for c in track.clips)]
     return {"session_id": session.id, "tracks": tracks}
+
+
+@router.get("/projects/{project_name}/takes/audio/{clip_id}")
+def preview_take(project_name: str, clip_id: str, request: Request):
+    _member(request)
+    session, _, project = _session(project_name)
+    source = _clip_source(project, session, clip_id)
+    return FileResponse(
+        source,
+        media_type=mimetypes.guess_type(source.name)[0] or "audio/wav",
+        content_disposition_type="inline",
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 @router.get("/projects/{project_name}/takes/{track_id}")
 def track_takes(project_name: str, track_id: str, request: Request):
     _member(request)
     session, _, _ = _session(project_name)
-    return _public_track(_track(session, track_id))
+    return _public_track(_track(session, track_id), project_name)
 
 
 @router.post("/projects/{project_name}/takes/{track_id}/commit")
@@ -115,7 +147,7 @@ def commit_take(project_name: str, track_id: str, body: CommitTakeRequest, reque
         "take_lane": body.take_lane,
     })
     session.save(session_path)
-    return _public_track(track)
+    return _public_track(track, project_name)
 
 
 @router.delete("/projects/{project_name}/takes/{track_id}/commit")
@@ -137,4 +169,4 @@ def clear_take_commit(project_name: str, track_id: str, request: Request):
             clip.metadata.pop("committed", None)
     session.generation_history.append({"action": "clear_committed_take", "track_id": track.id})
     session.save(session_path)
-    return _public_track(track)
+    return _public_track(track, project_name)
