@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from urllib.parse import urlparse
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -37,33 +37,58 @@ _LIMITER = _SlidingWindowLimiter()
 
 
 def _client_key(request: Request) -> str:
-    # request.client is preferred over user-controlled X-Forwarded-For. In production,
-    # configure uvicorn/reverse-proxy trusted forwarding so request.client is normalized.
     return request.client.host if request.client else "unknown"
 
 
 def _same_origin(request: Request) -> bool:
-    """Protect cookie-authenticated writes against cross-site requests.
-
-    SameSite cookies already provide a useful browser barrier; Origin/Sec-Fetch-Site adds a
-    second server-side check without requiring JavaScript-visible CSRF secrets.
-    """
+    """Protect cookie-authenticated writes against cross-site requests."""
     fetch_site = (request.headers.get("sec-fetch-site") or "").lower()
     if fetch_site == "cross-site":
         return False
 
     origin = request.headers.get("origin")
     if not origin:
-        # Traditional same-origin HTML form submissions may send Referer rather than Origin.
         origin = request.headers.get("referer")
     if not origin:
-        # Non-browser clients using explicit Bearer auth are handled outside this function.
         return True
 
     parsed = urlparse(origin)
     request_host = (request.headers.get("host") or "").lower()
     origin_host = (parsed.netloc or "").lower()
     return bool(request_host and origin_host and request_host == origin_host)
+
+
+async def _inject_esp_brand(response):
+    """Attach the shared ESP theme/favicon to every server-rendered HTML screen.
+
+    Portals retain their own layout CSS, while the brand layer centrally overrides colour, glow,
+    panels and the `.brand` logo treatment. This prevents visual drift as new pages are added.
+    """
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "text/html" not in content_type or not hasattr(response, "body_iterator"):
+        return response
+
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else str(chunk).encode("utf-8"))
+    raw = b"".join(chunks)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return Response(content=raw, status_code=response.status_code, headers=dict(response.headers), media_type=content_type)
+
+    if "/brand/theme.css" not in text:
+        head = "<link rel='stylesheet' href='/brand/theme.css'><link rel='icon' type='image/webp' href='/brand/esp-logo.webp'>"
+        if "</head>" in text:
+            text = text.replace("</head>", head + "</head>", 1)
+        else:
+            text = head + text
+
+    headers = {
+        key: value for key, value in response.headers.items()
+        if key.lower() not in {"content-length", "content-type"}
+    }
+    return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
 
 
 class StudioSecurityMiddleware(BaseHTTPMiddleware):
@@ -93,6 +118,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Cross-site write request blocked"}, status_code=403)
 
         response = await call_next(request)
+        response = await _inject_esp_brand(response)
 
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
