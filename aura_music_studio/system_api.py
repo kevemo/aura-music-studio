@@ -4,13 +4,22 @@ from fastapi import APIRouter
 
 from .doctor import system_report
 from .model_catalog import public_catalog
+from .provider_credentials import credential_report
 
 router = APIRouter(prefix="/system", tags=["Studio System"])
 
 
 @router.get("/doctor")
 def doctor():
-    return system_report()
+    report = system_report()
+    report["credentials"] = credential_report()
+    return report
+
+
+@router.get("/credential-status")
+def credential_status():
+    """Return configuration state only; never return any secret value or fingerprint."""
+    return credential_report()
 
 
 @router.get("/model-catalog")
