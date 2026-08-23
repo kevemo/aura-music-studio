@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -167,30 +166,56 @@ class AuraSystemCompanionService(AuraCompanionService):
             )
 
         if member.plan.has(VIDEO_DIRECTOR):
-            tools.append(
-                {
-                    "type": "function",
-                    "name": "create_music_video",
-                    "description": (
-                        "Start Aura Music Video Director for a completed song project. It storyboards the song, generates tracked shots, "
-                        "then assembles them against the original mastered audio when all shots complete."
-                    ),
-                    "strict": True,
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "project_name": {"type": "string"},
-                            "title": {"type": "string"},
-                            "concept": {"type": "string"},
-                            "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]},
-                            "provider": {"type": "string", "enum": ["auto", "local", "openai", "runway"]},
-                            "quality": {"type": "string", "enum": ["standard", "high", "professional"]},
-                            "continuity": {"type": "string"},
+            tools.extend(
+                [
+                    {
+                        "type": "function",
+                        "name": "create_music_video",
+                        "description": (
+                            "Start Aura Music Video Director for a completed song project. It storyboards the song, generates tracked shots, "
+                            "then assembles them against the original mastered audio when all shots complete."
+                        ),
+                        "strict": True,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "project_name": {"type": "string"},
+                                "title": {"type": "string"},
+                                "concept": {"type": "string"},
+                                "aspect_ratio": {"type": "string", "enum": ["16:9", "9:16", "1:1"]},
+                                "provider": {"type": "string", "enum": ["auto", "local", "openai", "runway"]},
+                                "quality": {"type": "string", "enum": ["standard", "high", "professional"]},
+                                "continuity": {"type": "string"},
+                            },
+                            "required": ["project_name", "title", "concept", "aspect_ratio", "provider", "quality", "continuity"],
+                            "additionalProperties": False,
                         },
-                        "required": ["project_name", "title", "concept", "aspect_ratio", "provider", "quality", "continuity"],
-                        "additionalProperties": False,
                     },
-                }
+                    {
+                        "type": "function",
+                        "name": "get_music_video_status",
+                        "description": "Refresh and report one of the signed-in user's Aura Music Video Director projects.",
+                        "strict": True,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"music_video_id": {"type": "string"}},
+                            "required": ["music_video_id"],
+                            "additionalProperties": False,
+                        },
+                    },
+                    {
+                        "type": "function",
+                        "name": "list_my_music_videos",
+                        "description": "List the signed-in user's recent Aura Music Video Director projects and statuses.",
+                        "strict": True,
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 30}},
+                            "required": ["limit"],
+                            "additionalProperties": False,
+                        },
+                    },
+                ]
             )
 
         return tools
@@ -295,5 +320,23 @@ class AuraSystemCompanionService(AuraCompanionService):
                 quality=str(arguments.get("quality") or "standard"),
                 continuity=str(arguments.get("continuity") or "consistent cinematic visual language"),
             )
+
+        if name == "get_music_video_status":
+            if not member.plan.has(VIDEO_DIRECTOR):
+                raise AuraCompanionError("Aura Music Video Director requires Pro")
+            return self.music_video.refresh(
+                user_id=member.user_id,
+                project_id=str(arguments.get("music_video_id") or ""),
+            )
+
+        if name == "list_my_music_videos":
+            if not member.plan.has(VIDEO_DIRECTOR):
+                raise AuraCompanionError("Aura Music Video Director requires Pro")
+            return {
+                "music_videos": self.music_video.store.list_projects(
+                    member.user_id,
+                    limit=int(arguments.get("limit") or 10),
+                )
+            }
 
         return super()._execute_tool(member, name, arguments)
