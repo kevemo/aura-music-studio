@@ -8,6 +8,7 @@ import typer
 from rich import print
 
 from .autopilot import AuraAutopilot
+from .backup import StudioBackupManager
 from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
@@ -147,6 +148,55 @@ def public_address_command(
     value = manager.check(update_ddns=update_ddns) if refresh else manager.read_status()
     payload = value.__dict__ if hasattr(value, "__dict__") else value
     print(json.dumps(payload, indent=2, default=str))
+
+
+@app.command("backup")
+def backup_studio(
+    output: Path | None = typer.Option(None, "--output", help="Optional .zip output path"),
+    include_outputs: bool = typer.Option(True, "--include-outputs/--no-outputs", help="Include rendered masters/stems"),
+    include_work: bool = typer.Option(True, "--include-work/--no-work", help="Include project work/revision files"),
+    age_recipient: str | None = typer.Option(None, "--age-recipient", help="Optional age public recipient for standard encrypted backup"),
+    keep_plain: bool = typer.Option(False, "--keep-plain", help="Keep the unencrypted .zip when age encryption is used"),
+):
+    """Create an owner-controlled portable backup of accounts/billing/jobs and private projects."""
+    result = StudioBackupManager().create(
+        output=output,
+        include_outputs=include_outputs,
+        include_work=include_work,
+        age_recipient=age_recipient,
+        keep_plain_when_encrypted=keep_plain,
+    )
+    print(json.dumps(result, indent=2, default=str))
+
+
+@app.command("backup-inspect")
+def backup_inspect(
+    archive: Path = typer.Argument(..., exists=True, dir_okay=False),
+    age_identity: Path | None = typer.Option(None, "--age-identity", exists=True, dir_okay=False),
+    verify_hashes: bool = typer.Option(True, "--verify/--no-verify"),
+):
+    """Inspect and optionally verify every file in an ESP Studio backup."""
+    result = StudioBackupManager.inspect(archive, age_identity=age_identity, verify_hashes=verify_hashes)
+    print(json.dumps(result, indent=2, default=str))
+
+
+@app.command("restore-backup")
+def restore_backup(
+    archive: Path = typer.Argument(..., exists=True, dir_okay=False),
+    offline: bool = typer.Option(False, "--offline-confirmed", help="Required: confirms web/worker services are stopped"),
+    age_identity: Path | None = typer.Option(None, "--age-identity", exists=True, dir_okay=False),
+    preserve_existing: bool = typer.Option(True, "--preserve-existing/--replace-existing"),
+):
+    """Restore a verified Studio backup. Refuses to run unless offline restore is explicitly confirmed."""
+    if not offline:
+        raise typer.BadParameter("Stop the Studio/web/worker services, then pass --offline-confirmed")
+    result = StudioBackupManager().restore(
+        archive,
+        confirm_offline=True,
+        age_identity=age_identity,
+        preserve_existing=preserve_existing,
+    )
+    print(json.dumps(result, indent=2, default=str))
 
 
 @app.command("render-worker")
