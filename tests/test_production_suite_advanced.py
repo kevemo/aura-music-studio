@@ -12,8 +12,8 @@ from aura_music_studio.plugin_rack import load_plugin_catalog, public_plugin_cat
 from aura_music_studio.source_detection import detect_source_role
 
 
-def test_version_is_daw_mixer_suite_0170():
-    assert __version__ == "0.17.0"
+def test_version_is_live_renderer_suite_0180():
+    assert __version__ == "0.18.0"
 
 
 def test_public_job_never_exposes_private_payload_json():
