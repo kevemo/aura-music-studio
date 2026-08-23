@@ -40,7 +40,7 @@ class BackupScheduler:
 
     def __init__(self):
         self.manager = StudioBackupManager()
-        self.settings = StudioSettings(self.manager.store)
+        self.settings = StudioSettings()
         self.status_path = Path(os.getenv("LSS_BACKUP_STATUS", "data/backup_scheduler_status.json"))
         self.status_path.parent.mkdir(parents=True, exist_ok=True)
 
