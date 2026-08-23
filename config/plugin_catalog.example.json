@@ -1,0 +1,35 @@
+{
+  "plugins": [
+    {
+      "id": "example-vocal-strip",
+      "name": "Example Vocal Channel Strip",
+      "category": "vocal",
+      "format": "vst3",
+      "path": "/opt/aura/plugins/ExampleVocalStrip.vst3",
+      "enabled": false,
+      "description": "Disabled example only. Install and review a licensed plugin, then create an owner-approved catalog entry.",
+      "license_note": "Verify commercial/server processing rights before enabling.",
+      "parameter_hints": {
+        "input_gain": {"min": -24, "max": 24},
+        "compression": {"min": 0, "max": 1},
+        "air": {"min": 0, "max": 1}
+      }
+    },
+    {
+      "id": "example-guitar-amp",
+      "name": "Example Guitar Amp",
+      "category": "guitar",
+      "format": "vst3",
+      "path": "/opt/aura/plugins/ExampleGuitarAmp.vst3",
+      "enabled": false,
+      "description": "Disabled example for an owner-approved amp/cab plugin.",
+      "license_note": "Verify the installed plugin licence and server/production use rights before enabling.",
+      "parameter_hints": {
+        "gain": {"min": 0, "max": 1},
+        "bass": {"min": 0, "max": 1},
+        "middle": {"min": 0, "max": 1},
+        "treble": {"min": 0, "max": 1}
+      }
+    }
+  ]
+}
