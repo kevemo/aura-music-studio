@@ -9,11 +9,12 @@ from pydantic import BaseModel, Field
 from .assets import AssetLibrary
 from .automix import apply_automix
 from .autotune import AutoTuneSettings, detect_key, tune_vocal
-from .build_around import BuildAroundRequest, build_around_upload
+from .build_around import BuildAroundRequest
 from .effects import render_effects
 from .fx_designer import FxDesignRequest, design_fx, safe_slug
 from .fx_presets import get_preset as get_fx_preset, public_presets
 from .instrument_catalog import public_catalog
+from .job_api import queue as job_queue, start_full_song_slot
 from .mastering import master, master_album, public_mastering_presets, translation_report
 from .plans import (
     ADVANCED_AUTOTUNE,
@@ -30,6 +31,7 @@ from .plans import (
     BUILD_AROUND_UPLOAD,
     MULTITRACK_DAW,
     PLUGIN_RACK,
+    PRIORITY_QUEUE,
     REFERENCE_MASTERING,
     STANDARD_AUTOTUNE,
     STANDARD_FX,
@@ -132,6 +134,13 @@ def _asset_audio(project: Path, asset_id: str):
     return library, record, project / record.path
 
 
+def _public_job(job: dict) -> dict:
+    value = dict(job)
+    value.pop("payload_json", None)
+    value.pop("result_json", None)
+    return value
+
+
 @router.get("/instrument-catalog")
 def instrument_catalog(request: Request):
     member = _member(request)
@@ -194,6 +203,7 @@ def mastering_catalog(request: Request):
 def build_around(project_name: str, body: BuildAroundRequest, request: Request):
     member = _member(request)
     _require(member, BUILD_AROUND_UPLOAD)
+    project = _project(project_name)
     if body.output_mode == "multitrack":
         _require(member, MULTITRACK_DAW)
     if not member.plan.has(ADVANCED_INSTRUMENT_SELECTOR):
@@ -202,10 +212,18 @@ def build_around(project_name: str, body: BuildAroundRequest, request: Request):
             item = next((x for x in catalog.get(switch.family, []) if x["id"] == switch.type_id), None)
             if item and item.get("pro_only"):
                 raise HTTPException(403, f"{item['label']} is a Pro instrument type")
-    try:
-        return build_around_upload(_project(project_name), body)
-    except (KeyError, ValueError, FileNotFoundError) as exc:
-        raise HTTPException(400, str(exc)) from exc
+    # Validate the selected source belongs to this project before a job is admitted to the queue.
+    _asset_audio(project, body.asset_id)
+    start_full_song_slot(member, project_name)
+    priority = 100 if member.plan.has(PRIORITY_QUEUE) else 20
+    job = job_queue.submit(
+        member.user_id,
+        project_name,
+        job_type="build_around",
+        priority=priority,
+        payload=body.model_dump(mode="json"),
+    )
+    return _public_job(job)
 
 
 @router.post("/projects/{project_name}/fx")
