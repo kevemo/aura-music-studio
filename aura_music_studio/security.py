@@ -58,12 +58,8 @@ def _same_origin(request: Request) -> bool:
     return bool(request_host and origin_host and request_host == origin_host)
 
 
-async def _inject_esp_brand(response):
-    """Attach the shared ESP theme/favicon to every server-rendered HTML screen.
-
-    Portals retain their own layout CSS, while the brand layer centrally overrides colour, glow,
-    panels and the `.brand` logo treatment. This prevents visual drift as new pages are added.
-    """
+async def _inject_esp_brand(response, path: str):
+    """Attach the shared ESP theme/favicon to every server-rendered HTML screen."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -83,6 +79,10 @@ async def _inject_esp_brand(response):
             text = text.replace("</head>", head + "</head>", 1)
         else:
             text = head + text
+
+    if path in {"/studio", "/production-suite"} and "esp-history-fab" not in text:
+        history = "<a class='esp-history-fab' href='/history' title='Project history and undo'>↶ Project History</a>"
+        text = text.replace("</body>", history + "</body>", 1) if "</body>" in text else text + history
 
     headers = {
         key: value for key, value in response.headers.items()
@@ -118,7 +118,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Cross-site write request blocked"}, status_code=403)
 
         response = await call_next(request)
-        response = await _inject_esp_brand(response)
+        response = await _inject_esp_brand(response, path)
 
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
