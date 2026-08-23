@@ -2,9 +2,9 @@
 
 ## Music Making for Professionals · Powered by Aura
 
-**The Live Sound Studio v0.11.0** is ESP's real-audio-first AI music creation, recording and production platform. **Aura** is the internal autonomous producer/orchestrator.
+**The Live Sound Studio v0.12.0** is ESP's real-audio-first AI music creation, recording and production platform. **Aura** is the internal autonomous producer/orchestrator.
 
-The project is being built as a generative DAW and self-hostable music service rather than a single text-to-song endpoint. It combines original-song creation, backing tracks, upload-to-full-production, recording, consent-gated vocal tools, stem separation, take lanes/comping, effects, tuning, mixing, mastering, project history, memberships and owner administration in one tenant-isolated application.
+The project is being built as a generative DAW and self-hostable music service rather than a single text-to-song endpoint. It combines original-song creation, backing tracks, upload-to-full-production, recording, consent-gated vocal tools, stem separation, take lanes/comping, effects, tuning, mixing, mastering, project history, memberships, owner administration, independent public addressing and owner-controlled migration in one tenant-isolated application.
 
 ## Real-audio guarantee
 
@@ -23,8 +23,10 @@ If a real-audio renderer is unavailable, the Studio fails the render instead of 
 ### Public product + membership
 
 - ESP-branded landing page, pricing, sign-up and sign-in
-- Exact ESP logo packaged with the app
+- exact ESP logo packaged with the app
 - shared black/cosmic-purple, gold, magenta, silver and ruby visual identity
+- public SEO/use-case pages, sitemap and robots controls
+- installable PWA manifest with a public-only cache allow-list
 - membership requests routed to `elevatesoulsproductions@gmail.com`
 - Free / Base / Pro server-side entitlements
 - ESP owner approval dashboard
@@ -156,9 +158,22 @@ The Studio does not provide unrestricted impersonation tooling. Voice conversion
 
 Commercial search/chat APIs are not required by the core architecture.
 
+## Public discovery
+
+Once ESP gives Aura a reachable hostname or public IP, the app already exposes public search-focused pages for:
+
+- `/ai-music-studio`
+- `/ai-song-generator`
+- `/backing-track-maker`
+- `/stem-splitter`
+- `/ai-mastering`
+- `/ai-vocal-studio`
+
+`robots.txt` and `sitemap.xml` expose only the intended public marketing surfaces. Member dashboards, projects, owner tools, membership actions and private audio routes are deliberately excluded. The service worker caches only a small public allow-list and never caches member/project/payment routes.
+
 ## Self-hosted public access — no paid domain required
 
-The v0.11 stack includes **Aura Public Address Manager**. Cloudflare is not part of this deployment path.
+The v0.12 stack includes **Aura Public Address Manager**. Cloudflare is not part of this deployment path.
 
 Supported modes:
 
@@ -231,6 +246,31 @@ aura public-address --serve
 
 Full LAN/router address information is shown only in the authenticated ESP owner dashboard. Member-facing diagnostics are redacted.
 
+## Owner-controlled backup and migration
+
+Accounts, billing state, production jobs and private project files can be exported into a checksummed portable archive without a cloud backup provider.
+
+```bash
+aura backup
+aura backup-inspect backups/ESP_Live_Sound_Studio_....zip
+```
+
+Optional standard `age` encryption:
+
+```bash
+aura backup --age-recipient age1...
+```
+
+Restore is intentionally offline-only:
+
+```bash
+aura restore-backup backup.zip --offline-confirmed
+```
+
+The archive excludes `.env`, DDNS credentials, SMTP passwords, payment/provider secrets and model API keys. Every archived file is SHA-256 verified before restore, and the previous database/project tree is preserved by default. ESP owners can also create/list/download backups from `/owner/backups`.
+
+Docker stores backups in a dedicated persistent volume separate from member project/output storage.
+
 ## Core development install
 
 ```bash
@@ -251,7 +291,7 @@ Optional Python UPnP integration:
 pip install -e '.[selfhost]'
 ```
 
-The Docker image also includes the local `upnpc` utility so router-first address inspection can work without that Python optional extra.
+The Docker image also includes the local `upnpc` utility so router-first address inspection can work without that Python optional extra. It also includes the standard `age` command for optional owner-encrypted backups.
 
 ## Self-hosted neural generation
 
@@ -265,7 +305,7 @@ GPU compute is a physical resource. The software can avoid paid generation APIs,
 
 - [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) — feature/engine research matrix
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — backend/DAW/engine architecture
-- [`docs/PRODUCT_DEPLOYMENT.md`](docs/PRODUCT_DEPLOYMENT.md) — accounts/billing/product deployment
+- [`docs/PRODUCT_DEPLOYMENT.md`](docs/PRODUCT_DEPLOYMENT.md) — accounts/billing/self-host deployment
 - [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) — domain-independent £0-additional-hosting deployment path
 - [`docs/SETUP.md`](docs/SETUP.md) — engine/setup notes
 
@@ -275,4 +315,4 @@ GPU compute is a physical resource. The software can avoid paid generation APIs,
 **Presented by:** Elevate Souls Productions  
 **AI producer:** Aura  
 **Tagline:** Music Making for Professionals  
-**Current code milestone:** v0.11.0
+**Current code milestone:** v0.12.0
