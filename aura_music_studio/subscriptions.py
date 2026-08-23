@@ -28,6 +28,10 @@ class SubscriptionLedger:
     The current PayPal links are manually verified, so this ledger gives Base/Pro a
     real monthly access window rather than making one payment activate the account forever.
     A future PayPal/Stripe webhook can call the same verify_payment method.
+
+    ESP Creator Network members may hold a Base entitlement with billing_status=esp_comped.
+    ESP owners may hold a Pro entitlement with billing_status=owner_comped. These are internal
+    entitlements rather than paid subscriptions and therefore do not expire through this ledger.
     """
 
     def __init__(self, store: AccountStore | None = None):
@@ -132,15 +136,61 @@ class SubscriptionLedger:
         state = self.get(user_id)
         return {"user": user, "subscription": state}
 
+    def _esp_active(self, user_id: str) -> bool:
+        try:
+            with self._connect() as con:
+                row = con.execute(
+                    "SELECT status FROM esp_memberships WHERE user_id=?",
+                    (user_id,),
+                ).fetchone()
+            return bool(row and row["status"] in {"active", "owner"})
+        except sqlite3.OperationalError:
+            # The command-center schema is lazily initialized. Before it exists there is no ESP comp entitlement.
+            return False
+
     def enforce(self, user: dict) -> dict:
         """Refresh a signed-in user's billing status before entitlements are granted."""
-        if not user or user.get("plan_id") == "free":
+        if not user:
             return user
+
+        billing_status = user.get("billing_status") or ""
+        if billing_status == "owner_comped":
+            return user
+        if billing_status == "esp_comped":
+            if self._esp_active(user["id"]):
+                return user
+            # Defensive cleanup if ESP access was removed without the normal revoke workflow.
+            with self._connect() as con:
+                con.execute(
+                    "UPDATE users SET plan_id='free',requested_plan_id='free',billing_status='not_required' WHERE id=?",
+                    (user["id"],),
+                )
+            return self.store.get_user(user["id"]) or user
+
+        if user.get("plan_id") == "free":
+            return user
+
         state = self.get(user["id"])
         now = _now()
         end = _parse(state.get("period_end")) if state else None
         if state and state.get("status") == "active" and end and end > now:
             return user
+
+        # A paid Pro period for an approved ESP member falls back to the included Base entitlement,
+        # rather than locking the member out or demanding Base payment again.
+        if self._esp_active(user["id"]):
+            with self._connect() as con:
+                if state:
+                    con.execute(
+                        "UPDATE subscription_state SET status='past_due', updated_at=? WHERE user_id=?",
+                        (_iso(now), user["id"]),
+                    )
+                con.execute(
+                    """UPDATE users SET status='active',plan_id='base',requested_plan_id='base',billing_status='esp_comped'
+                       WHERE id=?""",
+                    (user["id"],),
+                )
+            return self.store.get_user(user["id"]) or user
 
         with self._connect() as con:
             if state:
