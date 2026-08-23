@@ -6,6 +6,8 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from .backup_scheduler import BackupScheduler
+from .compute_capabilities import compatibility
 from .compute_nodes import ComputeNodeRegistry
 from .doctor import system_report
 from .model_catalog import public_catalog
@@ -14,40 +16,54 @@ router = APIRouter(prefix="/system", tags=["Studio System"])
 
 
 def _safe_backup_status() -> dict:
-    path = Path(os.getenv("LSS_BACKUP_STATUS", "data/backup_scheduler_status.json"))
+    scheduler = BackupScheduler()
+    config = scheduler.configuration()
     value: dict = {}
-    if path.is_file():
+    if scheduler.status_path.is_file():
         try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
+            loaded = json.loads(scheduler.status_path.read_text(encoding="utf-8"))
             value = loaded if isinstance(loaded, dict) else {}
         except Exception:
             value = {}
     last = value.get("last_result") if isinstance(value.get("last_result"), dict) else {}
     backup = last.get("backup")
     return {
-        "automatic_enabled": os.getenv("LSS_AUTO_BACKUP_ENABLED", "false").lower() == "true",
-        "interval_hours": int(os.getenv("LSS_AUTO_BACKUP_INTERVAL_HOURS", "24")),
-        "retention_count": int(os.getenv("LSS_AUTO_BACKUP_KEEP", "7")),
+        "automatic_enabled": config["enabled"],
+        "interval_hours": config["interval_hours"],
+        "retention_count": config["retention_count"],
+        "include_finished_outputs": config["include_outputs"],
+        "include_work_files": config["include_work"],
         "last_success_at": value.get("last_success_at"),
         "last_failure_at": value.get("last_failure_at"),
         "last_ok": last.get("ok"),
         "last_archive": Path(str(backup)).name if backup else None,
-        "encrypted_when_recipient_configured": bool(os.getenv("LSS_BACKUP_AGE_RECIPIENT")),
+        "encrypted_when_recipient_configured": config["encrypted_when_recipient_configured"],
         "filesystem_path_exposed": False,
+        "encryption_recipient_exposed": False,
     }
 
 
-def independence_status() -> dict:
+def _safe_node_status() -> dict:
     try:
-        nodes = ComputeNodeRegistry().summary()
+        registry = ComputeNodeRegistry()
+        summary = registry.summary()
+        nodes = registry.list_nodes(stale_after_seconds=max(60, int(os.getenv("LSS_NODE_HEARTBEAT_SECONDS", "30")) * 4))
+        compatible_online = sum(
+            1 for node in nodes
+            if node.get("online") and node.get("status") != "revoked" and compatibility(node)["compatible"]
+        )
+        return {**summary, "compatible_online": compatible_online, "same_version_required": os.getenv("LSS_NODE_REQUIRE_SAME_VERSION", "true").lower() == "true"}
     except Exception as exc:
-        nodes = {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+        return {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def independence_status() -> dict:
     return {
         "self_host_first": True,
         "paid_domain_required": False,
         "cloud_host_required": False,
         "automatic_local_backups": _safe_backup_status(),
-        "esp_compute_nodes": nodes,
+        "esp_compute_nodes": _safe_node_status(),
         "compute_node_credentials_exposed": False,
         "compute_node_network_addresses_exposed": False,
     }
