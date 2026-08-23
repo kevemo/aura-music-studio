@@ -1,37 +1,70 @@
-# The Live Sound Studio — Product Deployment
+# ESP Live Sound Studio — Product Deployment
 
 **Elevate Souls Productions Presents: The Live Sound Studio**  
-**Music Making for Professionals**  
-Internal AI producer: **Aura**
+**Music Making for Professionals · Powered by Aura**
 
-## What runs in the main Studio service
+The primary deployment target is now **ESP-controlled self-hosting**. The product does not require Cloudflare, another paid domain, a paid app host, Firebase/Supabase, or a commercial music-generation API in order for the application architecture to operate.
 
-The production `app.py` serves one FastAPI application containing:
+See [`SELF_HOSTING.md`](SELF_HOSTING.md) for the public-address/network guide.
 
-- public landing page and pricing;
+## What runs in the ESP Studio stack
+
+The production `app.py` and supporting private services provide:
+
+- public ESP-branded landing/pricing/discovery pages;
+- installable PWA metadata and tightly scoped public service worker;
 - sign-up and sign-in;
 - ESP membership approval lifecycle;
-- member dashboard;
+- member dashboard and private Studio workspaces;
 - Free / Base / Pro entitlement enforcement;
 - Base daily confirmed-track accounting;
 - Pro unlimited tool access;
 - ESP owner/admin portal;
-- PayPal manual payment-link routing;
-- verified monthly billing-period ledger;
-- project and asset APIs;
+- PayPal manual payment-link routing and verified billing periods;
+- private per-member projects/assets;
+- browser recording;
 - real-audio production orchestration;
-- mastering, splitter/stems, DAW/session and export APIs;
+- build-around-upload workflows;
+- generative DAW/session/take/comp/revision systems;
+- mastering, splitter/stems, tuning, FX and engineering jobs;
+- asynchronous production worker;
+- Aura speech, reasoning and controlled web gateway;
+- private SearXNG metasearch;
+- Aura Public Address Manager;
+- owner-controlled backup/migration system;
 - health endpoint at `/health`.
 
-## Product URLs
+## Public and private URLs
+
+Public/indexable:
 
 - `/` — public landing page
 - `/pricing` — Free / Base / Pro comparison
 - `/signup` — membership request
 - `/signin` — member sign-in
-- `/dashboard` — member plan/status/tools
-- `/owner` — ESP owner administration
-- `/docs` — API documentation
+- `/ai-music-studio`
+- `/ai-song-generator`
+- `/backing-track-maker`
+- `/stem-splitter`
+- `/ai-mastering`
+- `/ai-vocal-studio`
+- `/robots.txt`
+- `/sitemap.xml`
+- `/manifest.webmanifest`
+
+Private/member or owner surfaces include:
+
+- `/dashboard`
+- `/studio`
+- `/production-suite`
+- `/recording-studio`
+- `/take-manager`
+- `/history`
+- `/owner`
+- `/owner/backups`
+- `/projects/...`
+
+Private/member routes are deliberately excluded from the public sitemap and public service-worker cache.
 
 ## Membership lifecycle
 
@@ -46,45 +79,154 @@ The production `app.py` serves one FastAPI application containing:
 9. Additional verified payments extend the current paid-through date.
 10. If a paid period expires, access automatically returns to payment-pending until renewal is verified.
 
-The current PayPal invoice/payment links are therefore safe to use as a manual billing bridge without pretending they are recurring subscription webhooks.
+The current PayPal invoice links are used as a manual billing bridge; opening a payment URL is never treated as proof of payment.
 
 ## Tier rules
 
 ### Free
 
-Basic song/project creation, basic lyrics, Aura Producer planning and basic previews. No confirmed finished full-track allowance.
+Entry-level creative access, Aura Producer/songwriting tools, starter controls and basic previews. No confirmed finished full-track allowance.
 
 ### Base — $4.99/month
 
-One **confirmed full track per day**. The member may regenerate the same draft track repeatedly before confirmation. Confirmation consumes the day's allowance. Base includes MP3/WAV finished downloads, basic mastering, uploads, backing-track creation and harmony tools.
+One **confirmed full track per day**. The member may regenerate the current draft before confirmation. Base includes the core full-song/backing-track workflow, browser recording, Build Around Upload complete-mix mode, MP3/WAV finished downloads, standard Aura Tune/FX/AutoMix, useful mastering and reduced splitter modes.
 
 ### Pro — $9.99/month
 
-Unlimited confirmed tracks and the complete enabled studio: splitter/stems, multitrack DAW, take lanes, automation, advanced/reference mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, audio-to-MIDI control analysis, BandLab/stem exports and all download formats.
+Unlimited full-track production and the complete enabled Studio: editable multitrack Build Around, detailed splitter/stems, Take Manager, phrase comping, automation, advanced instrument variants, Aura FX Designer, trusted plugin rack, advanced/custom Aura Tune, reference/album mastering, Sample Lab, Style DNA, repaint/remix/edit tools, consent-approved voice features, spatial/tone/video engineering, priority jobs and the complete download/export set.
 
-## Security secrets
+## Self-host-first network architecture
 
-Never commit real values. Configure these in the deployment host's secret manager:
+Default private stack:
 
-- `LSS_ADMIN_KEY` — long random ESP owner-dashboard key
-- `LSS_SMTP_USERNAME`
-- `LSS_SMTP_PASSWORD`
-- `LSS_SMTP_FROM`
-- any model/worker authentication tokens if used
+```text
+browser on ESP host
+        │
+        ▼
+127.0.0.1:8000
+        │
+        ▼
+ESP Live Sound Studio
+ ├─ membership/database
+ ├─ private projects
+ ├─ Aura production worker
+ ├─ local/open model workers
+ └─ private SearXNG
+```
 
-For production HTTPS:
+Optional public profile:
+
+```text
+Internet
+   │
+   ▼
+free hostname OR direct public IP
+   │
+   ▼
+Caddy on ESP host (80/443)
+   │
+   ▼
+private Live Sound Studio service
+```
+
+The FastAPI application itself binds to host loopback in the Docker configuration. Caddy is the public reverse-proxy/TLS boundary when the public profile is enabled.
+
+## No paid domain requirement
+
+Aura Public Address Manager supports:
+
+- local-only mode;
+- direct public-IP mode;
+- FreeDNS/afraid.org free hostname;
+- DuckDNS free hostname.
+
+Aura monitors the address, can refresh the configured free-DDNS record, checks DNS readiness and warns about likely CGNAT. Full LAN/router/public network details are owner-only; ordinary member diagnostics receive only redacted readiness information.
+
+A provider account/record still has to exist for a free-DDNS hostname. Aura maintains it after ESP supplies the private provider credential.
+
+## HTTPS
+
+For a free hostname that resolves to the ESP server:
 
 ```env
-LSS_PUBLIC_BASE_URL=https://your-live-domain.example
+LSS_PUBLIC_BASE_URL=auto
+LSS_PUBLIC_SITE_ADDRESS=your-free-host.example
 LSS_COOKIE_SECURE=true
 ```
 
-For local HTTP testing:
+Caddy handles HTTPS on the ESP host once DNS and inbound ports 80/443 are correctly routed.
+
+Direct-IP mode deliberately defaults to HTTP rather than falsely assuming a browser-trusted certificate can be issued for every arbitrary IP:
 
 ```env
-LSS_PUBLIC_BASE_URL=http://127.0.0.1:8000
+LSS_DDNS_PROVIDER=direct
+LSS_PUBLIC_SITE_ADDRESS=http://:80
 LSS_COOKIE_SECURE=false
 ```
+
+## Secure initialization
+
+Before package installation:
+
+```bash
+python scripts/setup_self_host.py --provider direct
+```
+
+After installation:
+
+```bash
+aura self-host-init --provider direct
+```
+
+The initializer creates strong ESP owner/provenance secrets itself. Tokenized DDNS credentials are not accepted as CLI flags and must be placed privately in `.env` so they do not enter shell history.
+
+## Public launch
+
+```bash
+docker compose --profile public up -d --build
+```
+
+Local-only/private launch:
+
+```bash
+docker compose up -d --build
+```
+
+Convenience launchers:
+
+```bash
+bash scripts/start_self_host.sh
+```
+
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_self_host.ps1
+```
+
+## Public-address owner controls
+
+The ESP owner dashboard reports:
+
+- recommended public URL;
+- configured hostname;
+- LAN/router/public address diagnosis;
+- DNS A/AAAA result;
+- CGNAT warning;
+- HTTPS readiness;
+- DDNS refresh state.
+
+It never displays the DDNS update token/URL.
+
+## Membership approval email URL
+
+Set:
+
+```env
+LSS_PUBLIC_BASE_URL=auto
+```
+
+and membership email links resolve from Aura Public Address Manager's current recommended URL. ESP does not need to manually rewrite the approval-link base every time an ISP address changes.
 
 ## Email approval delivery
 
@@ -94,36 +236,62 @@ The Studio supports SMTP directly. Gmail can be configured with:
 LSS_SMTP_HOST=smtp.gmail.com
 LSS_SMTP_PORT=587
 LSS_SMTP_USERNAME=elevatesoulsproductions@gmail.com
-LSS_SMTP_PASSWORD=<deployment secret / app password>
+LSS_SMTP_PASSWORD=<deployment secret / app-specific credential>
 LSS_SMTP_STARTTLS=true
 ```
 
-If SMTP is not configured, the code writes the message to a development outbox and explicitly reports that it was **not sent**.
+If SMTP is not configured, the application writes a development-outbox message and explicitly reports that it was not delivered.
 
-## Local production-style launch
+## Backups and machine migration
+
+Aura's backup engine creates portable ZIP archives containing:
+
+- a transactionally consistent SQLite backup of accounts/memberships/billing/jobs;
+- private project files;
+- project sessions/revisions/work files when enabled;
+- finished outputs when enabled;
+- per-file SHA-256 hashes and a backup manifest.
+
+It deliberately excludes deployment `.env` and provider/payment/email/model secrets.
+
+Create:
 
 ```bash
-cp .env.example .env
-# fill secrets
-
-docker compose up --build
+aura backup
 ```
 
-Then open:
+Optional standard `age` encryption:
 
-- `http://127.0.0.1:8000/`
-- `http://127.0.0.1:8000/owner`
+```bash
+aura backup --age-recipient age1...
+```
 
-Persistent named volumes hold account/billing data and projects.
+Verify:
+
+```bash
+aura backup-inspect backups/ESP_Live_Sound_Studio_....zip
+```
+
+Restore requires the Studio/web/worker to be stopped and explicit confirmation:
+
+```bash
+aura restore-backup backup.zip --offline-confirmed
+```
+
+Aura verifies every manifest checksum before replacement and, by default, preserves the old database/project tree beside the restored state. The owner portal also provides backup creation/list/download controls; restore remains CLI/offline-only intentionally.
+
+Model checkpoints, Docker images and deployment secrets are not duplicated into every backup because they can be reinstalled/reconfigured separately and may be extremely large.
 
 ## Real-audio compute architecture
 
-The customer/account web service is intentionally separate from the heavy neural music worker.
+The customer/account web service is separate from heavy neural music generation. The Studio prefers a self-hosted ACE-Step worker and can route to additional local/open engines.
 
-The Studio orchestrator can call a self-hosted ACE-Step worker and compatible open engines. MIDI, MusicXML and notation remain control layers only; they cannot be promoted to Final Master.
+MIDI, MusicXML and notation remain control layers only; they cannot be promoted to Final Master.
 
-For a fully open/self-hosted installation, run the model worker on GPU compute and point the Studio at it using `AURA_ACESTEP_API_URL`. Commercial provider adapters remain optional fallbacks and are not required by the product architecture.
+GPU compute remains a physical resource. Avoiding paid generation APIs does not make unlimited generation computationally free; throughput is bounded by the GPU hardware ESP owns or otherwise has access to.
 
-## Free-host deployment note
+## Startup-cost objective
 
-Do not choose a host solely because it offers free CPU web hosting. A public membership product also requires **persistent account/billing storage**, HTTPS and secret management. The neural music layer additionally needs GPU compute. The repository is now host-independent so these can be selected separately without rewriting the product.
+Assuming ESP already has suitable hardware, storage, electricity and Internet connectivity, the software is designed so the initial **additional domain/hosting/backend cost can be £0**.
+
+External rails still exist where the real-world function requires them (for example ISP connectivity, DNS if a hostname is used, public certificate authorities, PayPal and Gmail), but they do not own the Studio database, projects or music-production code.

@@ -8,13 +8,19 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
+      LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_WEB_ENABLED: "true"
       AURA_SEARXNG_URL: http://searxng:8080
     ports:
-      - "8000:8000"
+      # Local-owner access only. Public traffic should enter through the optional Caddy
+      # self-host profile on ports 80/443 rather than exposing FastAPI directly.
+      - "127.0.0.1:8000:8000"
     volumes:
       - live_sound_data:/app/data
       - live_sound_projects:/app/projects
+      - live_sound_backups:/app/backups
     depends_on:
       searxng:
         condition: service_started
@@ -35,15 +41,48 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
+      LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_JOB_POLL_SECONDS: "2"
       AURA_WEB_ENABLED: "true"
       AURA_SEARXNG_URL: http://searxng:8080
     volumes:
       - live_sound_data:/app/data
       - live_sound_projects:/app/projects
+      - live_sound_backups:/app/backups
     depends_on:
       searxng:
         condition: service_started
+
+  aura-backup-scheduler:
+    build: .
+    container_name: live-sound-studio-backup-scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "aura_music_studio.backup_scheduler"]
+    env_file:
+      - .env
+    environment:
+      AURA_PROJECTS_ROOT: /app/projects
+      LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
+    volumes:
+      - live_sound_data:/app/data
+      - live_sound_projects:/app/projects:ro
+      - live_sound_backups:/app/backups
+
+  aura-address-manager:
+    build: .
+    container_name: live-sound-studio-address-manager
+    restart: unless-stopped
+    command: ["python", "-m", "aura_music_studio.public_address"]
+    env_file:
+      - .env
+    environment:
+      LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
+    volumes:
+      - live_sound_data:/app/data
 
   searxng:
     image: searxng/searxng:latest
@@ -58,6 +97,31 @@ services:
     # Deliberately no host `ports:` mapping. Aura can reach this service over the private
     # Compose network, while members cannot use the metasearch instance as an open proxy.
 
+  caddy:
+    image: caddy:2
+    container_name: live-sound-studio-public-gateway
+    restart: unless-stopped
+    profiles: ["public"]
+    env_file:
+      - .env
+    environment:
+      # Set to a hostname (for automatic HTTPS) or http://:80 for direct-IP fallback.
+      LSS_PUBLIC_SITE_ADDRESS: ${LSS_PUBLIC_SITE_ADDRESS:-http://:80}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      live-sound-studio:
+        condition: service_healthy
+
 volumes:
   live_sound_data:
   live_sound_projects:
+  live_sound_backups:
+  caddy_data:
+  caddy_config:

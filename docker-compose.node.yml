@@ -1,0 +1,58 @@
+services:
+  aura-compute-node:
+    build: .
+    container_name: esp-aura-compute-node
+    restart: unless-stopped
+    command: ["python", "-m", "aura_music_studio.compute_node_agent"]
+    env_file:
+      - .env.node
+    environment:
+      LSS_NODE_WORK_DIR: /app/node-work
+      AURA_ACESTEP_API_URL: http://ace-step:8001
+      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
+      AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
+      AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+    volumes:
+      - esp_node_work:/app/node-work
+    depends_on:
+      ace-step:
+        condition: service_healthy
+    # Outbound-only coordinator connection. No public ports are published by the node agent.
+
+  ace-step:
+    # Same reviewed upstream pin as the main Studio GPU override.
+    build:
+      context: https://github.com/ace-step/ACE-Step-1.5.git#14c0211d5a0653b0f63e27686f4c3f151b4d8629
+      dockerfile: Dockerfile
+    container_name: esp-aura-node-ace-step
+    restart: unless-stopped
+    gpus: all
+    environment:
+      ACESTEP_MODE: api
+      ACESTEP_API_HOST: 0.0.0.0
+      ACESTEP_API_PORT: 8001
+      ACESTEP_INIT_SERVICE: "true"
+      ACESTEP_CONFIG_PATH: acestep-v15-xl-turbo
+      ACESTEP_LM_MODEL_PATH: acestep-5Hz-lm-4B
+      ACESTEP_LLM_BACKEND: pt
+      HF_HOME: /root/.cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
+    expose:
+      - "8001"
+    volumes:
+      - esp_node_ace_checkpoints:/app/checkpoints
+      - esp_node_ace_outputs:/app/output
+      - esp_node_hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 8
+      start_period: 180s
+    # ACE-Step stays private inside the node's Compose network.
+
+volumes:
+  esp_node_work:
+  esp_node_ace_checkpoints:
+  esp_node_ace_outputs:
+  esp_node_hf_cache:

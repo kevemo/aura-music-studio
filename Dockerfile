@@ -4,12 +4,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     AURA_PROJECTS_ROOT=/app/projects \
-    LSS_DB_PATH=/app/data/live_sound_studio.sqlite3
+    LSS_DB_PATH=/app/data/live_sound_studio.sqlite3 \
+    LSS_BACKUP_DIR=/app/backups
 
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl git \
+    && apt-get install -y --no-install-recommends ffmpeg libsndfile1 curl git miniupnpc age \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
@@ -21,7 +22,7 @@ COPY projects ./projects
 RUN pip install --upgrade pip \
     && pip install .
 
-RUN mkdir -p /app/data /app/projects
+RUN mkdir -p /app/data /app/projects /app/backups
 
 EXPOSE 8000
 

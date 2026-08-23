@@ -62,13 +62,17 @@ def _mix_files(files: list[Path], output: Path, sample_rate: int) -> Path:
     return output
 
 
-def selected_audio_clips(track: Track) -> list[Clip]:
-    """Return the audio clips that should currently render for a track.
+def _gain_file(source: Path, output: Path, gain_db: float, sample_rate: int) -> Path:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(source),
+        "-af", f"volume={float(gain_db):.4f}dB", "-c:a", "pcm_f32le", "-ar", str(sample_rate), str(output),
+    ], check=True)
+    return output
 
-    A committed take is an explicit human/Aura choice and therefore wins over the newest take lane.
-    If nothing is committed, the latest/highest take lane is auditioned. Multiple committed clips are
-    supported for future regional comping, where different timeline regions may come from different takes.
-    """
+
+def selected_audio_clips(track: Track) -> list[Clip]:
+    """Return the audio clips that should currently render for a track."""
     audio_clips = [c for c in track.clips if c.kind == "audio" and not c.muted]
     if not audio_clips:
         return []
@@ -80,7 +84,7 @@ def selected_audio_clips(track: Track) -> list[Clip]:
 
 
 def render_track(track: Track, session: StudioSession, project_root: Path, work_dir: Path) -> Path | None:
-    if track.mute:
+    if track.mute or track.role == "bus":
         return None
     selected = selected_audio_clips(track)
     if not selected:
@@ -91,8 +95,6 @@ def render_track(track: Track, session: StudioSession, project_root: Path, work_
         for i, clip in enumerate(selected)
     ]
     dry = _mix_files(clip_files, work_dir / "tracks" / f"{track.id}_dry.wav", session.sample_rate)
-
-    # Static insert rack first, then continuous track fader/pan automation.
     processed = work_dir / "tracks" / f"{track.id}_processed.wav"
     render_effects(dry, processed, track.effects, sample_rate=session.sample_rate)
     final = work_dir / "tracks" / f"{track.id}_final.wav"
@@ -100,24 +102,70 @@ def render_track(track: Track, session: StudioSession, project_root: Path, work_
     return final
 
 
-def render_session(session: StudioSession, project_root: Path, output: Path, work_dir: Path | None = None) -> Path:
-    """Render a StudioSession to real waveform audio.
+def _render_bus(bus: Track, inputs: list[Path], session: StudioSession, work_dir: Path) -> Path | None:
+    if bus.mute or not inputs:
+        return None
+    dry = _mix_files(inputs, work_dir / "buses" / f"{bus.id}_dry.wav", session.sample_rate)
+    processed = work_dir / "buses" / f"{bus.id}_processed.wav"
+    render_effects(dry, processed, bus.effects, sample_rate=session.sample_rate)
+    final = work_dir / "buses" / f"{bus.id}_final.wav"
+    apply_track_automation(processed, final, bus, expected_sample_rate=session.sample_rate)
+    return final
 
-    MIDI/lyrics/marker clips are deliberately not rendered here. MIDI can guide neural generation,
-    but Final Master only contains waveform audio created by neural engines, recordings or approved hybrid processing.
+
+def render_session(session: StudioSession, project_root: Path, output: Path, work_dir: Path | None = None) -> Path:
+    """Render a StudioSession to real waveform audio with parallel auxiliary buses.
+
+    MIDI/lyrics/marker clips are never rendered. Sends are post-fader waveform copies into bus effects;
+    a bus cannot create sound without a real-audio source feeding it.
     """
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg is required for Aura's real-audio session mixer")
     work_dir = work_dir or project_root / "work" / "session_mix"
     work_dir.mkdir(parents=True, exist_ok=True)
-    audible = [t for t in session.tracks if not t.mute and t.role != "master"]
-    solos = [t for t in audible if t.solo]
-    if solos:
-        audible = solos
-    rendered = [p for t in audible if (p := render_track(t, session, project_root, work_dir)) is not None]
-    if not rendered:
+
+    sources = [t for t in session.tracks if t.role not in {"master", "bus"} and not t.mute]
+    buses = [t for t in session.tracks if t.role == "bus" and not t.mute]
+    source_solos = [t for t in sources if t.solo]
+    bus_solos = [t for t in buses if t.solo]
+
+    feed_sources = source_solos if source_solos else sources
+    direct_sources = source_solos if source_solos else ([] if bus_solos else sources)
+    active_buses = bus_solos if bus_solos else buses
+
+    rendered_by_id: dict[str, Path] = {}
+    for track in feed_sources:
+        rendered = render_track(track, session, project_root, work_dir)
+        if rendered is not None:
+            rendered_by_id[track.id] = rendered
+
+    master_inputs: list[Path] = [rendered_by_id[t.id] for t in direct_sources if t.id in rendered_by_id]
+    active_bus_ids = {bus.id for bus in active_buses}
+    sends_by_bus: dict[str, list[Path]] = {bus.id: [] for bus in active_buses}
+    for source in feed_sources:
+        rendered = rendered_by_id.get(source.id)
+        if rendered is None:
+            continue
+        for index, send in enumerate(source.sends):
+            if not send.enabled or send.bus_track_id not in active_bus_ids:
+                continue
+            send_file = _gain_file(
+                rendered,
+                work_dir / "sends" / f"{source.id}_{index:03d}_{send.bus_track_id}.wav",
+                send.level_db,
+                session.sample_rate,
+            )
+            sends_by_bus[send.bus_track_id].append(send_file)
+
+    for bus in active_buses:
+        rendered_bus = _render_bus(bus, sends_by_bus.get(bus.id, []), session, work_dir)
+        if rendered_bus is not None:
+            master_inputs.append(rendered_bus)
+
+    if not master_inputs:
         raise RuntimeError("Aura session has no real-audio clips to render. Symbolic/MIDI clips cannot become the final master.")
-    premaster = _mix_files(rendered, work_dir / "premaster.wav", session.sample_rate)
+
+    premaster = _mix_files(master_inputs, work_dir / "premaster.wav", session.sample_rate)
     master_tracks = [t for t in session.tracks if t.role == "master"]
     output.parent.mkdir(parents=True, exist_ok=True)
     if master_tracks and master_tracks[0].effects:

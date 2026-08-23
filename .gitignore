@@ -8,7 +8,19 @@ venv/
 
 # Secrets / local configuration
 .env
+.env.*
+!.env.example
 *.key
+*.pem
+
+# Self-host runtime state — never commit member/account data or portable backups
+data/
+backups/
+*.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.zip.age
 
 # Local AI engines and model weights
 engines/
@@ -20,15 +32,16 @@ checkpoints/
 *.pt
 *.onnx
 
-# Generated project audio
-projects/*/work/
-projects/*/output/
-projects/*/input/uploads/
-projects/*/input/assets/
-projects/*/input/voice_profiles/
-projects/*/.aura_rights/
-projects/*/assets.json
-projects/*/aura_status.json
+# Generated/private project audio and member assets (supports tenant-nested project roots)
+projects/**/work/
+projects/**/output/
+projects/**/input/uploads/
+projects/**/input/assets/
+projects/**/input/voice_profiles/
+projects/**/.aura_rights/
+projects/**/assets.json
+projects/**/aura_status.json
+projects/**/aura_session.json
 
 # Large audio/video
 *.wav

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AutomationPoint(BaseModel):
@@ -14,8 +15,37 @@ class AutomationPoint(BaseModel):
 
 
 class AutomationLane(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     parameter: str
     points: list[AutomationPoint] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_lane(self):
+        parameter = (self.parameter or "").strip().lower()
+        if parameter in {"volume", "volume_db", "fader", "gain_db"}:
+            parameter = "volume_db"
+            bounds = (-60.0, 18.0)
+        elif parameter in {"pan", "balance"}:
+            parameter = "pan"
+            bounds = (-1.0, 1.0)
+        else:
+            bounds = None
+
+        by_time: dict[float, AutomationPoint] = {}
+        for point in self.points:
+            time = float(point.time)
+            value = float(point.value)
+            if not math.isfinite(time) or not math.isfinite(value):
+                continue
+            time = max(0.0, time)
+            if bounds:
+                value = max(bounds[0], min(bounds[1], value))
+            by_time[time] = AutomationPoint(time=time, value=value)
+
+        object.__setattr__(self, "parameter", parameter)
+        object.__setattr__(self, "points", [by_time[key] for key in sorted(by_time)])
+        return self
 
 
 class Effect(BaseModel):
@@ -27,6 +57,14 @@ class Effect(BaseModel):
     ]
     enabled: bool = True
     parameters: dict[str, float | str | bool] = Field(default_factory=dict)
+
+
+class Send(BaseModel):
+    """Parallel post-fader send from a source track to an auxiliary bus."""
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    bus_track_id: str
+    level_db: float = Field(default=-18.0, ge=-60.0, le=12.0)
+    enabled: bool = True
 
 
 class Clip(BaseModel):
@@ -49,17 +87,19 @@ class Track(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     name: str
     role: Literal[
-        "master", "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard",
+        "master", "bus", "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard",
         "strings", "synth", "percussion", "brass", "woodwinds", "fx", "midi", "other"
     ] = "other"
     clips: list[Clip] = Field(default_factory=list)
     effects: list[Effect] = Field(default_factory=list)
     automation: list[AutomationLane] = Field(default_factory=list)
+    sends: list[Send] = Field(default_factory=list)
     volume_db: float = 0.0
     pan: float = Field(default=0.0, ge=-1.0, le=1.0)
     mute: bool = False
     solo: bool = False
     color: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 class Marker(BaseModel):

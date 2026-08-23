@@ -14,7 +14,11 @@ class Section(BaseModel):
 
 
 class RendererConfig(BaseModel):
-    preferred: list[str] = Field(default_factory=lambda: ["acestep_api", "local_acestep", "muser", "deapi", "eleven_music", "mureka", "acestep_space", "yue"])
+    # Independence-first: self-hosted engines are preferred. Public Spaces are opt-in rather than
+    # an automatic dependency, and authenticated hosted providers are fallbacks only when configured.
+    preferred: list[str] = Field(default_factory=lambda: [
+        "acestep_api", "local_acestep", "muser", "yue", "deapi", "eleven_music", "mureka"
+    ])
     model: str = "acestep-v15-xl-turbo"
     cover_strength: float = Field(default=0.78, ge=0.0, le=1.0)
     duration_limit_seconds: int = 300

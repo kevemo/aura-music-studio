@@ -1,0 +1,27 @@
+{
+    # ESP Live Sound Studio owns the application and data. Caddy is used only as the local
+    # reverse proxy/TLS terminator. With a real hostname it obtains and renews HTTPS
+    # certificates automatically; direct-IP fallback can use http://:80.
+    admin off
+}
+
+{$LSS_PUBLIC_SITE_ADDRESS:http://:80} {
+    encode zstd gzip
+
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    request_body {
+        max_size 300MB
+    }
+
+    reverse_proxy live-sound-studio:8000 {
+        health_uri /health
+        health_interval 30s
+        health_timeout 5s
+    }
+}
