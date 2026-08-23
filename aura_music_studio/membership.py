@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 
 from .accounts import AccountStore
 from .plans import Plan, get_plan, require_feature
+from .subscriptions import SubscriptionLedger
 
 
 @dataclass(frozen=True)
 class MemberContext:
     user: dict
     plan: Plan
+    subscription: dict | None = None
 
     @property
     def user_id(self) -> str:
@@ -27,14 +28,25 @@ class MemberContext:
 class MembershipService:
     def __init__(self, store: AccountStore | None = None):
         self.store = store or AccountStore()
+        self.subscriptions = SubscriptionLedger(self.store)
 
     def from_session(self, session_token: str | None, *, require_active: bool = True) -> MemberContext:
         user = self.store.resolve_session(session_token)
         if not user:
             raise PermissionError("Sign in required")
+
+        # Paid tiers must have a current verified billing period. This turns the existing
+        # manual PayPal verification into a true monthly entitlement instead of permanent access.
+        user = self.subscriptions.enforce(user)
         if require_active and user.get("status") != "active":
             raise PermissionError(f"Membership is not active (status: {user.get('status')})")
-        return MemberContext(user=user, plan=get_plan(user.get("plan_id") or "free"))
+
+        subscription = self.subscriptions.get(user["id"]) if user.get("plan_id") != "free" else None
+        return MemberContext(
+            user=user,
+            plan=get_plan(user.get("plan_id") or "free"),
+            subscription=subscription,
+        )
 
     def require(self, session_token: str | None, feature: str) -> MemberContext:
         member = self.from_session(session_token, require_active=True)
@@ -65,4 +77,5 @@ class MembershipService:
             "status": member.user.get("status"),
             "plan": member.plan.public_dict(),
             "billing_status": member.user.get("billing_status"),
+            "billing_period_end": (member.subscription or {}).get("period_end"),
         }
