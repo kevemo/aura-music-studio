@@ -8,6 +8,7 @@ from aura_music_studio.api import app
 from aura_music_studio.aura_avatar import router as aura_avatar_router
 from aura_music_studio.aura_avatar_bootstrap import router as aura_avatar_bootstrap_router
 from aura_music_studio.aura_avatar_bridge import router as aura_avatar_bridge_router
+from aura_music_studio import aura_avatar_theme_tools as _aura_avatar_theme_tools  # installs niche energy behaviour
 from aura_music_studio import aura_avatar_ai_tools as _aura_avatar_ai_tools  # installs safe embodied tool hooks
 from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
