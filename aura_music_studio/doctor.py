@@ -111,21 +111,38 @@ def _queue_status() -> dict:
 
 
 def _public_address_status() -> dict:
+    """Return a member-safe self-host summary.
+
+    Full LAN/router/public address details are intentionally reserved for the authenticated ESP owner
+    dashboard. `/system/doctor` is visible to ordinary active members and must not disclose host-network
+    topology.
+    """
     try:
         from .public_address import PublicAddressManager
         manager = PublicAddressManager()
-        status = manager.read_status()
+        raw = manager.read_status()
+        safe_status = {
+            "checked_at": raw.get("checked_at"),
+            "provider": raw.get("provider"),
+            "hostname": raw.get("hostname"),
+            "recommended_url": raw.get("recommended_url"),
+            "ddns_updated": raw.get("ddns_updated"),
+            "likely_cgnat": raw.get("likely_cgnat"),
+            "caddy_https_ready": raw.get("caddy_https_ready"),
+            "warnings": raw.get("warnings") or [],
+            "configured": raw.get("configured", True if raw.get("checked_at") else False),
+        }
         return {
             "enabled": True,
             "mode": (os.getenv("LSS_DDNS_PROVIDER") or "none").strip().lower(),
             "configured_hostname": manager.hostname,
-            "caddy_site_address": os.getenv("LSS_PUBLIC_SITE_ADDRESS") or "http://:80",
             "upnp_module_available": _module("miniupnpc"),
-            "upnp_discovery_enabled": (os.getenv("LSS_UPNP_DISCOVERY", "true").lower() == "true"),
+            "upnp_cli_available": _binary("upnpc"),
             "automatic_port_forwarding_enabled": (os.getenv("LSS_UPNP_PORT_FORWARD", "false").lower() == "true"),
-            "status": status,
+            "status": safe_status,
             "cloud_host_required": False,
             "cloudflare_required": False,
+            "internal_network_addresses_exposed": False,
             "ddns_secret_exposed": False,
         }
     except Exception as exc:
@@ -256,6 +273,7 @@ def system_report() -> dict:
             "ffmpeg": _binary("ffmpeg"),
             "ffprobe": _binary("ffprobe"),
             "whisper_cli": _binary("whisper-cli"),
+            "upnpc": _binary("upnpc"),
             "fluidsynth_control_preview_only": _binary("fluidsynth"),
             "musescore": any(_binary(x) for x in ("musescore4", "musescore", "mscore")),
         },
@@ -278,6 +296,7 @@ def system_report() -> dict:
             "per_member_projects": True,
             "server_side_entitlements": True,
             "web_ssrf_protection": True,
+            "host_network_details_owner_only": True,
         },
         "real_audio_renderers": {
             "native_self_hosted_primary": ace_api,
