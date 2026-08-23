@@ -61,6 +61,7 @@ REGION_REPAINT = "region_repaint"
 BASIC_STEM_SPLITTER = "basic_stem_splitter"
 STEM_SPLITTER = "stem_splitter"
 STEM_DOWNLOAD = "stem_download"
+BASIC_TIMELINE = "basic_timeline"
 MULTITRACK_DAW = "multitrack_daw"
 TAKE_LANES = "take_lanes"
 AUTOMATION = "automation"
@@ -142,6 +143,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     BACKING_TRACK,
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
+    BASIC_TIMELINE,
     VIDEO_GENERATION,
     IMAGE_GENERATION,
     POSTER_GENERATION,
@@ -214,7 +216,7 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Full music, video and image/poster creation unlock on Base."
+            "starter FX, basic Aura Tune and basic mastering. Full music, video, image/poster and timeline creation unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -227,8 +229,8 @@ PLANS: dict[str, Plan] = {
         description=(
             "Core Live Sound Studio creation: one confirmed full track every day with unlimited regenerations until confirmation, "
             "upload-to-song production, MP3/WAV, standard instruments and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing tracks and harmony tools; standard AI video creation; and genuine AI image/poster generation with core "
-            "visual editing and effects."
+            "cleanup, backing tracks, harmony tools and basic waveform timeline editing; standard AI video creation; and genuine AI "
+            "image/poster generation with core visual editing and effects."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -240,11 +242,11 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("9.99"),
         description=(
             "The complete professional Live Sound Studio. Includes unlimited full-track creation plus advanced controls across music, "
-            "audio, video, image and poster workflows: expanded instruments, multitrack production, full FX, advanced Aura Tune, detailed "
-            "stems, automation, deep revisions, advanced mastering, Sample Lab, Style DNA, voice tools, Aura Video Director, video-to-video, "
-            "extended/high-quality video rendering, advanced image generation/editing, transparent outputs, branded poster composition, "
-            "and the Visual FX Studio with a layered timeline, keyframes, masks, blend modes, motion tracking, chroma key, AI background "
-            "and object editing, professional color grading, speed curves, advanced captions/exports and priority processing."
+            "audio, video, image and poster workflows: expanded instruments, visual multitrack DAW, take lanes, routing and automation, "
+            "full FX, advanced Aura Tune, detailed stems, deep revisions, advanced mastering, Sample Lab, Style DNA, voice tools, Aura "
+            "Video Director, video-to-video, extended/high-quality video rendering, advanced image generation/editing, transparent outputs, "
+            "branded poster composition, and the Visual FX Studio with a layered timeline, keyframes, masks, blend modes, motion tracking, "
+            "chroma key, AI background/object editing, professional color grading, speed curves, advanced captions/exports and priority processing."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
