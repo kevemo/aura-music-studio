@@ -27,6 +27,7 @@ from .plans import (
     STEM_SPLITTER,
     STYLE_DNA,
     UPLOAD_AUDIO,
+    VIDEO_GENERATION,
     VIDEO_SYNC,
     WAV_DOWNLOAD,
 )
@@ -53,6 +54,8 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
+    if path == "/api/video/generate" and method == "POST":
+        return VIDEO_GENERATION
     if path.startswith("/speech/"):
         return AURA_SPEECH
     if path.startswith("/web/"):
