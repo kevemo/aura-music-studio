@@ -15,6 +15,7 @@ from .plans import (
     AURA_SPEECH,
     BASIC_CREATE,
     BASIC_MASTERING,
+    BASIC_TIMELINE,
     FULL_TRACK,
     HARMONY_ARCHITECT,
     MP3_DOWNLOAD,
@@ -66,6 +67,8 @@ def _required_feature(path: str, method: str) -> str | None:
         return PRODUCER_CHAT
     if path.endswith("/produce") or path.endswith("/render-jobs"):
         return FULL_TRACK
+    if "/daw/" in path or path.endswith("/daw"):
+        return BASIC_TIMELINE
     if path.endswith("/region-edit"):
         return REGION_REPAINT
     if path.endswith("/add-generated-track"):
