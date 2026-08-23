@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import soundfile as sf
 
-from .session import AutomationLane, AutomationPoint, Clip, Effect, Send, StudioSession, Track
+from .session import AutomationLane, Clip, Effect, Send, StudioSession, Track
 
 
 SESSION_FILE = "aura_session.json"
@@ -49,7 +49,7 @@ def session_duration(session: StudioSession) -> float:
 
 
 def public_session(session: StudioSession) -> dict:
-    """Browser-safe DAW state. Source paths/private metadata never leave the server."""
+    """Browser-safe DAW state. Source paths and private metadata never leave the server."""
     tracks = []
     for track in session.tracks:
         clips = []
@@ -68,7 +68,6 @@ def public_session(session: StudioSession) -> dict:
                 "take_lane": clip.take_lane,
                 "committed": bool(clip.metadata.get("committed", False)),
                 "generated": bool(clip.metadata.get("generated", False)),
-                "frozen_render": bool(clip.metadata.get("frozen_render", False)),
             })
         tracks.append({
             "id": track.id,
@@ -84,7 +83,6 @@ def public_session(session: StudioSession) -> dict:
             "effect_count": len(track.effects),
             "sends": [send.model_dump() for send in track.sends],
             "frozen": bool(track.metadata.get("frozen", False)),
-            "bus_preset": track.metadata.get("bus_preset") if track.role == "bus" else None,
         })
     return {
         "id": session.id,
@@ -100,7 +98,6 @@ def public_session(session: StudioSession) -> dict:
         "markers": [marker.model_dump() for marker in session.markers],
         "tracks": tracks,
         "source_paths_exposed": False,
-        "private_track_metadata_exposed": False,
     }
 
 
@@ -175,37 +172,6 @@ def set_clip_fades(session: StudioSession, clip_id: str, fade_in: float, fade_ou
     clip.fade_out = max(0.0, min(float(fade_out), maximum))
     session.touch()
     return clip
-
-
-def crossfade_clips(session: StudioSession, left_clip_id: str, right_clip_id: str, duration: float) -> tuple[Clip, Clip]:
-    """Create a non-destructive equal-time overlap using clip fades.
-
-    The source files are untouched. The right clip is positioned to overlap the tail of the left clip,
-    and both clip fade values are set to the requested crossfade duration.
-    """
-    if left_clip_id == right_clip_id:
-        raise ValueError("Crossfade requires two different clips")
-    left_track, left = find_clip(session, left_clip_id)
-    right_track, right = find_clip(session, right_clip_id)
-    if left_track.id != right_track.id:
-        raise ValueError("Crossfade clips must be on the same track")
-    if left.kind != "audio" or right.kind != "audio":
-        raise ValueError("Crossfade requires real audio clips")
-    if left.take_lane != right.take_lane:
-        raise ValueError("Crossfade clips must be on the same take lane")
-    requested = float(duration)
-    maximum = min(left.duration / 2.0, right.duration / 2.0)
-    if requested <= 0.001 or maximum <= 0.001:
-        raise ValueError("Crossfade duration is too short")
-    if requested > maximum:
-        raise ValueError(f"Crossfade cannot exceed {maximum:.3f} seconds for these clips")
-    if right.start < left.start:
-        raise ValueError("The right crossfade clip must start at or after the left clip")
-    right.start = max(0.0, left.start + left.duration - requested)
-    left.fade_out = requested
-    right.fade_in = requested
-    session.touch()
-    return left, right
 
 
 def trim_clip(
@@ -293,10 +259,41 @@ def set_track_mix(
     return track
 
 
-def create_bus(session: StudioSession, name: str, preset: str = "clean") -> Track:
-    preset = (preset or "clean").strip().lower()
-    if preset not in {"clean", "reverb", "delay"}:
-        raise ValueError("Unknown bus preset")
+def crossfade_clips(session: StudioSession, left_clip_id: str, right_clip_id: str, duration: float) -> tuple[Clip, Clip]:
+    left_track, left = find_clip(session, left_clip_id)
+    right_track, right = find_clip(session, right_clip_id)
+    if left_track.id != right_track.id:
+        raise ValueError("Crossfade clips must be on the same track")
+    if left.kind != "audio" or right.kind != "audio":
+        raise ValueError("Crossfade requires real audio clips")
+    if left.take_lane != right.take_lane:
+        raise ValueError("Crossfade clips must be on the same take lane")
+    if right.start < left.start:
+        left, right = right, left
+    requested = max(0.001, min(30.0, float(duration)))
+    maximum = min(left.duration, right.duration) / 2.0
+    fade = min(requested, maximum)
+    if fade <= 0.0:
+        raise ValueError("Clips are too short to crossfade")
+    desired_right_start = left.start + left.duration - fade
+    shift = desired_right_start - right.start
+    if shift > 0:
+        right.start += shift
+    overlap = max(0.0, left.start + left.duration - right.start)
+    if overlap <= 0.0:
+        right.start = desired_right_start
+        overlap = fade
+    overlap = min(overlap, fade, left.duration / 2.0, right.duration / 2.0)
+    left.fade_out = overlap
+    right.fade_in = overlap
+    session.touch()
+    return left, right
+
+
+def create_bus(session: StudioSession, *, name: str = "", preset: str = "reverb") -> Track:
+    preset = (preset or "reverb").strip().lower()
+    if preset not in {"reverb", "delay", "clean"}:
+        raise ValueError("Unsupported bus preset")
     bus = session.add_track((name or f"Aura {preset.title()} Bus")[:100], "bus")
     bus.metadata["bus_preset"] = preset
     if preset == "reverb":
@@ -463,16 +460,20 @@ def set_automation(
     parameter: str,
     points: list[dict],
 ) -> AutomationLane:
+    """Write one canonical validated automation lane.
+
+    AutomationLane owns normalization, clamping, non-finite filtering and duplicate-time collapse.
+    Canonicalizing before lookup prevents aliases such as ``volume`` and ``volume_db`` from creating
+    separate lanes that would fight each other during render.
+    """
     track = session.find_track(track_id)
-    clean = [
-        AutomationPoint(time=max(0.0, float(item["time"])), value=float(item["value"]))
-        for item in points
-    ]
-    clean.sort(key=lambda item: item.time)
-    lane = next((item for item in track.automation if item.parameter == parameter), None)
+    candidate = AutomationLane(parameter=parameter, points=points)
+    lane = next((item for item in track.automation if item.parameter == candidate.parameter), None)
     if lane is None:
-        lane = AutomationLane(parameter=parameter)
+        lane = candidate
         track.automation.append(lane)
-    lane.points = clean
+    else:
+        lane.parameter = candidate.parameter
+        lane.points = candidate.points
     session.touch()
     return lane
