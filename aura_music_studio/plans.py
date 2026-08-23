@@ -64,6 +64,8 @@ STEM_DOWNLOAD = "stem_download"
 MULTITRACK_DAW = "multitrack_daw"
 TAKE_LANES = "take_lanes"
 AUTOMATION = "automation"
+REVISION_HISTORY = "revision_history"
+DEEP_REVISION_HISTORY = "deep_revision_history"
 SAMPLE_LAB = "sample_lab"
 STYLE_DNA = "style_dna"
 HARMONY_ARCHITECT = "harmony_architect"
@@ -104,6 +106,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     UPLOAD_SCORE,
     BACKING_TRACK,
     HARMONY_ARCHITECT,
+    REVISION_HISTORY,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -124,6 +127,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     MULTITRACK_DAW,
     TAKE_LANES,
     AUTOMATION,
+    DEEP_REVISION_HISTORY,
     SAMPLE_LAB,
     STYLE_DNA,
     APPROVED_VOICE_DUPLICATION,
@@ -156,7 +160,7 @@ PLANS: dict[str, Plan] = {
         description=(
             "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
             "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation and harmony tools."
+            "cleanup, backing-track creation, harmony tools and project revision history."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -169,9 +173,9 @@ PLANS: dict[str, Plan] = {
         description=(
             "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
             "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes and automation, advanced/reference/album mastering, "
-            "Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, "
-            "immersive spatial audio, video/music sync and all enabled export formats."
+            "Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes, automation and deep revision history, "
+            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
+            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
