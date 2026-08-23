@@ -27,6 +27,7 @@ from aura_music_studio.production_suite_api import router as production_suite_ro
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.renderer_api import router as renderer_router
+from aura_music_studio.renderer_middleware import RendererAdmissionMiddleware
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
@@ -34,6 +35,9 @@ from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
+
+# This guard executes before Build Around route code can mutate quota/queue state.
+app.add_middleware(RendererAdmissionMiddleware)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
