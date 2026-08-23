@@ -52,6 +52,14 @@ def _resolve_output(project: Path, relative_path: str) -> Path:
     return target
 
 
+def _allowed_output(project: Path, relative_path: str, request: Request) -> tuple[Path, str]:
+    member = _member(request)
+    needed = _required_download_feature(relative_path)
+    if not member.plan.has(needed):
+        raise HTTPException(403, "This output requires a higher Live Sound Studio membership tier")
+    return _resolve_output(project, relative_path), needed
+
+
 @router.get("/projects/{project_name}/outputs")
 def list_outputs(project_name: str, request: Request):
     project = _project(project_name)
@@ -64,17 +72,22 @@ def list_outputs(project_name: str, request: Request):
         rel = path.relative_to(output).as_posix()
         needed = _required_download_feature(rel)
         allowed = member.plan.has(needed)
+        audio = path.suffix.lower() in AUDIO_EXTS
+        encoded_project = quote(project_name, safe="")
+        encoded_rel = quote(rel, safe="/")
         records.append(
             {
                 "name": path.name,
                 "path": rel,
                 "bytes": path.stat().st_size,
                 "content_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-                "audio": path.suffix.lower() in AUDIO_EXTS,
+                "audio": audio,
                 "download_allowed": allowed,
                 "download_url": (
-                    f"/projects/{quote(project_name, safe='')}/outputs/file/{quote(rel, safe='/')}"
-                    if allowed else None
+                    f"/projects/{encoded_project}/outputs/file/{encoded_rel}" if allowed else None
+                ),
+                "stream_url": (
+                    f"/projects/{encoded_project}/outputs/stream/{encoded_rel}" if allowed and audio else None
                 ),
             }
         )
@@ -84,13 +97,22 @@ def list_outputs(project_name: str, request: Request):
 @router.get("/projects/{project_name}/outputs/file/{relative_path:path}")
 def download_output(project_name: str, relative_path: str, request: Request):
     project = _project(project_name)
-    member = _member(request)
-    needed = _required_download_feature(relative_path)
-    if not member.plan.has(needed):
-        raise HTTPException(403, "This output requires a higher Live Sound Studio membership tier")
-    target = _resolve_output(project, relative_path)
+    target, _ = _allowed_output(project, relative_path, request)
     return FileResponse(
         target,
         media_type=mimetypes.guess_type(target.name)[0] or "application/octet-stream",
         filename=target.name,
+    )
+
+
+@router.get("/projects/{project_name}/outputs/stream/{relative_path:path}")
+def stream_output(project_name: str, relative_path: str, request: Request):
+    project = _project(project_name)
+    target, _ = _allowed_output(project, relative_path, request)
+    if target.suffix.lower() not in AUDIO_EXTS:
+        raise HTTPException(400, "Only audio outputs can be streamed inline")
+    return FileResponse(
+        target,
+        media_type=mimetypes.guess_type(target.name)[0] or "audio/wav",
+        headers={"Content-Disposition": "inline"},
     )
