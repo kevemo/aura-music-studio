@@ -15,6 +15,7 @@ from .engine_manager import EngineManager
 from .jobs import AuraJobWorker
 from .pipeline import AuraPipeline
 from .producer import llm_plan
+from .public_address import PublicAddressManager
 
 app = typer.Typer(help=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Powered by {AI_PRODUCER_NAME}.")
 
@@ -101,6 +102,23 @@ def engines(
 def doctor():
     """Check the complete Studio: engines, queue, web, speech, security and provenance."""
     print(json.dumps(system_report(), indent=2, default=str))
+
+
+@app.command("public-address")
+def public_address_command(
+    refresh: bool = typer.Option(True, "--refresh/--status-only", help="Detect address and update configured DDNS before printing status"),
+    update_ddns: bool = typer.Option(True, "--update-ddns/--no-update-ddns", help="Allow the configured free-DDNS record to be refreshed"),
+    serve: bool = typer.Option(False, "--serve", help="Run Aura's continuous DDNS/public-address manager"),
+):
+    """Inspect or continuously maintain the self-hosted Studio's public address."""
+    manager = PublicAddressManager()
+    if serve:
+        print("[bold green]Aura Public Address Manager online[/bold green]")
+        manager.serve_forever()
+        return
+    value = manager.check(update_ddns=update_ddns) if refresh else manager.read_status()
+    payload = value.__dict__ if hasattr(value, "__dict__") else value
+    print(json.dumps(payload, indent=2, default=str))
 
 
 @app.command("render-worker")
