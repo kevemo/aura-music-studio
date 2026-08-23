@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -71,7 +72,7 @@ def _run_job(job_id: str, request: GenerateRequest) -> None:
         if not INFERENCE.is_file():
             raise FileNotFoundError(f"YuE inference script missing: {INFERENCE}")
         command = [
-            "python", str(INFERENCE),
+            sys.executable, str(INFERENCE),
             "--cuda_idx", os.getenv("YUE_CUDA_IDX", "0"),
             "--stage1_model", request.stage1_model,
             "--stage2_model", request.stage2_model,
