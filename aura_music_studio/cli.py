@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from rich import print
 from .autopilot import AuraAutopilot
 from .backup import StudioBackupManager
 from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
+from .compute_node_agent import ESPComputeNodeAgent, collect_hardware, collect_software, enroll_node
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
@@ -20,6 +22,17 @@ from .public_address import PublicAddressManager
 from .self_host_setup import initialize_self_host
 
 app = typer.Typer(help=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Powered by {AI_PRODUCER_NAME}.")
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ[key.strip()] = value.strip()
 
 
 @app.command()
@@ -197,6 +210,53 @@ def restore_backup(
         preserve_existing=preserve_existing,
     )
     print(json.dumps(result, indent=2, default=str))
+
+
+@app.command("node-enroll")
+def node_enroll(
+    coordinator: str = typer.Option(..., "--coordinator", help="HTTPS URL of the ESP Live Sound Studio coordinator"),
+    name: str | None = typer.Option(None, "--name", help="Friendly ESP node name"),
+    capabilities: str = typer.Option("music_generation,engineering", "--capabilities"),
+    env_path: Path = typer.Option(Path(".env.node"), "--env", help="Permission-restricted node credential file"),
+    token: str | None = typer.Option(None, "--token", help="Short-lived one-time enrollment token; omit to be prompted securely"),
+):
+    """Enroll this machine as a revocable outbound ESP compute node."""
+    enrollment_token = token or typer.prompt("ESP one-time enrollment token", hide_input=True)
+    result = enroll_node(
+        coordinator,
+        enrollment_token,
+        name=name,
+        capabilities=[x.strip() for x in capabilities.split(",") if x.strip()],
+        env_path=env_path,
+    )
+    print(json.dumps(result, indent=2, default=str))
+    print(f"[bold green]Node enrolled. Start it with: aura node-worker --env {env_path}[/bold green]")
+
+
+@app.command("node-doctor")
+def node_doctor():
+    """Inspect the current machine's hardware/software capabilities before enrolling it."""
+    print(json.dumps({"hardware": collect_hardware(), "software": collect_software()}, indent=2, default=str))
+
+
+@app.command("node-run-once")
+def node_run_once(
+    env_path: Path = typer.Option(Path(".env.node"), "--env", exists=True, dir_okay=False),
+):
+    """Heartbeat, claim and execute at most one coordinator job for node testing."""
+    _load_env_file(env_path)
+    result = ESPComputeNodeAgent().run_once()
+    print(json.dumps(result or {"job": None}, indent=2, default=str))
+
+
+@app.command("node-worker")
+def node_worker(
+    env_path: Path = typer.Option(Path(".env.node"), "--env", exists=True, dir_okay=False),
+):
+    """Run this ESP-controlled machine as an outbound Aura compute worker."""
+    _load_env_file(env_path)
+    print("[bold green]ESP Aura compute node online[/bold green]")
+    ESPComputeNodeAgent().serve_forever()
 
 
 @app.command("render-worker")
