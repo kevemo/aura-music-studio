@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -25,6 +26,20 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _command_ready(name: str) -> bool:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return False
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    executable = parts[0]
+    return bool(shutil.which(executable) or Path(executable).is_file())
 
 
 def probe_real_audio(path: str | Path, *, minimum_seconds: float = 1.0) -> AudioProbe:
@@ -97,9 +112,9 @@ def _ace_step_status() -> dict[str, Any]:
                         if isinstance(item, str):
                             models.append(item)
                         elif isinstance(item, dict):
-                            name = item.get("id") or item.get("name") or item.get("model")
-                            if name:
-                                models.append(str(name))
+                            model_name = item.get("id") or item.get("name") or item.get("model")
+                            if model_name:
+                                models.append(str(model_name))
             except Exception:
                 models = []
         return {
@@ -122,17 +137,14 @@ def _ace_step_status() -> dict[str, Any]:
 
 def _yue_status() -> dict[str, Any]:
     url = (os.getenv("AURA_YUE_API_URL") or "").strip().rstrip("/")
-    command_configured = bool((os.getenv("AURA_YUE_CMD") or "").strip())
+    command_configured = _command_ready("AURA_YUE_CMD")
     if not url:
         return {
             "id": "yue", "configured": command_configured, "reachable": False, "primary": False,
             "role": "lyrics-first optional full-song renderer", "internal_url_exposed": False,
         }
-    headers = {}
-    if os.getenv("YUE_API_KEY"):
-        headers["Authorization"] = f"Bearer {os.environ['YUE_API_KEY']}"
     try:
-        response = requests.get(f"{url}/health", headers=headers, timeout=5)
+        response = requests.get(f"{url}/health", timeout=5)
         response.raise_for_status()
         payload = response.json() if response.content else {}
         return {
@@ -162,11 +174,11 @@ def renderer_runtime_status() -> dict[str, Any]:
         "mureka": bool(os.getenv("MUREKA_API_KEY")),
     }
     local_commands = {
-        "local_acestep": bool(os.getenv("AURA_LOCAL_RENDER_CMD")),
-        "muser": bool(os.getenv("AURA_MUSER_CMD")),
-        "diffrhythm": bool(os.getenv("AURA_DIFFRHYTHM_CMD")),
-        "audiocraft": bool(os.getenv("AURA_AUDIOCRAFT_CMD")),
-        "stable_audio": bool(os.getenv("AURA_STABLE_AUDIO_CMD")),
+        "local_acestep": _command_ready("AURA_LOCAL_RENDER_CMD"),
+        "muser": _command_ready("AURA_MUSER_CMD"),
+        "diffrhythm": _command_ready("AURA_DIFFRHYTHM_CMD"),
+        "audiocraft": _command_ready("AURA_AUDIOCRAFT_CMD"),
+        "stable_audio": _command_ready("AURA_STABLE_AUDIO_CMD"),
     }
     self_hosted_ready = bool(ace.get("reachable") or yue.get("reachable") or any(local_commands.values()))
     authenticated_hosted_ready = any(hosted.values())
@@ -182,7 +194,9 @@ def renderer_runtime_status() -> dict[str, Any]:
         "other_local_commands": local_commands,
         "optional_authenticated_hosted": hosted,
         "public_space_fallback_enabled": bool((os.getenv("AURA_ACESTEP_SPACES") or "").strip()),
-        "fail_closed_without_real_renderer": _bool_env("AURA_REQUIRE_LIVE_RENDERER", True),
+        # Base/development mode may inspect or edit projects without a GPU. The live GPU overlays
+        # force this true so queued Final Master jobs fail immediately if the renderer disappears.
+        "fail_closed_without_real_renderer": _bool_env("AURA_REQUIRE_LIVE_RENDERER", False),
     }
 
 
