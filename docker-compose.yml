@@ -8,6 +8,7 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
       LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_WEB_ENABLED: "true"
       AURA_SEARXNG_URL: http://searxng:8080
@@ -18,6 +19,7 @@ services:
     volumes:
       - live_sound_data:/app/data
       - live_sound_projects:/app/projects
+      - live_sound_backups:/app/backups
     depends_on:
       searxng:
         condition: service_started
@@ -38,6 +40,7 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
       LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_JOB_POLL_SECONDS: "2"
       AURA_WEB_ENABLED: "true"
@@ -45,6 +48,7 @@ services:
     volumes:
       - live_sound_data:/app/data
       - live_sound_projects:/app/projects
+      - live_sound_backups:/app/backups
     depends_on:
       searxng:
         condition: service_started
@@ -99,5 +103,6 @@ services:
 volumes:
   live_sound_data:
   live_sound_projects:
+  live_sound_backups:
   caddy_data:
   caddy_config:
