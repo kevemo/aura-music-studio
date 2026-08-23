@@ -36,6 +36,7 @@ from aura_music_studio.music_video_api import router as music_video_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
+from aura_music_studio.owner_identity import OwnerIdentityMiddleware, router as owner_identity_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -54,8 +55,11 @@ from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular creative routers share the core app's authentication, plan enforcement and tenant isolation.
 # ESP command-center/niche routes retain separate ESP role gates and are not ordinary customer features.
+# OwnerIdentityMiddleware never grants owner access: it adds signed Kev/Mary attribution inside the
+# independently authenticated owner session and records successful owner writes in the audit chain.
 app.add_middleware(EspNicheDashboardMiddleware)
 app.add_middleware(EspCommandCenterViewMiddleware)
+app.add_middleware(OwnerIdentityMiddleware)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
@@ -87,6 +91,7 @@ app.include_router(esp_niche_router)
 app.include_router(esp_view_mode_router)
 app.include_router(recording_router)
 app.include_router(output_router)
+app.include_router(owner_identity_router)
 app.include_router(owner_backup_router)
 app.include_router(owner_compute_router)
 app.include_router(privacy_router)
