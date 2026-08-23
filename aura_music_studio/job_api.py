@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .accounts import AccountStore
 from .jobs import StudioJobQueue
 from .plans import PRIORITY_QUEUE
+from .renderer_runtime import RendererUnavailable, require_render_capacity
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Aura Production Jobs"])
@@ -24,7 +25,6 @@ def _member(request: Request):
 
 def _public(job: dict) -> dict:
     value = dict(job)
-    # Payloads may contain private lyrics, prompts, voice settings or production instructions.
     value.pop("payload_json", None)
     raw = value.pop("result_json", None)
     if raw:
@@ -57,11 +57,19 @@ def submit_render(project_name: str, request: Request):
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Project not found") from exc
 
-    # Every full-song project gets a slot. Base enforces one confirmation/day; Pro's allowance is unlimited.
+    # Renderer admission happens before the Base daily slot is touched. An offline GPU must never
+    # consume a member's daily confirmed-song allowance.
+    try:
+        capacity = require_render_capacity(task_type="text2music")
+    except RendererUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
     start_full_song_slot(member, project_name)
     priority = 100 if member.plan.has(PRIORITY_QUEUE) else 20
     job = queue.submit(member.user_id, project_name, job_type="produce", priority=priority)
-    return _public(job)
+    public = _public(job)
+    public["renderer_admission"] = capacity
+    return public
 
 
 @router.get("/jobs")
