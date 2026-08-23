@@ -110,6 +110,64 @@ def _queue_status() -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
+def _production_suite_status(modules: dict, ace_api: dict) -> dict:
+    try:
+        from .fx_presets import PRESETS as FX_PRESETS
+        from .instrument_catalog import CATALOG
+        from .mastering import PRESETS as MASTER_PRESETS
+        from .separation import VALID_MODES
+
+        instrument_types = sum(len(items) for items in CATALOG.values())
+        return {
+            "enabled": True,
+            "workspace": "/production-suite",
+            "build_around_upload": {
+                "enabled": True,
+                "engine": "ACE-Step 1.5 Complete",
+                "renderer_reachable": bool(ace_api.get("reachable")),
+                "supports_vocal_anchor": True,
+                "supports_instrument_anchor": True,
+                "can_add_lead_vocal_to_instrument": True,
+            },
+            "instrument_selector": {
+                "families": len(CATALOG),
+                "performance_types": instrument_types,
+                "advanced_tier_switches": True,
+            },
+            "fx": {
+                "preset_count": len(FX_PRESETS),
+                "stock_waveform_dsp_ready": _binary("ffmpeg"),
+                "plugin_host_configured": bool(os.getenv("AURA_PLUGIN_HOST_CMD")),
+                "pedalboard_python_available": modules.get("pedalboard", False),
+            },
+            "aura_tune": {
+                "built_in_offline_fallback": True,
+                "professional_backend_configured": bool(os.getenv("AURA_AUTOTUNE_CMD")),
+                "modes": ["natural", "classic", "hard", "robot", "custom"],
+                "automatic_key_detection": True,
+            },
+            "automix": {
+                "enabled": True,
+                "editable_non_destructive": True,
+                "genre_aware": True,
+            },
+            "mastering": {
+                "preset_count": len(MASTER_PRESETS),
+                "reference_mastering": modules.get("matchering", False),
+                "album_consistency_mastering": True,
+                "manual_eq_width_loudness_controls": True,
+            },
+            "splitter": {
+                "modes": sorted(VALID_MODES),
+                "audio_separator_ready": modules.get("audio_separator", False),
+                "demucs_ready": modules.get("demucs", False),
+                "custom_separator_configured": bool(os.getenv("AURA_SEPARATOR_CMD")),
+            },
+        }
+    except Exception as exc:
+        return {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def system_report() -> dict:
     gpu = _gpu()
     ace_api = _acestep_api_status()
@@ -146,6 +204,7 @@ def system_report() -> dict:
         "pedalboard": _module("pedalboard"),
         "audio_separator": _binary("audio-separator") or _module("audio_separator"),
     }
+    production_suite = _production_suite_status(modules, ace_api)
     public_spaces = [
         x.strip()
         for x in os.getenv(
@@ -185,6 +244,7 @@ def system_report() -> dict:
         "aura_internet": web,
         "spoken_aura": speech,
         "production_queue": queue,
+        "production_suite": production_suite,
         "provenance": {
             "enabled": True,
             "hmac_signing_enabled": bool(os.getenv("LSS_PROVENANCE_SECRET")),
