@@ -110,6 +110,28 @@ def _queue_status() -> dict:
         return {"error": f"{type(exc).__name__}: {exc}"}
 
 
+def _public_address_status() -> dict:
+    try:
+        from .public_address import PublicAddressManager
+        manager = PublicAddressManager()
+        status = manager.read_status()
+        return {
+            "enabled": True,
+            "mode": (os.getenv("LSS_DDNS_PROVIDER") or "none").strip().lower(),
+            "configured_hostname": manager.hostname,
+            "caddy_site_address": os.getenv("LSS_PUBLIC_SITE_ADDRESS") or "http://:80",
+            "upnp_module_available": _module("miniupnpc"),
+            "upnp_discovery_enabled": (os.getenv("LSS_UPNP_DISCOVERY", "true").lower() == "true"),
+            "automatic_port_forwarding_enabled": (os.getenv("LSS_UPNP_PORT_FORWARD", "false").lower() == "true"),
+            "status": status,
+            "cloud_host_required": False,
+            "cloudflare_required": False,
+            "ddns_secret_exposed": False,
+        }
+    except Exception as exc:
+        return {"enabled": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
 def _production_suite_status(modules: dict, ace_api: dict) -> dict:
     try:
         from .fx_presets import PRESETS as FX_PRESETS
@@ -175,6 +197,7 @@ def system_report() -> dict:
     web = _web_status()
     speech = _speech_status()
     queue = _queue_status()
+    public_address = _public_address_status()
 
     api_renderers = {
         "deapi": bool(os.getenv("DEAPI_API_KEY")),
@@ -203,6 +226,7 @@ def system_report() -> dict:
         "matchering": _module("matchering"),
         "pedalboard": _module("pedalboard"),
         "audio_separator": _binary("audio-separator") or _module("audio_separator"),
+        "miniupnpc": _module("miniupnpc"),
     }
     production_suite = _production_suite_status(modules, ace_api)
     public_spaces = [
@@ -242,6 +266,7 @@ def system_report() -> dict:
             "local_first": True,
         },
         "aura_internet": web,
+        "self_hosted_public_address": public_address,
         "spoken_aura": speech,
         "production_queue": queue,
         "production_suite": production_suite,
