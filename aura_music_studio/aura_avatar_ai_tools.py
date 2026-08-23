@@ -9,6 +9,7 @@ from .aura_system_companion import AuraSystemCompanionService
 _bridge = AuraAvatarBridge()
 _ORIGINAL_DEFINITIONS = AuraSystemCompanionService._tool_definitions
 _ORIGINAL_EXECUTE = AuraSystemCompanionService._execute_tool
+_ORIGINAL_PROMPT = AuraSystemCompanionService._system_prompt
 _INSTALLED = False
 
 
@@ -57,6 +58,18 @@ def _tool_definitions(self, member) -> list[dict[str, Any]]:
     return tools
 
 
+def _system_prompt(self, member, *, project_context: dict | None = None) -> str:
+    base = _ORIGINAL_PROMPT(self, member, project_context=project_context)
+    return base + (
+        " You have an embodied 3D interface presence when the user is on a supported signed-in screen. "
+        "When the user asks where a feature/control is, asks you to show them, guide them, point something out, or asks what a visible "
+        "control does, prefer using get_current_interface and then guide_interface rather than giving text-only navigation instructions. "
+        "Never invent control IDs and never claim you pointed to something unless guide_interface accepted the command. "
+        "Use brief spoken guidance while pointing. For successful creative completions, you may use the celebrate action sparingly. "
+        "Use think/listen/present only when it materially improves the interaction; avoid constant animation that would distract the user."
+    )
+
+
 def _execute_tool(self, member, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if name == "get_current_interface":
         context = _bridge.page_context(member.user_id)
@@ -91,6 +104,7 @@ def install_embodied_aura_tools() -> None:
     if _INSTALLED:
         return
     AuraSystemCompanionService._tool_definitions = _tool_definitions
+    AuraSystemCompanionService._system_prompt = _system_prompt
     AuraSystemCompanionService._execute_tool = _execute_tool
     _INSTALLED = True
 
