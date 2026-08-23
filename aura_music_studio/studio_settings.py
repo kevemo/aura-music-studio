@@ -81,6 +81,13 @@ class StudioSettings:
             return parsed
         return value if value is not None else default
 
+    def has(self, key: str) -> bool:
+        if key not in ALLOWED_SETTINGS:
+            raise KeyError(key)
+        with self._connect() as con:
+            row = con.execute("SELECT 1 FROM studio_settings WHERE key=?", (key,)).fetchone()
+        return bool(row)
+
     def get(self, key: str) -> Any:
         if key not in ALLOWED_SETTINGS:
             raise KeyError(key)
@@ -93,6 +100,9 @@ class StudioSettings:
             return self._validate(key, json.loads(row["value_json"]))
         except Exception:
             return default
+
+    def get_or(self, key: str, fallback: Any) -> Any:
+        return self.get(key) if self.has(key) else self._validate(key, fallback)
 
     def set(self, key: str, value: Any, *, updated_by: str = "ESP Owner") -> Any:
         parsed = self._validate(key, value)
