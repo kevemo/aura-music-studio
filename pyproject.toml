@@ -56,5 +56,8 @@ aura = "aura_music_studio.cli:app"
 [tool.setuptools.packages.find]
 include = ["aura_music_studio*"]
 
+[tool.setuptools.package-data]
+aura_music_studio = ["static/*.webp"]
+
 [tool.ruff]
 line-length = 100
