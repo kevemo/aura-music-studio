@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+import requests
+
+from .producer import ProducerPlan, llm_plan
+
+
+@dataclass
+class SpeechResult:
+    transcript: str
+    plan: ProducerPlan
+    spoken_text: str
+    speech_file: str | None = None
+
+
+class AuraSpeechService:
+    """Offline-first speech interface for Aura.
+
+    Speech recognition and synthesis are adapters, not hard dependencies. The preferred
+    standalone path is whisper.cpp for STT plus a locally hosted TTS engine (for example
+    Piper running as a separate process/service). Studio actions are still entitlement-
+    checked by the main API; speech never bypasses membership rules.
+    """
+
+    def __init__(self):
+        self.stt_cmd = (os.getenv("AURA_STT_CMD") or "").strip()
+        self.tts_cmd = (os.getenv("AURA_TTS_CMD") or "").strip()
+        self.tts_url = (os.getenv("AURA_TTS_URL") or "").rstrip("/")
+        self.whisper_model = (os.getenv("AURA_WHISPER_MODEL") or "").strip()
+        self.piper_model = (os.getenv("AURA_PIPER_MODEL") or "").strip()
+
+    @staticmethod
+    def _run_template(template: str, values: dict[str, str]) -> subprocess.CompletedProcess:
+        rendered = template
+        for key, value in values.items():
+            rendered = rendered.replace("{" + key + "}", shlex.quote(value))
+        return subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
+
+    def transcribe(self, audio_path: str | Path) -> str:
+        source = Path(audio_path).resolve()
+        if not source.is_file():
+            raise FileNotFoundError(source)
+
+        if self.stt_cmd:
+            with tempfile.TemporaryDirectory(prefix="aura-stt-") as tmp:
+                out = Path(tmp) / "transcript.txt"
+                result = self._run_template(self.stt_cmd, {"input": str(source), "output": str(out)})
+                if out.exists():
+                    return out.read_text(encoding="utf-8").strip()
+                return (result.stdout or "").strip()
+
+        whisper_cli = shutil.which("whisper-cli")
+        if whisper_cli and self.whisper_model:
+            with tempfile.TemporaryDirectory(prefix="aura-whisper-") as tmp:
+                prefix = Path(tmp) / "aura"
+                subprocess.run(
+                    [whisper_cli, "-m", self.whisper_model, "-f", str(source), "-otxt", "-of", str(prefix)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+                transcript = prefix.with_suffix(".txt")
+                if transcript.exists():
+                    return transcript.read_text(encoding="utf-8").strip()
+
+        raise RuntimeError(
+            "No local speech-to-text engine is configured. Set AURA_STT_CMD or install "
+            "whisper.cpp and configure AURA_WHISPER_MODEL."
+        )
+
+    def speak(self, text: str, output_path: str | Path) -> Path:
+        text = (text or "").strip()
+        if not text:
+            raise ValueError("Nothing to speak")
+        output = Path(output_path).resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+
+        if self.tts_url:
+            response = requests.post(
+                f"{self.tts_url}/synthesize",
+                json={"text": text},
+                timeout=120,
+            )
+            response.raise_for_status()
+            output.write_bytes(response.content)
+            return output
+
+        if self.tts_cmd:
+            self._run_template(self.tts_cmd, {"text": text, "output": str(output)})
+            if not output.exists():
+                raise RuntimeError("Configured AURA_TTS_CMD did not produce the requested audio file")
+            return output
+
+        if self.piper_model:
+            subprocess.run(
+                ["python", "-m", "piper", "-m", self.piper_model, "-f", str(output), "--", text],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            if output.exists():
+                return output
+
+        raise RuntimeError(
+            "No local speech synthesis engine is configured. Set AURA_TTS_URL/AURA_TTS_CMD "
+            "or configure AURA_PIPER_MODEL."
+        )
+
+    @staticmethod
+    def _spoken_summary(plan: ProducerPlan) -> str:
+        if not plan.actions:
+            return "I understood the request, but I do not yet have a studio action to perform."
+        descriptions = []
+        for action in plan.actions[:4]:
+            phrase = action.action.replace("_", " ")
+            if action.track_role:
+                phrase += f" for {action.track_role.replace('_', ' ')}"
+            if action.start_seconds is not None and action.end_seconds is not None:
+                phrase += f" from {action.start_seconds:g} to {action.end_seconds:g} seconds"
+            descriptions.append(phrase)
+        sentence = "; then ".join(descriptions)
+        suffix = " I need a little more detail before changing the audio." if plan.needs_confirmation else ""
+        return f"I have mapped that to: {sentence}.{suffix}"
+
+    def command(self, audio_path: str | Path, *, session_summary: dict | None = None, speech_output: str | Path | None = None) -> SpeechResult:
+        transcript = self.transcribe(audio_path)
+        plan = llm_plan(transcript, session_summary=session_summary)
+        spoken = self._spoken_summary(plan)
+        speech_file = None
+        if speech_output is not None:
+            speech_file = str(self.speak(spoken, speech_output))
+        return SpeechResult(transcript=transcript, plan=plan, spoken_text=spoken, speech_file=speech_file)
+
+    def diagnostics(self) -> dict:
+        return {
+            "stt_command_configured": bool(self.stt_cmd),
+            "tts_command_configured": bool(self.tts_cmd),
+            "tts_url_configured": bool(self.tts_url),
+            "whisper_cli": shutil.which("whisper-cli"),
+            "whisper_model_configured": bool(self.whisper_model),
+            "piper_model_configured": bool(self.piper_model),
+            "offline_first": True,
+        }
+
+
+def speech_result_json(result: SpeechResult) -> str:
+    return json.dumps(
+        {
+            "transcript": result.transcript,
+            "plan": result.plan.model_dump(),
+            "spoken_text": result.spoken_text,
+            "speech_file": result.speech_file,
+        },
+        indent=2,
+    )
