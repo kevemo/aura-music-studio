@@ -2,9 +2,11 @@ services:
   live-sound-studio:
     environment:
       AURA_ACESTEP_API_URL: http://ace-step:8001
-      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
-      AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
-      AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+      ACESTEP_API_KEY: ${ACESTEP_API_KEY:-}
+      AURA_ACESTEP_FULL_MODEL: ${AURA_ACESTEP_FULL_MODEL:-acestep-v15-xl-turbo}
+      AURA_ACESTEP_TRACK_MODEL: ${AURA_ACESTEP_TRACK_MODEL:-acestep-v15-base}
+      AURA_ACESTEP_SAMPLE_MODEL: ${AURA_ACESTEP_SAMPLE_MODEL:-acestep-v15-base}
+      AURA_REQUIRE_LIVE_RENDERER: "true"
     depends_on:
       ace-step:
         condition: service_healthy
@@ -12,9 +14,11 @@ services:
   aura-worker:
     environment:
       AURA_ACESTEP_API_URL: http://ace-step:8001
-      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
-      AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
-      AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+      ACESTEP_API_KEY: ${ACESTEP_API_KEY:-}
+      AURA_ACESTEP_FULL_MODEL: ${AURA_ACESTEP_FULL_MODEL:-acestep-v15-xl-turbo}
+      AURA_ACESTEP_TRACK_MODEL: ${AURA_ACESTEP_TRACK_MODEL:-acestep-v15-base}
+      AURA_ACESTEP_SAMPLE_MODEL: ${AURA_ACESTEP_SAMPLE_MODEL:-acestep-v15-base}
+      AURA_REQUIRE_LIVE_RENDERER: "true"
     depends_on:
       ace-step:
         condition: service_healthy
@@ -32,10 +36,13 @@ services:
       ACESTEP_MODE: api
       ACESTEP_API_HOST: 0.0.0.0
       ACESTEP_API_PORT: 8001
+      ACESTEP_API_KEY: ${ACESTEP_API_KEY:-}
       ACESTEP_INIT_SERVICE: "true"
-      ACESTEP_CONFIG_PATH: acestep-v15-xl-turbo
-      ACESTEP_LM_MODEL_PATH: acestep-5Hz-lm-4B
-      ACESTEP_LLM_BACKEND: pt
+      ACESTEP_CONFIG_PATH: ${AURA_ACESTEP_FULL_MODEL:-acestep-v15-xl-turbo}
+      ACESTEP_LM_MODEL_PATH: ${ACESTEP_LM_MODEL_PATH:-acestep-5Hz-lm-4B}
+      ACESTEP_LLM_BACKEND: ${ACESTEP_LLM_BACKEND:-pt}
+      ACESTEP_QUEUE_WORKERS: "1"
+      ACESTEP_QUEUE_MAXSIZE: ${ACESTEP_QUEUE_MAXSIZE:-100}
       HF_HOME: /root/.cache/huggingface
       TOKENIZERS_PARALLELISM: "false"
     expose:
@@ -48,8 +55,8 @@ services:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
       interval: 30s
       timeout: 10s
-      retries: 8
-      start_period: 180s
+      retries: 12
+      start_period: 300s
     # Deliberately no public host port. Only The Live Sound Studio services call this worker.
 
 volumes:
