@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from urllib.parse import unquote
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -104,6 +105,42 @@ def _required_feature(path: str, method: str) -> str | None:
     return None
 
 
+def _base_daw_project_requires_pro(path: str) -> bool:
+    """Detect advanced DAW state left by a previous Pro membership.
+
+    The current user's tenant context is already established before this helper runs. Base may keep the
+    project and its files, but multitrack, take-lane and automation state cannot be operated through the
+    Base timeline after downgrade.
+    """
+    if "/projects/" not in path or "/daw" not in path:
+        return False
+    try:
+        encoded = path.split("/projects/", 1)[1].split("/daw", 1)[0]
+        project_name = unquote(encoded).strip("/")
+        if not project_name:
+            return False
+        from .tenant_storage import project_path
+        from .session import StudioSession
+
+        project = project_path(project_name, must_exist=True)
+        session_file = project / "aura_session.json"
+        if not session_file.is_file():
+            return False
+        session = StudioSession.load(session_file)
+        tracks = [track for track in session.tracks if track.role != "master"]
+        if len(tracks) > 1:
+            return True
+        for track in tracks:
+            if track.automation:
+                return True
+            if any(clip.take_lane > 0 for clip in track.clips if clip.kind == "audio"):
+                return True
+        return False
+    except Exception:
+        # Normal route handlers retain responsibility for malformed/missing project responses.
+        return False
+
+
 class MembershipAccessMiddleware(BaseHTTPMiddleware):
     """Server-side membership, entitlement and tenant-boundary enforcement."""
 
@@ -133,6 +170,17 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                         "detail": f"{feature} is not included in the {member.plan.name} tier",
                         "plan": member.plan.id,
                         "upgrade_required": True,
+                    },
+                    status_code=403,
+                )
+
+            if not member.plan.has(MULTITRACK_DAW) and _base_daw_project_requires_pro(path):
+                return JSONResponse(
+                    {
+                        "detail": "This project contains Pro multitrack, take-lane or automation state. Upgrade to Pro to reopen its advanced DAW session.",
+                        "plan": member.plan.id,
+                        "upgrade_required": True,
+                        "project_preserved": True,
                     },
                     status_code=403,
                 )
