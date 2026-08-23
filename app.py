@@ -7,6 +7,8 @@ Run locally:
 from aura_music_studio.api import app
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.daw_api import router as daw_router
+from aura_music_studio.daw_portal import router as daw_portal_router
 from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
@@ -32,6 +34,8 @@ from aura_music_studio.vocal_api import router as vocal_router
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
+app.include_router(daw_router)
+app.include_router(daw_portal_router)
 app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
