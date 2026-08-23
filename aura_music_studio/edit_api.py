@@ -9,6 +9,7 @@ from .assets import AssetLibrary
 from .editing import RegionEditRequest, add_take_to_session, generate_region_take
 from .layers import generate_complementary_layer
 from .project import ProjectWorkspace
+from .revisions import create_revision
 from .session import Clip, StudioSession
 from .tenant_storage import project_path
 
@@ -54,6 +55,15 @@ def _session(project: Path) -> tuple[StudioSession, Path]:
     return session, path
 
 
+def _snapshot(project: Path, label: str, reason: str) -> None:
+    # Pro-only edit endpoints keep a deep metadata/session undo history. Audio is never duplicated.
+    try:
+        create_revision(project, label=label, reason=reason, actor="Aura", keep=200)
+    except Exception:
+        # A missing pre-existing session/manifest must never prevent a valid first edit.
+        pass
+
+
 @router.post("/projects/{project_name}/region-edit")
 def region_edit(project_name: str, request: RegionEditPayload):
     project = _project(project_name)
@@ -87,6 +97,7 @@ def region_edit(project_name: str, request: RegionEditPayload):
 
     if request.track_id:
         session, session_path = _session(project)
+        _snapshot(project, f"Before {request.operation} take", "region_edit")
         try:
             clip = add_take_to_session(
                 session,
@@ -123,6 +134,7 @@ def add_generated_track(project_name: str, request: AddTrackRequest):
         raise HTTPException(503, f"Generated track unavailable: {type(exc).__name__}: {exc}") from exc
 
     session, session_path = _session(project)
+    _snapshot(project, f"Before adding {request.track_role}", "add_generated_track")
     track = session.add_track(request.track_name or f"Aura {request.track_role.title()}", request.track_role)
     clip = Clip(
         name=f"Generated {request.track_role}",
