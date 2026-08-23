@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .accounts import AccountStore
+from .compute_capabilities import compatibility, job_types_for_capabilities
 from .compute_nodes import ComputeNodeRegistry
 from .jobs import StudioJobQueue
 from .node_transfer import apply_result_bundle, build_project_bundle
@@ -59,32 +60,6 @@ def _node_auth(node_id: str | None, authorization: str | None) -> dict:
         return registry.authenticate(node_id, secret)
     except PermissionError as exc:
         raise HTTPException(401, str(exc)) from exc
-
-
-def _job_types(capabilities: list[str]) -> list[str]:
-    caps = {str(x).strip().lower() for x in capabilities}
-    result: set[str] = set()
-    if "music_generation" in caps or "all" in caps:
-        result.update({"produce", "build_around"})
-    if "engineering" in caps or "all" in caps:
-        result.update({
-            "engineering:split",
-            "engineering:master",
-            "engineering:autotune",
-            "engineering:restore",
-            "engineering:spatial",
-        })
-    if "stem_separation" in caps:
-        result.add("engineering:split")
-    if "mastering" in caps:
-        result.add("engineering:master")
-    if "autotune" in caps:
-        result.add("engineering:autotune")
-    if "restoration" in caps:
-        result.add("engineering:restore")
-    if "spatial_audio" in caps:
-        result.add("engineering:spatial")
-    return sorted(result)
 
 
 def _worker_id(node_id: str) -> str:
@@ -141,13 +116,14 @@ def heartbeat(
     authorization: str | None = Header(default=None),
 ):
     node = _node_auth(x_esp_node_id, authorization)
-    return registry.heartbeat(
+    updated = registry.heartbeat(
         node["id"],
         capabilities=body.capabilities,
         hardware=body.hardware,
         software=body.software,
         remote_ip=_remote_ip(request),
     )
+    return {**updated, "compatibility": compatibility(updated)}
 
 
 @router.post("/claim")
@@ -157,12 +133,20 @@ def claim_job(
     authorization: str | None = Header(default=None),
 ):
     node = _node_auth(x_esp_node_id, authorization)
-    registry.heartbeat(node["id"], remote_ip=_remote_ip(request))
-    allowed = _job_types(node.get("capabilities") or [])
+    node = registry.heartbeat(node["id"], remote_ip=_remote_ip(request))
+    version = compatibility(node)
+    allowed = job_types_for_capabilities(node.get("capabilities") or [])
+    if not version["compatible"]:
+        return {
+            "job": None,
+            "allowed_job_types": allowed,
+            "compatibility": version,
+            "upgrade_required": True,
+        }
     job = queue.claim_next_for_job_types(_worker_id(node["id"]), allowed)
     if not job:
-        return {"job": None, "allowed_job_types": allowed}
-    return {"job": _public_claim(job)}
+        return {"job": None, "allowed_job_types": allowed, "compatibility": version}
+    return {"job": _public_claim(job), "compatibility": version}
 
 
 @router.post("/jobs/{job_id}/lease")
@@ -248,9 +232,11 @@ async def upload_result(
         except Exception as exc:
             raise HTTPException(400, f"Node result rejected: {type(exc).__name__}: {exc}") from exc
 
+    merged_files = merged.get("merged_files") or []
     result_summary = {
         "remote_compute_node": node["id"],
         "remote_compute_node_name": node.get("name"),
+        "output_files": [path for path in merged_files if str(path).startswith("output/")],
         **merged,
     }
     if not queue.complete_owned(job_id, worker_id, result_summary):
