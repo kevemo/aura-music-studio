@@ -15,7 +15,7 @@ class Section(BaseModel):
 
 class RendererConfig(BaseModel):
     preferred: list[str] = Field(default_factory=lambda: ["acestep_api", "local_acestep", "muser", "deapi", "eleven_music", "mureka", "acestep_space", "yue"])
-    model: str = "acestep-v15-xl-turbo"
+    model: str = "acestep-v15-turbo"
     cover_strength: float = Field(default=0.78, ge=0.0, le=1.0)
     duration_limit_seconds: int = 300
     max_attempts_per_host: int = 3
