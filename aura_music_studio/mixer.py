@@ -62,18 +62,29 @@ def _mix_files(files: list[Path], output: Path, sample_rate: int) -> Path:
     return output
 
 
+def selected_audio_clips(track: Track) -> list[Clip]:
+    """Return the audio clips that should currently render for a track.
+
+    A committed take is an explicit human/Aura choice and therefore wins over the newest take lane.
+    If nothing is committed, the latest/highest take lane is auditioned. Multiple committed clips are
+    supported for future regional comping, where different timeline regions may come from different takes.
+    """
+    audio_clips = [c for c in track.clips if c.kind == "audio" and not c.muted]
+    if not audio_clips:
+        return []
+    committed = [c for c in audio_clips if bool(c.metadata.get("committed", False))]
+    if committed:
+        return committed
+    max_lane = max((c.take_lane for c in audio_clips), default=0)
+    return [c for c in audio_clips if c.take_lane == max_lane]
+
+
 def render_track(track: Track, session: StudioSession, project_root: Path, work_dir: Path) -> Path | None:
     if track.mute:
         return None
-    audio_clips = [c for c in track.clips if c.kind == "audio" and not c.muted]
-    if not audio_clips:
-        return None
-
-    # Alternate take lanes: the latest/highest lane is auditioned unless an older clip is explicitly committed.
-    max_lane = max((c.take_lane for c in audio_clips), default=0)
-    selected = [c for c in audio_clips if c.take_lane == max_lane or c.metadata.get("committed", False)]
+    selected = selected_audio_clips(track)
     if not selected:
-        selected = audio_clips
+        return None
 
     clip_files = [
         _clip_audio(clip, project_root, work_dir / "clips" / f"{track.id}_{i:03d}.wav", session.sample_rate)
