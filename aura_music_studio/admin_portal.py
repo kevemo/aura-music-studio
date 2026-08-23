@@ -10,15 +10,17 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .accounts import AccountStore
 from .branding import PRODUCT_FULL_NAME, TAGLINE
+from .public_address import PublicAddressManager
 from .subscriptions import SubscriptionLedger
 
 router = APIRouter()
 store = AccountStore()
 subscriptions = SubscriptionLedger(store)
+public_address = PublicAddressManager()
 ADMIN_COOKIE = "lss_admin_session"
 
 CSS = """
-:root{--bg:#0c0713;--panel:#1a1124;--gold:#e8bd62;--text:#fff;--muted:#c8bbd3;--line:#423052;--green:#75d89d;--red:#ff8fa3}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0c0713;color:#fff;margin:0}.wrap{max-width:1100px;margin:auto;padding:28px}.card{background:#1a1124;border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0}.row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.muted{color:var(--muted)}.gold{color:var(--gold)}input,select{background:#0d0813;border:1px solid var(--line);color:#fff;border-radius:10px;padding:11px}button,.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}.approve{background:var(--gold);color:#180f20}.reject{background:#552339;color:#fff}.activate{background:#245b3b;color:#fff}.top{display:flex;justify-content:space-between;align-items:center;gap:15px}.pill{border:1px solid var(--line);padding:5px 9px;border-radius:99px;font-size:.8rem}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}@media(max-width:760px){.grid{grid-template-columns:1fr}}
+:root{--bg:#0c0713;--panel:#1a1124;--gold:#e8bd62;--text:#fff;--muted:#c8bbd3;--line:#423052;--green:#75d89d;--red:#ff8fa3}*{box-sizing:border-box}body{font-family:system-ui,sans-serif;background:#0c0713;color:#fff;margin:0}.wrap{max-width:1100px;margin:auto;padding:28px}.card{background:#1a1124;border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0}.row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.muted{color:var(--muted)}.gold{color:var(--gold)}input,select{background:#0d0813;border:1px solid var(--line);color:#fff;border-radius:10px;padding:11px}button,.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:800;cursor:pointer;text-decoration:none;display:inline-block}.approve{background:var(--gold);color:#180f20}.reject{background:#552339;color:#fff}.activate{background:#245b3b;color:#fff}.top{display:flex;justify-content:space-between;align-items:center;gap:15px}.pill{border:1px solid var(--line);padding:5px 9px;border-radius:99px;font-size:.8rem}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.kv{display:grid;grid-template-columns:190px 1fr;gap:8px 14px;margin:10px 0}.warn{color:#ffcf75}.good{color:var(--green)}.bad{color:var(--red)}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}@media(max-width:760px){.grid{grid-template-columns:1fr}.kv{grid-template-columns:1fr}}
 """
 
 
@@ -48,6 +50,29 @@ def _payment_queue() -> list[dict]:
         return [dict(row) for row in rows]
     finally:
         con.close()
+
+
+def _address_panel() -> str:
+    status = public_address.read_status()
+    if not status.get("checked_at"):
+        return """<div class='card'><h2>Public address</h2><p class='muted'>Aura has not completed a public-address check yet.</p><form method='post' action='/owner/public-address/refresh'><button class='approve'>Run address check</button></form></div>"""
+
+    hostname = status.get("hostname") or "Not configured"
+    public_ip = status.get("public_ipv4") or "Not detected"
+    router_ip = status.get("router_external_ipv4") or "Not available"
+    lan_ip = status.get("lan_ipv4") or "Not detected"
+    recommended = status.get("recommended_url") or "Not currently reachable"
+    provider = (status.get("provider") or "none").upper()
+    dns = ", ".join(status.get("dns_addresses") or []) or "No DNS result"
+    cgnat = bool(status.get("likely_cgnat"))
+    https_ready = bool(status.get("caddy_https_ready"))
+    warnings = status.get("warnings") or []
+    warning_html = "".join(f"<li>{escape(str(item))}</li>" for item in warnings)
+    state_class = "bad" if cgnat else "good"
+    https_class = "good" if https_ready else "warn"
+    return f"""<div class='card'><div class='row'><div><div class='gold'><b>AURA PUBLIC ADDRESS MANAGER</b></div><h2>Self-hosted Studio address</h2></div><span class='pill'>{escape(provider)}</span></div>
+<div class='kv'><b>Recommended URL</b><code>{escape(str(recommended))}</code><b>Hostname</b><code>{escape(str(hostname))}</code><b>Public IPv4</b><code>{escape(str(public_ip))}</code><b>Router-facing IPv4</b><code>{escape(str(router_ip))}</code><b>LAN IPv4</b><code>{escape(str(lan_ip))}</code><b>DNS resolves to</b><code>{escape(dns)}</code><b>Likely CGNAT</b><span class='{state_class}'>{'YES — inbound IPv4 may be blocked upstream' if cgnat else 'No CGNAT signal detected'}</span><b>Hostname HTTPS readiness</b><span class='{https_class}'>{'DNS points at this host' if https_ready else 'Not yet verified'}</span></div>
+<p class='muted'>Aura owns the address-management logic. FreeDNS/DuckDNS, when selected, only provide the optional hostname. Memberships, music, projects, database, workers and AI remain on the ESP-controlled host.</p>{f"<ul class='warn'>{warning_html}</ul>" if warning_html else ''}<div class='row' style='justify-content:flex-start'><form method='post' action='/owner/public-address/refresh'><button class='approve'>Refresh + update DDNS</button></form><a class='btn activate' href='{escape(str(recommended), quote=True)}' target='_blank' rel='noopener' {'style="pointer-events:none;opacity:.45"' if recommended == 'Not currently reachable' else ''}>Open public Studio</a></div></div>"""
 
 
 @router.get("/owner", response_class=HTMLResponse)
@@ -107,10 +132,24 @@ def owner_dashboard(request: Request):
 
     body = f"""<div class='top'><div><div class='gold'><b>ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div>
 <div class='grid'><div class='card'><b>Free</b><h2>$0</h2><span class='muted'>Basic studio</span></div><div class='card'><b>Base</b><h2>$4.99</h2><span class='muted'>1 confirmed track/day</span></div><div class='card'><b>Pro</b><h2>$9.99</h2><span class='muted'>Unlimited full studio</span></div></div>
+{_address_panel()}
 <h2>Pending membership requests</h2>{pending_html}
 <h2>Approved — waiting for PayPal verification</h2>{payment_html}
 <div class='card'><h2>Monthly access rule</h2><p class='muted'>Each verified Base/Pro payment grants a 31-day billing period. Another verified payment extends the existing paid-through date. When that period expires, the account automatically returns to payment-pending until renewal is verified. Duplicate payment references are rejected.</p></div>"""
     return _page(body)
+
+
+@router.post("/owner/public-address/refresh", response_class=HTMLResponse)
+def owner_public_address_refresh(request: Request):
+    if not _authorized(request):
+        return RedirectResponse("/owner", status_code=303)
+    try:
+        public_address.check(update_ddns=True)
+        return RedirectResponse("/owner/dashboard", status_code=303)
+    except Exception as exc:
+        return _page(
+            f"<div class='card'><h1>Public address refresh</h1><p class='bad'>Aura could not complete the address check: {escape(type(exc).__name__ + ': ' + str(exc))}</p><a class='btn approve' href='/owner/dashboard'>Back to owner dashboard</a></div>"
+        )
 
 
 @router.post("/owner/activate-payment", response_class=HTMLResponse)
