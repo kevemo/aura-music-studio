@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .access_control import MembershipAccessMiddleware
+from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
@@ -33,11 +34,12 @@ PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.5.1",
+    version="0.5.2",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first multi-model generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
 app.include_router(web_portal_router)
+app.include_router(admin_portal_router)
 app.include_router(membership_router)
 
 
@@ -68,7 +70,8 @@ def health():
         "real_audio_only_final": True,
         "membership_tiers": ["free", "base", "pro"],
         "customer_portal": True,
-        "api_version": "0.5.1",
+        "owner_portal": True,
+        "api_version": "0.5.2",
     }
 
 
