@@ -30,6 +30,10 @@ class AuraSpeechService:
     Browser microphone formats such as WebM/Opus are converted to mono 16 kHz WAV through
     local ffmpeg before transcription. Locale is passed to locale-aware TTS backends rather
     than silently forcing English pronunciation.
+
+    Capable TTS adapters also receive Aura's stable vocal direction (voice/style/rate/pitch)
+    so her spoken presence remains warm, grounded and measured instead of falling back to a
+    provider's arbitrary default voice. Backends that do not support these fields may ignore them.
     """
 
     def __init__(self):
@@ -38,6 +42,21 @@ class AuraSpeechService:
         self.tts_url = (os.getenv("AURA_TTS_URL") or "").rstrip("/")
         self.whisper_model = (os.getenv("AURA_WHISPER_MODEL") or "").strip()
         self.piper_model = (os.getenv("AURA_PIPER_MODEL") or "").strip()
+        self.tts_voice = (os.getenv("AURA_TTS_VOICE") or "Aura").strip()
+        self.tts_style = (
+            os.getenv("AURA_TTS_STYLE")
+            or "warm, resonant, grounded, measured, calm, compassionate, confident; deliberate pauses; no rushed delivery"
+        ).strip()
+        self.tts_rate = self._float_env("AURA_TTS_RATE", 0.94, 0.6, 1.35)
+        self.tts_pitch = self._float_env("AURA_TTS_PITCH", 0.0, -12.0, 12.0)
+
+    @staticmethod
+    def _float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+        try:
+            value = float(os.getenv(name, str(default)))
+        except (TypeError, ValueError):
+            value = default
+        return max(minimum, min(maximum, value))
 
     @staticmethod
     def _run_template(template: str, values: dict[str, str]) -> subprocess.CompletedProcess:
@@ -123,12 +142,22 @@ class AuraSpeechService:
             return specific
         if language_model:
             return language_model
-        # A single legacy Piper model is safe only for its declared/default locale. Do not
-        # silently speak Spanish/Japanese/etc. through an English-only model.
         default_locale = (os.getenv("AURA_PIPER_DEFAULT_LOCALE") or "en").lower()
         if language == default_locale.split("-", 1)[0].lower():
             return self.piper_model
         return ""
+
+    def _voice_payload(self, *, text: str, locale: str) -> dict:
+        return {
+            "text": text,
+            "locale": locale,
+            "language": locale.split("-", 1)[0],
+            "voice": self.tts_voice,
+            "style": self.tts_style,
+            "rate": self.tts_rate,
+            "pitch_semitones": self.tts_pitch,
+            "persona": "Sovereign Spiritual Love and Light",
+        }
 
     def speak(self, text: str, output_path: str | Path, *, locale: str = "en") -> Path:
         text = (text or "").strip()
@@ -137,11 +166,12 @@ class AuraSpeechService:
             raise ValueError("Nothing to speak")
         output = Path(output_path).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
+        voice_payload = self._voice_payload(text=text, locale=locale)
 
         if self.tts_url:
             response = requests.post(
                 f"{self.tts_url}/synthesize",
-                json={"text": text, "locale": locale},
+                json=voice_payload,
                 timeout=120,
             )
             response.raise_for_status()
@@ -151,7 +181,16 @@ class AuraSpeechService:
         if self.tts_cmd:
             self._run_template(
                 self.tts_cmd,
-                {"text": text, "output": str(output), "locale": locale, "language": locale.split("-", 1)[0]},
+                {
+                    "text": text,
+                    "output": str(output),
+                    "locale": locale,
+                    "language": locale.split("-", 1)[0],
+                    "voice": self.tts_voice,
+                    "style": self.tts_style,
+                    "rate": f"{self.tts_rate:.3f}",
+                    "pitch": f"{self.tts_pitch:.3f}",
+                },
             )
             if not output.exists():
                 raise RuntimeError("Configured AURA_TTS_CMD did not produce the requested audio file")
@@ -215,6 +254,12 @@ class AuraSpeechService:
             "piper_model_configured": bool(self.piper_model),
             "piper_default_locale": os.getenv("AURA_PIPER_DEFAULT_LOCALE", "en"),
             "locale_aware_tts": bool(self.tts_url or self.tts_cmd),
+            "voice_profile": {
+                "voice": self.tts_voice,
+                "style": self.tts_style,
+                "rate": self.tts_rate,
+                "pitch_semitones": self.tts_pitch,
+            },
             "ffmpeg": shutil.which("ffmpeg"),
             "browser_audio_transcoding": bool(shutil.which("ffmpeg")),
             "offline_first": True,
