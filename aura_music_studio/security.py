@@ -85,6 +85,9 @@ async def _inject_esp_brand(response, path: str):
         extras += "<a class='esp-history-fab' href='/history' title='Project history and undo'>↶ Project History</a>"
     if path == "/production-suite" and "href='/take-manager'" not in text:
         extras += "<a class='esp-history-fab' style='bottom:66px' href='/take-manager' title='Audition and select generated performances'>🎚 Take Manager</a>"
+    if path in {"/studio", "/production-suite"} and "href='/recording-studio'" not in text:
+        recording_bottom = "66px" if path == "/studio" else "114px"
+        extras += f"<a class='esp-history-fab' style='bottom:{recording_bottom}' href='/recording-studio' title='Record vocals and instruments directly'>🎙 Recording Studio</a>"
     if extras:
         text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
