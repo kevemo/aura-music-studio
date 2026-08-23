@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from html import escape
+
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from .accounts import AccountStore
+from .branding import PRODUCT_NAME
+from .plans import TAKE_LANES, get_plan
+
+router = APIRouter()
+store = AccountStore()
+
+
+@router.get('/take-manager', response_class=HTMLResponse)
+def take_manager(request: Request):
+    user = store.resolve_session(request.cookies.get('lss_session'))
+    if not user:
+        return RedirectResponse('/signin', status_code=303)
+    if user.get('status') != 'active':
+        return RedirectResponse('/dashboard', status_code=303)
+    plan = get_plan(user.get('plan_id') or 'free')
+    allowed = plan.has(TAKE_LANES)
+    locked = '' if allowed else (
+        "<div class='alert'>Take Manager is a Pro feature. Base still keeps regeneration of its daily "
+        "full-track draft, while Pro exposes the individual generated performances for audition and comping.</div>"
+    )
+    page = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Take Manager — {escape(PRODUCT_NAME)}</title><style>
+*{{box-sizing:border-box}}body{{margin:0;font-family:Inter,system-ui,sans-serif;color:#fff}}.wrap{{max-width:1320px;margin:auto;padding:20px}}.top{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}}.brand{{font-weight:950;font-size:1.1rem}}a{{color:inherit;text-decoration:none}}.btn,button{{border:1px solid #523263;background:#21102c;color:#fff;padding:9px 12px;border-radius:10px;font-weight:850;cursor:pointer}}.primary{{background:linear-gradient(135deg,#ffe7a6,#e8ba59,#b67a23);color:#170b18}}.panel,.track,.lane{{background:#140b1b;border:1px solid #4b3056;border-radius:16px;padding:15px}}.layout{{display:grid;grid-template-columns:270px 1fr;gap:16px;margin-top:18px}}select{{width:100%;padding:11px;background:#09050d;color:#fff;border:1px solid #523263;border-radius:9px}}.field{{margin:11px 0}}.track{{margin-bottom:14px}}.trackhead{{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}}.lanes{{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;margin-top:10px}}.lane.selected{{border-color:#e7b953;box-shadow:0 0 20px #e7b95318}}.lane.committed{{border-color:#d12a9f;box-shadow:0 0 20px #d12a9f22}}.lane h4{{margin:0 0 8px}}audio{{width:100%;margin:8px 0}}.muted{{color:#cdbfd4}}.badge{{display:inline-block;padding:4px 8px;border-radius:999px;border:1px solid #65406d;color:#ffe29a;font-size:.72rem;font-weight:900}}.status,.alert{{white-space:pre-wrap;background:#09060d;border:1px solid #523263;border-radius:11px;padding:12px;margin-top:12px}}@media(max-width:800px){{.layout{{grid-template-columns:1fr}}}}
+</style></head><body><div class='wrap'><div class='top'><a class='brand' href='/studio'>{escape(PRODUCT_NAME)}<small style='display:block;color:#e7b953'>AURA TAKE MANAGER</small></a><div><span class='badge'>{escape(plan.name)}</span> <a class='btn' href='/production-suite'>Production Suite</a> <a class='btn' href='/history'>History</a></div></div>
+<div class='layout'><aside class='panel'><h2>Performance takes</h2><p class='muted'>Regenerated Pro multitrack parts become alternate takes on the same instrument lane instead of duplicate tracks.</p>{locked}<div class='field'><label>Project</label><select id='project' onchange='loadTakes()'></select></div><button onclick='loadTakes()' {'disabled' if not allowed else ''}>Refresh</button><div id='status' class='status'>Choose a project.</div></aside><main><div id='tracks'></div></main></div></div>
+<script>
+const ALLOWED={str(allowed).lower()};
+async function api(url,options={{}}){{const r=await fetch(url,{{credentials:'same-origin',...options}});let b;try{{b=await r.json()}}catch{{b=await r.text()}}if(!r.ok)throw new Error(typeof b==='string'?b:(b.detail||JSON.stringify(b)));return b}}
+function setStatus(v,ok=true){{const e=document.getElementById('status');e.textContent=typeof v==='string'?v:JSON.stringify(v,null,2);e.style.color=ok?'#86e0a8':'#ff9aa9'}}
+async function init(){{try{{const ps=await api('/projects');const s=document.getElementById('project');for(const p of ps){{const o=document.createElement('option');o.value=p.name;o.textContent=p.name;s.appendChild(o)}}if(ps.length&&ALLOWED)loadTakes();else if(!ps.length)setStatus('Create a project first.')}}catch(e){{setStatus(e.message,false)}}}}
+async function loadTakes(){{if(!ALLOWED)return;const p=document.getElementById('project').value;if(!p)return;try{{const data=await api('/projects/'+encodeURIComponent(p)+'/takes');renderTracks(p,data.tracks);setStatus('Loaded '+data.tracks.length+' audio tracks.')}}catch(e){{document.getElementById('tracks').innerHTML='';setStatus(e.message,false)}}}}
+function renderTracks(project,tracks){{const root=document.getElementById('tracks');root.innerHTML='';if(!tracks.length){{root.innerHTML='<div class="panel muted">No take lanes yet. Use Pro Multitrack Build Around or regenerate a generated part.</div>';return}}for(const t of tracks){{const box=document.createElement('section');box.className='track';const head=document.createElement('div');head.className='trackhead';const info=document.createElement('div');const h=document.createElement('h3');h.textContent=t.name;const m=document.createElement('div');m.className='muted';m.textContent=t.role+' · '+t.take_count+' take'+(t.take_count===1?'':'s');info.append(h,m);const latest=document.createElement('button');latest.textContent='Return to Latest';latest.disabled=t.committed_lane===null;latest.onclick=()=>clearCommit(project,t.track_id);head.append(info,latest);box.appendChild(head);const lanes=document.createElement('div');lanes.className='lanes';for(const lane of t.lanes){{const d=document.createElement('div');const selected=lane.clips.some(c=>t.selected_clip_ids.includes(c.clip_id));const committed=lane.clips.some(c=>c.committed);d.className='lane'+(selected?' selected':'')+(committed?' committed':'');const lh=document.createElement('h4');lh.textContent='Take '+(lane.take_lane+1);d.appendChild(lh);if(committed){{const b=document.createElement('span');b.className='badge';b.textContent='SELECTED';d.appendChild(b)}}for(const c of lane.clips){{const n=document.createElement('div');n.className='muted';n.textContent=c.name+(c.generated?' · Aura generated':'');const a=document.createElement('audio');a.controls=true;a.preload='none';a.src=c.preview_url;d.append(n,a)}}const use=document.createElement('button');use.className='primary';use.textContent=committed?'Using This Take':'Use This Take';use.disabled=committed;use.onclick=()=>commitTake(project,t.track_id,lane.take_lane);d.appendChild(use);lanes.appendChild(d)}}box.appendChild(lanes);root.appendChild(box)}}}}
+async function commitTake(project,track,lane){{try{{setStatus('Selecting take '+(lane+1)+'...');await api('/projects/'+encodeURIComponent(project)+'/takes/'+encodeURIComponent(track)+'/commit',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{take_lane:lane}})}});setStatus('Take selected. Project history snapshot created.');loadTakes()}}catch(e){{setStatus(e.message,false)}}}}
+async function clearCommit(project,track){{try{{await api('/projects/'+encodeURIComponent(project)+'/takes/'+encodeURIComponent(track)+'/commit',{{method:'DELETE'}});setStatus('Track returned to latest take. History snapshot created.');loadTakes()}}catch(e){{setStatus(e.message,false)}}}}
+init();
+</script></body></html>"""
+    return HTMLResponse(page)
