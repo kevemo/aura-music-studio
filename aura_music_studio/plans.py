@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 
 
@@ -25,10 +25,11 @@ class Plan:
         return data
 
 
-# Stable entitlement keys. API/UI code should check these instead of price values.
+# Stable entitlement keys. API/UI code checks these rather than price values.
 BASIC_CREATE = "basic_create"
 BASIC_LYRICS = "basic_lyrics"
 BASIC_PREVIEW = "basic_preview"
+AURA_SPEECH = "aura_speech"
 FULL_TRACK = "full_track"
 UNLIMITED_REGEN_UNTIL_CONFIRMED = "unlimited_regen_until_confirmed"
 MP3_DOWNLOAD = "mp3_download"
@@ -37,6 +38,7 @@ FLAC_DOWNLOAD = "flac_download"
 BASIC_MASTERING = "basic_mastering"
 ADVANCED_MASTERING = "advanced_mastering"
 REFERENCE_MASTERING = "reference_mastering"
+AUDIO_CLEANUP = "audio_cleanup"
 UPLOAD_AUDIO = "upload_audio"
 UPLOAD_SCORE = "upload_score"
 BACKING_TRACK = "backing_track"
@@ -53,6 +55,9 @@ HARMONY_ARCHITECT = "harmony_architect"
 APPROVED_VOICE_DUPLICATION = "approved_voice_duplication"
 AUDIO_TO_MIDI_CONTROL = "audio_to_midi_control"
 PRODUCER_CHAT = "producer_chat"
+NEURAL_AMP = "neural_amp"
+SPATIAL_AUDIO = "spatial_audio"
+VIDEO_SYNC = "video_sync"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
@@ -63,6 +68,7 @@ FREE_FEATURES = frozenset({
     BASIC_LYRICS,
     BASIC_PREVIEW,
     PRODUCER_CHAT,
+    AURA_SPEECH,
 })
 
 BASE_FEATURES = FREE_FEATURES | frozenset({
@@ -71,6 +77,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     MP3_DOWNLOAD,
     WAV_DOWNLOAD,
     BASIC_MASTERING,
+    AUDIO_CLEANUP,
     UPLOAD_AUDIO,
     UPLOAD_SCORE,
     BACKING_TRACK,
@@ -93,6 +100,9 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     STYLE_DNA,
     APPROVED_VOICE_DUPLICATION,
     AUDIO_TO_MIDI_CONTROL,
+    NEURAL_AMP,
+    SPATIAL_AUDIO,
+    VIDEO_SYNC,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
 })
@@ -104,8 +114,8 @@ PLANS: dict[str, Plan] = {
         name="Free",
         monthly_price_usd=Decimal("0.00"),
         description=(
-            "Basic Live Sound Studio access: create song ideas, use Aura's basic lyric/producer tools "
-            "and generate basic previews. Full finished-track allowance and premium studio tools are not included."
+            "Basic Live Sound Studio access: song ideas, Aura lyric/producer help, spoken Aura control "
+            "and basic previews. Finished full tracks and premium engineering tools are not included."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -116,9 +126,8 @@ PLANS: dict[str, Plan] = {
         name="Base",
         monthly_price_usd=Decimal("4.99"),
         description=(
-            "One confirmed full track every day. Regenerate that day's track as many times as needed "
-            "until you confirm the result, with MP3/WAV download, basic mastering, uploads, backing-track "
-            "creation and harmony tools."
+            "One confirmed full track every day with unlimited regenerations until confirmation, plus MP3/WAV "
+            "downloads, basic mastering and cleanup, uploads, backing-track creation and harmony tools."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -129,9 +138,10 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: unlimited regeneration, "
-            "downloads, splitter/stems, multitrack DAW, mastering, reference tools, covers/remixes, Sample Lab, "
-            "Style DNA, Harmony Architect, approved voice duplication, automation and every enabled studio feature."
+            "Unlimited full-track creation and the complete Live Sound Studio: splitter/stems, multitrack DAW, "
+            "take lanes, automation, advanced/reference mastering, Sample Lab, Style DNA, covers/remixes/repaint, "
+            "Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, "
+            "video/music sync, all download formats and every enabled studio feature."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
