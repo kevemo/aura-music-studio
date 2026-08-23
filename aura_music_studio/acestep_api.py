@@ -182,13 +182,42 @@ class AceStepClient:
             instruction=f"Extract the {track} track from the audio:", inference_steps=32, guidance_scale=7.0,
         ), output_dir)[0]
 
-    def complete(self, source: Path, output_dir: Path, *, tracks: list[str], prompt: str, model: str | None = None) -> Path:
+    def complete(
+        self,
+        source: Path,
+        output_dir: Path,
+        *,
+        tracks: list[str],
+        prompt: str,
+        lyrics: str = "",
+        model: str | None = None,
+        bpm: int | None = None,
+        key: str | None = None,
+        meter: str = "4",
+        language: str = "en",
+    ) -> Path:
+        """Complete an isolated vocal/instrument with selected missing tracks.
+
+        `lyrics` is optional but enables the complete workflow to add a new lead vocal when the
+        uploaded source is an instrument. The source performance remains the conditioning audio.
+        """
         normalized = [x.strip().lower() for x in tracks]
         invalid = [x for x in normalized if x not in ACE_TRACKS]
         if invalid:
             raise ValueError(f"Unsupported ACE-Step Complete tracks: {invalid}")
         joined = ", ".join(normalized)
         return self.generate(AceStepRequest(
-            prompt=prompt, task_type="complete", src_audio=str(source), model=model, thinking=True,
-            instruction=f"Complete the input track with {joined}:", inference_steps=32, guidance_scale=7.0,
+            prompt=prompt,
+            lyrics=lyrics,
+            task_type="complete",
+            src_audio=str(source),
+            model=model,
+            bpm=bpm,
+            key_scale=key,
+            time_signature=meter,
+            vocal_language=language,
+            thinking=True,
+            instruction=f"Complete the input track with {joined}:",
+            inference_steps=32,
+            guidance_scale=7.0,
         ), output_dir)[0]
