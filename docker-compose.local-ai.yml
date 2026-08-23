@@ -1,0 +1,46 @@
+services:
+  live-sound-studio:
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      AURA_LLM_PROVIDER: ollama
+      AURA_OLLAMA_MODEL: ${AURA_OLLAMA_MODEL:-qwen3:4b}
+      AURA_PRODUCER_USE_OLLAMA: "true"
+    depends_on:
+      ollama:
+        condition: service_started
+
+  aura-worker:
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      AURA_LLM_PROVIDER: ollama
+      AURA_OLLAMA_MODEL: ${AURA_OLLAMA_MODEL:-qwen3:4b}
+      AURA_PRODUCER_USE_OLLAMA: "true"
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: live-sound-studio-ollama
+    restart: unless-stopped
+    expose:
+      - "11434"
+    volumes:
+      - aura_ollama_models:/root/.ollama
+    # No public port. Aura reaches Ollama only across the private Compose network.
+
+  ollama-model-init:
+    image: ollama/ollama:latest
+    container_name: live-sound-studio-ollama-init
+    restart: on-failure
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    command: ["pull", "${AURA_OLLAMA_MODEL:-qwen3:4b}"]
+    depends_on:
+      ollama:
+        condition: service_started
+    volumes:
+      - aura_ollama_models:/root/.ollama
+
+volumes:
+  aura_ollama_models:
