@@ -50,15 +50,15 @@ class VideoGenerationError(RuntimeError):
 
 
 class VideoGenerationService:
-    """Model-agnostic video generator used by the Live Sound Studio.
+    """Model-agnostic real video generation for the Live Sound Studio.
 
-    Provider order in auto mode:
+    Auto-provider order:
     1. local/self-hosted command (`AURA_VIDEO_RENDER_CMD`)
     2. OpenAI video generation (`OPENAI_API_KEY`)
     3. Runway (`RUNWAYML_API_SECRET`)
 
-    The service never fabricates a successful video. A request that cannot be
-    submitted to a real configured renderer returns a clear failure.
+    The service never fabricates a successful video. Provider-hosted outputs are
+    copied into Live Sound Studio storage when a remote task completes.
     """
 
     VALID_MODES = {"text_to_video", "image_to_video", "video_to_video"}
@@ -83,6 +83,23 @@ class VideoGenerationService:
             except Exception as exc:  # provider failover is deliberate
                 errors.append(f"{provider}: {exc}")
         raise VideoGenerationError("No video renderer succeeded. " + " | ".join(errors))
+
+    def refresh(self, *, result_id: str, provider: str, provider_job_id: str | None) -> dict[str, Any]:
+        provider = (provider or "").strip().lower()
+        if not provider_job_id:
+            raise VideoGenerationError("This video job has no provider task ID")
+        if provider == "openai":
+            return self._refresh_openai(result_id, provider_job_id)
+        if provider == "runway":
+            return self._refresh_runway(result_id, provider_job_id)
+        if provider == "local":
+            output = self.output_root / f"{result_id}.mp4"
+            return {
+                "status": "completed" if output.exists() else "failed",
+                "output_path": str(output) if output.exists() else None,
+                "error": None if output.exists() else "Local render output was not found",
+            }
+        raise VideoGenerationError(f"Unknown video provider: {provider}")
 
     def _validate(self, request: VideoGenerationRequest) -> None:
         if not request.prompt or not request.prompt.strip():
@@ -142,6 +159,7 @@ class VideoGenerationService:
                 "AURA_VIDEO_REFERENCE": request.reference_url or "",
                 "AURA_VIDEO_NEGATIVE_PROMPT": request.negative_prompt or "",
                 "AURA_VIDEO_PROJECT_ID": request.project_id or "",
+                "AURA_VIDEO_QUALITY": request.quality,
             }
         )
         completed = subprocess.run(
@@ -161,22 +179,33 @@ class VideoGenerationService:
         return result
 
     @staticmethod
-    def _openai_size(ratio: str) -> str:
-        return {"9:16": "720x1280", "16:9": "1280x720", "1:1": "1280x720"}[ratio]
+    def _openai_size(ratio: str, quality: str) -> str:
+        high = quality.strip().lower() in {"high", "professional", "pro"}
+        if ratio == "9:16":
+            return "1024x1792" if high else "720x1280"
+        if ratio == "16:9":
+            return "1792x1024" if high else "1280x720"
+        # OpenAI's current video endpoint does not expose a square output size.
+        return "1280x720"
 
     def _generate_openai(self, request: VideoGenerationRequest) -> VideoGenerationResult:
         if request.mode == "video_to_video":
-            raise VideoGenerationError("OpenAI adapter currently supports text/image reference generation, not video-to-video")
+            raise VideoGenerationError("Use the dedicated OpenAI edit/remix workflow or another provider for video-to-video")
+        if request.duration_seconds > 12:
+            raise VideoGenerationError("OpenAI single-shot video generation currently supports up to 12 seconds")
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise VideoGenerationError("OPENAI_API_KEY is not configured")
-        model = os.getenv("AURA_OPENAI_VIDEO_MODEL", "sora-2")
+        model = os.getenv(
+            "AURA_OPENAI_VIDEO_PRO_MODEL" if request.quality.strip().lower() != "standard" else "AURA_OPENAI_VIDEO_MODEL",
+            "sora-2-pro" if request.quality.strip().lower() != "standard" else "sora-2",
+        )
         result = self._base_result(request, "openai", model)
         payload: dict[str, Any] = {
             "model": model,
             "prompt": request.prompt,
             "seconds": min((4, 8, 12), key=lambda x: abs(x - request.duration_seconds)),
-            "size": self._openai_size(request.aspect_ratio),
+            "size": self._openai_size(request.aspect_ratio, request.quality),
         }
         if request.reference_url:
             payload["input_reference"] = {"image_url": request.reference_url}
@@ -193,6 +222,31 @@ class VideoGenerationService:
         result.status = data.get("status") or "submitted"
         return result
 
+    def _refresh_openai(self, result_id: str, provider_job_id: str) -> dict[str, Any]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise VideoGenerationError("OPENAI_API_KEY is not configured")
+        headers = {"Authorization": f"Bearer {api_key}"}
+        response = requests.get(f"https://api.openai.com/v1/videos/{provider_job_id}", headers=headers, timeout=60)
+        if response.status_code >= 300:
+            raise VideoGenerationError(f"OpenAI video status failed ({response.status_code}): {response.text[:500]}")
+        data = response.json()
+        status = data.get("status") or "in_progress"
+        if status != "completed":
+            error = data.get("error")
+            return {"status": status, "error": error.get("message") if isinstance(error, dict) else error}
+        content = requests.get(
+            f"https://api.openai.com/v1/videos/{provider_job_id}/content",
+            headers=headers,
+            stream=True,
+            timeout=300,
+        )
+        if content.status_code >= 300:
+            raise VideoGenerationError(f"OpenAI video download failed ({content.status_code})")
+        output = self.output_root / f"{result_id}.mp4"
+        self._write_stream(content, output)
+        return {"status": "completed", "output_path": str(output), "output_url": None, "error": None}
+
     @staticmethod
     def _runway_ratio(ratio: str) -> str:
         return {"9:16": "720:1280", "16:9": "1280:720", "1:1": "1280:720"}[ratio]
@@ -201,7 +255,10 @@ class VideoGenerationService:
         api_key = os.getenv("RUNWAYML_API_SECRET")
         if not api_key:
             raise VideoGenerationError("RUNWAYML_API_SECRET is not configured")
-        model = os.getenv("AURA_RUNWAY_VIDEO_MODEL", "gen4.5")
+        if request.mode == "video_to_video":
+            model = os.getenv("AURA_RUNWAY_VIDEO_TO_VIDEO_MODEL", "aleph2")
+        else:
+            model = os.getenv("AURA_RUNWAY_VIDEO_MODEL", "gen4.5")
         result = self._base_result(request, "runway", model)
         endpoint = "text_to_video"
         payload: dict[str, Any] = {
@@ -234,6 +291,59 @@ class VideoGenerationService:
         result.provider_job_id = data.get("id")
         result.status = "submitted"
         return result
+
+    def _refresh_runway(self, result_id: str, provider_job_id: str) -> dict[str, Any]:
+        api_key = os.getenv("RUNWAYML_API_SECRET")
+        if not api_key:
+            raise VideoGenerationError("RUNWAYML_API_SECRET is not configured")
+        response = requests.get(
+            f"https://api.dev.runwayml.com/v1/tasks/{provider_job_id}",
+            headers={"Authorization": f"Bearer {api_key}", "X-Runway-Version": "2024-11-06"},
+            timeout=60,
+        )
+        if response.status_code >= 300:
+            raise VideoGenerationError(f"Runway task status failed ({response.status_code}): {response.text[:500]}")
+        data = response.json()
+        raw = (data.get("status") or "PENDING").upper()
+        status_map = {
+            "PENDING": "queued",
+            "THROTTLED": "queued",
+            "RUNNING": "in_progress",
+            "SUCCEEDED": "completed",
+            "FAILED": "failed",
+            "CANCELLED": "failed",
+        }
+        status = status_map.get(raw, raw.lower())
+        if status != "completed":
+            return {"status": status, "error": data.get("failure") or data.get("failureCode")}
+        outputs = data.get("output") or []
+        if not outputs:
+            raise VideoGenerationError("Runway completed without an output URL")
+        remote_url = outputs[0]
+        download = requests.get(remote_url, stream=True, timeout=300)
+        if download.status_code >= 300:
+            raise VideoGenerationError(f"Runway output download failed ({download.status_code})")
+        output = self.output_root / f"{result_id}.mp4"
+        self._write_stream(download, output)
+        return {"status": "completed", "output_path": str(output), "output_url": None, "error": None}
+
+    @staticmethod
+    def _write_stream(response: requests.Response, output: Path) -> None:
+        max_bytes = int(os.getenv("AURA_VIDEO_MAX_DOWNLOAD_BYTES", str(1024 * 1024 * 1024)))
+        total = 0
+        with output.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if not chunk:
+                    continue
+                total += len(chunk)
+                if total > max_bytes:
+                    handle.close()
+                    output.unlink(missing_ok=True)
+                    raise VideoGenerationError("Generated video exceeded the configured download size limit")
+                handle.write(chunk)
+        if not output.exists() or output.stat().st_size < 1024:
+            output.unlink(missing_ok=True)
+            raise VideoGenerationError("Downloaded video output was empty or invalid")
 
     @staticmethod
     def provenance_hash(result: VideoGenerationResult) -> str:
