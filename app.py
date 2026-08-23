@@ -9,6 +9,7 @@ from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
+from aura_music_studio.image_api import router as image_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
@@ -22,13 +23,18 @@ from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.video_api import router as video_router
+from aura_music_studio.visual_fx_api import router as visual_fx_router
+from aura_music_studio.visual_portal import router as visual_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
-# Modular advanced routers share the core app's authentication, plan enforcement and tenant isolation.
-# Brand routes are public static assets shared by every customer/owner portal.
+# Modular creative routers share the core app's authentication, plan enforcement and tenant isolation.
+# ESP command-center routes retain their separate ESP role gates and are not ordinary customer features.
 app.include_router(brand_router)
 app.include_router(vocal_router)
 app.include_router(video_router)
+app.include_router(image_router)
+app.include_router(visual_fx_router)
+app.include_router(visual_portal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
 app.include_router(esp_command_center_router)
