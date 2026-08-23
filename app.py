@@ -21,12 +21,14 @@ from aura_music_studio.source_detection_api import router as source_detection_ro
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
+from aura_music_studio.video_api import router as video_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular advanced routers share the core app's authentication, plan enforcement and tenant isolation.
 # Brand routes are public static assets shared by every customer/owner portal.
 app.include_router(brand_router)
 app.include_router(vocal_router)
+app.include_router(video_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
 app.include_router(esp_command_center_router)
