@@ -15,6 +15,7 @@ from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .engineering_api import router as engineering_router
+from .job_api import router as job_api_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
 from .mixer import render_session
@@ -36,7 +37,7 @@ from .web_portal import router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.7.2",
+    version="0.8.0",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
@@ -48,6 +49,7 @@ app.include_router(membership_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
 app.include_router(web_api_router)
+app.include_router(job_api_router)
 
 
 class ProducerRequest(BaseModel):
@@ -84,7 +86,9 @@ def health():
         "advanced_engineering_api": True,
         "controlled_web_gateway": True,
         "per_member_project_isolation": True,
-        "api_version": "0.7.2",
+        "async_production_jobs": True,
+        "signed_provenance_manifests": True,
+        "api_version": "0.8.0",
     }
 
 
@@ -131,6 +135,7 @@ def producer(project_name: str, request: ProducerRequest):
 
 @app.post("/projects/{project_name}/produce")
 def produce(project_name: str):
+    """Legacy synchronous renderer. Public UI should prefer /render-jobs."""
     return AuraPipeline(_project(project_name)).run()
 
 
