@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import shlex
+import shutil
 from pathlib import Path
 
-import requests
 import soundfile as sf
 
 from .acestep_api import AceStepClient
@@ -16,7 +16,7 @@ LEGACY_ACE_MODEL_ALIASES = {
 
 
 class RendererUnavailable(RuntimeError):
-    """Raised when no real-audio renderer can safely accept a production job."""
+    """Raised when no real-waveform renderer can safely accept a production job."""
 
 
 def _unwrap(payload):
@@ -28,7 +28,6 @@ def _unwrap(payload):
 
 
 def validate_real_audio(path: Path, *, minimum_seconds: float = 0.25) -> dict:
-    """Prove a renderer output is readable waveform audio before it enters the production pipeline."""
     path = Path(path)
     if not path.is_file() or path.stat().st_size < 1024:
         raise RuntimeError(f"Renderer output is missing or too small to be valid audio: {path}")
@@ -79,10 +78,17 @@ class AceStepRuntime:
         data = self._get("v1/stats") or {}
         return data if isinstance(data, dict) else {}
 
-    def initialize(self, *, model: str | None = None, slot: int = 1, init_llm: bool = False, lm_model: str | None = None) -> dict:
+    def initialize(
+        self,
+        *,
+        model: str | None = None,
+        slot: int = 1,
+        init_llm: bool = False,
+        lm_model: str | None = None,
+    ) -> dict:
         payload = {"slot": int(slot), "init_llm": bool(init_llm)}
         if model:
-            payload["model"] = LEGACY_ACE_MODEL_ALIASES.get(model, model)
+            payload["model"] = self._canonical_model(model)
         if lm_model:
             payload["lm_model_path"] = lm_model
         response = self.client.session.post(self.client.base_url + "v1/init", json=payload, timeout=900)
@@ -99,7 +105,13 @@ class AceStepRuntime:
         clean = str(name).strip()
         return LEGACY_ACE_MODEL_ALIASES.get(clean, clean)
 
-    def resolve_model(self, requested: str | None = None, *, task_type: str = "text2music", require_loaded: bool = True) -> str:
+    def resolve_model(
+        self,
+        requested: str | None = None,
+        *,
+        task_type: str = "text2music",
+        require_loaded: bool = True,
+    ) -> str:
         inventory = self.inventory()
         models = [row for row in inventory.get("models", []) if isinstance(row, dict) and row.get("name")]
         requested = self._canonical_model(requested)
@@ -116,12 +128,10 @@ class AceStepRuntime:
                     return requested
             raise RendererUnavailable(
                 f"ACE-Step model '{requested}' is not loaded with support for {task_type}. "
-                "Check /renderers/status or initialize the configured model slot."
+                "Check renderer status or initialize that model slot."
             )
-        if default:
-            for row in candidates:
-                if row["name"] == default:
-                    return default
+        if default and any(row["name"] == default for row in candidates):
+            return default
         if candidates:
             return str(candidates[0]["name"])
         raise RendererUnavailable(f"ACE-Step has no loaded model supporting {task_type}")
@@ -182,29 +192,30 @@ class AceStepRuntime:
             if task_type in {"lego", "extract", "complete"}
             else os.getenv("AURA_ACESTEP_FULL_MODEL", "acestep-v15-turbo")
         )
-        health = self.health()
-        if not health.get("reachable"):
-            raise RendererUnavailable("ACE-Step neural renderer is offline. Aura cannot accept a real full-song render until a GPU worker is available.")
+        if not self.health().get("reachable"):
+            raise RendererUnavailable(
+                "ACE-Step neural renderer is offline. Aura cannot accept this neural render until a GPU worker is available."
+            )
         return self.resolve_model(requested, task_type=task_type)
 
 
+def _command_status(env_var: str) -> dict:
+    raw = (os.getenv(env_var) or "").strip()
+    if not raw:
+        return {"configured": False, "ready": False}
+    try:
+        executable = shlex.split(raw)[0]
+    except Exception:
+        return {"configured": True, "ready": False, "error": "invalid command"}
+    ready = bool(Path(executable).expanduser().exists() or shutil.which(executable))
+    return {"configured": True, "ready": ready, "executable": Path(executable).name}
+
+
 def yue_status() -> dict:
-    """Report optional YuE readiness without making it a hidden dependency of the main site."""
-    command = (os.getenv("AURA_YUE_CMD") or "").strip()
-    if not command:
-        return {
-            "engine": "yue",
-            "configured": False,
-            "ready": False,
-            "role": "optional_high_vram_lyrics_first_renderer",
-            "license": "Apache-2.0 (official repository/model notice; deployment remains owner-controlled)",
-        }
-    executable = command.split()[0]
+    status = _command_status("AURA_YUE_CMD")
     return {
         "engine": "yue",
-        "configured": True,
-        "ready": bool(Path(executable).exists() or __import__("shutil").which(executable)),
-        "command_present": True,
+        **status,
         "role": "optional_high_vram_lyrics_first_renderer",
         "license": "Apache-2.0",
     }
@@ -213,18 +224,56 @@ def yue_status() -> dict:
 def real_renderer_status(*, include_stats: bool = True) -> dict:
     ace = AceStepRuntime().status(include_stats=include_stats)
     yue = yue_status()
-    local_commands = {
-        "local_acestep": bool(os.getenv("AURA_LOCAL_RENDER_CMD")),
-        "muser": bool(os.getenv("AURA_MUSER_CMD")),
-        "diffrhythm": bool(os.getenv("AURA_DIFFRHYTHM_CMD")),
-        "stable_audio": bool(os.getenv("AURA_STABLE_AUDIO_CMD")),
+    other = {
+        "local_acestep": _command_status("AURA_LOCAL_RENDER_CMD"),
+        "muser": _command_status("AURA_MUSER_CMD"),
+        "diffrhythm": _command_status("AURA_DIFFRHYTHM_CMD"),
+        "stable_audio": _command_status("AURA_STABLE_AUDIO_CMD"),
     }
+    hosted_optional = {
+        "eleven_music": bool(os.getenv("ELEVENLABS_API_KEY")),
+        "mureka": bool(os.getenv("MUREKA_API_KEY")),
+        "deapi": bool(os.getenv("DEAPI_API_KEY")),
+    }
+    any_local = any(item.get("ready") for item in other.values())
     return {
         "primary": "ace-step-1.5",
         "primary_ready": bool(ace.get("ready")),
         "ace_step": ace,
         "yue": yue,
-        "other_local_commands": local_commands,
-        "any_real_renderer_ready": bool(ace.get("ready") or yue.get("ready") or any(local_commands.values())),
+        "other_local_commands": other,
+        "hosted_optional": hosted_optional,
+        "any_real_renderer_ready": bool(
+            ace.get("ready") or yue.get("ready") or any_local or any(hosted_optional.values())
+        ),
         "final_audio_policy": "real_waveform_only",
     }
+
+
+def require_render_capacity(*, task_type: str = "text2music") -> dict:
+    """Fail before quota/queue admission when there is no executable real-audio path.
+
+    ACE-Step remains first priority. For full-song text generation only, an explicitly configured
+    executable local/YuE engine or existing hosted fallback may keep the service available.
+    Complete/Lego/Extract require ACE-Step Base because those workflows depend on its native task API.
+    """
+    try:
+        model = AceStepRuntime().require_ready(task_type=task_type)
+        return {"engine": "ace-step-1.5", "model": model, "task_type": task_type}
+    except RendererUnavailable as ace_error:
+        if task_type in {"complete", "lego", "extract"}:
+            raise
+        status = real_renderer_status(include_stats=False)
+        if status["yue"].get("ready"):
+            return {"engine": "yue", "task_type": task_type}
+        for name, item in status["other_local_commands"].items():
+            if item.get("ready"):
+                return {"engine": name, "task_type": task_type}
+        for name, ready in status["hosted_optional"].items():
+            if ready:
+                return {"engine": name, "task_type": task_type}
+        raise RendererUnavailable(
+            "No verified real-audio renderer is available. Start the ESP ACE-Step GPU worker, "
+            "an enrolled compatible compute node, or an explicitly configured fallback before rendering. "
+            f"ACE-Step status: {ace_error}"
+        ) from ace_error
