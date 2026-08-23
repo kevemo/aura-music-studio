@@ -50,19 +50,27 @@ class VideoGenerationError(RuntimeError):
 
 
 class VideoGenerationService:
-    """Model-agnostic real video generation for the Live Sound Studio.
+    """Model-agnostic real video generation for The Live Sound Studio.
 
     Auto-provider order:
-    1. local/self-hosted command (`AURA_VIDEO_RENDER_CMD`)
-    2. OpenAI video generation (`OPENAI_API_KEY`)
-    3. Runway (`RUNWAYML_API_SECRET`)
+    1. configured self-hosted/open model renderer
+    2. OpenAI video generation
+    3. Runway
 
-    The service never fabricates a successful video. Provider-hosted outputs are
-    copied into Live Sound Studio storage when a remote task completes.
+    Local renderer contracts support a general adapter plus explicit LTX-2, Wan 2.2,
+    HunyuanVideo and CogVideoX commands. The service never fabricates successful output,
+    never silently changes an aspect ratio, and stores remote results locally after completion.
     """
 
     VALID_MODES = {"text_to_video", "image_to_video", "video_to_video"}
     VALID_RATIOS = {"9:16", "16:9", "1:1"}
+    LOCAL_RENDERERS = (
+        ("custom", "AURA_VIDEO_RENDER_CMD", "AURA_VIDEO_MODEL", "local-video-renderer"),
+        ("ltx2", "AURA_LTX2_CMD", "AURA_LTX2_MODEL", "LTX-2.3"),
+        ("wan22", "AURA_WAN22_CMD", "AURA_WAN22_MODEL", "Wan2.2"),
+        ("hunyuanvideo", "AURA_HUNYUANVIDEO_CMD", "AURA_HUNYUANVIDEO_MODEL", "HunyuanVideo"),
+        ("cogvideox", "AURA_COGVIDEOX_CMD", "AURA_COGVIDEOX_MODEL", "CogVideoX"),
+    )
 
     def __init__(self, output_root: str | Path | None = None):
         self.output_root = Path(output_root or os.getenv("AURA_VIDEO_OUTPUT_DIR", "outputs/video"))
@@ -80,18 +88,12 @@ class VideoGenerationService:
                     return self._generate_openai(request)
                 if provider == "runway":
                     return self._generate_runway(request)
-            except Exception as exc:  # provider failover is deliberate
+            except Exception as exc:
                 errors.append(f"{provider}: {exc}")
         raise VideoGenerationError("No video renderer succeeded. " + " | ".join(errors))
 
     def refresh(self, *, result_id: str, provider: str, provider_job_id: str | None) -> dict[str, Any]:
         provider = (provider or "").strip().lower()
-        if not provider_job_id:
-            raise VideoGenerationError("This video job has no provider task ID")
-        if provider == "openai":
-            return self._refresh_openai(result_id, provider_job_id)
-        if provider == "runway":
-            return self._refresh_runway(result_id, provider_job_id)
         if provider == "local":
             output = self.output_root / f"{result_id}.mp4"
             return {
@@ -99,6 +101,12 @@ class VideoGenerationService:
                 "output_path": str(output) if output.exists() else None,
                 "error": None if output.exists() else "Local render output was not found",
             }
+        if not provider_job_id:
+            raise VideoGenerationError("This video job has no provider task ID")
+        if provider == "openai":
+            return self._refresh_openai(result_id, provider_job_id)
+        if provider == "runway":
+            return self._refresh_runway(result_id, provider_job_id)
         raise VideoGenerationError(f"Unknown video provider: {provider}")
 
     def _validate(self, request: VideoGenerationRequest) -> None:
@@ -113,6 +121,13 @@ class VideoGenerationService:
         if request.duration_seconds < 1 or request.duration_seconds > 60:
             raise VideoGenerationError("Video duration must be between 1 and 60 seconds")
 
+    def _configured_local_renderer(self) -> tuple[str, str, str] | None:
+        for name, command_env, model_env, default_model in self.LOCAL_RENDERERS:
+            command = (os.getenv(command_env) or "").strip()
+            if command:
+                return name, command, os.getenv(model_env, default_model)
+        return None
+
     def _provider_order(self, requested: str) -> list[str]:
         requested = (requested or "auto").strip().lower()
         if requested != "auto":
@@ -120,7 +135,7 @@ class VideoGenerationService:
                 raise VideoGenerationError(f"Unknown video provider: {requested}")
             return [requested]
         order: list[str] = []
-        if os.getenv("AURA_VIDEO_RENDER_CMD"):
+        if self._configured_local_renderer():
             order.append("local")
         if os.getenv("OPENAI_API_KEY"):
             order.append("openai")
@@ -128,7 +143,7 @@ class VideoGenerationService:
             order.append("runway")
         if not order:
             raise VideoGenerationError(
-                "No real video provider is configured. Set AURA_VIDEO_RENDER_CMD, OPENAI_API_KEY, or RUNWAYML_API_SECRET."
+                "No real video provider is configured. Configure a local video renderer, OPENAI_API_KEY, or RUNWAYML_API_SECRET."
             )
         return order
 
@@ -143,14 +158,17 @@ class VideoGenerationService:
         )
 
     def _generate_local(self, request: VideoGenerationRequest) -> VideoGenerationResult:
-        command = os.getenv("AURA_VIDEO_RENDER_CMD", "").strip()
-        if not command:
-            raise VideoGenerationError("AURA_VIDEO_RENDER_CMD is not configured")
-        result = self._base_result(request, "local", os.getenv("AURA_VIDEO_MODEL", "local-video-renderer"))
+        configured = self._configured_local_renderer()
+        if not configured:
+            raise VideoGenerationError("No self-hosted video renderer command is configured")
+        engine, command, model = configured
+        result = self._base_result(request, "local", model)
         output = self.output_root / f"{result.id}.mp4"
         env = os.environ.copy()
         env.update(
             {
+                "AURA_VIDEO_ENGINE": engine,
+                "AURA_VIDEO_MODEL": model,
                 "AURA_VIDEO_PROMPT": request.prompt,
                 "AURA_VIDEO_MODE": request.mode,
                 "AURA_VIDEO_RATIO": request.aspect_ratio,
@@ -160,6 +178,7 @@ class VideoGenerationService:
                 "AURA_VIDEO_NEGATIVE_PROMPT": request.negative_prompt or "",
                 "AURA_VIDEO_PROJECT_ID": request.project_id or "",
                 "AURA_VIDEO_QUALITY": request.quality,
+                "AURA_VIDEO_TARGET_PLATFORM": request.target_platform or "",
             }
         )
         completed = subprocess.run(
@@ -171,28 +190,27 @@ class VideoGenerationService:
             check=False,
         )
         if completed.returncode != 0:
-            raise VideoGenerationError(completed.stderr.strip() or "Local video renderer failed")
+            raise VideoGenerationError(completed.stderr.strip() or f"{engine} video renderer failed")
         if not output.exists() or output.stat().st_size < 1024:
-            raise VideoGenerationError("Local video renderer did not produce a valid MP4 output")
+            raise VideoGenerationError(f"{engine} video renderer did not produce a valid MP4 output")
         result.status = "completed"
         result.output_path = str(output)
         return result
 
     @staticmethod
     def _openai_size(ratio: str, quality: str) -> str:
+        if ratio == "1:1":
+            raise VideoGenerationError("OpenAI video currently exposes portrait and landscape sizes, not native square output")
         high = quality.strip().lower() in {"high", "professional", "pro"}
         if ratio == "9:16":
             return "1024x1792" if high else "720x1280"
-        if ratio == "16:9":
-            return "1792x1024" if high else "1280x720"
-        # OpenAI's current video endpoint does not expose a square output size.
-        return "1280x720"
+        return "1792x1024" if high else "1280x720"
 
     def _generate_openai(self, request: VideoGenerationRequest) -> VideoGenerationResult:
         if request.mode == "video_to_video":
-            raise VideoGenerationError("Use the dedicated OpenAI edit/remix workflow or another provider for video-to-video")
+            raise VideoGenerationError("OpenAI video-to-video is not enabled in this adapter; use Runway or a configured local renderer")
         if request.duration_seconds > 12:
-            raise VideoGenerationError("OpenAI single-shot video generation currently supports up to 12 seconds")
+            raise VideoGenerationError("OpenAI single-shot video generation adapter supports up to 12 seconds")
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise VideoGenerationError("OPENAI_API_KEY is not configured")
@@ -203,7 +221,7 @@ class VideoGenerationService:
         result = self._base_result(request, "openai", model)
         payload: dict[str, Any] = {
             "model": model,
-            "prompt": request.prompt,
+            "prompt": request.prompt + (f"\nAvoid: {request.negative_prompt}" if request.negative_prompt else ""),
             "seconds": min((4, 8, 12), key=lambda x: abs(x - request.duration_seconds)),
             "size": self._openai_size(request.aspect_ratio, request.quality),
         }
@@ -219,6 +237,8 @@ class VideoGenerationService:
             raise VideoGenerationError(f"OpenAI video request failed ({response.status_code}): {response.text[:500]}")
         data = response.json()
         result.provider_job_id = data.get("id")
+        if not result.provider_job_id:
+            raise VideoGenerationError("OpenAI video request returned no job id")
         result.status = data.get("status") or "submitted"
         return result
 
@@ -248,8 +268,15 @@ class VideoGenerationService:
         return {"status": "completed", "output_path": str(output), "output_url": None, "error": None}
 
     @staticmethod
-    def _runway_ratio(ratio: str) -> str:
-        return {"9:16": "720:1280", "16:9": "1280:720", "1:1": "1280:720"}[ratio]
+    def _runway_ratio(request: VideoGenerationRequest) -> str | None:
+        if request.mode == "video_to_video":
+            # Aleph 2.0 preserves source resolution; omitting ratio avoids falsely promising a crop.
+            return None
+        if request.mode == "text_to_video":
+            if request.aspect_ratio == "1:1":
+                raise VideoGenerationError("Runway Gen-4.5 text-to-video does not expose native square output")
+            return {"9:16": "720:1280", "16:9": "1280:720"}[request.aspect_ratio]
+        return {"9:16": "720:1280", "16:9": "1280:720", "1:1": "960:960"}[request.aspect_ratio]
 
     def _generate_runway(self, request: VideoGenerationRequest) -> VideoGenerationResult:
         api_key = os.getenv("RUNWAYML_API_SECRET")
@@ -257,24 +284,30 @@ class VideoGenerationService:
             raise VideoGenerationError("RUNWAYML_API_SECRET is not configured")
         if request.mode == "video_to_video":
             model = os.getenv("AURA_RUNWAY_VIDEO_TO_VIDEO_MODEL", "aleph2")
+            if request.duration_seconds < 2 or request.duration_seconds > 30:
+                raise VideoGenerationError("Runway Aleph 2.0 video-to-video expects a 2–30 second source clip")
         else:
             model = os.getenv("AURA_RUNWAY_VIDEO_MODEL", "gen4.5")
         result = self._base_result(request, "runway", model)
         endpoint = "text_to_video"
-        payload: dict[str, Any] = {
-            "model": model,
-            "promptText": request.prompt,
-            "ratio": self._runway_ratio(request.aspect_ratio),
-            "duration": request.duration_seconds,
-        }
+        prompt = request.prompt
         if request.negative_prompt:
-            payload["negativePrompt"] = request.negative_prompt
+            prompt += f"\nAvoid these visual elements: {request.negative_prompt}"
+        payload: dict[str, Any] = {"model": model, "promptText": prompt[:1000]}
+        ratio = self._runway_ratio(request)
+        if ratio:
+            payload["ratio"] = ratio
+
         if request.mode == "image_to_video":
             endpoint = "image_to_video"
             payload["promptImage"] = request.reference_url
+            payload["duration"] = request.duration_seconds
         elif request.mode == "video_to_video":
             endpoint = "video_to_video"
             payload["videoUri"] = request.reference_url
+        else:
+            payload["duration"] = request.duration_seconds
+
         response = requests.post(
             f"https://api.dev.runwayml.com/v1/{endpoint}",
             headers={
@@ -289,6 +322,8 @@ class VideoGenerationService:
             raise VideoGenerationError(f"Runway video request failed ({response.status_code}): {response.text[:500]}")
         data = response.json()
         result.provider_job_id = data.get("id")
+        if not result.provider_job_id:
+            raise VideoGenerationError("Runway video request returned no task id")
         result.status = "submitted"
         return result
 
