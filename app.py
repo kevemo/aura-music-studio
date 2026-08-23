@@ -11,6 +11,7 @@ from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.output_api import router as output_router
+from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -25,7 +26,7 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular advanced routers share the core app's authentication, plan enforcement and tenant isolation.
-# Brand/discovery routes are public. Private Studio APIs remain behind membership middleware.
+# Brand/discovery routes are public. Owner backup routes perform their own owner-cookie check.
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(vocal_router)
@@ -34,6 +35,7 @@ app.include_router(engineering_job_router)
 app.include_router(esp_command_center_router)
 app.include_router(recording_router)
 app.include_router(output_router)
+app.include_router(owner_backup_router)
 app.include_router(privacy_router)
 app.include_router(production_portal_router)
 app.include_router(production_suite_router)
