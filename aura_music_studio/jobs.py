@@ -120,6 +120,7 @@ class StudioJobQueue:
             "oldest_queued_at": oldest["created_at"] if oldest else None,
             "backend": "sqlite_wal",
             "payload_jobs": True,
+            "remote_node_leases": True,
         }
 
     def requeue_stale(self, *, stale_after_seconds: int = 10_800, max_attempts: int = 3) -> int:
@@ -139,25 +140,42 @@ class StudioJobQueue:
             ).rowcount
         return int(recovered + failed)
 
-    def claim_next(self, worker_id: str) -> dict | None:
-        self.requeue_stale()
+    def _claim_query(self, worker_id: str, where_sql: str = "", params: tuple = ()) -> dict | None:
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
-                """SELECT * FROM studio_jobs WHERE status='queued'
-                   ORDER BY priority DESC, created_at ASC LIMIT 1"""
+                f"""SELECT * FROM studio_jobs WHERE status='queued' {where_sql}
+                    ORDER BY priority DESC, created_at ASC LIMIT 1""",
+                params,
             ).fetchone()
             if not row:
                 con.commit()
                 return None
-            con.execute(
+            cur = con.execute(
                 """UPDATE studio_jobs SET status='running', started_at=?, worker_id=?, attempts=attempts+1
                    WHERE id=? AND status='queued'""",
                 (_now(), worker_id, row["id"]),
             )
+            if cur.rowcount != 1:
+                con.rollback()
+                return None
             claimed = con.execute("SELECT * FROM studio_jobs WHERE id=?", (row["id"],)).fetchone()
             con.commit()
         return dict(claimed) if claimed else None
+
+    def claim_next(self, worker_id: str) -> dict | None:
+        self.requeue_stale()
+        return self._claim_query(worker_id)
+
+    def claim_next_for_job_types(self, worker_id: str, job_types: list[str]) -> dict | None:
+        """Atomically lease only jobs this remote ESP node can execute."""
+        clean = sorted({str(x).strip() for x in job_types if str(x).strip()})
+        if not clean:
+            return None
+        stale = max(60, int(__import__("os").getenv("LSS_NODE_LEASE_SECONDS", "3600")))
+        self.requeue_stale(stale_after_seconds=stale)
+        placeholders = ",".join("?" for _ in clean)
+        return self._claim_query(worker_id, f"AND job_type IN ({placeholders})", tuple(clean))
 
     def complete(self, job_id: str, result: dict) -> None:
         with self._connect() as con:
@@ -166,12 +184,31 @@ class StudioJobQueue:
                 (_now(), json.dumps(result, default=str), job_id),
             )
 
+    def complete_owned(self, job_id: str, worker_id: str, result: dict) -> bool:
+        """Complete a remotely leased job only when the submitting node still owns its lease."""
+        with self._connect() as con:
+            cur = con.execute(
+                """UPDATE studio_jobs SET status='completed', completed_at=?, result_json=?, error=NULL
+                   WHERE id=? AND status='running' AND worker_id=?""",
+                (_now(), json.dumps(result, default=str), job_id, worker_id),
+            )
+        return cur.rowcount == 1
+
     def fail(self, job_id: str, error: str) -> None:
         with self._connect() as con:
             con.execute(
                 "UPDATE studio_jobs SET status='failed', completed_at=?, error=? WHERE id=?",
                 (_now(), error[:8000], job_id),
             )
+
+    def fail_owned(self, job_id: str, worker_id: str, error: str) -> bool:
+        with self._connect() as con:
+            cur = con.execute(
+                """UPDATE studio_jobs SET status='failed', completed_at=?, error=?
+                   WHERE id=? AND status='running' AND worker_id=?""",
+                (_now(), error[:8000], job_id, worker_id),
+            )
+        return cur.rowcount == 1
 
     def cancel_queued(self, job_id: str, user_id: str) -> bool:
         with self._connect() as con:
