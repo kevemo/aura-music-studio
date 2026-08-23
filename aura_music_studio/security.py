@@ -10,6 +10,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .aura_avatar_bootstrap import avatar_bootstrap_html
+
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 AUTH_RATE_PATHS = {"/auth/login", "/auth/signup", "/owner/login"}
 
@@ -67,12 +69,19 @@ def _show_aura_entry(path: str) -> bool:
         "/visual-studio",
         "/history",
         "/take-manager",
+        "/aura",
     }
     return path in direct or path.startswith("/esp")
 
 
+def _show_embodied_aura(path: str) -> bool:
+    # Only authenticated product surfaces receive the persistent embodied interface.
+    # Public marketing/auth pages stay lightweight and do not load the 3D runtime.
+    return _show_aura_entry(path)
+
+
 async def _inject_esp_brand(response, path: str):
-    """Attach the shared ESP theme/favicon and persistent Aura entry to rendered HTML."""
+    """Attach the shared ESP theme/favicon, Aura entry and embodied companion runtime."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -109,6 +118,8 @@ async def _inject_esp_brand(response, path: str):
             "color:#fff;padding:11px 16px;border-radius:999px;font-weight:900;box-shadow:0 10px 35px #0009,0 0 28px #a64bd355;\">"
             "✨ Aura</a>"
         )
+    if _show_embodied_aura(path) and "aura-avatar-runtime" not in text:
+        extras += avatar_bootstrap_html()
     if extras:
         text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
@@ -156,7 +167,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
             "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
         )
         response.headers.setdefault("Cache-Control", "no-store" if path.startswith(("/auth", "/owner", "/dashboard")) else "private")
 
