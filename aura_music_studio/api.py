@@ -23,6 +23,7 @@ from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .rights import RightsLedger
 from .samples import SampleRequest, analyze_sample, generate_sample, make_loop
+from .security import StudioSecurityMiddleware
 from .separation import StemSeparator
 from .session import StudioSession
 from .speech_api import router as speech_api_router
@@ -37,10 +38,13 @@ from .web_portal import router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.8.0",
+    version="0.8.1",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
+# Membership middleware establishes the authenticated member/tenant context. Security middleware
+# is added last so it is the outer public-web envelope around every route.
 app.add_middleware(MembershipAccessMiddleware)
+app.add_middleware(StudioSecurityMiddleware)
 app.include_router(web_portal_router)
 app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
@@ -88,7 +92,10 @@ def health():
         "per_member_project_isolation": True,
         "async_production_jobs": True,
         "signed_provenance_manifests": True,
-        "api_version": "0.8.0",
+        "security_headers": True,
+        "cookie_write_origin_protection": True,
+        "auth_rate_limiting": True,
+        "api_version": "0.8.1",
     }
 
 
@@ -328,13 +335,15 @@ def output_files(project_name: str):
     out = project / "output"
     if not out.exists():
         return []
-    return [str(p.relative_to(project)) for p in sorted(out.rglob("*")) if p.is_file()]
+    return [str(p.relative_to(out)) for p in sorted(out.rglob("*")) if p.is_file()]
 
 
 @app.get("/projects/{project_name}/download")
-def download(project_name: str, path: str):
+def legacy_download(project_name: str, path: str):
+    """Legacy output-only download route. New clients should use /outputs/file/... ."""
     project = _project(project_name)
-    target = (project / path).resolve()
-    if project not in target.parents or not target.is_file():
-        raise HTTPException(404, "File not found")
+    output_root = (project / "output").resolve()
+    target = (output_root / path).resolve()
+    if output_root not in target.parents or not target.is_file():
+        raise HTTPException(404, "Output file not found")
     return FileResponse(target)
