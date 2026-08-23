@@ -45,6 +45,7 @@ PUBLIC_EXACT = {
 PUBLIC_PREFIXES = (
     "/auth/",
     "/admin/",
+    "/owner",
 )
 
 
