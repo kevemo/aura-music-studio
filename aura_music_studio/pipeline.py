@@ -16,6 +16,7 @@ from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 from .provenance import build_provenance, write_provenance
 from .quality import evaluate_audio
+from .renderer_runtime import probe_real_audio, require_live_renderer
 from .renderers import render_with_failover
 
 
@@ -50,6 +51,15 @@ class AuraPipeline:
             if guide:
                 status["guide"] = str(guide)
                 status["guide_note"] = "Control/reference only; never exported as finished music."
+
+            status["stage"] = "renderer_preflight"
+            self._write_status(status)
+            renderer_preflight = require_live_renderer()
+            status["renderer_preflight"] = {
+                "final_master_renderer_ready": renderer_preflight["final_master_renderer_ready"],
+                "self_hosted_ready": renderer_preflight["self_hosted_ready"],
+                "active_primary": renderer_preflight["active_primary"],
+            }
 
             status["stage"] = "real_audio_render_and_qc"
             self._write_status(status)
@@ -169,6 +179,9 @@ class AuraPipeline:
     def _evaluate_final_real_audio(self, path: Path, plan) -> dict:
         if path.name == "score_guide.wav" or "score_guide" in str(path):
             raise RuntimeError("Aura refused a symbolic guide at the final-audio quality stage.")
+        probe = probe_real_audio(path, minimum_seconds=1.0)
+        if not probe.valid:
+            raise RuntimeError(f"Final renderer output is not valid real audio: {probe.error}")
         qc = evaluate_audio(path, target_duration=self._target_duration(plan), target_bpm=plan.tempo_bpm)
         if not qc["passes_basic_integrity"]:
             raise RuntimeError(f"Final real-audio mix failed integrity QC: {qc}")
@@ -191,6 +204,20 @@ class AuraPipeline:
                     )
                 if render.audio_path.name == "score_guide.wav" or "score_guide" in str(render.audio_path):
                     raise RuntimeError("Aura refused to export the score/MIDI guide as finished music.")
+                probe = probe_real_audio(render.audio_path, minimum_seconds=1.0)
+                if not probe.valid:
+                    raise RuntimeError(
+                        f"Aura refused renderer {render.renderer}: output is not decodable real audio ({probe.error})."
+                    )
+                render.metadata = {
+                    **render.metadata,
+                    "audio_probe": {
+                        "duration_seconds": probe.duration_seconds,
+                        "sample_rate": probe.sample_rate,
+                        "channels": probe.channels,
+                        "valid": True,
+                    },
+                }
 
             take_path = takes_dir / f"take_{index:02d}{render.audio_path.suffix.lower()}"
             shutil.copy2(render.audio_path, take_path)
