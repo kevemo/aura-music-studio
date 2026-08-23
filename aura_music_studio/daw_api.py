@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from urllib.parse import quote
 
 import soundfile as sf
 from fastapi import APIRouter, HTTPException, Request
@@ -379,9 +380,15 @@ def render_daw_mix(project_name: str, request: Request):
         render_session(session, project, output, project / "work" / "daw_mix")
     except Exception as exc:
         raise HTTPException(500, f"DAW render failed: {type(exc).__name__}: {exc}") from exc
+    relative_output = output.relative_to(project / "output").as_posix()
+    encoded_project = quote(project_name, safe="")
+    encoded_output = quote(relative_output, safe="/")
     return {
         "rendered": True,
-        "path": str(output.relative_to(project)),
+        "path": relative_output,
+        "stream_url": f"/projects/{encoded_project}/outputs/stream/{encoded_output}",
+        "download_url": f"/projects/{encoded_project}/outputs/file/{encoded_output}",
         "sample_rate": session.sample_rate,
         "real_audio_only": True,
+        "storage_path_exposed": False,
     }
