@@ -21,7 +21,7 @@ def test_backup_runtime_settings_override_environment_without_restart(tmp_path, 
     assert scheduler.enabled is False
     assert scheduler.interval_hours == 24
 
-    settings = StudioSettings(scheduler.manager.store)
+    settings = StudioSettings()
     settings.update_many({
         "auto_backup_enabled": True,
         "auto_backup_interval_hours": 6,
@@ -49,15 +49,17 @@ def test_backup_runtime_settings_reject_out_of_range_values(tmp_path, monkeypatc
         settings.set("smtp_password", "must never be stored here")
 
 
-def test_backup_status_contains_no_encryption_private_key(tmp_path, monkeypatch):
+def test_backup_status_contains_no_encryption_recipient_or_private_key(tmp_path, monkeypatch):
+    status_path = tmp_path / "backup-status.json"
     monkeypatch.setenv("LSS_DB_PATH", str(tmp_path / "studio.sqlite3"))
     monkeypatch.setenv("AURA_PROJECTS_ROOT", str(tmp_path / "projects"))
     monkeypatch.setenv("LSS_BACKUP_DIR", str(tmp_path / "backups"))
-    monkeypatch.setenv("LSS_BACKUP_STATUS", str(tmp_path / "backup-status.json"))
+    monkeypatch.setenv("LSS_BACKUP_STATUS", str(status_path))
     monkeypatch.setenv("LSS_BACKUP_AGE_RECIPIENT", "age1publicrecipient")
     scheduler = BackupScheduler()
     scheduler._status(last_result={"ran": False, "reason": "test"})
-    payload = json.loads(Path(monkeypatch.getenv("LSS_BACKUP_STATUS") if hasattr(monkeypatch, "getenv") else str(tmp_path / "backup-status.json")).read_text())
+    payload = json.loads(status_path.read_text(encoding="utf-8"))
     text = json.dumps(payload)
     assert "age1publicrecipient" not in text
-    assert "private" not in text.lower()
+    assert "identity" not in text.lower()
+    assert payload["encrypted_when_recipient_configured"] is True
