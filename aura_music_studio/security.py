@@ -80,9 +80,13 @@ async def _inject_esp_brand(response, path: str):
         else:
             text = head + text
 
+    extras = ""
     if path in {"/studio", "/production-suite"} and "esp-history-fab" not in text:
-        history = "<a class='esp-history-fab' href='/history' title='Project history and undo'>↶ Project History</a>"
-        text = text.replace("</body>", history + "</body>", 1) if "</body>" in text else text + history
+        extras += "<a class='esp-history-fab' href='/history' title='Project history and undo'>↶ Project History</a>"
+    if path == "/production-suite" and "href='/take-manager'" not in text:
+        extras += "<a class='esp-history-fab' style='bottom:66px' href='/take-manager' title='Audition and select generated performances'>🎚 Take Manager</a>"
+    if extras:
+        text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
     headers = {
         key: value for key, value in response.headers.items()
