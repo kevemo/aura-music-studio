@@ -14,11 +14,16 @@ def _db(value, default=0.0) -> float:
         return default
 
 
+def _clip(value, low, high):
+    return max(low, min(float(value), high))
+
+
 def compile_ffmpeg_chain(effects: list[Effect]) -> str:
     """Compile Aura track effects into a real-audio ffmpeg filter chain.
 
-    This processes waveform audio only. MIDI/symbolic data never enters this render path.
-    Unsupported/custom effects stay in session metadata until a configured plugin host renders them.
+    Effects that can be represented safely with stock FFmpeg filters are rendered here. More
+    sophisticated plugin/model processors can remain in session metadata and be routed through a
+    configured plugin host without ever turning symbolic/MIDI data into a final master.
     """
     chain: list[str] = []
     for fx in effects:
@@ -27,6 +32,10 @@ def compile_ffmpeg_chain(effects: list[Effect]) -> str:
         p = fx.parameters
         if fx.type == "gain":
             chain.append(f"volume={_db(p.get('db'))}dB")
+        elif fx.type == "highpass":
+            chain.append(f"highpass=f={_clip(p.get('hz', 70), 20, 1000):.2f}")
+        elif fx.type == "lowpass":
+            chain.append(f"lowpass=f={_clip(p.get('hz', 18000), 1000, 22000):.2f}")
         elif fx.type == "eq":
             if p.get("low_db") is not None:
                 chain.append(f"bass=g={_db(p.get('low_db'))}:f={float(p.get('low_hz', 120))}:w=0.7")
@@ -47,24 +56,56 @@ def compile_ffmpeg_chain(effects: list[Effect]) -> str:
             chain.append(f"alimiter=limit={limit:.5f}:attack={float(p.get('attack_ms', 5))}:release={float(p.get('release_ms', 50))}")
         elif fx.type == "gate":
             chain.append(f"agate=threshold={float(p.get('threshold_db', -45))}dB:ratio={float(p.get('ratio', 8))}:attack={float(p.get('attack_ms', 10))}:release={float(p.get('release_ms', 120))}")
+        elif fx.type == "deesser":
+            # Portable de-essing approximation: narrow upper-presence attenuation.
+            hz = _clip(p.get("frequency_hz", 6500), 3500, 11000)
+            reduction = -abs(_clip(p.get("reduction_db", 4.0), 0, 12))
+            chain.append(f"equalizer=f={hz:.1f}:width_type=o:width=1.2:g={reduction:.2f}")
         elif fx.type == "reverb":
-            # Compact room-style convolution-free fallback.
-            delay = int(float(p.get("predelay_ms", 30)))
-            decay = max(0.05, min(float(p.get("mix", .18)), .8))
+            delay = int(_clip(p.get("predelay_ms", 30), 1, 500))
+            decay = _clip(p.get("mix", .18), .01, .8)
             chain.append(f"aecho=0.8:0.7:{delay}|{delay*2}:{decay}|{decay*.6}")
         elif fx.type == "delay":
-            ms = int(float(p.get("delay_ms", 240)))
-            feedback = max(0.0, min(float(p.get("feedback", .25)), .9))
+            ms = int(_clip(p.get("delay_ms", 240), 1, 2000))
+            feedback = _clip(p.get("feedback", .25), 0.0, .9)
             chain.append(f"aecho=0.8:0.7:{ms}:{feedback}")
-        elif fx.type == "distortion":
-            drive = max(1.0, float(p.get("drive", 2.0)))
+        elif fx.type in {"distortion", "saturation"}:
+            drive = _clip(p.get("drive", 2.0 if fx.type == "distortion" else 1.35), 1.0, 12.0)
             chain.append(f"asoftclip=type=tanh:threshold={1.0/drive:.4f}")
+        elif fx.type == "exciter":
+            amount = _clip(p.get("amount", 2.0), 0.0, 8.0)
+            chain.append(f"treble=g={amount:.2f}:f={float(p.get('frequency_hz', 7000))}:w=0.5")
+        elif fx.type == "chorus":
+            delay = _clip(p.get("delay_ms", 18), 5, 40)
+            decay = _clip(p.get("decay", .35), .05, .9)
+            speed = _clip(p.get("rate_hz", .8), .1, 5)
+            depth = _clip(p.get("depth", 2.0), .1, 10)
+            chain.append(f"chorus=0.7:0.9:{delay:.2f}:{decay:.3f}:{speed:.3f}:{depth:.3f}")
+        elif fx.type == "flanger":
+            delay = _clip(p.get("delay_ms", 2.0), 0, 30)
+            depth = _clip(p.get("depth_ms", 2.0), 0, 10)
+            regen = _clip(p.get("feedback", 0), -95, 95)
+            speed = _clip(p.get("rate_hz", .5), .1, 10)
+            chain.append(f"flanger=delay={delay:.2f}:depth={depth:.2f}:regen={regen:.2f}:speed={speed:.3f}")
+        elif fx.type == "phaser":
+            speed = _clip(p.get("rate_hz", .5), .1, 2)
+            decay = _clip(p.get("decay", .4), .0, .99)
+            chain.append(f"aphaser=in_gain=0.7:out_gain=0.9:delay=3:decay={decay:.3f}:speed={speed:.3f}:type=t")
+        elif fx.type == "tremolo":
+            speed = _clip(p.get("rate_hz", 5.0), .1, 20)
+            depth = _clip(p.get("depth", .5), 0.0, 1.0)
+            chain.append(f"tremolo=f={speed:.3f}:d={depth:.3f}")
         elif fx.type == "pitch_shift":
-            semitones = float(p.get("semitones", 0))
+            semitones = _clip(p.get("semitones", 0), -12, 12)
             ratio = 2 ** (semitones / 12.0)
             chain.append(f"asetrate=48000*{ratio:.8f},aresample=48000,atempo={1/ratio:.8f}")
+        elif fx.type == "doubler":
+            ms = int(_clip(p.get("delay_ms", 22), 8, 45))
+            mix = _clip(p.get("mix", .18), .02, .5)
+            chain.append(f"aecho=0.9:0.8:{ms}:{mix}")
+            chain.append(f"stereotools=mlev=1:slev={_clip(p.get('width', 1.25), 1.0, 2.0):.3f}")
         elif fx.type == "stereo_width":
-            width = max(0.0, min(float(p.get("width", 1.0)), 2.0))
+            width = _clip(p.get("width", 1.0), 0.0, 2.0)
             chain.append(f"stereotools=mlev=1:slev={width}")
     return ",".join(chain)
 
