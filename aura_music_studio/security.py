@@ -109,6 +109,8 @@ async def _inject_esp_brand(response, path: str):
     if path in {"/studio", "/production-suite"} and "href='/recording-studio'" not in text:
         recording_bottom = "66px" if path == "/studio" else "114px"
         extras += f"<a class='esp-history-fab' style='bottom:{recording_bottom}' href='/recording-studio' title='Record vocals and instruments directly'>🎙 Recording Studio</a>"
+    if path == "/owner/dashboard" and "href='/owner/compute-nodes'" not in text:
+        extras += "<a class='esp-history-fab' href='/owner/compute-nodes' title='Manage ESP compute machines'>🖥 Compute Nodes</a>"
     if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:
         extras += "<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js').catch(()=>{}));}</script>"
     if extras:
@@ -160,7 +162,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
-        if path.startswith(("/auth", "/owner", "/dashboard", "/membership")):
+        if path.startswith(("/auth", "/owner", "/dashboard", "/membership", "/node-coordinator")):
             response.headers.setdefault("Cache-Control", "no-store")
         elif path in PUBLIC_PWA_PATHS or path in {"/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/service-worker.js"}:
             response.headers.setdefault("Cache-Control", "public, max-age=300")
