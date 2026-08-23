@@ -57,6 +57,8 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
+    if path == "/aura" or path.startswith("/api/aura/"):
+        return PRODUCER_CHAT
     # Capability endpoints remain readable to signed-in Free members so the UI can explain upgrades.
     if path.startswith("/api/video/") and path != "/api/video/capabilities":
         return VIDEO_GENERATION
@@ -143,7 +145,7 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
             if path.endswith("/download"):
                 # Generated video/image downloads are already bound to their generation entitlement
                 # and tenant-specific job records. Audio/stem downloads use format-specific rules.
-                if path.startswith("/api/video/") or path.startswith("/api/image/"):
+                if path.startswith("/api/video/") or path.startswith("/api/image/") or path.startswith("/api/aura/attachments/"):
                     return await call_next(request)
                 requested = (request.query_params.get("path") or "").lower()
                 if requested.endswith(".mp3"):
