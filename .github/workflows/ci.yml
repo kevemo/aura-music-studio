@@ -28,6 +28,17 @@ jobs:
           cp .env.example .env
           docker compose config -q
           docker compose --profile public config -q
+      - name: ESP compute-node Compose validation
+        run: |
+          cat > .env.node <<'EOF'
+          LSS_NODE_COORDINATOR_URL=http://127.0.0.1:8000
+          LSS_NODE_ID=ci-node
+          LSS_NODE_SECRET=ci-placeholder-not-a-production-secret
+          LSS_NODE_NAME=CI Node
+          LSS_NODE_CAPABILITIES=music_generation,engineering
+          EOF
+          docker compose -f docker-compose.node.yml config -q
+          rm -f .env.node
       - name: Caddy configuration validation
         run: |
           docker run --rm \
