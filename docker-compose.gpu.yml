@@ -1,0 +1,48 @@
+services:
+  live-sound-studio:
+    environment:
+      AURA_ACESTEP_API_URL: http://ace-step:8001
+      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
+      AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
+      AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+    depends_on:
+      ace-step:
+        condition: service_healthy
+
+  ace-step:
+    # Pinned to the ACE-Step 1.5 upstream commit verified by ESP during this build.
+    # Update deliberately after reviewing upstream changes/licences rather than tracking `main` blindly.
+    build:
+      context: https://github.com/ace-step/ACE-Step-1.5.git#14c0211d5a0653b0f63e27686f4c3f151b4d8629
+      dockerfile: Dockerfile
+    container_name: live-sound-studio-ace-step
+    restart: unless-stopped
+    gpus: all
+    environment:
+      ACESTEP_MODE: api
+      ACESTEP_API_HOST: 0.0.0.0
+      ACESTEP_API_PORT: 8001
+      ACESTEP_INIT_SERVICE: "true"
+      ACESTEP_CONFIG_PATH: acestep-v15-xl-turbo
+      ACESTEP_LM_MODEL_PATH: acestep-5Hz-lm-4B
+      ACESTEP_LLM_BACKEND: pt
+      HF_HOME: /root/.cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
+    expose:
+      - "8001"
+    volumes:
+      - ace_step_checkpoints:/app/checkpoints
+      - ace_step_outputs:/app/output
+      - ace_step_hf_cache:/root/.cache/huggingface
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 8
+      start_period: 180s
+    # Deliberately no public host port. Only The Live Sound Studio service calls this worker.
+
+volumes:
+  ace_step_checkpoints:
+  ace_step_outputs:
+  ace_step_hf_cache:
