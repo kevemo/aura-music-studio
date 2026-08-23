@@ -35,11 +35,12 @@ from .request_context import reset_current_user_id, set_current_user_id
 PUBLIC_EXACT = {
     "/", "/pricing", "/signup", "/signin", "/signout", "/dashboard", "/studio",
     "/health", "/plans", "/membership/review", "/membership/decision",
-    "/membership/payment", "/docs", "/redoc", "/openapi.json",
+    "/membership/payment", "/docs", "/redoc", "/openapi.json", "/favicon.webp",
 }
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
 # an active paid/free entitlement, so pending/past-due members can still export/delete their data.
-PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/")
+# Brand assets must also remain public so unauthenticated landing/auth pages can load the ESP identity.
+PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/")
 
 
 def _token(request: Request) -> str | None:
