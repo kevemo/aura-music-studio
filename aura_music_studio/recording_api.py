@@ -6,10 +6,22 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from .plans import UPLOAD_AUDIO
-from .recording_core import ingest_recording, normalize_capture, safe_recording_name, validate_recording_role
+from .recording_core import (
+    ALLOWED_RECORDING_ROLES,
+    ingest_recording,
+    normalize_capture,
+    safe_recording_name,
+    validate_recording_role,
+)
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Studio Recording"])
+
+# Backward-compatible public aliases retained for existing integrations/tests.
+# The canonical definitions now live in recording_core so the standalone recorder
+# and the in-DAW recorder share exactly the same validation and filename contract.
+ALLOWED_ROLES = ALLOWED_RECORDING_ROLES
+_safe_name = safe_recording_name
 
 
 def _member(request: Request):
