@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass
 from typing import Literal
 
 import requests
@@ -13,7 +12,8 @@ from pydantic import BaseModel, Field
 class ProducerAction(BaseModel):
     action: Literal[
         "generate_layer", "replace_region", "extend", "remix", "separate_stems", "create_harmony",
-        "master", "change_mix", "add_effect", "analyze", "create_song", "unknown"
+        "master", "change_mix", "add_effect", "analyze", "create_song", "clean_audio", "spatialize",
+        "amp_tone", "video_sync", "comp_takes", "pitch_timing", "export", "unknown"
     ] = "unknown"
     track_role: str | None = None
     start_seconds: float | None = None
@@ -34,7 +34,7 @@ TRACK_WORDS = {
     "drum": "drums", "drums": "drums", "bass": "bass", "guitar": "guitar", "piano": "piano",
     "keys": "keyboard", "keyboard": "keyboard", "string": "strings", "strings": "strings",
     "vocal": "vocals", "vocals": "vocals", "harmony": "backing_vocals", "harmonies": "backing_vocals",
-    "percussion": "percussion", "synth": "synth",
+    "percussion": "percussion", "synth": "synth", "choir": "backing_vocals",
 }
 
 
@@ -47,7 +47,6 @@ def _track_from_text(text: str) -> str | None:
 
 
 def _parse_time_range(text: str) -> tuple[float | None, float | None]:
-    # Supports e.g. 1:20-1:35, 80-95 seconds, from 80 to 95 seconds.
     def sec(token: str) -> float:
         if ":" in token:
             m, s = token.split(":", 1)
@@ -74,12 +73,26 @@ def rule_based_plan(request: str) -> ProducerPlan:
         actions.append(ProducerAction(action="separate_stems", track_role=track, prompt=text))
     elif any(x in lower for x in ["harmony", "harmonies", "backing vocal", "choir"]):
         actions.append(ProducerAction(action="create_harmony", track_role="backing_vocals", prompt=text))
+    elif any(x in lower for x in ["denoise", "de-noise", "clean vocal", "clean audio", "remove noise", "remove hum", "repair audio", "spectral repair"]):
+        actions.append(ProducerAction(action="clean_audio", track_role=track, prompt=text))
+    elif any(x in lower for x in ["spatial", "binaural", "ambisonic", "3d audio", "3d mix", "surround"]):
+        actions.append(ProducerAction(action="spatialize", track_role=track, prompt=text))
+    elif any(x in lower for x in ["amp tone", "guitar amp", "tube amp", "cab tone", "neural amp"]):
+        actions.append(ProducerAction(action="amp_tone", track_role=track or "guitar", prompt=text))
+    elif any(x in lower for x in ["sync to video", "score this video", "music to video", "hit the cuts", "scene cuts"]):
+        actions.append(ProducerAction(action="video_sync", prompt=text))
+    elif any(x in lower for x in ["comp takes", "comp the vocal", "best takes", "take lanes"]):
+        actions.append(ProducerAction(action="comp_takes", track_role=track, prompt=text))
+    elif any(x in lower for x in ["fix timing", "quantize audio", "tighten timing", "pitch correct", "tune vocal", "autotune"]):
+        actions.append(ProducerAction(action="pitch_timing", track_role=track, prompt=text))
     elif any(x in lower for x in ["master", "louder", "streaming level", "reference master"]):
         actions.append(ProducerAction(action="master", prompt=text))
     elif any(x in lower for x in ["remix", "restyle", "change genre"]):
         actions.append(ProducerAction(action="remix", prompt=text))
     elif any(x in lower for x in ["add reverb", "add delay", "compress", "eq ", "distortion", "effect"]):
         actions.append(ProducerAction(action="add_effect", track_role=track, prompt=text))
+    elif any(x in lower for x in ["export", "download stems", "bandlab pack", "bounce", "render wav", "render flac"]):
+        actions.append(ProducerAction(action="export", track_role=track, prompt=text))
     elif any(x in lower for x in ["make a song", "create a song", "new song", "write a song"]):
         actions.append(ProducerAction(action="create_song", prompt=text))
     elif any(x in lower for x in ["add ", "generate ", "make the chorus", "make verse", "bigger chorus", "more guitar", "more drums"]):
@@ -90,19 +103,18 @@ def rule_based_plan(request: str) -> ProducerPlan:
     needs = any(a.action == "replace_region" and (a.start_seconds is None or a.end_seconds is None) for a in actions)
     return ProducerPlan(
         user_request=text,
-        interpretation="Aura mapped the request into non-destructive studio operations.",
+        interpretation="Aura mapped the request into non-destructive Live Sound Studio operations.",
         actions=actions,
         needs_confirmation=needs,
-        notes=["Final audio generation must use a neural/recorded/hybrid audio engine; symbolic guides are control data only."],
+        notes=[
+            "Final audio generation must use a neural, recorded or hybrid waveform engine; symbolic guides are control data only.",
+            "Voice conversion/duplication requires an approved consent record and must never bypass the studio rights ledger.",
+        ],
     )
 
 
 def llm_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
-    """Optional external LLM planner. Falls back to the deterministic producer grammar.
-
-    Configure AURA_PRODUCER_LLM_URL and optionally AURA_PRODUCER_LLM_KEY. The endpoint must return
-    JSON matching ProducerPlan. This keeps Aura model-agnostic and avoids hard-wiring one chat provider.
-    """
+    """Optional model planner with deterministic offline fallback."""
     url = os.getenv("AURA_PRODUCER_LLM_URL")
     if not url:
         return rule_based_plan(request)
@@ -110,7 +122,10 @@ def llm_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
     if os.getenv("AURA_PRODUCER_LLM_KEY"):
         headers["Authorization"] = f"Bearer {os.environ['AURA_PRODUCER_LLM_KEY']}"
     payload = {
-        "instruction": "Return only an Aura Music Studio ProducerPlan JSON. Never route final music to MIDI/SoundFont audio.",
+        "instruction": (
+            "Return only a Live Sound Studio Aura ProducerPlan JSON. Never route final music to MIDI/SoundFont audio. "
+            "Never create or convert a person's voice unless the session contains a valid consent/rights record."
+        ),
         "request": request,
         "session": session_summary or {},
         "schema": ProducerPlan.model_json_schema(),
