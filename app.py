@@ -26,6 +26,7 @@ from aura_music_studio.production_portal import router as production_portal_rout
 from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
+from aura_music_studio.renderer_api import router as renderer_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
@@ -44,6 +45,7 @@ app.include_router(daw_recording_ui_router)
 app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
+app.include_router(renderer_router)
 app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
