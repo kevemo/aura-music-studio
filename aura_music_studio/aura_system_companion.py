@@ -133,7 +133,7 @@ class AuraSystemCompanionService(AuraCompanionService):
                     {
                         "type": "function",
                         "name": "get_song_render_status",
-                        "description": "Read the signed-in user's production render-job status.",
+                        "description": "Read the signed-in user's queued/running/completed production workflow status, including song or music-video submission jobs.",
                         "strict": True,
                         "parameters": {
                             "type": "object",
@@ -172,8 +172,8 @@ class AuraSystemCompanionService(AuraCompanionService):
                         "type": "function",
                         "name": "create_music_video",
                         "description": (
-                            "Start Aura Music Video Director for a completed song project. It storyboards the song, generates tracked shots, "
-                            "then assembles them against the original mastered audio when all shots complete."
+                            "Queue Aura Music Video Director for a completed song project. The production worker storyboards/submits the real video shots; "
+                            "Aura can then inspect the submission job and resulting music-video project without blocking this conversation."
                         ),
                         "strict": True,
                         "parameters": {
@@ -194,7 +194,7 @@ class AuraSystemCompanionService(AuraCompanionService):
                     {
                         "type": "function",
                         "name": "get_music_video_status",
-                        "description": "Refresh and report one of the signed-in user's Aura Music Video Director projects.",
+                        "description": "Refresh and report one of the signed-in user's Aura Music Video Director projects after its submission job has created it.",
                         "strict": True,
                         "parameters": {
                             "type": "object",
@@ -278,16 +278,17 @@ class AuraSystemCompanionService(AuraCompanionService):
             return {
                 "job_id": job["id"],
                 "project_name": project_name,
+                "job_type": job["job_type"],
                 "status": job["status"],
                 "priority": job["priority"],
             }
 
         if name == "get_song_render_status":
             if not member.plan.has(FULL_TRACK):
-                raise AuraCompanionError("Full-song rendering is not available on this membership")
+                raise AuraCompanionError("Production workflow status is not available on this membership")
             job = self.jobs.get(str(arguments.get("job_id") or ""), user_id=member.user_id)
             if not job:
-                raise AuraCompanionError("Render job not found")
+                raise AuraCompanionError("Production workflow job not found")
             result = {k: v for k, v in job.items() if k not in {"payload_json", "result_json"}}
             if job.get("result_json"):
                 import json
@@ -309,17 +310,34 @@ class AuraSystemCompanionService(AuraCompanionService):
         if name == "create_music_video":
             if not member.plan.has(VIDEO_DIRECTOR):
                 raise AuraCompanionError("Aura Music Video Director requires Pro")
-            project = project_path(str(arguments.get("project_name") or ""), must_exist=True)
-            return self.music_video.start(
-                user_id=member.user_id,
-                source_project=project,
-                title=str(arguments.get("title") or project.name),
-                concept=str(arguments.get("concept") or "cinematic music video"),
-                aspect_ratio=str(arguments.get("aspect_ratio") or "16:9"),
-                provider=str(arguments.get("provider") or "auto"),
-                quality=str(arguments.get("quality") or "standard"),
-                continuity=str(arguments.get("continuity") or "consistent cinematic visual language"),
+            project_name = str(arguments.get("project_name") or "").strip()
+            project = project_path(project_name, must_exist=True)
+            if not (project / "output" / "Aura_Final_Master.wav").is_file():
+                raise AuraCompanionError("Finish the song master before starting Aura Music Video Director")
+            priority = 100 if member.plan.has(PRIORITY_QUEUE) else 25
+            job = self.jobs.submit(
+                member.user_id,
+                project_name,
+                job_type="music_video_start",
+                priority=priority,
+                payload={
+                    "title": str(arguments.get("title") or project.name),
+                    "concept": str(arguments.get("concept") or "cinematic music video"),
+                    "aspect_ratio": str(arguments.get("aspect_ratio") or "16:9"),
+                    "provider": str(arguments.get("provider") or "auto"),
+                    "quality": str(arguments.get("quality") or "standard"),
+                    "continuity": str(arguments.get("continuity") or "consistent cinematic visual language"),
+                },
             )
+            return {
+                "queued": True,
+                "job_id": job["id"],
+                "job_type": job["job_type"],
+                "project_name": project_name,
+                "status": job["status"],
+                "priority": job["priority"],
+                "next_action": "Use get_song_render_status with this job_id. When complete, the result contains the music-video project id.",
+            }
 
         if name == "get_music_video_status":
             if not member.plan.has(VIDEO_DIRECTOR):
