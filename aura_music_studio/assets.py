@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -14,6 +15,8 @@ from pydantic import BaseModel, Field
 from .rights import RightsLedger, RightsRecord
 
 AUDIO_EXTS = {".wav", ".mp3", ".flac", ".m4a", ".ogg", ".aac"}
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+MODEL_EXTS = {".nam", ".onnx"}
 SYMBOLIC_EXTS = {".mid", ".midi", ".musicxml", ".xml", ".mxl"}
 SCORE_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 TEXT_EXTS = {".txt", ".md", ".lrc", ".srt", ".json", ".yaml", ".yml"}
@@ -101,6 +104,10 @@ class AssetLibrary:
         ext = path.suffix.lower()
         if ext in AUDIO_EXTS:
             return "audio"
+        if ext in VIDEO_EXTS:
+            return "video"
+        if ext in MODEL_EXTS:
+            return "model"
         if ext in SYMBOLIC_EXTS:
             return "symbolic"
         if ext in SCORE_EXTS:
@@ -120,22 +127,45 @@ class AssetLibrary:
 
     @staticmethod
     def _analyze(path: Path, kind: str) -> dict:
-        if kind != "audio":
-            return {}
-        try:
-            info = sf.info(path)
-            y, sr = librosa.load(path, sr=None, mono=True, duration=180)
-            tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-            tempo_value = float(tempo[0] if hasattr(tempo, "__len__") else tempo)
-            chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-            pitch_class = int(chroma.mean(axis=1).argmax()) if chroma.size else None
-            names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-            return {
-                "duration_seconds": float(info.frames / info.samplerate),
-                "sample_rate": int(info.samplerate),
-                "channels": int(info.channels),
-                "estimated_bpm": tempo_value,
-                "dominant_pitch_class": names[pitch_class] if pitch_class is not None else None,
-            }
-        except Exception as exc:
-            return {"analysis_error": f"{type(exc).__name__}: {exc}"}
+        if kind == "audio":
+            try:
+                info = sf.info(path)
+                y, sr = librosa.load(path, sr=None, mono=True, duration=180)
+                tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+                tempo_value = float(tempo[0] if hasattr(tempo, "__len__") else tempo)
+                chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+                pitch_class = int(chroma.mean(axis=1).argmax()) if chroma.size else None
+                names = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+                return {
+                    "duration_seconds": float(info.frames / info.samplerate),
+                    "sample_rate": int(info.samplerate),
+                    "channels": int(info.channels),
+                    "estimated_bpm": tempo_value,
+                    "dominant_pitch_class": names[pitch_class] if pitch_class is not None else None,
+                }
+            except Exception as exc:
+                return {"analysis_error": f"{type(exc).__name__}: {exc}"}
+        if kind == "video":
+            try:
+                proc = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                payload = json.loads(proc.stdout)
+                fmt = payload.get("format", {})
+                streams = payload.get("streams", [])
+                video = next((s for s in streams if s.get("codec_type") == "video"), {})
+                return {
+                    "duration_seconds": float(fmt.get("duration", 0) or 0),
+                    "width": video.get("width"),
+                    "height": video.get("height"),
+                    "video_codec": video.get("codec_name"),
+                    "has_audio": any(s.get("codec_type") == "audio" for s in streams),
+                }
+            except Exception as exc:
+                return {"analysis_error": f"{type(exc).__name__}: {exc}"}
+        if kind == "model":
+            return {"model_format": path.suffix.lower().lstrip(".")}
+        return {}
