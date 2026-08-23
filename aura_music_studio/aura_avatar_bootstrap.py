@@ -21,6 +21,30 @@ PATCHED_RUNTIME_JS = RUNTIME_JS.replace(
 ).replace(
     "this.updateLipSync(this.state==='speaking'?this.speechLevel():0,t);",
     "this.updateLipSync(this.state==='speaking'?(this.analyser?this.speechLevel():(0.25+0.20*Math.abs(Math.sin(t*.018)))):0,t);",
+).replace(
+    "const aura=new AuraEmbodiedRuntime();aura.init();",
+    r"""
+AuraEmbodiedRuntime.prototype.startTour=async function(){
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+  const visible=el=>{const r=el.getBoundingClientRect(),s=getComputedStyle(el);return r.width>18&&r.height>18&&r.bottom>0&&r.top<innerHeight&&s.visibility!=='hidden'&&s.display!=='none';};
+  const all=[...document.querySelectorAll('main a[href],main button,.dashboard a[href],.dashboard button,.tiles a[href],.tiles button,.nav a[href],.nav button')];
+  const unique=[];const seen=new Set();
+  for(const el of all){
+    if(!visible(el)||el.closest('#aura-embodied-root')||el.classList.contains('aura-companion-fab')||el.classList.contains('aura-tour-fab'))continue;
+    const label=(el.getAttribute('data-aura-guide')||el.getAttribute('aria-label')||el.getAttribute('title')||el.textContent||'').replace(/\s+/g,' ').trim();
+    if(label.length<2||label.length>100||seen.has(label.toLowerCase()))continue;seen.add(label.toLowerCase());unique.push({el,label});if(unique.length>=6)break;
+  }
+  if(!unique.length){await this.speak('I can stay with you here. Ask me what you would like to find or create.');return;}
+  await this.speak('I will show you around. I will point out the main controls on this screen.');
+  for(let i=0;i<unique.length;i++){
+    const {el,label}=unique[i];if(!document.body.contains(el))continue;el.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});await sleep(420);
+    if(!el.id)el.id='aura-guide-'+Math.random().toString(36).slice(2,9);this.guideTo('#'+CSS.escape(el.id));await sleep(720);
+    const custom=el.getAttribute('data-aura-guide');const line=custom||('This is '+label+'.');await this.speak(line);await sleep(180);
+  }
+  this.guideTarget=null;this.setState('idle');await this.speak('That is the main layout. I can guide you to any feature whenever you need me.');
+};
+const aura=new AuraEmbodiedRuntime();aura.init();
+""",
 )
 
 
