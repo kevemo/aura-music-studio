@@ -13,7 +13,6 @@ from uuid import uuid4
 import librosa
 
 from .lyrics import parse_sections
-from .project import ProjectWorkspace
 from .video_generation import VideoGenerationRequest, VideoGenerationService
 from .video_storyboard import MusicVideoStoryboardPlanner, SongSection
 
@@ -32,6 +31,7 @@ class MusicVideoStore:
         con = sqlite3.connect(self.db_path)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA journal_mode=WAL")
+        con.execute("PRAGMA foreign_keys=ON")
         return con
 
     def _init_schema(self) -> None:
@@ -61,6 +61,7 @@ class MusicVideoStore:
                     id TEXT PRIMARY KEY,
                     music_video_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
+                    render_result_id TEXT NOT NULL,
                     shot_index INTEGER NOT NULL,
                     section TEXT NOT NULL,
                     start_seconds REAL NOT NULL,
@@ -81,6 +82,10 @@ class MusicVideoStore:
                     ON aura_music_video_shots(music_video_id, shot_index);
                 """
             )
+            columns = {row[1] for row in con.execute("PRAGMA table_info(aura_music_video_shots)").fetchall()}
+            if "render_result_id" not in columns:
+                con.execute("ALTER TABLE aura_music_video_shots ADD COLUMN render_result_id TEXT")
+                con.execute("UPDATE aura_music_video_shots SET render_result_id=id WHERE render_result_id IS NULL")
 
     @staticmethod
     def _now() -> str:
@@ -107,13 +112,13 @@ class MusicVideoStore:
         with self._connect() as con:
             con.execute(
                 """INSERT INTO aura_music_video_shots
-                   (id,music_video_id,user_id,shot_index,section,start_seconds,end_seconds,requested_seconds,prompt,provider,model,provider_job_id,status,output_path,error,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id,music_video_id,user_id,render_result_id,shot_index,section,start_seconds,end_seconds,requested_seconds,prompt,provider,model,provider_job_id,status,output_path,error,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    shot_id, music_video_id, user_id, shot["index"], shot["section"], shot["start_seconds"],
-                    shot["end_seconds"], shot["requested_seconds"], shot["prompt"], result["provider"],
-                    result["model"], result.get("provider_job_id"), result["status"], result.get("output_path"),
-                    result.get("error"), now, now,
+                    shot_id, music_video_id, user_id, result["id"], shot["index"], shot["section"],
+                    shot["start_seconds"], shot["end_seconds"], shot["requested_seconds"], shot["prompt"],
+                    result["provider"], result["model"], result.get("provider_job_id"), result["status"],
+                    result.get("output_path"), result.get("error"), now, now,
                 ),
             )
         return shot_id
@@ -230,10 +235,8 @@ class AuraMusicVideoDirector:
         return result
 
     @staticmethod
-    def _provider_seconds(duration: float) -> int:
-        # Eight-second shots are the interoperability sweet spot across the configured provider layer.
-        # Short tail shots are rendered at least four seconds and trimmed during final assembly.
-        return 4 if duration <= 4.0 else 8
+    def _provider_seconds(_duration: float) -> int:
+        return 8
 
     def start(
         self,
@@ -254,6 +257,9 @@ class AuraMusicVideoDirector:
         if duration < 2:
             raise MusicVideoError("The completed song is too short for a music video")
         sections = self._split_sections(self._section_plan(source_project, duration), max_shot=8.0)
+        max_shots = int(os.getenv("AURA_MUSIC_VIDEO_MAX_SHOTS", "60"))
+        if len(sections) > max_shots:
+            raise MusicVideoError(f"Music-video plan requires {len(sections)} shots, above the configured limit of {max_shots}")
         raw_shots = self.storyboards.build(
             title=title,
             visual_concept=concept,
@@ -322,7 +328,7 @@ class AuraMusicVideoDirector:
                 return self.store.get_project(user_id, project_id)
             try:
                 refreshed = self.video.refresh(
-                    result_id=shot["id"],
+                    result_id=shot["render_result_id"],
                     provider=shot["provider"],
                     provider_job_id=shot.get("provider_job_id"),
                 )
