@@ -8,6 +8,7 @@ from aura_music_studio.api import app
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.privacy_api import router as privacy_router
+from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.vocal_api import router as vocal_router
 
@@ -16,6 +17,7 @@ app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(output_router)
 app.include_router(privacy_router)
+app.include_router(production_suite_router)
 app.include_router(system_router)
 
 __all__ = ["app"]
