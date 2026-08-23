@@ -9,9 +9,10 @@ services:
     environment:
       LSS_NODE_WORK_DIR: /app/node-work
       AURA_ACESTEP_API_URL: http://ace-step:8001
-      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
+      AURA_ACESTEP_FULL_MODEL: acestep-v15-turbo
       AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
       AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+      ACESTEP_API_KEY: ${ACESTEP_API_KEY:-}
     volumes:
       - esp_node_work:/app/node-work
     depends_on:
@@ -20,7 +21,7 @@ services:
     # Outbound-only coordinator connection. No public ports are published by the node agent.
 
   ace-step:
-    # Same reviewed upstream pin as the main Studio GPU override.
+    # Same reviewed official ACE-Step 1.5 pin as the main Studio GPU override.
     build:
       context: https://github.com/ace-step/ACE-Step-1.5.git#14c0211d5a0653b0f63e27686f4c3f151b4d8629
       dockerfile: Dockerfile
@@ -31,10 +32,13 @@ services:
       ACESTEP_MODE: api
       ACESTEP_API_HOST: 0.0.0.0
       ACESTEP_API_PORT: 8001
+      ACESTEP_API_KEY: ${ACESTEP_API_KEY:-}
       ACESTEP_INIT_SERVICE: "true"
-      ACESTEP_CONFIG_PATH: acestep-v15-xl-turbo
-      ACESTEP_LM_MODEL_PATH: acestep-5Hz-lm-4B
-      ACESTEP_LLM_BACKEND: pt
+      ACESTEP_CONFIG_PATH: acestep-v15-turbo
+      ACESTEP_CONFIG_PATH2: acestep-v15-base
+      ACESTEP_LM_MODEL_PATH: ${AURA_ACESTEP_LM_MODEL:-acestep-5Hz-lm-1.7B}
+      ACESTEP_LLM_BACKEND: ${AURA_ACESTEP_LLM_BACKEND:-pt}
+      ACESTEP_OFFLOAD_TO_CPU: ${AURA_ACESTEP_OFFLOAD_TO_CPU:-false}
       HF_HOME: /root/.cache/huggingface
       TOKENIZERS_PARALLELISM: "false"
     expose:
@@ -47,8 +51,8 @@ services:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8001/health"]
       interval: 30s
       timeout: 10s
-      retries: 8
-      start_period: 180s
+      retries: 10
+      start_period: 300s
     # ACE-Step stays private inside the node's Compose network.
 
 volumes:
