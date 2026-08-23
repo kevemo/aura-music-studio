@@ -9,9 +9,11 @@ from pydantic import BaseModel, Field
 
 from .plans import VISUAL_FX_STUDIO
 from .visual_fx import VisualEffect, VisualFxError, VisualFxStore, VisualKeyframe, VisualLayer
+from .visual_fx_render_ownership import VisualFxRenderOwnership, VisualFxRenderOwnershipError
 
 router = APIRouter(prefix="/api/visual-fx", tags=["visual-fx"])
 store = VisualFxStore()
+render_ownership = VisualFxRenderOwnership(store.db_path, store.output_root)
 
 
 class CreateVisualProjectBody(BaseModel):
@@ -98,6 +100,7 @@ def visual_fx_capabilities():
             "advanced captions",
             "non-destructive project schema",
             "real compositor export contract",
+            "tenant-bound render ownership",
         ],
         "blend_modes": sorted(store.VALID_BLEND_MODES),
         "layer_types": sorted(store.VALID_LAYER_TYPES),
@@ -182,19 +185,64 @@ def delete_layer(project_id: str, layer_id: str, request: Request):
 def render_project(project_id: str, body: RenderBody, request: Request):
     member = _member(request)
     try:
-        return store.render_project(user_id=member.user_id, project_id=project_id, output_kind=body.output_kind)
+        result = store.render_project(user_id=member.user_id, project_id=project_id, output_kind=body.output_kind)
+        render_id = str(result["id"])
+        output_kind = str(result["output_kind"])
+        output_path = Path(str(result["output_path"]))
+        render_ownership.register(
+            user_id=member.user_id,
+            project_id=project_id,
+            render_id=render_id,
+            output_kind=output_kind,
+            output_path=output_path,
+        )
+        # Never expose a deployment filesystem path to the browser. The opaque, tenant-bound
+        # download route is the only client capability for the completed export.
+        return {
+            "id": render_id,
+            "status": result.get("status", "completed"),
+            "output_kind": output_kind,
+            "download_url": f"/api/visual-fx/renders/{render_id}/{output_kind}",
+        }
     except VisualFxError as exc:
         raise HTTPException(422, str(exc)) from exc
+    except VisualFxRenderOwnershipError as exc:
+        # The file remains inaccessible because unregistered output ids fail closed.
+        raise HTTPException(500, "Visual FX export could not be registered securely") from exc
+
+
+@router.get("/renders")
+def list_renders(request: Request, project_id: str | None = None, limit: int = 100):
+    member = _member(request)
+    items = render_ownership.list_for_user(member.user_id, project_id=project_id, limit=limit)
+    return {
+        "renders": [
+            {
+                **item,
+                "download_url": f"/api/visual-fx/renders/{item['render_id']}/{item['output_kind']}",
+            }
+            for item in items
+        ]
+    }
 
 
 @router.get("/renders/{render_id}/{output_kind}")
 def download_render(render_id: str, output_kind: str, request: Request):
-    _member(request)
+    member = _member(request)
     if output_kind not in {"mp4", "png"}:
-        raise HTTPException(404, "Unsupported render type")
-    output = (store.output_root / f"{render_id}.{output_kind}").resolve()
-    root = store.output_root.resolve()
-    if not output.is_relative_to(root) or not output.is_file():
         raise HTTPException(404, "Rendered output is unavailable")
+    try:
+        output = render_ownership.resolve(
+            user_id=member.user_id,
+            render_id=render_id,
+            output_kind=output_kind,
+        )
+    except VisualFxRenderOwnershipError as exc:
+        raise HTTPException(404, "Rendered output is unavailable") from exc
     media_type = "video/mp4" if output_kind == "mp4" else "image/png"
-    return FileResponse(output, media_type=media_type, filename=f"live-sound-studio-{render_id}.{output_kind}")
+    return FileResponse(
+        output,
+        media_type=media_type,
+        filename=f"live-sound-studio-{render_id}.{output_kind}",
+        headers={"Cache-Control": "private, no-store"},
+    )
