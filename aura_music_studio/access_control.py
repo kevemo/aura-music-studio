@@ -21,6 +21,7 @@ from .plans import (
     MULTITRACK_DAW,
     NEURAL_AMP,
     PRODUCER_CHAT,
+    REGION_REPAINT,
     SAMPLE_LAB,
     SPATIAL_AUDIO,
     STEM_SPLITTER,
@@ -57,6 +58,10 @@ def _required_feature(path: str, method: str) -> str | None:
         return PRODUCER_CHAT
     if path.endswith("/produce") or path.endswith("/render-jobs"):
         return FULL_TRACK
+    if path.endswith("/region-edit"):
+        return REGION_REPAINT
+    if path.endswith("/add-generated-track"):
+        return MULTITRACK_DAW
     if path.endswith("/harmonies"):
         return HARMONY_ARCHITECT
     if path.endswith("/voice-convert") or path.endswith("/voice-profiles") or path.endswith("/voices"):
