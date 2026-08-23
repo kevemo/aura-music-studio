@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from aura_music_studio.mixer import selected_audio_clips
 from aura_music_studio.session import Clip, Track
-from aura_music_studio.take_api import _public_track
+from aura_music_studio.take_api import _base_comp_segments, _copy_segment, _public_track
 
 
 def _clip(name: str, lane: int, committed: bool = False) -> Clip:
@@ -36,3 +36,24 @@ def test_public_take_metadata_hides_filesystem_source():
     assert "source" not in clip
     assert clip["preview_url"].startswith("/projects/my-song/takes/audio/")
     assert "private" not in clip["preview_url"]
+
+
+def test_comp_segment_uses_correct_timeline_and_source_offset():
+    original = _clip("take-two", 1)
+    segment = _copy_segment(original, 2.5, 6.0, source_lane=1, fade_seconds=.005)
+    assert segment.start == 2.5
+    assert segment.duration == 3.5
+    assert segment.source_offset == 2.5
+    assert segment.metadata["committed"] is True
+    assert segment.metadata["comp_segment"] is True
+    assert segment.metadata["comp_source_lane"] == 1
+
+
+def test_existing_comp_becomes_base_for_next_phrase_edit():
+    first = _copy_segment(_clip("take-one", 0), 0.0, 4.0, source_lane=0, fade_seconds=.005)
+    second = _copy_segment(_clip("take-two", 1), 4.0, 10.0, source_lane=1, fade_seconds=.005)
+    track = Track(name="Vocal", role="vocals", clips=[_clip("one", 0), _clip("two", 1), first, second])
+    base = _base_comp_segments(track)
+    assert len(base) == 2
+    assert [clip.metadata["comp_source_lane"] for clip in base] == [0, 1]
+    assert selected_audio_clips(track) == base
