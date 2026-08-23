@@ -42,9 +42,9 @@ PUBLIC_EXACT = {
 }
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
 # an active paid/free entitlement, so pending/past-due members can still export/delete their data.
-# Brand assets must also remain public so unauthenticated landing/auth pages can load the ESP identity.
-# ESP creator/agent/admin products keep their own ESP-role gates; they are not ordinary plan features.
-PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/")
+# Brand assets and localization remain public so unauthenticated landing/auth pages can load and
+# switch language before sign-in. ESP creator/agent/admin products keep their own ESP-role gates.
+PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/localization/")
 
 
 def _token(request: Request) -> str | None:
