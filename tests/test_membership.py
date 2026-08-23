@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from aura_music_studio.accounts import AccountStore
@@ -10,6 +12,7 @@ from aura_music_studio.plans import (
     STEM_SPLITTER,
     get_plan,
 )
+from aura_music_studio.subscriptions import SubscriptionLedger
 
 
 def _approved_paid_user(store: AccountStore, email: str, plan_id: str):
@@ -18,9 +21,12 @@ def _approved_paid_user(store: AccountStore, email: str, plan_id: str):
     assert pending and pending["status"] == "pending"
     approved = store.decide_membership(signup.approval_token, "approve", "ESP Test Owner")
     assert approved["status"] == "approved_pending_payment"
-    active = store.activate_paid_plan(signup.user_id, plan_id, "PAYPAL-TEST-REFERENCE")
+    ledger = SubscriptionLedger(store)
+    status = ledger.verify_payment(signup.user_id, plan_id, f"PAYPAL-{plan_id}-TEST-REFERENCE")
+    active = status["user"]
     assert active["status"] == "active"
     assert active["plan_id"] == plan_id
+    assert status["subscription"]["status"] == "active"
     return active
 
 
@@ -74,9 +80,26 @@ def test_base_is_one_confirmed_track_per_day_with_unlimited_preconfirm_regens(tm
 
 def test_paid_plan_cannot_activate_before_esp_approval(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
+    ledger = SubscriptionLedger(store)
     signup = store.signup("pending@example.com", "Pending Member", "very-secure-password", "pro")
     with pytest.raises(ValueError):
-        store.activate_paid_plan(signup.user_id, "pro", "PAYPAL-TEST")
+        ledger.verify_payment(signup.user_id, "pro", "PAYPAL-TEST")
+
+
+def test_verified_payment_creates_and_extends_monthly_period(tmp_path):
+    store = AccountStore(tmp_path / "accounts.sqlite3")
+    signup = store.signup("renew@example.com", "Renewing Member", "very-secure-password", "pro")
+    store.decide_membership(signup.approval_token, "approve", "ESP Test Owner")
+    ledger = SubscriptionLedger(store)
+
+    first = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-ONE")
+    first_end = datetime.fromisoformat(first["subscription"]["period_end"])
+    second = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")
+    second_end = datetime.fromisoformat(second["subscription"]["period_end"])
+    assert second_end > first_end
+
+    with pytest.raises(ValueError):
+        ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")
 
 
 def test_rejected_request_cannot_be_approved_twice(tmp_path):
