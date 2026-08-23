@@ -28,9 +28,10 @@ from .plans import (
     VIDEO_SYNC,
     WAV_DOWNLOAD,
 )
+from .request_context import reset_current_user_id, set_current_user_id
 
 PUBLIC_EXACT = {
-    "/", "/pricing", "/signup", "/signin", "/signout", "/dashboard",
+    "/", "/pricing", "/signup", "/signin", "/signout", "/dashboard", "/studio",
     "/health", "/plans", "/membership/review", "/membership/decision",
     "/membership/payment", "/docs", "/redoc", "/openapi.json",
 }
@@ -49,6 +50,8 @@ def _required_feature(path: str, method: str) -> str | None:
         return BASIC_CREATE
     if path.startswith("/speech/"):
         return AURA_SPEECH
+    if path.startswith("/web/"):
+        return PRODUCER_CHAT
     if "/producer" in path:
         return PRODUCER_CHAT
     if path.endswith("/produce"):
@@ -83,7 +86,12 @@ def _required_feature(path: str, method: str) -> str | None:
 
 
 class MembershipAccessMiddleware(BaseHTTPMiddleware):
-    """Server-side entitlement enforcement; UI state is never trusted."""
+    """Server-side membership, entitlement and tenant-boundary enforcement.
+
+    UI state is never trusted. For every protected request, the authenticated member id is
+    placed into a ContextVar so project/session storage resolves to that member's private
+    namespace. The value is always reset after the request, even on errors.
+    """
 
     def __init__(self, app):
         super().__init__(app)
@@ -95,53 +103,72 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS" or path in PUBLIC_EXACT or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
             return await call_next(request)
 
-        token = _token(request)
+        session_token = _token(request)
         try:
-            member = self.memberships.from_session(token, require_active=True)
+            member = self.memberships.from_session(session_token, require_active=True)
         except PermissionError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=401)
 
-        feature = _required_feature(path, request.method)
-        if feature and not member.plan.has(feature):
-            return JSONResponse(
-                {"detail": f"{feature} is not included in the {member.plan.name} tier", "plan": member.plan.id, "upgrade_required": True},
-                status_code=403,
-            )
+        context_token = set_current_user_id(member.user_id)
+        request.state.member = member
+        try:
+            feature = _required_feature(path, request.method)
+            if feature and not member.plan.has(feature):
+                return JSONResponse(
+                    {
+                        "detail": f"{feature} is not included in the {member.plan.name} tier",
+                        "plan": member.plan.id,
+                        "upgrade_required": True,
+                    },
+                    status_code=403,
+                )
 
-        if path.endswith("/download"):
-            requested = (request.query_params.get("path") or "").lower()
-            if requested.endswith(".mp3"):
-                needed = MP3_DOWNLOAD
-            elif requested.endswith(".wav") and "stem" not in requested and "bandlab" not in requested:
-                needed = WAV_DOWNLOAD
-            else:
-                needed = STEM_SPLITTER
-            if not member.plan.has(needed):
-                return JSONResponse({"detail": "This download requires a higher membership tier", "upgrade_required": True}, status_code=403)
-
-        project_id = None
-        base_slot = None
-        if request.method == "POST" and path.endswith("/produce"):
-            try:
-                project_id = path.split("/projects/", 1)[1].rsplit("/produce", 1)[0]
-            except Exception:
-                project_id = None
-            if project_id and member.plan.confirmed_songs_per_day is not None:
-                try:
-                    base_slot = self.store.start_song_slot(member.user_id, project_id, datetime.now(timezone.utc).date().isoformat())
-                except (PermissionError, ValueError) as exc:
-                    return JSONResponse({"detail": str(exc)}, status_code=403)
-                if base_slot.get("state") == "confirmed":
+            if path.endswith("/download"):
+                requested = (request.query_params.get("path") or "").lower()
+                if requested.endswith(".mp3"):
+                    needed = MP3_DOWNLOAD
+                elif requested.endswith(".wav") and "stem" not in requested and "bandlab" not in requested:
+                    needed = WAV_DOWNLOAD
+                else:
+                    needed = STEM_SPLITTER
+                if not member.plan.has(needed):
                     return JSONResponse(
-                        {"detail": "This track has already been confirmed. Start a new daily project to create another finished song."},
+                        {"detail": "This download requires a higher membership tier", "upgrade_required": True},
                         status_code=403,
                     )
 
-        response = await call_next(request)
+            project_id = None
+            base_slot = None
+            if request.method == "POST" and path.endswith("/produce"):
+                try:
+                    project_id = path.split("/projects/", 1)[1].rsplit("/produce", 1)[0]
+                except Exception:
+                    project_id = None
+                if project_id and member.plan.confirmed_songs_per_day is not None:
+                    try:
+                        base_slot = self.store.start_song_slot(
+                            member.user_id,
+                            project_id,
+                            datetime.now(timezone.utc).date().isoformat(),
+                        )
+                    except (PermissionError, ValueError) as exc:
+                        return JSONResponse({"detail": str(exc)}, status_code=403)
+                    if base_slot.get("state") == "confirmed":
+                        return JSONResponse(
+                            {
+                                "detail": "This track has already been confirmed. Start a new daily project to create another finished song."
+                            },
+                            status_code=403,
+                        )
 
-        if project_id and base_slot and 200 <= response.status_code < 300:
-            try:
-                self.store.record_regeneration(member.user_id, project_id)
-            except Exception:
-                pass
-        return response
+            response = await call_next(request)
+
+            if project_id and base_slot and 200 <= response.status_code < 300:
+                try:
+                    self.store.record_regeneration(member.user_id, project_id)
+                except Exception:
+                    # A logging failure must not corrupt a successfully generated response.
+                    pass
+            return response
+        finally:
+            reset_current_user_id(context_token)
