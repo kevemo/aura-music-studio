@@ -124,7 +124,8 @@ def _run_job(job_id: str, request: GenerateRequest) -> None:
 
 
 @app.get("/health")
-def health(_: None = Depends(_auth)):
+def health():
+    """Private-network health only; no secrets or model paths are returned."""
     with lock:
         running = sum(1 for item in jobs.values() if item.get("status") == "running")
         queued = sum(1 for item in jobs.values() if item.get("status") == "queued")
