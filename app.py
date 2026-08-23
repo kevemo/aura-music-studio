@@ -12,6 +12,8 @@ from aura_music_studio.output_api import router as output_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
+from aura_music_studio.recording_api import router as recording_router
+from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
@@ -26,10 +28,12 @@ app.include_router(brand_router)
 app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
+app.include_router(recording_router)
 app.include_router(output_router)
 app.include_router(privacy_router)
 app.include_router(production_portal_router)
 app.include_router(production_suite_router)
+app.include_router(recording_portal_router)
 app.include_router(revision_router)
 app.include_router(revision_portal_router)
 app.include_router(take_router)
