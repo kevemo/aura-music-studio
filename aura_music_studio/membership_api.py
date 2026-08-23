@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .accounts import AccountStore
+from .audit import AuditLedger
 from .billing import payment_instructions, public_payment_options
 from .branding import PRODUCT_FULL_NAME, TAGLINE
 from .mailer import notify_membership_decision, notify_membership_request
@@ -20,6 +21,7 @@ router = APIRouter()
 store = AccountStore()
 memberships = MembershipService(store)
 subscriptions = SubscriptionLedger(store)
+audit = AuditLedger(store)
 COOKIE_NAME = "lss_session"
 
 
@@ -220,6 +222,12 @@ def membership_decision(token: str = Form(...), decision: str = Form(...), decid
         raise HTTPException(400, str(exc)) from exc
     approved = decision.lower() == "approve"
     plan_id = before["requested_plan_id"]
+    audit.append(
+        actor=decided_by,
+        action="membership_approved" if approved else "membership_rejected",
+        subject_user_id=before["user_id"],
+        details={"requested_plan_id": plan_id},
+    )
     payment = payment_instructions(plan_id) if approved else None
     notify_membership_decision(
         applicant_email=before["email"],
@@ -268,6 +276,16 @@ def activate_payment(payload: PaymentActivationRequest, x_lss_admin_key: str | N
         raise HTTPException(400, str(exc)) from exc
     user = status["user"] or {}
     subscription = status["subscription"] or {}
+    audit.append(
+        actor="ESP admin API",
+        action="subscription_payment_verified",
+        subject_user_id=user.get("id"),
+        details={
+            "plan_id": user.get("plan_id"),
+            "billing_period_end": subscription.get("period_end"),
+            "payment_reference_last4": payload.payment_reference[-4:] if payload.payment_reference else None,
+        },
+    )
     return {
         "activated": True,
         "user_id": user.get("id"),
