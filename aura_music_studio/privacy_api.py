@@ -37,16 +37,23 @@ def _session_user(request: Request) -> dict:
     return user
 
 
-def _safe_rows(table: str, user_id: str, *, omit: set[str] | None = None) -> list[dict]:
+def _safe_rows(
+    table: str,
+    user_id: str,
+    *,
+    user_column: str = "user_id",
+    omit: set[str] | None = None,
+) -> list[dict]:
     omit = omit or set()
+    # Table/column values are internal constants from _member_export, never request values.
     try:
         with sqlite3.connect(store.db_path) as con:
             con.row_factory = sqlite3.Row
-            rows = con.execute(f"SELECT * FROM {table} WHERE user_id=?", (user_id,)).fetchall()
-        return [
-            {key: row[key] for key in row.keys() if key not in omit}
-            for row in rows
-        ]
+            rows = con.execute(
+                f"SELECT * FROM {table} WHERE {user_column}=?",
+                (user_id,),
+            ).fetchall()
+        return [{key: row[key] for key in row.keys() if key not in omit} for row in rows]
     except sqlite3.OperationalError:
         return []
 
@@ -65,7 +72,11 @@ def _member_export(user: dict, destination: Path) -> None:
         "subscription_state": _safe_rows("subscription_state", user["id"]),
         "subscription_payments": _safe_rows("subscription_payments", user["id"]),
         "production_jobs": _safe_rows("studio_jobs", user["id"]),
-        "admin_actions_about_account": _safe_rows("admin_audit_log", user["id"]),
+        "admin_actions_about_account": _safe_rows(
+            "admin_audit_log",
+            user["id"],
+            user_column="subject_user_id",
+        ),
     }
 
     member_projects = (ROOT / "members" / user["id"]).resolve()
@@ -74,10 +85,16 @@ def _member_export(user: dict, destination: Path) -> None:
         raise RuntimeError("Invalid member project path")
 
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("account-data.json", json.dumps(data, indent=2, default=str, ensure_ascii=False))
+        archive.writestr(
+            "account-data.json",
+            json.dumps(data, indent=2, default=str, ensure_ascii=False),
+        )
         if member_projects.exists():
             for path in sorted(p for p in member_projects.rglob("*") if p.is_file()):
-                archive.write(path, arcname=f"projects/{path.relative_to(member_projects).as_posix()}")
+                archive.write(
+                    path,
+                    arcname=f"projects/{path.relative_to(member_projects).as_posix()}",
+                )
 
 
 def _cleanup(path: str) -> None:
@@ -122,6 +139,8 @@ def delete_account(payload: DeleteAccountRequest, request: Request, response: Re
     if members_root not in member_projects.parents:
         raise HTTPException(500, "Invalid member storage path")
 
+    # Audit record intentionally survives account deletion; it contains only the opaque user id,
+    # plan/status and no password, email or uploaded content.
     audit.append(
         actor="member-self-service",
         action="account_deleted",
@@ -138,4 +157,7 @@ def delete_account(payload: DeleteAccountRequest, request: Request, response: Re
         raise HTTPException(500, f"Account deletion failed: {type(exc).__name__}: {exc}") from exc
 
     response.delete_cookie(COOKIE_NAME)
-    return {"deleted": True, "message": "Your Live Sound Studio account and private project storage were deleted."}
+    return {
+        "deleted": True,
+        "message": "Your Live Sound Studio account and private project storage were deleted.",
+    }
