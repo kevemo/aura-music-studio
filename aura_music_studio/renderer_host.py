@@ -108,14 +108,19 @@ def ensure_renderer_secrets(env_path: Path = Path(".env"), *, mode: str = "ace")
     return {"env": str(env_path), "generated_secret_names": generated, "secret_values_exposed": False}
 
 
-def compose_command(mode: str, *tail: str) -> list[str]:
+def compose_command(mode: str, *tail: str, env_path: Path = Path(".env")) -> list[str]:
     if mode not in MODES:
         raise ValueError(f"Unknown renderer mode: {mode}")
-    command = ["docker", "compose"]
+    command = ["docker", "compose", "--env-file", str(env_path)]
     for filename in MODES[mode]:
         command += ["-f", filename]
     command += list(tail)
     return command
+
+
+def _command_text(command: list[str]) -> str:
+    import shlex
+    return " ".join(shlex.quote(part) for part in command)
 
 
 def start_renderers(*, mode: str = "ace", env_path: Path = Path(".env"), build: bool = True) -> dict:
@@ -124,21 +129,22 @@ def start_renderers(*, mode: str = "ace", env_path: Path = Path(".env"), build: 
         raise RuntimeError("Renderer host is not ready: " + " ".join(status.notes))
     secrets_result = ensure_renderer_secrets(env_path, mode=mode)
     tail = ["up", "-d"] + (["--build"] if build else [])
-    command = compose_command(mode, *tail)
+    command = compose_command(mode, *tail, env_path=env_path)
     subprocess.run(command, check=True)
+    smoke = compose_command(mode, "exec", "live-sound-studio", "aura", "renderer-smoke", env_path=env_path)
     return {
         "mode": mode,
         "started": True,
         "compose_files": MODES[mode],
         "secrets": secrets_result,
-        "next_smoke_test": "docker compose " + " ".join(sum((["-f", f] for f in MODES[mode]), [])) + " exec live-sound-studio aura renderer-smoke",
+        "next_smoke_test": _command_text(smoke),
     }
 
 
-def stop_renderers(*, mode: str = "ace") -> dict:
+def stop_renderers(*, mode: str = "ace", env_path: Path = Path(".env")) -> dict:
     status = host_renderer_status()
     if not status.docker_present or not status.compose_present:
         raise RuntimeError("Docker Compose is unavailable")
-    command = compose_command(mode, "down")
+    command = compose_command(mode, "down", env_path=env_path)
     subprocess.run(command, check=True)
     return {"mode": mode, "stopped": True, "volumes_preserved": True}
