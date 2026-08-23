@@ -177,6 +177,15 @@ class StudioJobQueue:
         placeholders = ",".join("?" for _ in clean)
         return self._claim_query(worker_id, f"AND job_type IN ({placeholders})", tuple(clean))
 
+    def renew_owned(self, job_id: str, worker_id: str) -> bool:
+        """Refresh a running job lease without changing attempts or ownership."""
+        with self._connect() as con:
+            cur = con.execute(
+                "UPDATE studio_jobs SET started_at=? WHERE id=? AND status='running' AND worker_id=?",
+                (_now(), job_id, worker_id),
+            )
+        return cur.rowcount == 1
+
     def complete(self, job_id: str, result: dict) -> None:
         with self._connect() as con:
             con.execute(
