@@ -8,6 +8,11 @@ import yaml
 
 from .models import ProjectManifest
 
+LEGACY_ACE_MODELS = {
+    "acestep-v15-xl-turbo": "acestep-v15-turbo",
+    "ace-step-v15-xl-turbo": "acestep-v15-turbo",
+}
+
 
 class ProjectWorkspace:
     def __init__(self, root: Path):
@@ -33,7 +38,11 @@ class ProjectWorkspace:
             data = json.loads(p.read_text(encoding="utf-8"))
         else:
             data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-        return ProjectManifest.model_validate(data)
+        manifest = ProjectManifest.model_validate(data)
+        model = (manifest.renderer.model or "").strip()
+        if model in LEGACY_ACE_MODELS:
+            manifest.renderer.model = LEGACY_ACE_MODELS[model]
+        return manifest
 
     def resolve_asset(self, value: str | None) -> Path | None:
         if not value:
