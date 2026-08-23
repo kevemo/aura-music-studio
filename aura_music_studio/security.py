@@ -12,6 +12,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 AUTH_RATE_PATHS = {"/auth/login", "/auth/signup", "/owner/login"}
+PUBLIC_PWA_PATHS = {
+    "/", "/pricing", "/signin", "/signup", "/ai-music-studio", "/ai-song-generator",
+    "/backing-track-maker", "/stem-splitter", "/ai-mastering", "/ai-vocal-studio",
+}
 
 
 class _SlidingWindowLimiter:
@@ -58,8 +62,19 @@ def _same_origin(request: Request) -> bool:
     return bool(request_host and origin_host and request_host == origin_host)
 
 
+def _known_public_url() -> str:
+    configured = (os.getenv("LSS_PUBLIC_BASE_URL") or "").strip()
+    if configured and configured.lower() not in {"auto", "automatic"}:
+        return configured
+    try:
+        from .public_address import PublicAddressManager
+        return (PublicAddressManager().read_status().get("recommended_url") or "").strip()
+    except Exception:
+        return ""
+
+
 async def _inject_esp_brand(response, path: str):
-    """Attach the shared ESP theme/favicon to every server-rendered HTML screen."""
+    """Attach the shared ESP theme/favicon/PWA metadata to server-rendered HTML."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -74,7 +89,13 @@ async def _inject_esp_brand(response, path: str):
         return Response(content=raw, status_code=response.status_code, headers=dict(response.headers), media_type=content_type)
 
     if "/brand/theme.css" not in text:
-        head = "<link rel='stylesheet' href='/brand/theme.css'><link rel='icon' type='image/webp' href='/brand/esp-logo.webp'>"
+        head = (
+            "<link rel='stylesheet' href='/brand/theme.css'>"
+            "<link rel='icon' type='image/webp' href='/brand/esp-logo.webp'>"
+            "<link rel='apple-touch-icon' href='/brand/esp-logo.webp'>"
+            "<link rel='manifest' href='/manifest.webmanifest'>"
+            "<meta name='theme-color' content='#120818'>"
+        )
         if "</head>" in text:
             text = text.replace("</head>", head + "</head>", 1)
         else:
@@ -88,6 +109,8 @@ async def _inject_esp_brand(response, path: str):
     if path in {"/studio", "/production-suite"} and "href='/recording-studio'" not in text:
         recording_bottom = "66px" if path == "/studio" else "114px"
         extras += f"<a class='esp-history-fab' style='bottom:{recording_bottom}' href='/recording-studio' title='Record vocals and instruments directly'>🎙 Recording Studio</a>"
+    if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:
+        extras += "<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js').catch(()=>{}));}</script>"
     if extras:
         text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
@@ -137,9 +160,15 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
-        response.headers.setdefault("Cache-Control", "no-store" if path.startswith(("/auth", "/owner", "/dashboard")) else "private")
+        if path.startswith(("/auth", "/owner", "/dashboard", "/membership")):
+            response.headers.setdefault("Cache-Control", "no-store")
+        elif path in PUBLIC_PWA_PATHS or path in {"/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/service-worker.js"}:
+            response.headers.setdefault("Cache-Control", "public, max-age=300")
+        else:
+            response.headers.setdefault("Cache-Control", "private")
 
-        public_url = (os.getenv("LSS_PUBLIC_BASE_URL") or "").lower()
-        if public_url.startswith("https://"):
+        public_url = _known_public_url().lower()
+        forwarded_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+        if public_url.startswith("https://") or forwarded_proto == "https":
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response
