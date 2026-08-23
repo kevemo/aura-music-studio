@@ -30,7 +30,18 @@ BASIC_CREATE = "basic_create"
 BASIC_LYRICS = "basic_lyrics"
 BASIC_PREVIEW = "basic_preview"
 AURA_SPEECH = "aura_speech"
+PRODUCER_CHAT = "producer_chat"
+INSTRUMENT_SELECTOR = "instrument_selector"
+ADVANCED_INSTRUMENT_SELECTOR = "advanced_instrument_selector"
+BASIC_FX = "basic_fx"
+STANDARD_FX = "standard_fx"
+ADVANCED_FX = "advanced_fx"
+BASIC_AUTOTUNE = "basic_autotune"
+STANDARD_AUTOTUNE = "standard_autotune"
+ADVANCED_AUTOTUNE = "advanced_autotune"
+AUTOMIX = "automix"
 FULL_TRACK = "full_track"
+BUILD_AROUND_UPLOAD = "build_around_upload"
 UNLIMITED_REGEN_UNTIL_CONFIRMED = "unlimited_regen_until_confirmed"
 MP3_DOWNLOAD = "mp3_download"
 WAV_DOWNLOAD = "wav_download"
@@ -38,12 +49,14 @@ FLAC_DOWNLOAD = "flac_download"
 BASIC_MASTERING = "basic_mastering"
 ADVANCED_MASTERING = "advanced_mastering"
 REFERENCE_MASTERING = "reference_mastering"
+ALBUM_MASTERING = "album_mastering"
 AUDIO_CLEANUP = "audio_cleanup"
 UPLOAD_AUDIO = "upload_audio"
 UPLOAD_SCORE = "upload_score"
 BACKING_TRACK = "backing_track"
 COVER_REMIX = "cover_remix"
 REGION_REPAINT = "region_repaint"
+BASIC_STEM_SPLITTER = "basic_stem_splitter"
 STEM_SPLITTER = "stem_splitter"
 STEM_DOWNLOAD = "stem_download"
 MULTITRACK_DAW = "multitrack_daw"
@@ -54,7 +67,6 @@ STYLE_DNA = "style_dna"
 HARMONY_ARCHITECT = "harmony_architect"
 APPROVED_VOICE_DUPLICATION = "approved_voice_duplication"
 AUDIO_TO_MIDI_CONTROL = "audio_to_midi_control"
-PRODUCER_CHAT = "producer_chat"
 NEURAL_AMP = "neural_amp"
 SPATIAL_AUDIO = "spatial_audio"
 VIDEO_SYNC = "video_sync"
@@ -69,14 +81,22 @@ FREE_FEATURES = frozenset({
     BASIC_PREVIEW,
     PRODUCER_CHAT,
     AURA_SPEECH,
+    INSTRUMENT_SELECTOR,
+    BASIC_FX,
+    BASIC_AUTOTUNE,
+    BASIC_MASTERING,
 })
 
 BASE_FEATURES = FREE_FEATURES | frozenset({
     FULL_TRACK,
+    BUILD_AROUND_UPLOAD,
     UNLIMITED_REGEN_UNTIL_CONFIRMED,
     MP3_DOWNLOAD,
     WAV_DOWNLOAD,
-    BASIC_MASTERING,
+    STANDARD_FX,
+    STANDARD_AUTOTUNE,
+    AUTOMIX,
+    BASIC_STEM_SPLITTER,
     AUDIO_CLEANUP,
     UPLOAD_AUDIO,
     UPLOAD_SCORE,
@@ -86,9 +106,13 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
     UNLIMITED_CONFIRMED_SONGS,
+    ADVANCED_INSTRUMENT_SELECTOR,
+    ADVANCED_FX,
+    ADVANCED_AUTOTUNE,
     FLAC_DOWNLOAD,
     ADVANCED_MASTERING,
     REFERENCE_MASTERING,
+    ALBUM_MASTERING,
     COVER_REMIX,
     REGION_REPAINT,
     STEM_SPLITTER,
@@ -114,8 +138,8 @@ PLANS: dict[str, Plan] = {
         name="Free",
         monthly_price_usd=Decimal("0.00"),
         description=(
-            "Basic Live Sound Studio access: song ideas, Aura lyric/producer help, spoken Aura control "
-            "and basic previews. Finished full tracks and premium engineering tools are not included."
+            "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
+            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and uploads unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -126,8 +150,9 @@ PLANS: dict[str, Plan] = {
         name="Base",
         monthly_price_usd=Decimal("4.99"),
         description=(
-            "One confirmed full track every day with unlimited regenerations until confirmation, plus MP3/WAV "
-            "downloads, basic mastering and cleanup, uploads, backing-track creation and harmony tools."
+            "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
+            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
+            "cleanup, backing-track creation and harmony tools."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -138,10 +163,10 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: splitter/stems, multitrack DAW, "
-            "take lanes, automation, advanced/reference mastering, Sample Lab, Style DNA, covers/remixes/repaint, "
-            "Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, "
-            "video/music sync, all download formats and every enabled studio feature."
+            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, full FX "
+            "banks, advanced/custom Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes and automation, "
+            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
+            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
