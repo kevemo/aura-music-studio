@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 import typer
@@ -11,6 +12,7 @@ from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
+from .jobs import AuraJobWorker
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 
@@ -48,8 +50,15 @@ def create_song(
     """Create a new original-song project ready for neural audio generation."""
     lyrics = lyrics_file.read_text(encoding="utf-8") if lyrics_file else ""
     request = CreateSongRequest(
-        title=title, concept=concept, lyrics=lyrics, generate_lyrics=generate_lyrics,
-        genre=genre, mood=mood, bpm=bpm, key=key, duration_seconds=duration,
+        title=title,
+        concept=concept,
+        lyrics=lyrics,
+        generate_lyrics=generate_lyrics,
+        genre=genre,
+        mood=mood,
+        bpm=bpm,
+        key=key,
+        duration_seconds=duration,
         vocal_mode="instrumental" if instrumental else "ai_vocal",
     )
     project = build_song_project(request, projects_root)
@@ -58,7 +67,7 @@ def create_song(
 
 @app.command("producer-plan")
 def producer_plan(request: str = typer.Argument(...)):
-    """Translate a natural-language producer request into safe non-destructive studio actions."""
+    """Translate natural-language producer direction into safe Studio actions."""
     plan = llm_plan(request)
     print(plan.model_dump_json(indent=2))
 
@@ -72,8 +81,7 @@ def engines(
     """Inspect or bootstrap Aura's local/open-source AI engine stack."""
     manager = EngineManager()
     if bootstrap:
-        result = manager.bootstrap(clone_engines=True, install_packages=install_packages)
-        print(json.dumps(result, indent=2, default=str))
+        print(json.dumps(manager.bootstrap(clone_engines=True, install_packages=install_packages), indent=2, default=str))
         return
     if update:
         actions = []
@@ -91,8 +99,19 @@ def engines(
 
 @app.command()
 def doctor():
-    """Check GPU, audio tools and configured neural engines."""
+    """Check the complete Studio: engines, queue, web, speech, security and provenance."""
     print(json.dumps(system_report(), indent=2, default=str))
+
+
+@app.command("render-worker")
+def render_worker(
+    worker_id: str | None = typer.Option(None, "--worker-id"),
+    poll_seconds: float = typer.Option(2.0, "--poll-seconds", min=0.2),
+):
+    """Run Aura's asynchronous long-form neural production worker."""
+    identifier = worker_id or f"{socket.gethostname()}-cli"
+    print(f"[bold green]Aura render worker online: {identifier}[/bold green]")
+    AuraJobWorker(worker_id=identifier).serve_forever(poll_seconds=poll_seconds)
 
 
 @app.command()
@@ -102,7 +121,7 @@ def autopilot(
     force: bool = typer.Option(False, "--force"),
     poll_seconds: int = typer.Option(60, "--poll-seconds"),
 ):
-    """Process project folders automatically."""
+    """Process local project folders automatically."""
     worker = AuraAutopilot(inbox, poll_seconds=poll_seconds)
     if once:
         print(json.dumps(worker.run_once(force=force), indent=2, default=str))
@@ -113,16 +132,16 @@ def autopilot(
 
 @app.command()
 def ui(host: str = "0.0.0.0", port: int = 7860):
-    """Launch The Live Sound Studio web UI."""
+    """Launch the legacy Gradio Studio UI."""
     from .ui import build_ui
     build_ui().launch(server_name=host, server_port=port)
 
 
 @app.command()
 def serve(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
-    """Launch The Live Sound Studio REST API for desktop/web/mobile front ends."""
+    """Launch the complete production web/account/studio service."""
     import uvicorn
-    uvicorn.run("aura_music_studio.api:app", host=host, port=port, reload=reload)
+    uvicorn.run("app:app", host=host, port=port, reload=reload)
 
 
 if __name__ == "__main__":
