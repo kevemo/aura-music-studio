@@ -3,7 +3,9 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import shutil
 import socket
+import subprocess
 import time
 import urllib.parse
 import urllib.request
@@ -74,7 +76,6 @@ def _local_ipv4() -> str | None:
     """Return the preferred LAN IPv4 without sending application data."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # UDP connect chooses a route but does not transmit until data is sent.
         sock.connect(("198.51.100.1", 80))
         return _safe_ip(sock.getsockname()[0])
     except OSError:
@@ -98,25 +99,50 @@ def _http_text(url: str, *, timeout: int = 12, max_bytes: int = 8192) -> str:
         return body.decode("utf-8", errors="replace").strip()
 
 
-def _upnp_external_ipv4() -> tuple[str | None, str | None]:
-    """Read the router-facing address through UPnP when miniupnpc is installed.
+def _upnpc_binary_external_ip() -> tuple[str | None, str | None]:
+    binary = shutil.which("upnpc")
+    if not binary:
+        return None, "upnpc_not_installed"
+    try:
+        text = subprocess.check_output([binary, "-s"], text=True, stderr=subprocess.STDOUT, timeout=8)
+        for line in text.splitlines():
+            if "ExternalIPAddress" in line and "=" in line:
+                value = _safe_ip(line.split("=", 1)[1].strip())
+                if value:
+                    return value, None
+        return None, "upnpc_external_ip_not_reported"
+    except Exception as exc:
+        return None, f"upnpc:{type(exc).__name__}: {exc}"
 
-    No port mappings are created here. Port forwarding is a separate, explicit owner opt-in.
+
+def _upnp_external_ipv4() -> tuple[str | None, str | None]:
+    """Read the router-facing address locally through UPnP when possible.
+
+    The Python miniupnpc module is preferred, then the `upnpc` CLI. No port mappings are created
+    by this function. Public HTTPS reflector services are only used later if local router discovery
+    cannot provide a global address.
     """
+    module_error = None
     try:
         import miniupnpc  # type: ignore
+        try:
+            upnp = miniupnpc.UPnP()
+            upnp.discoverdelay = 250
+            if upnp.discover() > 0:
+                upnp.selectigd()
+                value = _safe_ip(upnp.externalipaddress())
+                if value:
+                    return value, None
+            module_error = "python_upnp_gateway_not_found"
+        except Exception as exc:
+            module_error = f"python_upnp:{type(exc).__name__}: {exc}"
     except Exception:
-        return None, "miniupnpc_not_installed"
-    try:
-        upnp = miniupnpc.UPnP()
-        upnp.discoverdelay = 250
-        count = upnp.discover()
-        if count <= 0:
-            return None, "upnp_gateway_not_found"
-        upnp.selectigd()
-        return _safe_ip(upnp.externalipaddress()), None
-    except Exception as exc:
-        return None, f"{type(exc).__name__}: {exc}"
+        module_error = "python_miniupnpc_not_installed"
+
+    value, cli_error = _upnpc_binary_external_ip()
+    if value:
+        return value, None
+    return None, "; ".join(x for x in (module_error, cli_error) if x)
 
 
 def _http_public_ipv4() -> tuple[str | None, str | None]:
@@ -189,11 +215,7 @@ class PublicAddressStatus:
 
 
 class PublicAddressManager:
-    """Host-independent public-address manager for the self-hosted ESP Studio.
-
-    The Studio owns this logic. A DDNS provider, when configured, contributes only a free hostname;
-    account data, music, memberships, database and rendering remain on the ESP-controlled host.
-    """
+    """Host-independent public-address manager for the self-hosted ESP Studio."""
 
     def __init__(self, status_path: str | Path | None = None):
         self.status_path = Path(status_path or os.getenv("LSS_PUBLIC_ADDRESS_STATUS", DEFAULT_STATUS_PATH))
@@ -257,21 +279,37 @@ class PublicAddressManager:
             return False, "disabled"
         if not lan_ipv4:
             return False, "LAN address unavailable"
+
         try:
             import miniupnpc  # type: ignore
+            try:
+                upnp = miniupnpc.UPnP()
+                upnp.discoverdelay = 250
+                if upnp.discover() > 0:
+                    upnp.selectigd()
+                    for port in (80, 443):
+                        upnp.addportmapping(port, "TCP", lan_ipv4, port, "ESP Live Sound Studio", "")
+                    return True, "TCP 80/443 mappings requested through Python miniupnpc"
+            except Exception:
+                pass
         except Exception:
-            return False, "miniupnpc is not installed"
+            pass
+
+        binary = shutil.which("upnpc")
+        if not binary:
+            return False, "No miniupnpc module or upnpc binary is available"
         try:
-            upnp = miniupnpc.UPnP()
-            upnp.discoverdelay = 250
-            if upnp.discover() <= 0:
-                return False, "UPnP gateway not found"
-            upnp.selectigd()
             for port in (80, 443):
-                upnp.addportmapping(port, "TCP", lan_ipv4, port, "ESP Live Sound Studio", "")
-            return True, "TCP 80/443 mappings requested"
+                subprocess.run(
+                    [binary, "-e", "ESP Live Sound Studio", "-a", lan_ipv4, str(port), str(port), "TCP"],
+                    check=True,
+                    timeout=10,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            return True, "TCP 80/443 mappings requested through upnpc"
         except Exception as exc:
-            return False, f"{type(exc).__name__}: {exc}"
+            return False, f"upnpc:{type(exc).__name__}: {exc}"
 
     def check(self, *, update_ddns: bool = True) -> PublicAddressStatus:
         status = PublicAddressStatus(provider=self.provider, hostname=self.hostname)
@@ -287,8 +325,6 @@ class PublicAddressManager:
         status.public_ipv4 = public_ip
         status.global_ipv6 = _global_ipv6_candidates()
 
-        # A router-facing RFC1918/CGNAT address plus a different globally reflected address strongly
-        # suggests another NAT layer upstream of the ESP router.
         status.likely_cgnat = bool(
             router_ip
             and (_is_cgnat(router_ip) or _is_private_or_non_global(router_ip))
@@ -306,20 +342,21 @@ class PublicAddressManager:
         if status.hostname:
             status.recommended_url = f"https://{status.hostname}"
             status.caddy_https_ready = bool(
-                public_ip and (public_ip in status.dns_addresses or selected_v6 in status.dns_addresses)
+                (public_ip and public_ip in status.dns_addresses)
+                or (selected_v6 and selected_v6 in status.dns_addresses)
             )
         elif public_ip:
-            # Direct-IP mode is deliberately HTTP by default because a trusted certificate cannot be
-            # assumed for an arbitrary IP. A public hostname is the recommended HTTPS route.
             port = _int("LSS_DIRECT_PUBLIC_PORT", 80)
             suffix = "" if port == 80 else f":{port}"
             status.direct_ip_fallback = f"http://{public_ip}{suffix}"
             status.recommended_url = status.direct_ip_fallback
 
         mapped, mapping_message = self._optional_port_forward(status.lan_ipv4)
+        discovery_source = "router_upnp" if public_ip and public_ip == router_ip else "https_reflector"
         status.diagnostics = {
             "upnp_discovery": upnp_error or "available",
-            "public_ip_discovery": public_error or ("router_upnp" if public_ip == router_ip else "https_reflector"),
+            "public_ip_discovery": public_error or discovery_source,
+            "upnpc_binary_available": bool(shutil.which("upnpc")),
             "port_forwarding_requested": mapped,
             "port_forwarding": mapping_message,
             "ddns_secret_exposed": False,
