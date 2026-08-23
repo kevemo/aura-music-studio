@@ -110,6 +110,8 @@ async def _inject_esp_brand(response, path: str):
         extras += "<script src='/daw/recording-ui.js'></script>"
     if path == "/daw" and "/daw/routing-ui.js" not in text:
         extras += "<script src='/daw/routing-ui.js'></script>"
+    if path == "/daw" and "/daw/mixer-ui.js" not in text:
+        extras += "<script src='/daw/mixer-ui.js'></script>"
     if path == "/owner/dashboard" and "href='/owner/compute-nodes'" not in text:
         extras += "<a class='esp-history-fab' href='/owner/compute-nodes' title='Manage ESP compute machines'>🖥 Compute Nodes</a>"
     if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:
