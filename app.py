@@ -7,6 +7,7 @@ Run locally:
 from aura_music_studio.api import app
 from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
+from aura_music_studio.aura_voice_api import router as aura_voice_router
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
@@ -39,6 +40,7 @@ app.include_router(localization_router)
 app.include_router(live_translation_router)
 app.include_router(aura_chat_router)
 app.include_router(aura_chat_portal_router)
+app.include_router(aura_voice_router)
 app.include_router(vocal_router)
 app.include_router(video_router)
 app.include_router(music_video_router)
