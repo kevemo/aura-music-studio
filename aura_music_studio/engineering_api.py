@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -11,6 +10,7 @@ from .assets import AssetLibrary
 from .restoration import AudioRestorer
 from .spatial import SpatialRenderer
 from .speech import AuraSpeechService
+from .tenant_storage import project_path
 from .tone import NeuralToneProcessor
 from .video_sync import build_sync_map
 
@@ -49,13 +49,10 @@ class VideoSyncRequest(BaseModel):
 
 
 def _project(project_name: str) -> Path:
-    # Mirrors the main API's path safety without importing api.py and causing a router cycle.
-    from .api import PROJECTS_ROOT
-    root = PROJECTS_ROOT.resolve()
-    project = (root / project_name).resolve()
-    if root not in project.parents or not project.exists() or not project.is_dir():
-        raise HTTPException(404, "Project not found")
-    return project
+    try:
+        return project_path(project_name, must_exist=True)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(404, "Project not found") from exc
 
 
 @router.get("/speech/diagnostics")
@@ -81,16 +78,12 @@ async def speech_command(
             result = AuraSpeechService().command(source, session_summary=summary, speech_output=speech_out)
         except Exception as exc:
             raise HTTPException(500, f"Speech processing failed: {type(exc).__name__}: {exc}") from exc
-
-        payload = {
+        return {
             "transcript": result.transcript,
             "plan": result.plan.model_dump(),
             "spoken_text": result.spoken_text,
             "speech_generated": bool(result.speech_file),
         }
-        # The JSON API returns the plan and spoken text. A dedicated streaming speech endpoint
-        # can be added later; temporary reply audio is intentionally not exposed after tmp cleanup.
-        return payload
 
 
 @router.post("/projects/{project_name}/restore")
