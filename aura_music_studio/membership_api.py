@@ -14,10 +14,12 @@ from .branding import PRODUCT_FULL_NAME, TAGLINE
 from .mailer import notify_membership_decision, notify_membership_request
 from .membership import MembershipService
 from .plans import OWNERSHIP_NOTICE, public_plans
+from .subscriptions import SubscriptionLedger
 
 router = APIRouter()
 store = AccountStore()
 memberships = MembershipService(store)
+subscriptions = SubscriptionLedger(store)
 COOKIE_NAME = "lss_session"
 
 
@@ -66,6 +68,7 @@ def plans():
         "approval_email": "elevatesoulsproductions@gmail.com",
         "base_policy": "1 confirmed full track per day; unlimited regenerations until confirmation",
         "pro_policy": "unlimited confirmed tracks and complete studio feature set",
+        "paid_billing_period_days": 31,
     }
 
 
@@ -140,7 +143,6 @@ def confirm_song(project_name: str, request: Request):
         if member.plan.confirmed_songs_per_day == 0:
             raise PermissionError("The Free tier does not include confirmed full tracks")
         if member.plan.confirmed_songs_per_day is None:
-            # Pro is unlimited; confirmation is still recorded for project history but never gates another track.
             try:
                 slot = store.confirm_song(member.user_id, project_name)
             except ValueError:
@@ -243,7 +245,11 @@ def current_payment(request: Request):
     except PermissionError as exc:
         raise HTTPException(401, str(exc)) from exc
     if member.user.get("status") != "approved_pending_payment":
-        return {"payment_required": False, "status": member.user.get("status")}
+        return {
+            "payment_required": False,
+            "status": member.user.get("status"),
+            "billing_period_end": (member.subscription or {}).get("period_end"),
+        }
     return payment_instructions(member.user["requested_plan_id"])
 
 
@@ -257,13 +263,16 @@ def pending_memberships(x_lss_admin_key: str | None = Header(default=None)):
 def activate_payment(payload: PaymentActivationRequest, x_lss_admin_key: str | None = Header(default=None)):
     require_admin(x_lss_admin_key)
     try:
-        user = store.activate_paid_plan(payload.user_id, payload.plan_id, payload.payment_reference)
+        status = subscriptions.verify_payment(payload.user_id, payload.plan_id, payload.payment_reference)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    user = status["user"] or {}
+    subscription = status["subscription"] or {}
     return {
         "activated": True,
-        "user_id": user["id"],
-        "plan_id": user["plan_id"],
-        "billing_status": user["billing_status"],
+        "user_id": user.get("id"),
+        "plan_id": user.get("plan_id"),
+        "billing_status": user.get("billing_status"),
+        "billing_period_end": subscription.get("period_end"),
         "payment_reference": payload.payment_reference,
     }
