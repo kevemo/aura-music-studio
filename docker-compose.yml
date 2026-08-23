@@ -9,6 +9,7 @@ services:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
       LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
       LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_WEB_ENABLED: "true"
       AURA_SEARXNG_URL: http://searxng:8080
@@ -41,6 +42,7 @@ services:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
       LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
       LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
       AURA_JOB_POLL_SECONDS: "2"
       AURA_WEB_ENABLED: "true"
@@ -52,6 +54,23 @@ services:
     depends_on:
       searxng:
         condition: service_started
+
+  aura-backup-scheduler:
+    build: .
+    container_name: live-sound-studio-backup-scheduler
+    restart: unless-stopped
+    command: ["python", "-m", "aura_music_studio.backup_scheduler"]
+    env_file:
+      - .env
+    environment:
+      AURA_PROJECTS_ROOT: /app/projects
+      LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      LSS_BACKUP_DIR: /app/backups
+      LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
+    volumes:
+      - live_sound_data:/app/data
+      - live_sound_projects:/app/projects:ro
+      - live_sound_backups:/app/backups
 
   aura-address-manager:
     build: .
