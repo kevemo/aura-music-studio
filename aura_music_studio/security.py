@@ -58,8 +58,21 @@ def _same_origin(request: Request) -> bool:
     return bool(request_host and origin_host and request_host == origin_host)
 
 
+def _show_aura_entry(path: str) -> bool:
+    direct = {
+        "/dashboard",
+        "/studio",
+        "/production-suite",
+        "/recording-studio",
+        "/visual-studio",
+        "/history",
+        "/take-manager",
+    }
+    return path in direct or path.startswith("/esp")
+
+
 async def _inject_esp_brand(response, path: str):
-    """Attach the shared ESP theme/favicon to every server-rendered HTML screen."""
+    """Attach the shared ESP theme/favicon and persistent Aura entry to rendered HTML."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -88,6 +101,14 @@ async def _inject_esp_brand(response, path: str):
     if path in {"/studio", "/production-suite"} and "href='/recording-studio'" not in text:
         recording_bottom = "66px" if path == "/studio" else "114px"
         extras += f"<a class='esp-history-fab' style='bottom:{recording_bottom}' href='/recording-studio' title='Record vocals and instruments directly'>🎙 Recording Studio</a>"
+    if _show_aura_entry(path) and "aura-companion-fab" not in text:
+        extras += (
+            "<a class='aura-companion-fab' href='/aura' title='Open Aura full AI workpage' "
+            "style=\"position:fixed;left:18px;bottom:18px;z-index:10000;text-decoration:none;"
+            "background:linear-gradient(135deg,#24132f,#6f2f91);border:1px solid #c89ce2;"
+            "color:#fff;padding:11px 16px;border-radius:999px;font-weight:900;box-shadow:0 10px 35px #0009,0 0 28px #a64bd355;\">"
+            "✨ Aura</a>"
+        )
     if extras:
         text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
