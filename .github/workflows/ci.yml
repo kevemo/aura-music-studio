@@ -8,21 +8,32 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-      - name: System audio tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1
+      - name: System audio and self-host tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1 miniupnpc
       - name: Install Live Sound Studio core + dev
         run: pip install -e '.[dev]'
       - name: Compile Python
         run: python -m compileall -q aura_music_studio
       - name: Tests
         run: pytest -q
+      - name: Self-host Compose validation
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose --profile public config -q
+      - name: Caddy configuration validation
+        run: |
+          docker run --rm \
+            -e LSS_PUBLIC_SITE_ADDRESS=http://:80 \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Real-audio safety smoke test
         run: |
           python - <<'PY'
