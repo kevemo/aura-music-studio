@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AutomationPoint(BaseModel):
@@ -14,8 +15,37 @@ class AutomationPoint(BaseModel):
 
 
 class AutomationLane(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     parameter: str
     points: list[AutomationPoint] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalize_lane(self):
+        parameter = (self.parameter or "").strip().lower()
+        if parameter in {"volume", "volume_db", "fader", "gain_db"}:
+            parameter = "volume_db"
+            bounds = (-60.0, 18.0)
+        elif parameter in {"pan", "balance"}:
+            parameter = "pan"
+            bounds = (-1.0, 1.0)
+        else:
+            bounds = None
+
+        by_time: dict[float, AutomationPoint] = {}
+        for point in self.points:
+            time = float(point.time)
+            value = float(point.value)
+            if not math.isfinite(time) or not math.isfinite(value):
+                continue
+            time = max(0.0, time)
+            if bounds:
+                value = max(bounds[0], min(bounds[1], value))
+            by_time[time] = AutomationPoint(time=time, value=value)
+
+        object.__setattr__(self, "parameter", parameter)
+        object.__setattr__(self, "points", [by_time[key] for key in sorted(by_time)])
+        return self
 
 
 class Effect(BaseModel):
