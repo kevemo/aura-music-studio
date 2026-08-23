@@ -3,8 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
@@ -13,18 +12,16 @@ from .request_context import reset_current_user_id, set_current_user_id
 from .tenant_storage import project_path
 
 
+def _now_dt() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return _now_dt().isoformat()
 
 
 class StudioJobQueue:
-    """SQLite-backed production queue with no external broker dependency.
-
-    A separate Aura worker process claims queued jobs. This keeps long GPU renders away from
-    web request timeouts and preserves a zero-extra-service deployment option. SQLite WAL mode
-    is sufficient for the initial single/multi-worker deployment; a future queue adapter can
-    replace it without changing the public job API.
-    """
+    """SQLite-backed production queue with no external broker dependency."""
 
     def __init__(self, store: AccountStore | None = None):
         self.store = store or AccountStore()
@@ -99,8 +96,43 @@ class StudioJobQueue:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def summary(self) -> dict:
+        with self._connect() as con:
+            rows = con.execute("SELECT status, COUNT(*) AS count FROM studio_jobs GROUP BY status").fetchall()
+            oldest = con.execute(
+                "SELECT created_at FROM studio_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
+            ).fetchone()
+        return {
+            "counts": {row["status"]: int(row["count"]) for row in rows},
+            "oldest_queued_at": oldest["created_at"] if oldest else None,
+            "backend": "sqlite_wal",
+        }
+
+    def requeue_stale(self, *, stale_after_seconds: int = 10_800, max_attempts: int = 3) -> int:
+        """Recover jobs left running after a worker crash.
+
+        Three hours is intentionally conservative because full neural productions can be long.
+        Jobs that already reached max_attempts are failed instead of looping forever.
+        """
+        cutoff = (_now_dt() - timedelta(seconds=max(60, stale_after_seconds))).isoformat()
+        now = _now()
+        with self._connect() as con:
+            failed = con.execute(
+                """UPDATE studio_jobs SET status='failed', completed_at=?, error='Worker lease expired after maximum retries'
+                   WHERE status='running' AND started_at<? AND attempts>=?""",
+                (now, cutoff, max_attempts),
+            ).rowcount
+            recovered = con.execute(
+                """UPDATE studio_jobs SET status='queued', started_at=NULL, worker_id=NULL,
+                       error='Recovered after stale worker lease'
+                   WHERE status='running' AND started_at<? AND attempts<?""",
+                (cutoff, max_attempts),
+            ).rowcount
+        return int(recovered + failed)
+
     def claim_next(self, worker_id: str) -> dict | None:
-        """Atomically claim the next job, highest priority then oldest first."""
+        """Atomically claim the highest-priority oldest job."""
+        self.requeue_stale()
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
@@ -155,7 +187,6 @@ class AuraJobWorker:
             if job["job_type"] != "produce":
                 raise ValueError(f"Unsupported job type: {job['job_type']}")
             result = AuraPipeline(project).run()
-            # Successful regeneration increments the current Base draft's generation counter.
             try:
                 self.store.record_regeneration(job["user_id"], job["project_name"])
             except Exception:
