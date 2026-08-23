@@ -24,6 +24,8 @@ def _member(request: Request):
 
 def _public(job: dict) -> dict:
     value = dict(job)
+    # Payloads may contain private lyrics, prompts, voice settings or production instructions.
+    value.pop("payload_json", None)
     raw = value.pop("result_json", None)
     if raw:
         try:
@@ -31,6 +33,20 @@ def _public(job: dict) -> dict:
         except Exception:
             value["result"] = None
     return value
+
+
+def start_full_song_slot(member, project_name: str) -> dict:
+    try:
+        slot = store.start_song_slot(
+            member.user_id,
+            project_name,
+            datetime.now(timezone.utc).date().isoformat(),
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    if slot.get("state") == "confirmed":
+        raise HTTPException(403, "This track is already confirmed. Start a new project for another finished song.")
+    return slot
 
 
 @router.post("/projects/{project_name}/render-jobs")
@@ -41,18 +57,8 @@ def submit_render(project_name: str, request: Request):
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Project not found") from exc
 
-    if member.plan.confirmed_songs_per_day is not None:
-        try:
-            slot = store.start_song_slot(
-                member.user_id,
-                project_name,
-                datetime.now(timezone.utc).date().isoformat(),
-            )
-        except PermissionError as exc:
-            raise HTTPException(403, str(exc)) from exc
-        if slot.get("state") == "confirmed":
-            raise HTTPException(403, "This track is already confirmed. Start a new daily project.")
-
+    # Every full-song project gets a slot. Base enforces one confirmation/day; Pro's allowance is unlimited.
+    start_full_song_slot(member, project_name)
     priority = 100 if member.plan.has(PRIORITY_QUEUE) else 20
     job = queue.submit(member.user_id, project_name, job_type="produce", priority=priority)
     return _public(job)
