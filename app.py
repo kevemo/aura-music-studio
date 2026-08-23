@@ -7,6 +7,7 @@ Run locally:
 from aura_music_studio.api import app
 from aura_music_studio.aura_avatar import router as aura_avatar_router
 from aura_music_studio.aura_avatar_bootstrap import router as aura_avatar_bootstrap_router
+from aura_music_studio.aura_avatar_bridge import router as aura_avatar_bridge_router
 from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
 from aura_music_studio.aura_voice_api import router as aura_voice_router
@@ -45,6 +46,7 @@ app.include_router(aura_chat_portal_router)
 app.include_router(aura_voice_router)
 app.include_router(aura_avatar_router)
 app.include_router(aura_avatar_bootstrap_router)
+app.include_router(aura_avatar_bridge_router)
 app.include_router(vocal_router)
 app.include_router(video_router)
 app.include_router(music_video_router)
