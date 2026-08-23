@@ -45,17 +45,12 @@ def _client_key(request: Request) -> str:
 
 
 def _same_origin(request: Request) -> bool:
-    """Protect cookie-authenticated writes against cross-site requests."""
     fetch_site = (request.headers.get("sec-fetch-site") or "").lower()
     if fetch_site == "cross-site":
         return False
-
-    origin = request.headers.get("origin")
-    if not origin:
-        origin = request.headers.get("referer")
+    origin = request.headers.get("origin") or request.headers.get("referer")
     if not origin:
         return True
-
     parsed = urlparse(origin)
     request_host = (request.headers.get("host") or "").lower()
     origin_host = (parsed.netloc or "").lower()
@@ -74,7 +69,6 @@ def _known_public_url() -> str:
 
 
 async def _inject_esp_brand(response, path: str):
-    """Attach the shared ESP theme/favicon/PWA metadata to server-rendered HTML."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -114,6 +108,8 @@ async def _inject_esp_brand(response, path: str):
         extras += f"<a class='esp-history-fab' style='bottom:{daw_bottom}' href='/daw' title='Open the visual waveform timeline'>🎚 Visual DAW</a>"
     if path == "/daw" and "/daw/recording-ui.js" not in text:
         extras += "<script src='/daw/recording-ui.js'></script>"
+    if path == "/daw" and "/daw/routing-ui.js" not in text:
+        extras += "<script src='/daw/routing-ui.js'></script>"
     if path == "/owner/dashboard" and "href='/owner/compute-nodes'" not in text:
         extras += "<a class='esp-history-fab' href='/owner/compute-nodes' title='Manage ESP compute machines'>🖥 Compute Nodes</a>"
     if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:
@@ -121,42 +117,28 @@ async def _inject_esp_brand(response, path: str):
     if extras:
         text = text.replace("</body>", extras + "</body>", 1) if "</body>" in text else text + extras
 
-    headers = {
-        key: value for key, value in response.headers.items()
-        if key.lower() not in {"content-length", "content-type"}
-    }
+    headers = {key: value for key, value in response.headers.items() if key.lower() not in {"content-length", "content-type"}}
     return Response(content=text, status_code=response.status_code, headers=headers, media_type="text/html")
 
 
 class StudioSecurityMiddleware(BaseHTTPMiddleware):
-    """Security envelope around the public membership/studio application."""
-
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-
         if path in AUTH_RATE_PATHS and request.method == "POST":
             limit = int(os.getenv("LSS_AUTH_RATE_LIMIT", "12"))
             window = int(os.getenv("LSS_AUTH_RATE_WINDOW_SECONDS", "900"))
             allowed, retry = _LIMITER.allow((_client_key(request), path), limit=limit, window_seconds=window)
             if not allowed:
-                return JSONResponse(
-                    {"detail": "Too many authentication attempts. Try again later."},
-                    status_code=429,
-                    headers={"Retry-After": str(retry)},
-                )
+                return JSONResponse({"detail": "Too many authentication attempts. Try again later."}, status_code=429, headers={"Retry-After": str(retry)})
 
         if request.method in UNSAFE_METHODS:
-            has_cookie_auth = bool(
-                request.cookies.get("lss_session")
-                or request.cookies.get("lss_admin_session")
-            )
+            has_cookie_auth = bool(request.cookies.get("lss_session") or request.cookies.get("lss_admin_session"))
             bearer = (request.headers.get("authorization") or "").lower().startswith("bearer ")
             if has_cookie_auth and not bearer and not _same_origin(request):
                 return JSONResponse({"detail": "Cross-site write request blocked"}, status_code=403)
 
         response = await call_next(request)
         response = await _inject_esp_brand(response, path)
-
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
