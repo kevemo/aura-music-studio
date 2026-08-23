@@ -25,10 +25,9 @@ class SpeechResult:
 class AuraSpeechService:
     """Offline-first speech interface for Aura.
 
-    Speech recognition and synthesis are adapters, not hard dependencies. The preferred
-    standalone path is whisper.cpp for STT plus a locally hosted TTS engine (for example
-    Piper running as a separate process/service). Studio actions are still entitlement-
-    checked by the main API; speech never bypasses membership rules.
+    The preferred standalone path is whisper.cpp for STT plus a locally hosted TTS engine.
+    Browser microphone formats such as WebM/Opus are converted to mono 16 kHz WAV through
+    local ffmpeg before transcription. Studio actions remain entitlement-checked by the API.
     """
 
     def __init__(self):
@@ -45,32 +44,65 @@ class AuraSpeechService:
             rendered = rendered.replace("{" + key + "}", shlex.quote(value))
         return subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
 
+    @staticmethod
+    def _prepare_audio(source: Path, work_dir: Path) -> Path:
+        if source.suffix.lower() in {".wav", ".wave"}:
+            return source
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            raise RuntimeError("ffmpeg is required to transcode browser microphone audio for offline STT")
+        target = work_dir / "speech-input.wav"
+        subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(source),
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-c:a",
+                "pcm_s16le",
+                str(target),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return target
+
     def transcribe(self, audio_path: str | Path) -> str:
         source = Path(audio_path).resolve()
         if not source.is_file():
             raise FileNotFoundError(source)
 
-        if self.stt_cmd:
-            with tempfile.TemporaryDirectory(prefix="aura-stt-") as tmp:
-                out = Path(tmp) / "transcript.txt"
-                result = self._run_template(self.stt_cmd, {"input": str(source), "output": str(out)})
-                if out.exists():
-                    return out.read_text(encoding="utf-8").strip()
-                return (result.stdout or "").strip()
+        with tempfile.TemporaryDirectory(prefix="aura-speech-prep-") as prep_tmp:
+            prepared = self._prepare_audio(source, Path(prep_tmp))
 
-        whisper_cli = shutil.which("whisper-cli")
-        if whisper_cli and self.whisper_model:
-            with tempfile.TemporaryDirectory(prefix="aura-whisper-") as tmp:
-                prefix = Path(tmp) / "aura"
-                subprocess.run(
-                    [whisper_cli, "-m", self.whisper_model, "-f", str(source), "-otxt", "-of", str(prefix)],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-                transcript = prefix.with_suffix(".txt")
-                if transcript.exists():
-                    return transcript.read_text(encoding="utf-8").strip()
+            if self.stt_cmd:
+                with tempfile.TemporaryDirectory(prefix="aura-stt-") as tmp:
+                    out = Path(tmp) / "transcript.txt"
+                    result = self._run_template(self.stt_cmd, {"input": str(prepared), "output": str(out)})
+                    if out.exists():
+                        return out.read_text(encoding="utf-8").strip()
+                    return (result.stdout or "").strip()
+
+            whisper_cli = shutil.which("whisper-cli")
+            if whisper_cli and self.whisper_model:
+                with tempfile.TemporaryDirectory(prefix="aura-whisper-") as tmp:
+                    prefix = Path(tmp) / "aura"
+                    subprocess.run(
+                        [whisper_cli, "-m", self.whisper_model, "-f", str(prepared), "-otxt", "-of", str(prefix)],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                    transcript = prefix.with_suffix(".txt")
+                    if transcript.exists():
+                        return transcript.read_text(encoding="utf-8").strip()
 
         raise RuntimeError(
             "No local speech-to-text engine is configured. Set AURA_STT_CMD or install "
@@ -85,11 +117,7 @@ class AuraSpeechService:
         output.parent.mkdir(parents=True, exist_ok=True)
 
         if self.tts_url:
-            response = requests.post(
-                f"{self.tts_url}/synthesize",
-                json={"text": text},
-                timeout=120,
-            )
+            response = requests.post(f"{self.tts_url}/synthesize", json={"text": text}, timeout=120)
             response.raise_for_status()
             output.write_bytes(response.content)
             return output
@@ -131,7 +159,13 @@ class AuraSpeechService:
         suffix = " I need a little more detail before changing the audio." if plan.needs_confirmation else ""
         return f"I have mapped that to: {sentence}.{suffix}"
 
-    def command(self, audio_path: str | Path, *, session_summary: dict | None = None, speech_output: str | Path | None = None) -> SpeechResult:
+    def command(
+        self,
+        audio_path: str | Path,
+        *,
+        session_summary: dict | None = None,
+        speech_output: str | Path | None = None,
+    ) -> SpeechResult:
         transcript = self.transcribe(audio_path)
         plan = llm_plan(transcript, session_summary=session_summary)
         spoken = self._spoken_summary(plan)
@@ -148,6 +182,8 @@ class AuraSpeechService:
             "whisper_cli": shutil.which("whisper-cli"),
             "whisper_model_configured": bool(self.whisper_model),
             "piper_model_configured": bool(self.piper_model),
+            "ffmpeg": shutil.which("ffmpeg"),
+            "browser_audio_transcoding": bool(shutil.which("ffmpeg")),
             "offline_first": True,
         }
 
