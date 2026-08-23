@@ -48,6 +48,22 @@ def _safe_text(value: str, limit: int) -> str:
     return value.replace("\x00", "").strip()[:limit]
 
 
+def _gpu_ready() -> bool:
+    if not shutil.which("nvidia-smi"):
+        return False
+    try:
+        subprocess.run(
+            ["nvidia-smi", "-L"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=5,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def _final_candidate(output_dir: Path) -> Path:
     candidates = [p for p in output_dir.iterdir() if p.is_file() and p.suffix.lower() in {".mp3", ".wav", ".flac"}]
     if not candidates:
@@ -71,6 +87,8 @@ def _run_job(job_id: str, request: GenerateRequest) -> None:
     try:
         if not INFERENCE.is_file():
             raise FileNotFoundError(f"YuE inference script missing: {INFERENCE}")
+        if not _gpu_ready():
+            raise RuntimeError("YuE GPU worker has no usable NVIDIA GPU")
         command = [
             sys.executable, str(INFERENCE),
             "--cuda_idx", os.getenv("YUE_CUDA_IDX", "0"),
@@ -126,7 +144,12 @@ def _run_job(job_id: str, request: GenerateRequest) -> None:
 
 @app.get("/health")
 def health():
-    """Private-network health only; no secrets or model paths are returned."""
+    """Private-network readiness: HTTP alone is not enough; renderer prerequisites must be usable."""
+    inference_present = INFERENCE.is_file()
+    ffmpeg_present = shutil.which("ffmpeg") is not None
+    gpu_visible = _gpu_ready()
+    if not (inference_present and ffmpeg_present and gpu_visible):
+        raise HTTPException(status_code=503, detail="YuE renderer prerequisites are not ready")
     with lock:
         running = sum(1 for item in jobs.values() if item.get("status") == "running")
         queued = sum(1 for item in jobs.values() if item.get("status") == "queued")
@@ -135,14 +158,16 @@ def health():
         "busy": bool(running or queued),
         "running": running,
         "queued": queued,
-        "inference_present": INFERENCE.is_file(),
-        "ffmpeg_present": shutil.which("ffmpeg") is not None,
-        "gpu_visible": shutil.which("nvidia-smi") is not None,
+        "inference_present": True,
+        "ffmpeg_present": True,
+        "gpu_visible": True,
     }
 
 
 @app.post("/v1/jobs", status_code=202)
 def create_job(request: GenerateRequest, _: None = Depends(_auth)):
+    if not _gpu_ready():
+        raise HTTPException(status_code=503, detail="YuE GPU is unavailable")
     job_id = uuid.uuid4().hex
     with lock:
         jobs[job_id] = {"job_id": job_id, "status": "queued", "created_at": time.time()}
