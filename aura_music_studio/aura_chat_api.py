@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import mimetypes
 import os
 import re
@@ -14,6 +13,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .aura_attachment_understanding import AuraAttachmentUnderstandingService
 from .aura_companion import AuraCompanionError
 from .aura_persona import AURA_PERSONA_NAME, persona_context
 from .aura_system_companion import AuraSystemCompanionService
@@ -22,6 +22,7 @@ from .localization import LocalePreferenceStore
 router = APIRouter(prefix="/api/aura", tags=["Aura Workpage"])
 service = AuraSystemCompanionService()
 locale_store = LocalePreferenceStore(service.store.db_path)
+understanding = AuraAttachmentUnderstandingService()
 
 
 class AuraChatBody(BaseModel):
@@ -47,8 +48,6 @@ class MemoryBody(BaseModel):
 
 class AuraAttachmentStore:
     """Tenant-bound attachments for Aura's full chat/work page."""
-
-    TEXT_EXTS = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".htm", ".py", ".js", ".ts", ".tsx", ".jsx", ".css", ".sql", ".log"}
 
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
@@ -160,26 +159,22 @@ class AuraAttachmentStore:
 
     def context(self, user_id: str, ids: list[str]) -> list[dict]:
         context: list[dict] = []
-        max_text = int(os.getenv("AURA_CHAT_TEXT_ATTACHMENT_CHARS", "50000"))
         for attachment_id in ids:
             item = self.get(user_id, attachment_id)
             path = Path(item["stored_path"])
             if not path.is_file():
                 raise FileNotFoundError(item["original_name"])
-            entry = {
-                "attachment_id": item["id"],
-                "name": item["original_name"],
-                "mime_type": item["mime_type"],
-                "size_bytes": item["size_bytes"],
-                "sha256": item["sha256"],
-                "local_path": str(path),
-            }
-            if path.suffix.lower() in self.TEXT_EXTS or item["mime_type"].startswith("text/"):
-                try:
-                    entry["text_excerpt"] = path.read_text(encoding="utf-8", errors="replace")[:max_text]
-                except Exception:
-                    pass
-            context.append(entry)
+            analysis = understanding.understand(path, mime_type=item["mime_type"])
+            context.append(
+                {
+                    "attachment_id": item["id"],
+                    "name": item["original_name"],
+                    "mime_type": item["mime_type"],
+                    "size_bytes": item["size_bytes"],
+                    "sha256": item["sha256"],
+                    "analysis": analysis,
+                }
+            )
         return context
 
 
@@ -216,8 +211,13 @@ def aura_capabilities(request: Request):
             "full_chat": True,
             "persistent_history": True,
             "attachments": True,
-            "text_file_context": True,
-            "image_audio_video_attachment_storage": True,
+            "text_document_parsing": True,
+            "pdf_parsing": True,
+            "docx_parsing": True,
+            "audio_technical_analysis": True,
+            "audio_transcription_when_configured": True,
+            "video_metadata_and_audio_transcription": True,
+            "visual_semantic_analysis": bool(understanding.media_analyzer_cmd),
             "voice_input": True,
             "live_translation": True,
             "generation_result_cards": True,
@@ -330,8 +330,8 @@ def aura_chat(body: AuraChatBody, request: Request):
         "response_locale": locale,
         "attachments": attachment_context,
         "attachment_note": (
-            "Text attachment excerpts are available directly. Image/audio/video attachments are securely stored and identified here; "
-            "only claim visual/audio/video analysis when a configured multimodal analysis path actually processed the asset."
+            "Use only the attachment analysis actually present. Parsed document text, real audio analysis/transcripts and video metadata/transcripts "
+            "may be used directly. If visual_analysis_available is false, never claim to see or describe the image/video visuals."
         ),
     }
     try:
