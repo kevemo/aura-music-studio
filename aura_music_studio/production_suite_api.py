@@ -11,6 +11,7 @@ from .automix import apply_automix
 from .autotune import AutoTuneSettings, detect_key, tune_vocal
 from .build_around import BuildAroundRequest, build_around_upload
 from .effects import render_effects
+from .fx_designer import FxDesignRequest, design_fx, safe_slug
 from .fx_presets import get_preset as get_fx_preset, public_presets
 from .instrument_catalog import public_catalog
 from .mastering import master, master_album, public_mastering_presets, translation_report
@@ -19,6 +20,7 @@ from .plans import (
     ADVANCED_FX,
     ADVANCED_INSTRUMENT_SELECTOR,
     ADVANCED_MASTERING,
+    AI_FX_DESIGNER,
     ALBUM_MASTERING,
     AUTOMIX,
     BASIC_AUTOTUNE,
@@ -26,11 +28,14 @@ from .plans import (
     BASIC_MASTERING,
     BASIC_STEM_SPLITTER,
     BUILD_AROUND_UPLOAD,
+    MULTITRACK_DAW,
+    PLUGIN_RACK,
     REFERENCE_MASTERING,
     STANDARD_AUTOTUNE,
     STANDARD_FX,
     STEM_SPLITTER,
 )
+from .plugin_rack import PluginRackRequest, process_plugin_rack, public_plugin_catalog
 from .separation import StemSeparator
 from .session import StudioSession
 from .tenant_storage import project_path
@@ -46,6 +51,18 @@ BASE_MASTER_PRESETS = FREE_MASTER_PRESETS | {
 class FxRenderRequest(BaseModel):
     asset_id: str
     preset_id: str
+
+
+class FxDesignRenderRequest(BaseModel):
+    asset_id: str
+    description: str = Field(min_length=3, max_length=1500)
+    category: str = "creative"
+    max_effects: int = Field(default=8, ge=1, le=12)
+
+
+class PluginRenderRequest(BaseModel):
+    asset_id: str
+    rack: PluginRackRequest
 
 
 class TuneRequest(BaseModel):
@@ -141,6 +158,21 @@ def fx_catalog(request: Request):
     return {"plan": member.plan.id, "presets": rows}
 
 
+@router.post("/fx-design")
+def fx_design(body: FxDesignRequest, request: Request):
+    _require(_member(request), AI_FX_DESIGNER)
+    return design_fx(body).model_dump()
+
+
+@router.get("/plugin-catalog")
+def plugin_catalog(request: Request):
+    _require(_member(request), PLUGIN_RACK)
+    try:
+        return {"plugins": public_plugin_catalog(), "catalog_only": True}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(500, f"Plugin catalog configuration error: {exc}") from exc
+
+
 @router.get("/mastering-presets")
 def mastering_catalog(request: Request):
     member = _member(request)
@@ -162,8 +194,9 @@ def mastering_catalog(request: Request):
 def build_around(project_name: str, body: BuildAroundRequest, request: Request):
     member = _member(request)
     _require(member, BUILD_AROUND_UPLOAD)
+    if body.output_mode == "multitrack":
+        _require(member, MULTITRACK_DAW)
     if not member.plan.has(ADVANCED_INSTRUMENT_SELECTOR):
-        # Base can use the full family selector but Pro-only performance types remain locked.
         catalog = public_catalog()
         for switch in body.instrument_switches:
             item = next((x for x in catalog.get(switch.family, []) if x["id"] == switch.type_id), None)
@@ -192,6 +225,30 @@ def render_fx(project_name: str, body: FxRenderRequest, request: Request):
     out = project / "output" / "fx" / f"{_safe(Path(record.name).stem)}_{preset.id}.wav"
     render_effects(source, out, list(preset.effects))
     return {"output": str(out), "preset": preset.id, "name": preset.name, "effects": [x.model_dump() for x in preset.effects]}
+
+
+@router.post("/projects/{project_name}/fx-design-render")
+def fx_design_render(project_name: str, body: FxDesignRenderRequest, request: Request):
+    _require(_member(request), AI_FX_DESIGNER)
+    project = _project(project_name)
+    _, record, source = _asset_audio(project, body.asset_id)
+    design = design_fx(FxDesignRequest(description=body.description, category=body.category, max_effects=body.max_effects))
+    out = project / "output" / "fx" / f"{_safe(Path(record.name).stem)}_{safe_slug(body.description)}.wav"
+    render_effects(source, out, design.effects)
+    return {"output": str(out), "design": design.model_dump()}
+
+
+@router.post("/projects/{project_name}/plugin-rack")
+def plugin_rack(project_name: str, body: PluginRenderRequest, request: Request):
+    _require(_member(request), PLUGIN_RACK)
+    project = _project(project_name)
+    _, record, source = _asset_audio(project, body.asset_id)
+    out = project / "output" / "plugins" / f"{_safe(Path(record.name).stem)}_AuraPluginRack.wav"
+    try:
+        rendered, report = process_plugin_rack(source, out, body.rack)
+        return {"output": str(rendered), "report": report}
+    except (ValueError, PermissionError, FileNotFoundError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.post("/projects/{project_name}/autotune")
@@ -258,7 +315,10 @@ def mastering(project_name: str, body: MasterRequest, request: Request):
         allowed = FREE_MASTER_PRESETS
     if allowed is not None and body.preset not in allowed:
         raise HTTPException(403, "This mastering character requires a higher tier")
-    if (abs(body.low_db) > .01 or abs(body.mid_db) > .01 or abs(body.high_db) > .01 or body.stereo_width is not None or body.target_lufs is not None) and not member.plan.has(ADVANCED_MASTERING):
+    if (
+        abs(body.low_db) > .01 or abs(body.mid_db) > .01 or abs(body.high_db) > .01
+        or body.stereo_width is not None or body.target_lufs is not None
+    ) and not member.plan.has(ADVANCED_MASTERING):
         raise HTTPException(403, "Manual mastering controls unlock on Pro")
     project = _project(project_name)
     library, record, source = _asset_audio(project, body.asset_id)
@@ -291,4 +351,8 @@ def album_master(project_name: str, body: AlbumMasterRequest, request: Request):
             raise HTTPException(400, f"Asset {asset_id} is not audio")
         sources.append(project / record.path)
     out_dir = project / "output" / "album_master"
-    return {"tracks": master_album(sources, out_dir, preset=body.preset, target_lufs=body.target_lufs, intensity=body.intensity)}
+    return {
+        "tracks": master_album(
+            sources, out_dir, preset=body.preset, target_lufs=body.target_lufs, intensity=body.intensity
+        )
+    }
