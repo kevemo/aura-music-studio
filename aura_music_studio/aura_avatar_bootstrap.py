@@ -7,11 +7,20 @@ from .aura_avatar_runtime import RUNTIME_JS, THREE_VERSION, THREE_VRM_VERSION
 
 router = APIRouter(tags=["Aura Embodied Bootstrap"])
 
-# Repair the guarded thinking-state scalar and add compatibility hooks so the embodied
-# runtime follows speech played by existing pages as well as speech started directly by AuraAvatar.
+# Repair/extend the base module before serving it. The source runtime is deliberately kept
+# simple; this bootstrap layers product integration, accessibility and cross-page continuity.
 PATCHED_RUNTIME_JS = RUNTIME_JS.replace(
     "this.state==='thinking'?.55:0",
     "(this.state==='thinking'?0.55:0)",
+).replace(
+    "width:'230px',height:'410px'",
+    "width:(innerWidth<700?'165px':'230px'),height:(innerWidth<700?'295px':'410px')",
+).replace(
+    "behavior:'smooth'",
+    "behavior:(matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth')",
+).replace(
+    "clamp(dt*5)",
+    "clamp(dt*(matchMedia('(prefers-reduced-motion: reduce)').matches?30:5))",
 ).replace(
     "addEventListener('aura:celebrate',()=>{this.setState('celebrate');clearTimeout(this._stateTimer);this._stateTimer=setTimeout(()=>this.setState('idle'),1800)});",
     "addEventListener('aura:celebrate',()=>{this.setState('celebrate');clearTimeout(this._stateTimer);this._stateTimer=setTimeout(()=>this.setState('idle'),1800)});"
@@ -37,8 +46,8 @@ AuraEmbodiedRuntime.prototype.startTour=async function(){
   if(!unique.length){await this.speak('I can stay with you here. Ask me what you would like to find or create.');return;}
   await this.speak('I will show you around. I will point out the main controls on this screen.');
   for(let i=0;i<unique.length;i++){
-    const {el,label}=unique[i];if(!document.body.contains(el))continue;el.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});await sleep(420);
-    if(!el.id)el.id='aura-guide-'+Math.random().toString(36).slice(2,9);this.guideTo('#'+CSS.escape(el.id));await sleep(720);
+    const {el,label}=unique[i];if(!document.body.contains(el))continue;el.scrollIntoView({behavior:(matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'),block:'center',inline:'nearest'});await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?80:420);
+    if(!el.id)el.id='aura-guide-'+Math.random().toString(36).slice(2,9);this.guideTo('#'+CSS.escape(el.id));await sleep(matchMedia('(prefers-reduced-motion: reduce)').matches?80:720);
     const custom=el.getAttribute('data-aura-guide');const line=custom||('This is '+label+'.');await this.speak(line);await sleep(180);
   }
   this.guideTarget=null;this.setState('idle');await this.speak('That is the main layout. I can guide you to any feature whenever you need me.');
@@ -62,19 +71,27 @@ AuraEmbodiedRuntime.prototype.scanPageControls=async function(){
 AuraEmbodiedRuntime.prototype.handleBridgeCommand=async function(command){
   if(!command)return;const action=command.action,p=command.payload||{},message=p.message||'';
   if(action==='guide_to'){
-    const el=p.selector?document.querySelector(p.selector):null;if(el){el.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});await new Promise(r=>setTimeout(r,350));this.guideTo(p.selector,message);await new Promise(r=>setTimeout(r,650));}
+    const el=p.selector?document.querySelector(p.selector):null;if(el){el.scrollIntoView({behavior:(matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'),block:'center',inline:'nearest'});await new Promise(r=>setTimeout(r,matchMedia('(prefers-reduced-motion: reduce)').matches?60:350));this.guideTo(p.selector,message);await new Promise(r=>setTimeout(r,matchMedia('(prefers-reduced-motion: reduce)').matches?60:650));}
     if(p.speak&&message)await this.speak(message);return;
   }
   if(action==='present'){this.setState('presenting');if(p.speak&&message)await this.speak(message);return;}
   if(action==='celebrate'){this.setState('celebrate');if(p.speak&&message)await this.speak(message);setTimeout(()=>this.setState('idle'),1500);return;}
   if(action==='listen'){this.setState('listening');if(p.speak&&message)await this.speak(message);return;}
   if(action==='think'){this.setState('thinking');if(p.speak&&message)await this.speak(message);return;}
-  if(action==='minimize'){this.root.style.transformOrigin='bottom right';this.root.style.transform='scale(.34)';this.root.style.opacity='.82';return;}
-  if(action==='restore'){this.root.style.transform='scale(1)';this.root.style.opacity='1';this.setState('idle');if(p.speak&&message)await this.speak(message);return;}
+  if(action==='minimize'){this.root.style.transformOrigin='bottom right';this.root.style.transform='scale(.34)';this.root.style.opacity='.82';this.persistUiState();return;}
+  if(action==='restore'){this.root.style.transform='scale(1)';this.root.style.opacity='1';this.setState('idle');this.persistUiState();if(p.speak&&message)await this.speak(message);return;}
+};
+
+AuraEmbodiedRuntime.prototype.persistUiState=function(){
+  try{sessionStorage.setItem('aura-embodied-ui',JSON.stringify({x:this.pos.x,y:this.pos.y,minimized:this.root?.style?.transform?.includes('scale(.34)')||false}));}catch(_){}
+};
+AuraEmbodiedRuntime.prototype.restoreUiState=function(){
+  try{const raw=sessionStorage.getItem('aura-embodied-ui');if(!raw)return;const v=JSON.parse(raw);if(Number.isFinite(v.x)&&Number.isFinite(v.y)){this.pos.x=clamp(v.x,8,innerWidth-(innerWidth<700?173:238));this.pos.y=clamp(v.y,8,innerHeight-(innerWidth<700?303:418));this.target={...this.pos};}if(v.minimized){this.root.style.transformOrigin='bottom right';this.root.style.transform='scale(.34)';this.root.style.opacity='.82';}}catch(_){}
 };
 
 AuraEmbodiedRuntime.prototype.startBridge=function(){
-  this.scanPageControls();
+  this.restoreUiState();this.resize();this.scanPageControls();
+  addEventListener('pagehide',()=>this.persistUiState());
   this._pageScanTimer=setInterval(()=>this.scanPageControls(),5000);
   this._commandTimer=setInterval(async()=>{
     try{const r=await fetch('/api/aura/avatar/commands/next',{credentials:'same-origin'});if(!r.ok)return;const data=await r.json();if(data.command)await this.handleBridgeCommand(data.command);}catch(_){}
@@ -92,7 +109,7 @@ def avatar_bootstrap_html() -> str:
 {{"imports":{{
   "three":"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.module.js",
   "three/addons/":"https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/",
-  "@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@{THREE_VRM_VERSION}/lib/three-vrm.module.js"
+  "@pixiv/three-vrm":"https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@{THREE_VRM_VERSION}/lib/three-vrm.module.min.js"
 }}}}
 </script>
 <script type='module' src='/aura/avatar/runtime-v3.js' id='aura-avatar-runtime'></script>
