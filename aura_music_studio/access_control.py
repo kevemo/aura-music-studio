@@ -41,6 +41,7 @@ PUBLIC_EXACT = {
 # Privacy endpoints authenticate themselves with a valid session but deliberately do not require
 # an active paid/free entitlement, so pending/past-due members can still export/delete their data.
 # Brand assets must also remain public so unauthenticated landing/auth pages can load the ESP identity.
+# ESP creator/agent/admin products keep their own ESP-role gates; they are not ordinary plan features.
 PUBLIC_PREFIXES = ("/auth/", "/admin/", "/owner", "/privacy/", "/brand/")
 
 
@@ -54,7 +55,9 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
-    if path == "/api/video/generate" and method == "POST":
+    # Capabilities may be inspected by signed-in Free members so the UI can explain the upgrade.
+    # Every action that creates, reads, refreshes or downloads a video job is Base+.
+    if path.startswith("/api/video/") and path != "/api/video/capabilities":
         return VIDEO_GENERATION
     if path.startswith("/speech/"):
         return AURA_SPEECH
@@ -133,6 +136,11 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                 )
 
             if path.endswith("/download"):
+                # Video downloads are already bound to VIDEO_GENERATION above and are served only from
+                # the authenticated member's own VideoJobStore record. Audio/stem downloads use the
+                # legacy format-specific entitlement rules below.
+                if path.startswith("/api/video/"):
+                    return await call_next(request)
                 requested = (request.query_params.get("path") or "").lower()
                 if requested.endswith(".mp3"):
                     needed = MP3_DOWNLOAD
