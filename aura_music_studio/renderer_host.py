@@ -131,7 +131,11 @@ def start_renderers(*, mode: str = "ace", env_path: Path = Path(".env"), build: 
     tail = ["up", "-d"] + (["--build"] if build else [])
     command = compose_command(mode, *tail, env_path=env_path)
     subprocess.run(command, check=True)
-    smoke = compose_command(mode, "exec", "live-sound-studio", "aura", "renderer-smoke", env_path=env_path)
+    smoke = compose_command(
+        mode,
+        "exec", "live-sound-studio", "python", "-m", "aura_music_studio.renderer_smoke",
+        env_path=env_path,
+    )
     return {
         "mode": mode,
         "started": True,
