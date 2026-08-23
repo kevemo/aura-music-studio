@@ -50,6 +50,7 @@ class StudioJobQueue:
                     started_at TEXT,
                     completed_at TEXT,
                     worker_id TEXT,
+                    payload_json TEXT,
                     result_json TEXT,
                     error TEXT,
                     attempts INTEGER NOT NULL DEFAULT 0,
@@ -59,9 +60,22 @@ class StudioJobQueue:
                 ON studio_jobs(status, priority DESC, created_at ASC);
                 """
             )
+            # Existing deployments created studio_jobs before payload_json existed.
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(studio_jobs)").fetchall()}
+            if "payload_json" not in columns:
+                con.execute("ALTER TABLE studio_jobs ADD COLUMN payload_json TEXT")
 
-    def submit(self, user_id: str, project_name: str, *, job_type: str = "produce", priority: int = 10) -> dict:
+    def submit(
+        self,
+        user_id: str,
+        project_name: str,
+        *,
+        job_type: str = "produce",
+        priority: int = 10,
+        payload: dict | None = None,
+    ) -> dict:
         job_id = uuid4().hex
+        payload_json = json.dumps(payload, default=str) if payload is not None else None
         with self._connect() as con:
             existing = con.execute(
                 """SELECT * FROM studio_jobs
@@ -73,9 +87,9 @@ class StudioJobQueue:
                 return dict(existing)
             con.execute(
                 """INSERT INTO studio_jobs
-                   (id,user_id,project_name,job_type,status,priority,created_at)
-                   VALUES (?,?,?,?, 'queued', ?, ?)""",
-                (job_id, user_id, project_name, job_type, int(priority), _now()),
+                   (id,user_id,project_name,job_type,status,priority,created_at,payload_json)
+                   VALUES (?,?,?,?, 'queued', ?, ?, ?)""",
+                (job_id, user_id, project_name, job_type, int(priority), _now(), payload_json),
             )
             row = con.execute("SELECT * FROM studio_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row)
@@ -106,14 +120,10 @@ class StudioJobQueue:
             "counts": {row["status"]: int(row["count"]) for row in rows},
             "oldest_queued_at": oldest["created_at"] if oldest else None,
             "backend": "sqlite_wal",
+            "payload_jobs": True,
         }
 
     def requeue_stale(self, *, stale_after_seconds: int = 10_800, max_attempts: int = 3) -> int:
-        """Recover jobs left running after a worker crash.
-
-        Three hours is intentionally conservative because full neural productions can be long.
-        Jobs that already reached max_attempts are failed instead of looping forever.
-        """
         cutoff = (_now_dt() - timedelta(seconds=max(60, stale_after_seconds))).isoformat()
         now = _now()
         with self._connect() as con:
@@ -131,7 +141,6 @@ class StudioJobQueue:
         return int(recovered + failed)
 
     def claim_next(self, worker_id: str) -> dict | None:
-        """Atomically claim the highest-priority oldest job."""
         self.requeue_stale()
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
@@ -180,17 +189,35 @@ class AuraJobWorker:
         self.store = self.queue.store
         self.worker_id = worker_id
 
+    @staticmethod
+    def _payload(job: dict) -> dict:
+        raw = job.get("payload_json")
+        if not raw:
+            return {}
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError("Job payload must be a JSON object")
+        return value
+
     def run_job(self, job: dict) -> dict:
         context = set_current_user_id(job["user_id"])
         try:
             project = project_path(job["project_name"], must_exist=True)
-            if job["job_type"] != "produce":
+            if job["job_type"] == "produce":
+                result = AuraPipeline(project).run()
+            elif job["job_type"] == "build_around":
+                from .build_around import BuildAroundRequest, build_around_upload
+                result = build_around_upload(project, BuildAroundRequest.model_validate(self._payload(job)))
+            else:
                 raise ValueError(f"Unsupported job type: {job['job_type']}")
-            result = AuraPipeline(project).run()
-            try:
-                self.store.record_regeneration(job["user_id"], job["project_name"])
-            except Exception:
-                pass
+
+            # Full-song generation/regeneration shares the same Base draft accounting regardless
+            # of whether it came from Create Song or Build Around Upload.
+            if job["job_type"] in {"produce", "build_around"}:
+                try:
+                    self.store.record_regeneration(job["user_id"], job["project_name"])
+                except Exception:
+                    pass
             return result
         finally:
             reset_current_user_id(context)
