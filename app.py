@@ -14,6 +14,7 @@ from aura_music_studio.esp_command_center import router as esp_command_center_ro
 from aura_music_studio.image_api import router as image_router
 from aura_music_studio.live_translation_api import router as live_translation_router
 from aura_music_studio.localization_api import router as localization_router
+from aura_music_studio.music_video_api import router as music_video_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
@@ -40,6 +41,7 @@ app.include_router(aura_chat_router)
 app.include_router(aura_chat_portal_router)
 app.include_router(vocal_router)
 app.include_router(video_router)
+app.include_router(music_video_router)
 app.include_router(image_router)
 app.include_router(visual_fx_router)
 app.include_router(visual_portal_router)
