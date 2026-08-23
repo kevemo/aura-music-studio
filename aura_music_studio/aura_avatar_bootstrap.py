@@ -7,10 +7,20 @@ from .aura_avatar_runtime import RUNTIME_JS, THREE_VERSION, THREE_VRM_VERSION
 
 router = APIRouter(tags=["Aura Embodied Bootstrap"])
 
-# Correct the guarded thinking-state scalar in the source runtime before serving it.
+# Repair the guarded thinking-state scalar and add compatibility hooks so the embodied
+# runtime follows speech played by existing pages as well as speech started directly by AuraAvatar.
 PATCHED_RUNTIME_JS = RUNTIME_JS.replace(
     "this.state==='thinking'?.55:0",
     "(this.state==='thinking'?0.55:0)",
+).replace(
+    "addEventListener('aura:celebrate',()=>{this.setState('celebrate');clearTimeout(this._stateTimer);this._stateTimer=setTimeout(()=>this.setState('idle'),1800)});",
+    "addEventListener('aura:celebrate',()=>{this.setState('celebrate');clearTimeout(this._stateTimer);this._stateTimer=setTimeout(()=>this.setState('idle'),1800)});"
+    "document.addEventListener('play',e=>{if(e.target instanceof HTMLMediaElement){this.setState('speaking');dispatchEvent(new CustomEvent('aura:speaking',{detail:{active:true,source:'page-audio'}}));}},true);"
+    "document.addEventListener('ended',e=>{if(e.target instanceof HTMLMediaElement){this.setState('idle');dispatchEvent(new CustomEvent('aura:speaking',{detail:{active:false,source:'page-audio'}}));}},true);"
+    "document.addEventListener('pause',e=>{if(e.target instanceof HTMLMediaElement&&!e.target.ended){this.setState('idle');dispatchEvent(new CustomEvent('aura:speaking',{detail:{active:false,source:'page-audio'}}));}},true);",
+).replace(
+    "this.updateLipSync(this.state==='speaking'?this.speechLevel():0,t);",
+    "this.updateLipSync(this.state==='speaking'?(this.analyser?this.speechLevel():(0.25+0.20*Math.abs(Math.sin(t*.018)))):0,t);",
 )
 
 
