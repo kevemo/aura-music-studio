@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -176,6 +177,25 @@ class ESPComputeNodeAgent:
         response.raise_for_status()
         return response.json().get("job")
 
+    def renew_lease(self, job: dict) -> bool:
+        response = requests.post(
+            f"{self.base}{job['lease_url']}",
+            headers=self._headers(),
+            timeout=30,
+        )
+        response.raise_for_status()
+        return bool(response.json().get("renewed"))
+
+    def _lease_loop(self, job: dict, stop: threading.Event) -> None:
+        interval = max(10, int(os.getenv("LSS_NODE_HEARTBEAT_SECONDS", "30")))
+        while not stop.wait(interval):
+            try:
+                self.renew_lease(job)
+            except Exception:
+                # Temporary connectivity loss does not kill a local render. If the lease truly expires,
+                # the coordinator rejects the eventual result rather than accepting duplicate ownership.
+                continue
+
     def _download(self, url: str, destination: Path) -> None:
         maximum = max(64 * 1024 * 1024, int(os.getenv("LSS_NODE_MAX_BUNDLE_BYTES", str(2 * 1024**3))))
         with requests.get(f"{self.base}{url}", headers=self._headers(), stream=True, timeout=(30, 1800)) as response:
@@ -233,6 +253,9 @@ class ESPComputeNodeAgent:
         if not job:
             return None
         job_dir = Path(tempfile.mkdtemp(prefix=f"esp-node-{job['id'][:8]}-", dir=self.work_root))
+        lease_stop = threading.Event()
+        lease_thread = threading.Thread(target=self._lease_loop, args=(job, lease_stop), daemon=True)
+        lease_thread.start()
         try:
             bundle = job_dir / "job.zip"
             project = job_dir / "project"
@@ -241,7 +264,6 @@ class ESPComputeNodeAgent:
             manifest_job = manifest.get("job") or {}
             if manifest_job.get("id") != job["id"] or manifest_job.get("job_type") != job["job_type"]:
                 raise ValueError("Coordinator bundle metadata does not match the claimed job")
-            # The signed-in member's private payload travels only inside the authenticated job bundle.
             executable_job = {**job, "payload": manifest_job.get("payload") or {}}
             result = self._execute(executable_job, project)
             result_bundle = job_dir / "result.zip"
@@ -258,6 +280,8 @@ class ESPComputeNodeAgent:
             self._report_failure(job, message)
             return {"job_id": job["id"], "status": "failed", "error": message}
         finally:
+            lease_stop.set()
+            lease_thread.join(timeout=2)
             shutil.rmtree(job_dir, ignore_errors=True)
 
     def serve_forever(self) -> None:
