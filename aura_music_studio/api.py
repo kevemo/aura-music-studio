@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -26,16 +25,15 @@ from .samples import SampleRequest, analyze_sample, generate_sample, make_loop
 from .separation import StemSeparator
 from .session import StudioSession
 from .styles import StyleBlend, build_style_dna, style_prompt
+from .tenant_storage import list_project_dirs, project_path, projects_root
 from .transcription import audio_to_midi
 from .voice import create_voice_profile
+from .web_api import router as web_api_router
 from .web_portal import router as web_portal_router
-
-PROJECTS_ROOT = Path(os.getenv("AURA_PROJECTS_ROOT", "projects")).resolve()
-PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.6.0",
+    version="0.7.0",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
@@ -43,6 +41,7 @@ app.include_router(web_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
 app.include_router(engineering_router)
+app.include_router(web_api_router)
 
 
 class ProducerRequest(BaseModel):
@@ -50,12 +49,12 @@ class ProducerRequest(BaseModel):
 
 
 def _project(name: str) -> Path:
-    p = (PROJECTS_ROOT / name).resolve()
-    if PROJECTS_ROOT not in p.parents and p != PROJECTS_ROOT:
-        raise HTTPException(400, "Invalid project path")
-    if not p.exists():
-        raise HTTPException(404, "Project not found")
-    return p
+    try:
+        return project_path(name, must_exist=True)
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid project path") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
 
 
 def _session_path(project: Path) -> Path:
@@ -75,7 +74,9 @@ def health():
         "owner_portal": True,
         "spoken_aura": True,
         "advanced_engineering_api": True,
-        "api_version": "0.6.0",
+        "controlled_web_gateway": True,
+        "per_member_project_isolation": True,
+        "api_version": "0.7.0",
     }
 
 
@@ -92,14 +93,18 @@ def engines():
 @app.get("/projects")
 def list_projects():
     return [
-        {"name": p.name, "has_manifest": (p / "project.yaml").exists(), "has_session": _session_path(p).exists()}
-        for p in sorted(PROJECTS_ROOT.iterdir()) if p.is_dir()
+        {
+            "name": p.name,
+            "has_manifest": (p / "project.yaml").exists(),
+            "has_session": _session_path(p).exists(),
+        }
+        for p in list_project_dirs()
     ]
 
 
 @app.post("/songs")
 def create_song(request: CreateSongRequest):
-    project = build_song_project(request, PROJECTS_ROOT)
+    project = build_song_project(request, projects_root())
     return {"project": project.name, "path": str(project)}
 
 
@@ -175,8 +180,11 @@ async def upload_asset(
         while chunk := await file.read(1024 * 1024):
             f.write(chunk)
     record = AssetLibrary(project).ingest(
-        tmp, kind=kind, rights_basis=rights_basis, attestation=attestation,
-        tags=[x.strip() for x in tags.split(",") if x.strip()],
+        tmp,
+        kind=kind,
+        rights_basis=rights_basis,
+        attestation=attestation,
+        tags=[x.strip() for x in (tags or "").split(",") if x.strip()],
     )
     tmp.unlink(missing_ok=True)
     return record.model_dump()
@@ -203,7 +211,11 @@ def sample_generate(project_name: str, request: SampleRequest):
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"Aura_{request.kind}_{len(list(out_dir.glob('*.wav'))) + 1:03d}.wav"
     generated = generate_sample(request, out)
-    return {"path": str(generated), "analysis": analyze_sample(generated).model_dump(), "audio_origin": "neural"}
+    return {
+        "path": str(generated),
+        "analysis": analyze_sample(generated).model_dump(),
+        "audio_origin": "neural",
+    }
 
 
 @app.post("/projects/{project_name}/sample/loop")
@@ -251,7 +263,12 @@ def transcribe(project_name: str, asset_id: str):
 
 
 @app.post("/projects/{project_name}/master")
-def master_asset(project_name: str, asset_id: str, preset: str = "streaming", reference_asset_id: str | None = None):
+def master_asset(
+    project_name: str,
+    asset_id: str,
+    preset: str = "streaming",
+    reference_asset_id: str | None = None,
+):
     project = _project(project_name)
     library = AssetLibrary(project)
     source_record = library.get(asset_id)
@@ -260,7 +277,11 @@ def master_asset(project_name: str, asset_id: str, preset: str = "streaming", re
     reference = project / library.get(reference_asset_id).path if reference_asset_id else None
     out = project / "output" / f"{Path(source_record.name).stem}_AuraMaster.wav"
     mastered, report = master(project / source_record.path, out, preset=preset, reference=reference)
-    return {"path": str(mastered), "report": report, "translation": translation_report(mastered)}
+    return {
+        "path": str(mastered),
+        "report": report,
+        "translation": translation_report(mastered),
+    }
 
 
 @app.post("/projects/{project_name}/voice-profiles")
@@ -280,7 +301,10 @@ async def new_voice_profile(
             f.write(chunk)
     profile = create_voice_profile(
         RightsLedger(project / ".aura_rights"),
-        name=name, owner_label=owner_label, reference_files=[target], consent_statement=consent_statement,
+        name=name,
+        owner_label=owner_label,
+        reference_files=[target],
+        consent_statement=consent_statement,
     )
     return profile.model_dump()
 
