@@ -8,6 +8,7 @@ from aura_music_studio.api import app
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
 from aura_music_studio.daw_api import router as daw_router
+from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
 from aura_music_studio.daw_portal import router as daw_portal_router
 from aura_music_studio.daw_recording_api import router as daw_recording_router
 from aura_music_studio.daw_recording_ui import router as daw_recording_ui_router
@@ -42,6 +43,7 @@ app.include_router(daw_recording_router)
 app.include_router(daw_recording_ui_router)
 app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
+app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
