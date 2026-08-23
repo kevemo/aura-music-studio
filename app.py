@@ -17,6 +17,8 @@ from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
+from aura_music_studio.esp_niche import router as esp_niche_router
+from aura_music_studio.esp_niche_bootstrap import EspNicheDashboardMiddleware
 from aura_music_studio.image_api import router as image_router
 from aura_music_studio.live_translation_api import router as live_translation_router
 from aura_music_studio.localization_api import router as localization_router
@@ -39,7 +41,8 @@ from aura_music_studio.visual_portal import router as visual_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # Modular creative routers share the core app's authentication, plan enforcement and tenant isolation.
-# ESP command-center routes retain their separate ESP role gates and are not ordinary customer features.
+# ESP command-center/niche routes retain separate ESP role gates and are not ordinary customer features.
+app.add_middleware(EspNicheDashboardMiddleware)
 app.include_router(brand_router)
 app.include_router(localization_router)
 app.include_router(live_translation_router)
@@ -58,6 +61,7 @@ app.include_router(visual_portal_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
 app.include_router(esp_command_center_router)
+app.include_router(esp_niche_router)
 app.include_router(recording_router)
 app.include_router(output_router)
 app.include_router(privacy_router)
