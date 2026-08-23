@@ -26,16 +26,18 @@ from .session import StudioSession
 from .styles import StyleBlend, build_style_dna, style_prompt
 from .transcription import audio_to_midi
 from .voice import create_voice_profile
+from .web_portal import router as web_portal_router
 
 PROJECTS_ROOT = Path(os.getenv("AURA_PROJECTS_ROOT", "projects")).resolve()
 PROJECTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.5.0",
+    version="0.5.1",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first multi-model generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
+app.include_router(web_portal_router)
 app.include_router(membership_router)
 
 
@@ -65,7 +67,8 @@ def health():
         "ai_producer": "Aura",
         "real_audio_only_final": True,
         "membership_tiers": ["free", "base", "pro"],
-        "api_version": "0.5.0",
+        "customer_portal": True,
+        "api_version": "0.5.1",
     }
 
 
