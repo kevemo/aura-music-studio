@@ -60,7 +60,6 @@ class StudioJobQueue:
                 ON studio_jobs(status, priority DESC, created_at ASC);
                 """
             )
-            # Existing deployments created studio_jobs before payload_json existed.
             columns = {row["name"] for row in con.execute("PRAGMA table_info(studio_jobs)").fetchall()}
             if "payload_json" not in columns:
                 con.execute("ALTER TABLE studio_jobs ADD COLUMN payload_json TEXT")
@@ -203,17 +202,19 @@ class AuraJobWorker:
         context = set_current_user_id(job["user_id"])
         try:
             project = project_path(job["project_name"], must_exist=True)
-            if job["job_type"] == "produce":
+            job_type = job["job_type"]
+            if job_type == "produce":
                 result = AuraPipeline(project).run()
-            elif job["job_type"] == "build_around":
+            elif job_type == "build_around":
                 from .build_around import BuildAroundRequest, build_around_upload
                 result = build_around_upload(project, BuildAroundRequest.model_validate(self._payload(job)))
+            elif job_type.startswith("engineering:"):
+                from .engineering_jobs import run_engineering_job
+                result = run_engineering_job(project, self._payload(job))
             else:
-                raise ValueError(f"Unsupported job type: {job['job_type']}")
+                raise ValueError(f"Unsupported job type: {job_type}")
 
-            # Full-song generation/regeneration shares the same Base draft accounting regardless
-            # of whether it came from Create Song or Build Around Upload.
-            if job["job_type"] in {"produce", "build_around"}:
+            if job_type in {"produce", "build_around"}:
                 try:
                     self.store.record_regeneration(job["user_id"], job["project_name"])
                 except Exception:
