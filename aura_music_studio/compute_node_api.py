@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -112,6 +111,7 @@ def _public_claim(job: dict) -> dict:
         "attempts": job["attempts"],
         "payload": payload if isinstance(payload, dict) else {},
         "bundle_url": f"/node-coordinator/jobs/{job['id']}/bundle",
+        "lease_url": f"/node-coordinator/jobs/{job['id']}/lease",
         "result_url": f"/node-coordinator/jobs/{job['id']}/result",
         "fail_url": f"/node-coordinator/jobs/{job['id']}/fail",
     }
@@ -163,6 +163,20 @@ def claim_job(
     if not job:
         return {"job": None, "allowed_job_types": allowed}
     return {"job": _public_claim(job)}
+
+
+@router.post("/jobs/{job_id}/lease")
+def renew_lease(
+    job_id: str,
+    request: Request,
+    x_esp_node_id: str | None = Header(default=None),
+    authorization: str | None = Header(default=None),
+):
+    node = _node_auth(x_esp_node_id, authorization)
+    registry.heartbeat(node["id"], remote_ip=_remote_ip(request))
+    if not queue.renew_owned(job_id, _worker_id(node["id"])):
+        raise HTTPException(409, "This node no longer owns the job lease")
+    return {"renewed": True, "job_id": job_id}
 
 
 @router.get("/jobs/{job_id}/bundle")
