@@ -65,6 +65,12 @@ body:before{
   border-color:rgba(231,185,83,.22)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 20px 65px rgba(0,0,0,.35)!important;
 }
+.hero-card{position:relative;overflow:hidden}
+.hero-card:before{
+  content:"";display:block;width:154px;height:154px;margin:0 auto 16px;border-radius:50%;
+  background:url('/brand/esp-logo.webp') center/cover no-repeat;
+  box-shadow:0 0 0 1px rgba(231,185,83,.58),0 0 34px rgba(209,42,159,.33);
+}
 .card:hover,.tile:hover{border-color:rgba(209,42,159,.42)!important}
 .btn,button{
   border-color:rgba(231,185,83,.25)!important;
@@ -94,7 +100,13 @@ h1 span,.gold,.tier,.price{background:linear-gradient(180deg,#fff1bd,#e6b44c 58%
 .esp-logo-small{width:88px;height:88px;object-fit:cover;border-radius:50%;box-shadow:0 0 28px rgba(209,42,159,.38)}
 .esp-brand-line{height:1px;background:linear-gradient(90deg,transparent,#9b4eb9,#e7b953,#9b4eb9,transparent);margin:14px 0 22px}
 .esp-jewel{color:var(--esp-ruby)!important;text-shadow:0 0 12px rgba(212,43,53,.4)}
-@media(max-width:700px){.brand:before{width:46px;height:46px}.esp-hero-logo{width:min(230px,62vw)}}
+.esp-history-fab{
+  position:fixed;right:18px;bottom:18px;z-index:9998;text-decoration:none;color:#fff!important;font-weight:900;
+  border:1px solid rgba(231,185,83,.5);border-radius:999px;padding:10px 14px 10px 42px;
+  background:linear-gradient(135deg,rgba(58,20,70,.97),rgba(20,8,26,.97));box-shadow:0 10px 35px rgba(0,0,0,.4),0 0 20px rgba(209,42,159,.16);
+}
+.esp-history-fab:before{content:"";position:absolute;left:8px;top:50%;transform:translateY(-50%);width:26px;height:26px;border-radius:50%;background:url('/brand/esp-logo.webp') center/cover no-repeat}
+@media(max-width:700px){.brand:before{width:46px;height:46px}.esp-hero-logo{width:min(230px,62vw)}.hero-card:before{width:118px;height:118px}.esp-history-fab{right:10px;bottom:10px;font-size:.82rem}}
 """
 
 
