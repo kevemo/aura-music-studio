@@ -9,6 +9,16 @@ services:
       ace-step:
         condition: service_healthy
 
+  aura-worker:
+    environment:
+      AURA_ACESTEP_API_URL: http://ace-step:8001
+      AURA_ACESTEP_FULL_MODEL: acestep-v15-xl-turbo
+      AURA_ACESTEP_TRACK_MODEL: acestep-v15-base
+      AURA_ACESTEP_SAMPLE_MODEL: acestep-v15-base
+    depends_on:
+      ace-step:
+        condition: service_healthy
+
   ace-step:
     # Pinned to the ACE-Step 1.5 upstream commit verified by ESP during this build.
     # Update deliberately after reviewing upstream changes/licences rather than tracking `main` blindly.
@@ -40,7 +50,7 @@ services:
       timeout: 10s
       retries: 8
       start_period: 180s
-    # Deliberately no public host port. Only The Live Sound Studio service calls this worker.
+    # Deliberately no public host port. Only The Live Sound Studio services call this worker.
 
 volumes:
   ace_step_checkpoints:
