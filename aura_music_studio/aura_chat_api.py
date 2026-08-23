@@ -14,12 +14,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .aura_companion import AuraCompanionError, AuraCompanionService
+from .aura_companion import AuraCompanionError
 from .aura_persona import AURA_PERSONA_NAME, persona_context
+from .aura_system_companion import AuraSystemCompanionService
 from .localization import LocalePreferenceStore
 
 router = APIRouter(prefix="/api/aura", tags=["Aura Workpage"])
-service = AuraCompanionService()
+service = AuraSystemCompanionService()
 locale_store = LocalePreferenceStore(service.store.db_path)
 
 
@@ -223,6 +224,7 @@ def aura_capabilities(request: Request):
             "role_aware_tool_drawer": True,
             "project_context": True,
             "memory": True,
+            "system_workflow_tools": True,
         },
         "locale": locale,
     }
