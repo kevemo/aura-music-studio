@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from aura_music_studio import __version__
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.compute_node_api import _job_types
+from aura_music_studio.compute_capabilities import compatibility, job_types_for_capabilities
 from aura_music_studio.compute_nodes import ComputeNodeRegistry
 from aura_music_studio.jobs import StudioJobQueue
 from aura_music_studio.node_transfer import RESULT_ALLOWED_ROOT_FILES, extract_project_bundle
@@ -55,11 +56,21 @@ def test_revoked_node_credential_stops_authenticating(tmp_path, monkeypatch):
 
 
 def test_capabilities_map_only_to_supported_job_types():
-    assert set(_job_types(["music_generation"])) == {"produce", "build_around"}
-    assert set(_job_types(["stem_separation"])) == {"engineering:split"}
-    engineering = set(_job_types(["engineering"]))
+    assert set(job_types_for_capabilities(["music_generation"])) == {"produce", "build_around"}
+    assert set(job_types_for_capabilities(["stem_separation"])) == {"engineering:split"}
+    engineering = set(job_types_for_capabilities(["engineering"]))
     assert "engineering:master" in engineering
     assert "produce" not in engineering
+
+
+def test_same_version_is_required_by_default(monkeypatch):
+    monkeypatch.delenv("LSS_NODE_REQUIRE_SAME_VERSION", raising=False)
+    good = compatibility({"software": {"live_sound_studio_version": __version__}})
+    bad = compatibility({"software": {"live_sound_studio_version": "0.0.1"}})
+    unknown = compatibility({"software": {}})
+    assert good["compatible"] is True
+    assert bad["compatible"] is False
+    assert unknown["compatible"] is False
 
 
 def test_remote_lease_claims_only_allowed_job_types_and_only_owner_can_renew(tmp_path, monkeypatch):
