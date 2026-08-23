@@ -62,9 +62,8 @@ def test_capabilities_map_only_to_supported_job_types():
     assert "produce" not in engineering
 
 
-def test_remote_lease_claims_only_allowed_job_types(tmp_path, monkeypatch):
+def test_remote_lease_claims_only_allowed_job_types_and_only_owner_can_renew(tmp_path, monkeypatch):
     store = _store(tmp_path, monkeypatch)
-    # The queue schema references users. Create a minimal active test user directly for queue FK tests.
     with sqlite3.connect(store.db_path) as con:
         columns = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
         values = {
@@ -92,6 +91,8 @@ def test_remote_lease_claims_only_allowed_job_types(tmp_path, monkeypatch):
     assert leased is not None
     assert leased["job_type"] == "produce"
     assert leased["worker_id"] == "node:n1"
+    assert queue.renew_owned(leased["id"], "node:n1")
+    assert not queue.renew_owned(leased["id"], "node:other")
     assert queue.complete_owned(leased["id"], "node:n1", {"ok": True})
     assert not queue.complete_owned(leased["id"], "node:other", {"ok": False})
 
