@@ -61,6 +61,7 @@ REGION_REPAINT = "region_repaint"
 BASIC_STEM_SPLITTER = "basic_stem_splitter"
 STEM_SPLITTER = "stem_splitter"
 STEM_DOWNLOAD = "stem_download"
+BASIC_TIMELINE = "basic_timeline"
 MULTITRACK_DAW = "multitrack_daw"
 TAKE_LANES = "take_lanes"
 AUTOMATION = "automation"
@@ -107,6 +108,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     BACKING_TRACK,
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
+    BASIC_TIMELINE,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -147,7 +149,7 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and uploads unlock on Base."
+            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -160,7 +162,7 @@ PLANS: dict[str, Plan] = {
         description=(
             "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
             "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools and project revision history."
+            "cleanup, backing-track creation, harmony tools, project revision history and basic waveform timeline editing."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -173,7 +175,7 @@ PLANS: dict[str, Plan] = {
         description=(
             "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
             "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, multitrack DAW, take lanes, automation and deep revision history, "
+            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
             "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
             "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
         ),

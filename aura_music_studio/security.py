@@ -109,6 +109,9 @@ async def _inject_esp_brand(response, path: str):
     if path in {"/studio", "/production-suite"} and "href='/recording-studio'" not in text:
         recording_bottom = "66px" if path == "/studio" else "114px"
         extras += f"<a class='esp-history-fab' style='bottom:{recording_bottom}' href='/recording-studio' title='Record vocals and instruments directly'>🎙 Recording Studio</a>"
+    if path in {"/studio", "/production-suite"} and "href='/daw'" not in text:
+        daw_bottom = "114px" if path == "/studio" else "162px"
+        extras += f"<a class='esp-history-fab' style='bottom:{daw_bottom}' href='/daw' title='Open the visual waveform timeline'>🎚 Visual DAW</a>"
     if path == "/owner/dashboard" and "href='/owner/compute-nodes'" not in text:
         extras += "<a class='esp-history-fab' href='/owner/compute-nodes' title='Manage ESP compute machines'>🖥 Compute Nodes</a>"
     if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:

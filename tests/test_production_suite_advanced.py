@@ -12,8 +12,8 @@ from aura_music_studio.plugin_rack import load_plugin_catalog, public_plugin_cat
 from aura_music_studio.source_detection import detect_source_role
 
 
-def test_version_is_compute_fabric_suite_0130():
-    assert __version__ == "0.13.0"
+def test_version_is_visual_daw_suite_0140():
+    assert __version__ == "0.14.0"
 
 
 def test_public_job_never_exposes_private_payload_json():
