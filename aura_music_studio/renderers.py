@@ -14,6 +14,7 @@ from .acestep_api import AceStepClient, AceStepRequest
 from .cloud_providers import ElevenMusicClient, MurekaClient
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
+from .song_languages import song_language_from_manifest
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
@@ -72,6 +73,7 @@ class AceStepApiRenderer(BaseRenderer):
         source = _source_or_guide(workspace, manifest)
         duration = min(_target_duration(workspace, manifest, plan), 600)
         lyrics = _lyrics(workspace, manifest)
+        language = song_language_from_manifest(manifest)
         task_type = "text2music"
         src_audio = None
         reference_audio = None
@@ -93,6 +95,7 @@ class AceStepApiRenderer(BaseRenderer):
             key_scale=plan.key,
             time_signature=plan.meter.split("/")[0],
             audio_duration=float(duration),
+            vocal_language=language.ace_vocal_language,
             thinking=task_type in {"text2music", "lego", "complete"},
             use_format=True,
             audio_format="wav",
@@ -108,7 +111,14 @@ class AceStepApiRenderer(BaseRenderer):
             renderer=self.name,
             audio_path=outputs[0],
             audio_origin="neural",
-            metadata={"task_type": task_type, "api": client.base_url, "model": manifest.renderer.model},
+            metadata={
+                "task_type": task_type,
+                "api": client.base_url,
+                "model": manifest.renderer.model,
+                "song_locale": language.locale,
+                "vocal_language": language.ace_vocal_language,
+                "direct_language_support": language.ace_direct_support,
+            },
         )
 
 
@@ -123,14 +133,16 @@ class DeapiRenderer(BaseRenderer):
         base = os.getenv("DEAPI_BASE_URL", "https://api.deapi.ai").rstrip("/")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         duration = _target_duration(workspace, manifest, plan)
+        language = song_language_from_manifest(manifest)
         payload = {
             "model": os.getenv("DEAPI_MUSIC_MODEL", "AceStep_1_5_XL_Turbo_INT8"),
             "caption": plan.render_prompt,
             "lyrics": _lyrics(workspace, manifest),
             "duration": min(duration, manifest.renderer.duration_limit_seconds),
-            "bpm": round(plan.tempo_bpm),
+            "bpm": round(plan.tempo_bpm) if plan.tempo_bpm else None,
             "key": plan.key,
             "time_signature": plan.meter,
+            "vocal_language": language.ace_vocal_language,
             "format": "wav",
         }
         r = requests.post(f"{base}/api/v2/audio/music", headers=headers, json=payload, timeout=60)
@@ -155,7 +167,11 @@ class DeapiRenderer(BaseRenderer):
                     with out.open("wb") as f:
                         for chunk in audio.iter_content(1024 * 1024):
                             f.write(chunk)
-                return RenderResult(renderer=self.name, audio_path=out, metadata=data)
+                return RenderResult(
+                    renderer=self.name,
+                    audio_path=out,
+                    metadata={**data, "song_locale": language.locale, "vocal_language": language.ace_vocal_language},
+                )
             if state in {"failed", "error", "cancelled"}:
                 raise RuntimeError(f"deAPI generation failed: {data}")
             time.sleep(8)
@@ -171,8 +187,12 @@ class ElevenMusicRenderer(BaseRenderer):
     def render(self, workspace, manifest, plan):
         client = ElevenMusicClient()
         lyrics = _lyrics(workspace, manifest)
+        language = song_language_from_manifest(manifest)
         duration = min(_target_duration(workspace, manifest, plan), 600)
-        prompt = plan.render_prompt
+        prompt = (
+            plan.render_prompt
+            + f"\nLead vocal language: {language.english_name} ({language.native_name}), locale {language.locale}. Use natural native pronunciation."
+        )
         if lyrics:
             prompt += "\n\nUse these user-supplied lyrics and section labels:\n" + lyrics
         out = workspace.work_dir / "neural_master_eleven_music.mp3"
@@ -184,7 +204,11 @@ class ElevenMusicRenderer(BaseRenderer):
             model=os.getenv("ELEVEN_MUSIC_MODEL", "music_v2"),
             c2pa=True,
         )
-        return RenderResult(renderer=self.name, audio_path=out, metadata={"model": os.getenv("ELEVEN_MUSIC_MODEL", "music_v2")})
+        return RenderResult(
+            renderer=self.name,
+            audio_path=out,
+            metadata={"model": os.getenv("ELEVEN_MUSIC_MODEL", "music_v2"), "song_locale": language.locale},
+        )
 
 
 class MurekaRenderer(BaseRenderer):
@@ -196,18 +220,27 @@ class MurekaRenderer(BaseRenderer):
     def render(self, workspace, manifest, plan):
         client = MurekaClient()
         lyrics = _lyrics(workspace, manifest)
+        language = song_language_from_manifest(manifest)
+        prompt = (
+            plan.render_prompt
+            + f" Lead vocal language: {language.english_name} ({language.native_name}); native pronunciation."
+        )
         if lyrics:
             out = workspace.work_dir / "neural_master_mureka.mp3"
             client.lyrics_to_song(
                 out,
                 lyrics=lyrics[:5000],
-                prompt=plan.render_prompt[:1024],
+                prompt=prompt[:1024],
                 model=os.getenv("MUREKA_MODEL", "auto"),
             )
         else:
             out = workspace.work_dir / "neural_master_mureka_instrumental.mp3"
-            client.instrumental(out, prompt=plan.render_prompt[:1024], model=os.getenv("MUREKA_MODEL", "auto"))
-        return RenderResult(renderer=self.name, audio_path=out, metadata={"model": os.getenv("MUREKA_MODEL", "auto")})
+            client.instrumental(out, prompt=prompt[:1024], model=os.getenv("MUREKA_MODEL", "auto"))
+        return RenderResult(
+            renderer=self.name,
+            audio_path=out,
+            metadata={"model": os.getenv("MUREKA_MODEL", "auto"), "song_locale": language.locale},
+        )
 
 
 class AceStepSpaceRenderer(BaseRenderer):
@@ -242,9 +275,11 @@ class AceStepSpaceRenderer(BaseRenderer):
         mode = "cover" if source and source.exists() else "text2music"
         source_arg = handle_file(str(source)) if source and source.exists() else None
         lyrics = _lyrics(workspace, manifest) or "[Instrumental]"
+        language = song_language_from_manifest(manifest)
+        vocal_language = language.ace_vocal_language
         args = [
-            manifest.renderer.model, mode, plan.render_prompt, "en", plan.render_prompt, lyrics,
-            round(plan.tempo_bpm), plan.key or "", plan.meter.split("/")[0], "en",
+            manifest.renderer.model, mode, plan.render_prompt, vocal_language, plan.render_prompt, lyrics,
+            round(plan.tempo_bpm) if plan.tempo_bpm else 0, plan.key or "", plan.meter.split("/")[0], vocal_language,
             8, 7.0, True, "-1", None, duration, 1,
             source_arg, "", 0.0, -1,
             "Fill the audio semantic mask based on the given conditions:",
@@ -270,6 +305,7 @@ class ExternalCommandRenderer(BaseRenderer):
         out = workspace.work_dir / self.output_name
         source = _source_or_guide(workspace, manifest)
         lyrics_path = workspace.resolve_asset(manifest.lyrics_file)
+        language = song_language_from_manifest(manifest)
         env = os.environ.copy()
         env.update({
             "AURA_PROJECT": str(workspace.root),
@@ -282,12 +318,19 @@ class ExternalCommandRenderer(BaseRenderer):
             "AURA_KEY": plan.key or "",
             "AURA_METER": plan.meter,
             "AURA_DURATION": str(_target_duration(workspace, manifest, plan)),
+            "AURA_SONG_LOCALE": language.locale,
+            "AURA_VOCAL_LANGUAGE": language.ace_vocal_language,
+            "AURA_SONG_LANGUAGE_NAME": language.english_name,
             "AURA_OUTPUT": str(out),
         })
         subprocess.run(shlex.split(os.environ[self.env_var]), cwd=workspace.root, env=env, check=True)
         if not out.exists():
             raise RuntimeError(f"{self.name} command completed but did not create {out}")
-        return RenderResult(renderer=self.name, audio_path=out)
+        return RenderResult(
+            renderer=self.name,
+            audio_path=out,
+            metadata={"song_locale": language.locale, "vocal_language": language.ace_vocal_language},
+        )
 
 
 def _source_or_guide(workspace: ProjectWorkspace, manifest: ProjectManifest) -> Path | None:
