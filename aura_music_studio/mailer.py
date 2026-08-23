@@ -11,11 +11,18 @@ DEFAULT_ADMIN_EMAIL = "elevatesoulsproductions@gmail.com"
 
 
 def _public_url() -> str:
-    return (
-        os.getenv("LSS_PUBLIC_BASE_URL")
-        or os.getenv("LSS_PUBLIC_URL")
-        or "http://127.0.0.1:8000"
-    ).rstrip("/")
+    configured = (os.getenv("LSS_PUBLIC_BASE_URL") or os.getenv("LSS_PUBLIC_URL") or "").strip()
+    if configured and configured.lower() not in {"auto", "automatic"}:
+        return configured.rstrip("/")
+    try:
+        from .public_address import PublicAddressManager
+        status = PublicAddressManager().read_status()
+        recommended = (status.get("recommended_url") or "").strip()
+        if recommended:
+            return recommended.rstrip("/")
+    except Exception:
+        pass
+    return "http://127.0.0.1:8000"
 
 
 def _truthy(value: str | None, default: bool = False) -> bool:
