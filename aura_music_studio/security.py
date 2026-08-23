@@ -118,6 +118,14 @@ async def _inject_esp_brand(response, path: str):
             "color:#fff;padding:11px 16px;border-radius:999px;font-weight:900;box-shadow:0 10px 35px #0009,0 0 28px #a64bd355;\">"
             "✨ Aura</a>"
         )
+        extras += (
+            "<button class='aura-tour-fab' type='button' title='Let Aura show you around this screen' "
+            "onclick=\"window.AuraAvatar&&window.AuraAvatar.startTour&&window.AuraAvatar.startTour()\" "
+            "style=\"position:fixed;left:18px;bottom:66px;z-index:10000;"
+            "background:linear-gradient(135deg,#17101f,#352047);border:1px solid #82549c;"
+            "color:#f5e9ff;padding:9px 13px;border-radius:999px;font-weight:800;cursor:pointer;"
+            "box-shadow:0 8px 26px #0007;\">✦ Show me around</button>"
+        )
     if _show_embodied_aura(path) and "aura-avatar-runtime" not in text:
         extras += avatar_bootstrap_html()
     if extras:
