@@ -14,6 +14,15 @@ from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
 from aura_music_studio.aura_voice_api import router as aura_voice_router
 from aura_music_studio.brand_ui import router as brand_router
+from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.daw_api import router as daw_router
+from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
+from aura_music_studio.daw_portal import router as daw_portal_router
+from aura_music_studio.daw_recording_api import router as daw_recording_router
+from aura_music_studio.daw_recording_ui import router as daw_recording_ui_router
+from aura_music_studio.daw_routing_api import router as daw_routing_router
+from aura_music_studio.daw_routing_ui import router as daw_routing_ui_router
+from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
@@ -25,6 +34,8 @@ from aura_music_studio.live_translation_api import router as live_translation_ro
 from aura_music_studio.localization_api import router as localization_router
 from aura_music_studio.music_video_api import router as music_video_router
 from aura_music_studio.output_api import router as output_router
+from aura_music_studio.owner_backup_portal import router as owner_backup_router
+from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -46,6 +57,8 @@ from aura_music_studio.vocal_api import router as vocal_router
 app.add_middleware(EspNicheDashboardMiddleware)
 app.add_middleware(EspCommandCenterViewMiddleware)
 app.include_router(brand_router)
+app.include_router(discovery_router)
+app.include_router(compute_node_router)
 app.include_router(localization_router)
 app.include_router(live_translation_router)
 app.include_router(aura_chat_router)
@@ -54,6 +67,13 @@ app.include_router(aura_voice_router)
 app.include_router(aura_avatar_router)
 app.include_router(aura_avatar_bootstrap_router)
 app.include_router(aura_avatar_bridge_router)
+app.include_router(daw_router)
+app.include_router(daw_portal_router)
+app.include_router(daw_recording_router)
+app.include_router(daw_recording_ui_router)
+app.include_router(daw_routing_router)
+app.include_router(daw_routing_ui_router)
+app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
 app.include_router(video_router)
 app.include_router(music_video_router)
@@ -67,6 +87,8 @@ app.include_router(esp_niche_router)
 app.include_router(esp_view_mode_router)
 app.include_router(recording_router)
 app.include_router(output_router)
+app.include_router(owner_backup_router)
+app.include_router(owner_compute_router)
 app.include_router(privacy_router)
 app.include_router(production_portal_router)
 app.include_router(production_suite_router)
