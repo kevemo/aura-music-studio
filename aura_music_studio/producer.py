@@ -37,6 +37,13 @@ TRACK_WORDS = {
     "percussion": "percussion", "synth": "synth", "choir": "backing_vocals",
 }
 
+PRODUCER_SYSTEM = """You are Aura, the autonomous AI producer inside Elevate Souls Productions' Live Sound Studio.
+Convert each member request into safe, non-destructive Studio operations. Never choose MIDI, SoundFont or symbolic guide
+audio as final music. Do not bypass membership, rights, consent or voice-profile checks. Return JSON matching the supplied
+ProducerPlan schema. Prefer concrete track roles, time ranges and parameters only when supported by the request/context.
+If a destructive or ambiguous edit lacks required detail, set needs_confirmation=true. Voice conversion is allowed only
+when the session contains an approved consent/rights record for that voice profile."""
+
 
 def _track_from_text(text: str) -> str | None:
     lower = text.lower()
@@ -52,7 +59,11 @@ def _parse_time_range(text: str) -> tuple[float | None, float | None]:
             m, s = token.split(":", 1)
             return float(m) * 60 + float(s)
         return float(token)
-    match = re.search(r"(\d+(?::\d+(?:\.\d+)?)?)\s*(?:-|to|–)\s*(\d+(?::\d+(?:\.\d+)?)?)\s*(?:s|sec|secs|seconds)?", text, re.I)
+    match = re.search(
+        r"(\d+(?::\d+(?:\.\d+)?)?)\s*(?:-|to|–)\s*(\d+(?::\d+(?:\.\d+)?)?)\s*(?:s|sec|secs|seconds)?",
+        text,
+        re.I,
+    )
     if match:
         return sec(match.group(1)), sec(match.group(2))
     return None, None
@@ -113,29 +124,64 @@ def rule_based_plan(request: str) -> ProducerPlan:
     )
 
 
-def llm_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
-    """Optional model planner with deterministic offline fallback."""
-    url = os.getenv("AURA_PRODUCER_LLM_URL")
-    if not url:
-        return rule_based_plan(request)
+def _ollama_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
+    base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+    model = os.getenv("AURA_OLLAMA_MODEL", "qwen3:4b")
+    schema = ProducerPlan.model_json_schema()
+    prompt = (
+        "User request:\n" + request + "\n\nCurrent studio context:\n" +
+        json.dumps(session_summary or {}, ensure_ascii=False) +
+        "\n\nReturn only valid JSON matching this schema:\n" + json.dumps(schema)
+    )
+    response = requests.post(
+        f"{base}/api/chat",
+        json={
+            "model": model,
+            "stream": False,
+            "format": "json",
+            "messages": [
+                {"role": "system", "content": PRODUCER_SYSTEM},
+                {"role": "user", "content": prompt},
+            ],
+            "options": {"temperature": 0.25},
+        },
+        timeout=120,
+    )
+    response.raise_for_status()
+    content = response.json()["message"]["content"]
+    return ProducerPlan.model_validate(json.loads(content))
+
+
+def _external_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
+    url = os.environ["AURA_PRODUCER_LLM_URL"]
     headers = {"Content-Type": "application/json"}
     if os.getenv("AURA_PRODUCER_LLM_KEY"):
         headers["Authorization"] = f"Bearer {os.environ['AURA_PRODUCER_LLM_KEY']}"
     payload = {
-        "instruction": (
-            "Return only a Live Sound Studio Aura ProducerPlan JSON. Never route final music to MIDI/SoundFont audio. "
-            "Never create or convert a person's voice unless the session contains a valid consent/rights record."
-        ),
+        "instruction": PRODUCER_SYSTEM,
         "request": request,
         "session": session_summary or {},
         "schema": ProducerPlan.model_json_schema(),
     }
-    try:
-        r = requests.post(url, json=payload, headers=headers, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        if isinstance(data, dict) and "output" in data and isinstance(data["output"], str):
-            data = json.loads(data["output"])
-        return ProducerPlan.model_validate(data)
-    except Exception:
-        return rule_based_plan(request)
+    response = requests.post(url, json=payload, headers=headers, timeout=60)
+    response.raise_for_status()
+    data = response.json()
+    if isinstance(data, dict) and "output" in data and isinstance(data["output"], str):
+        data = json.loads(data["output"])
+    return ProducerPlan.model_validate(data)
+
+
+def llm_plan(request: str, session_summary: dict | None = None) -> ProducerPlan:
+    """Offline-first producer brain: local Ollama -> optional external planner -> deterministic rules."""
+    use_ollama = os.getenv("AURA_PRODUCER_USE_OLLAMA", "true").lower() in {"1", "true", "yes", "on"}
+    if use_ollama:
+        try:
+            return _ollama_plan(request, session_summary)
+        except Exception:
+            pass
+    if os.getenv("AURA_PRODUCER_LLM_URL"):
+        try:
+            return _external_plan(request, session_summary)
+        except Exception:
+            pass
+    return rule_based_plan(request)
