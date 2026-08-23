@@ -49,6 +49,18 @@ jobs:
           docker compose config -q
           docker compose --profile public config -q
 
+      - name: Self-hosted ACE-Step renderer topology validation
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml config -q
+
+      - name: Optional YuE renderer topology validation
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.yue.yml config -q
+
+      - name: Combined ACE-Step + YuE renderer topology validation
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.yue.yml config -q
+
       - name: ESP compute-node Compose validation
         run: |
           cat > .env.node <<'EOF'
@@ -72,6 +84,8 @@ jobs:
         run: |
           python - <<'PY'
           from aura_music_studio.models import ProjectManifest, RendererConfig
+          from aura_music_studio.renderer_runtime import probe_real_audio
+          from pathlib import Path
 
           try:
               ProjectManifest(
@@ -87,4 +101,11 @@ jobs:
               print('PASS: symbolic guide cannot become final master')
           else:
               raise SystemExit('FAIL: real-audio guard was bypassed')
+
+          symbolic = Path('ci_symbolic.mid')
+          symbolic.write_bytes(b'MThd\\x00\\x00\\x00\\x06')
+          if probe_real_audio(symbolic).valid:
+              raise SystemExit('FAIL: symbolic file passed the renderer waveform probe')
+          symbolic.unlink()
+          print('PASS: renderer waveform probe rejects symbolic controls')
           PY
