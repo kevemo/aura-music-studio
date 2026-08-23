@@ -13,6 +13,7 @@ from aura_music_studio.engineering_job_api import router as engineering_job_rout
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
+from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -38,6 +39,7 @@ app.include_router(esp_command_center_router)
 app.include_router(recording_router)
 app.include_router(output_router)
 app.include_router(owner_backup_router)
+app.include_router(owner_compute_router)
 app.include_router(privacy_router)
 app.include_router(production_portal_router)
 app.include_router(production_suite_router)
