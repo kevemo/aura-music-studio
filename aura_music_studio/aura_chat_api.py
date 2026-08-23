@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .aura_companion import AuraCompanionError, AuraCompanionService
+from .aura_persona import AURA_PERSONA_NAME, persona_context
 from .localization import LocalePreferenceStore
 
 router = APIRouter(prefix="/api/aura", tags=["Aura Workpage"])
@@ -209,6 +210,7 @@ def aura_capabilities(request: Request):
     locale = locale_store.get_user_locale(member.user_id) or "en"
     return {
         **service.capabilities(member),
+        "persona": AURA_PERSONA_NAME,
         "workspace": {
             "full_chat": True,
             "persistent_history": True,
@@ -321,6 +323,7 @@ def aura_chat(body: AuraChatBody, request: Request):
     locale = locale_store.get_user_locale(member.user_id) or "en"
     context = {
         "workspace": "Aura full chat workpage",
+        "aura_persona": persona_context(locale, body.workspace_mode),
         "workspace_mode": body.workspace_mode,
         "response_locale": locale,
         "attachments": attachment_context,
@@ -349,4 +352,5 @@ def aura_chat(body: AuraChatBody, request: Request):
             pass
     result["attachments"] = [_public_attachment(attachments.get(member.user_id, x)) for x in body.attachment_ids]
     result["locale"] = locale
+    result["persona"] = AURA_PERSONA_NAME
     return result
