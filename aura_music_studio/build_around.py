@@ -5,6 +5,7 @@ import re
 import shutil
 from pathlib import Path
 from typing import Literal
+from uuid import uuid4
 
 import soundfile as sf
 from pydantic import BaseModel, Field
@@ -16,7 +17,8 @@ from .instrument_catalog import InstrumentSwitch, defaults_for_genre, get_type, 
 from .lyrics import LyricRequest, generate_lyrics
 from .mixer import render_session
 from .project import ProjectWorkspace
-from .session import Clip, StudioSession
+from .revisions import create_revision
+from .session import Clip, StudioSession, Track
 
 
 SourceRole = Literal[
@@ -183,21 +185,53 @@ def _load_or_create_session(project: Path, name: str, bpm: int | None, key: str 
     return session
 
 
-def _append_audio_track(session: StudioSession, project: Path, *, name: str, role: str, source: Path, metadata: dict) -> str:
-    track = session.add_track(name, role if role in {
-        "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard", "strings",
-        "synth", "percussion", "brass", "woodwinds", "fx", "other"
-    } else "other")
+def _track_for_build_key(session: StudioSession, build_key: str) -> Track | None:
+    for track in session.tracks:
+        for clip in track.clips:
+            if clip.metadata.get("build_key") == build_key:
+                return track
+    return None
+
+
+def _next_take_lane(track: Track) -> int:
+    return max((clip.take_lane for clip in track.clips if clip.kind == "audio"), default=-1) + 1
+
+
+def _append_or_take(
+    session: StudioSession,
+    project: Path,
+    *,
+    name: str,
+    role: str,
+    source: Path,
+    build_key: str,
+    metadata: dict,
+    reuse_source_anchor: bool = False,
+) -> tuple[str, int, str]:
+    track = _track_for_build_key(session, build_key)
+    if track is not None and reuse_source_anchor:
+        return track.id, max((c.take_lane for c in track.clips), default=0), "reused_anchor"
+    if track is None:
+        track = session.add_track(name, role if role in {
+            "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard", "strings",
+            "synth", "percussion", "brass", "woodwinds", "fx", "other"
+        } else "other")
+        lane = 0
+        action = "created_track"
+    else:
+        lane = _next_take_lane(track)
+        action = "added_take"
+
     track.clips.append(Clip(
-        name=name,
+        name=name if lane == 0 else f"{name} — Take {lane + 1}",
         kind="audio",
         source=_relative(project, source),
         start=0.0,
         duration=_duration(source),
-        take_lane=0,
-        metadata={"real_audio": True, **metadata},
+        take_lane=lane,
+        metadata={"real_audio": True, "build_key": build_key, **metadata},
     ))
-    return track.id
+    return track.id, lane, action
 
 
 def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
@@ -207,22 +241,30 @@ def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
     ) = _prepare(project, request)
     client = AceStepClient()
     model = os.getenv("AURA_ACESTEP_TRACK_MODEL", "acestep-v15-base")
+    session_path = project / "aura_session.json"
+    if session_path.exists():
+        try:
+            create_revision(project, label="Before Build Around regeneration", reason="build_around", actor="Aura", keep=200)
+        except Exception:
+            pass
     session = _load_or_create_session(project, f"Build Around {Path(record.name).stem}", bpm, key, request.meter)
+    generation_id = uuid4().hex
 
     source_session_role = request.source_role if request.source_role != "other" else "other"
-    source_track_id = _append_audio_track(
+    source_track_id, source_lane, source_action = _append_or_take(
         session, project,
         name=f"Source — {Path(record.name).stem}",
         role=source_session_role,
         source=source,
+        build_key=f"source:{record.id}",
         metadata={"anchor": True, "asset_id": record.id, "source_role": request.source_role},
+        reuse_source_anchor=True,
     )
 
     generated: list[dict] = []
-    stem_root = workspace.work_dir / "build_around_stems"
+    stem_root = workspace.work_dir / "build_around_stems" / generation_id
     stem_root.mkdir(parents=True, exist_ok=True)
 
-    # Generate every enabled instrument switch independently, including multiple guitars/synths.
     for index, switch in enumerate(switches, 1):
         if not switch.enabled:
             continue
@@ -245,14 +287,20 @@ def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
             model=model,
         )
         role = item.family
-        track_id = _append_audio_track(
+        track_id, lane, action = _append_or_take(
             session, project,
             name=item.label,
             role=role,
             source=stem,
-            metadata={"generated": True, "engine": "ace-step-1.5-lego", "instrument_type": item.id},
+            build_key=f"build:{record.id}:{item.family}:{item.id}",
+            metadata={
+                "generated": True,
+                "engine": "ace-step-1.5-lego",
+                "instrument_type": item.id,
+                "generation_id": generation_id,
+            },
         )
-        generated.append({"track_id": track_id, "role": role, "type": item.id, "path": str(stem)})
+        generated.append({"track_id": track_id, "take_lane": lane, "action": action, "role": role, "type": item.id, "path": str(stem)})
 
     if request.include_lead_vocal and not source_is_vocal:
         vocal_complete = client.complete(
@@ -272,14 +320,20 @@ def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
             language=request.vocal_language,
         )
         vocal_stem = client.extract_track(vocal_complete, stem_root / "lead_vocal_isolated", track="vocals", model=model)
-        track_id = _append_audio_track(
+        track_id, lane, action = _append_or_take(
             session, project,
             name="Aura Lead Vocal",
             role="vocals",
             source=vocal_stem,
-            metadata={"generated": True, "engine": "ace-step-1.5-complete+extract", "lyrics_used": bool(lyrics)},
+            build_key=f"build:{record.id}:vocals:lead",
+            metadata={
+                "generated": True,
+                "engine": "ace-step-1.5-complete+extract",
+                "lyrics_used": bool(lyrics),
+                "generation_id": generation_id,
+            },
         )
-        generated.append({"track_id": track_id, "role": "vocals", "path": str(vocal_stem)})
+        generated.append({"track_id": track_id, "take_lane": lane, "action": action, "role": "vocals", "path": str(vocal_stem)})
 
     if request.include_backing_vocals:
         backing = client.add_track(
@@ -292,28 +346,31 @@ def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
             ),
             model=model,
         )
-        track_id = _append_audio_track(
+        track_id, lane, action = _append_or_take(
             session, project,
             name="Aura Backing Vocals",
             role="backing_vocals",
             source=backing,
-            metadata={"generated": True, "engine": "ace-step-1.5-lego"},
+            build_key=f"build:{record.id}:vocals:backing",
+            metadata={"generated": True, "engine": "ace-step-1.5-lego", "generation_id": generation_id},
         )
-        generated.append({"track_id": track_id, "role": "backing_vocals", "path": str(backing)})
+        generated.append({"track_id": track_id, "take_lane": lane, "action": action, "role": "backing_vocals", "path": str(backing)})
 
     mix_report = None
     if request.automix_after_generation:
         mix_report = apply_automix(session, project, genre=request.genre, intensity=.8)
-    session_path = project / "aura_session.json"
     session.generation_history.append({
         "action": "build_around_multitrack",
+        "generation_id": generation_id,
         "source_asset_id": record.id,
         "source_track_id": source_track_id,
+        "source_take_lane": source_lane,
+        "source_action": source_action,
         "generated_tracks": generated,
     })
     session.save(session_path)
 
-    mix_output = workspace.output_dir / f"Aura_BuildAround_Multitrack_{_slug(Path(record.name).stem)}.wav"
+    mix_output = workspace.output_dir / f"Aura_BuildAround_Multitrack_{_slug(Path(record.name).stem)}_{generation_id[:8]}.wav"
     render_session(session, project, mix_output)
     return {
         "source_asset_id": record.id,
@@ -324,6 +381,7 @@ def _multitrack(project: Path, request: BuildAroundRequest) -> dict:
         "bpm": bpm,
         "key": key,
         "output_mode": "multitrack",
+        "generation_id": generation_id,
         "source_track_id": source_track_id,
         "generated_tracks": generated,
         "session": str(session_path),
@@ -340,7 +398,7 @@ def build_around_upload(project: Path, request: BuildAroundRequest) -> dict:
 
     Base-friendly `complete_mix` returns one completed real-audio production. Pro `multitrack`
     generates independent editable neural stems, registers them in Aura's DAW session and renders
-    an initial AutoMix while preserving every source/generated track separately.
+    an initial AutoMix. Regenerations become alternate take lanes instead of duplicating tracks.
     """
     metadata = _multitrack(project, request) if request.output_mode == "multitrack" else _complete_mix(project, request)
     ProjectWorkspace(project).save_json("build_around_last.json", metadata)
