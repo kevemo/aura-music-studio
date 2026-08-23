@@ -17,6 +17,7 @@ from .plans import (
     BASIC_MASTERING,
     FULL_TRACK,
     HARMONY_ARCHITECT,
+    IMAGE_GENERATION,
     MP3_DOWNLOAD,
     MULTITRACK_DAW,
     NEURAL_AMP,
@@ -29,6 +30,7 @@ from .plans import (
     UPLOAD_AUDIO,
     VIDEO_GENERATION,
     VIDEO_SYNC,
+    VISUAL_FX_STUDIO,
     WAV_DOWNLOAD,
 )
 from .request_context import reset_current_user_id, set_current_user_id
@@ -55,10 +57,13 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
-    # Capabilities may be inspected by signed-in Free members so the UI can explain the upgrade.
-    # Every action that creates, reads, refreshes or downloads a video job is Base+.
+    # Capability endpoints remain readable to signed-in Free members so the UI can explain upgrades.
     if path.startswith("/api/video/") and path != "/api/video/capabilities":
         return VIDEO_GENERATION
+    if path.startswith("/api/image/") and path != "/api/image/capabilities":
+        return IMAGE_GENERATION
+    if path.startswith("/api/visual-fx/") and path != "/api/visual-fx/capabilities":
+        return VISUAL_FX_STUDIO
     if path.startswith("/speech/"):
         return AURA_SPEECH
     if path.startswith("/web/"):
@@ -136,10 +141,9 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                 )
 
             if path.endswith("/download"):
-                # Video downloads are already bound to VIDEO_GENERATION above and are served only from
-                # the authenticated member's own VideoJobStore record. Audio/stem downloads use the
-                # legacy format-specific entitlement rules below.
-                if path.startswith("/api/video/"):
+                # Generated video/image downloads are already bound to their generation entitlement
+                # and tenant-specific job records. Audio/stem downloads use format-specific rules.
+                if path.startswith("/api/video/") or path.startswith("/api/image/"):
                     return await call_next(request)
                 requested = (request.query_params.get("path") or "").lower()
                 if requested.endswith(".mp3"):
