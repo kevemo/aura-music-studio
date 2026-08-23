@@ -42,8 +42,20 @@ class VideoJobStore:
                 )
                 """
             )
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_video_jobs_user_created ON video_generation_jobs(user_id, created_at DESC)"
+            )
 
-    def save(self, *, user_id: str | None, result: dict[str, Any], mode: str, prompt: str, project_id: str | None, provenance_hash: str) -> None:
+    def save(
+        self,
+        *,
+        user_id: str | None,
+        result: dict[str, Any],
+        mode: str,
+        prompt: str,
+        project_id: str | None,
+        provenance_hash: str,
+    ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         with self._connect() as con:
             con.execute(
@@ -67,3 +79,38 @@ class VideoJobStore:
                 (user_id, max(1, min(limit, 200))),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def get_for_user(self, user_id: str, job_id: str) -> dict[str, Any] | None:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM video_generation_jobs WHERE user_id=? AND id=?",
+                (user_id, job_id),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_status(
+        self,
+        *,
+        user_id: str,
+        job_id: str,
+        status: str,
+        output_url: str | None = None,
+        output_path: str | None = None,
+        error: str | None = None,
+    ) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._connect() as con:
+            cursor = con.execute(
+                """
+                UPDATE video_generation_jobs
+                SET status=?, output_url=COALESCE(?, output_url), output_path=COALESCE(?, output_path), error=?, updated_at=?
+                WHERE user_id=? AND id=?
+                """,
+                (status, output_url, output_path, error, now, user_id, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise KeyError("Video job not found")
+        job = self.get_for_user(user_id, job_id)
+        if not job:
+            raise KeyError("Video job not found")
+        return job
