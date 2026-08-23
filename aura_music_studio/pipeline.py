@@ -15,6 +15,7 @@ from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 from .provenance import build_provenance, write_provenance
 from .quality import evaluate_audio
+from .renderer_runtime import validate_real_audio
 from .renderers import render_with_failover
 
 
@@ -161,9 +162,11 @@ class AuraPipeline:
     def _evaluate_final_real_audio(self, path: Path, plan) -> dict:
         if path.name == "score_guide.wav" or "score_guide" in str(path):
             raise RuntimeError("Aura refused a symbolic guide at the final-audio quality stage.")
+        waveform = validate_real_audio(path)
         qc = evaluate_audio(path, target_duration=self._target_duration(plan), target_bpm=plan.tempo_bpm)
         if not qc["passes_basic_integrity"]:
             raise RuntimeError(f"Final real-audio mix failed integrity QC: {qc}")
+        qc["waveform_validation"] = waveform
         return qc
 
     def _render_with_quality_control(self, plan):
@@ -184,6 +187,7 @@ class AuraPipeline:
                 if render.audio_path.name == "score_guide.wav" or "score_guide" in str(render.audio_path):
                     raise RuntimeError("Aura refused to export the score/MIDI guide as finished music.")
 
+            waveform = validate_real_audio(render.audio_path)
             take_path = takes_dir / f"take_{index:02d}{render.audio_path.suffix.lower()}"
             shutil.copy2(render.audio_path, take_path)
             take_render = RenderResult(
@@ -191,9 +195,10 @@ class AuraPipeline:
                 audio_path=take_path,
                 audio_origin=render.audio_origin,
                 is_final_quality=render.is_final_quality,
-                metadata=render.metadata,
+                metadata={**render.metadata, "real_audio_validation": waveform},
             )
             qc = evaluate_audio(take_path, target_duration=target_duration, target_bpm=plan.tempo_bpm)
+            qc["waveform_validation"] = waveform
             record = {
                 "take": index,
                 "renderer": render.renderer,
