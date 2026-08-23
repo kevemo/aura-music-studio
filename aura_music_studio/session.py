@@ -21,8 +21,9 @@ class AutomationLane(BaseModel):
 class Effect(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     type: Literal[
-        "gain", "eq", "compressor", "limiter", "gate", "reverb", "delay", "distortion",
-        "chorus", "phaser", "pitch_shift", "convolution", "stereo_width", "custom_safe_chain"
+        "gain", "eq", "highpass", "lowpass", "compressor", "limiter", "gate", "deesser",
+        "reverb", "delay", "distortion", "saturation", "exciter", "chorus", "flanger", "phaser",
+        "tremolo", "pitch_shift", "doubler", "convolution", "stereo_width", "custom_safe_chain"
     ]
     enabled: bool = True
     parameters: dict[str, float | str | bool] = Field(default_factory=dict)
