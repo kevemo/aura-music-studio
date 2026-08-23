@@ -25,6 +25,26 @@ services:
       retries: 3
       start_period: 20s
 
+  aura-worker:
+    build: .
+    container_name: live-sound-studio-aura-worker
+    restart: unless-stopped
+    command: ["python", "worker.py"]
+    env_file:
+      - .env
+    environment:
+      AURA_PROJECTS_ROOT: /app/projects
+      LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      AURA_JOB_POLL_SECONDS: "2"
+      AURA_WEB_ENABLED: "true"
+      AURA_SEARXNG_URL: http://searxng:8080
+    volumes:
+      - live_sound_data:/app/data
+      - live_sound_projects:/app/projects
+    depends_on:
+      searxng:
+        condition: service_started
+
   searxng:
     image: searxng/searxng:latest
     container_name: live-sound-studio-search
