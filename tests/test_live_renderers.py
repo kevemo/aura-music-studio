@@ -8,6 +8,7 @@ import pytest
 import soundfile as sf
 
 from aura_music_studio.acestep_api import AceStepClient, AceStepRequest
+from aura_music_studio.models import RendererConfig
 from aura_music_studio.renderer_runtime import probe_real_audio, renderer_runtime_status, require_live_renderer
 
 
@@ -16,6 +17,15 @@ def _wav(path: Path, seconds: float = 1.25, sr: int = 48000) -> Path:
     audio = (0.1 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
     sf.write(path, audio, sr, subtype="PCM_24")
     return path
+
+
+def test_default_renderer_order_is_self_host_first_and_public_spaces_are_opt_in():
+    preferred = RendererConfig().preferred
+    assert preferred[:4] == ["acestep_api", "local_acestep", "muser", "yue"]
+    assert "acestep_space" not in preferred
+    assert preferred.index("yue") < preferred.index("deapi")
+    assert preferred.index("yue") < preferred.index("eleven_music")
+    assert preferred.index("yue") < preferred.index("mureka")
 
 
 def test_real_audio_probe_accepts_waveform_and_rejects_symbolic(tmp_path: Path):
