@@ -11,6 +11,7 @@ from .compute_capabilities import compatibility
 from .compute_nodes import ComputeNodeRegistry
 from .doctor import system_report
 from .model_catalog import public_catalog
+from .renderer_runtime import renderer_runtime_status
 
 router = APIRouter(prefix="/system", tags=["Studio System"])
 
@@ -73,7 +74,14 @@ def independence_status() -> dict:
 def doctor():
     report = system_report()
     report["independence"] = independence_status()
+    report["live_renderers"] = renderer_runtime_status()
     return report
+
+
+@router.get("/renderers")
+def live_renderers():
+    """Member-safe renderer readiness; internal renderer URLs and credentials are never returned."""
+    return renderer_runtime_status()
 
 
 @router.get("/independence")

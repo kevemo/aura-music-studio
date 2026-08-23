@@ -1,0 +1,68 @@
+services:
+  live-sound-studio:
+    environment:
+      AURA_YUE_API_URL: http://yue:8011
+      AURA_YUE_CMD: python -m aura_music_studio.yue_remote_command
+      YUE_API_KEY: ${YUE_API_KEY:-}
+      AURA_YUE_MAX_SEGMENTS: ${AURA_YUE_MAX_SEGMENTS:-2}
+      AURA_YUE_STAGE1_MODEL: ${AURA_YUE_STAGE1_MODEL:-m-a-p/YuE-s1-7B-anneal-en-cot}
+      AURA_YUE_STAGE2_MODEL: ${AURA_YUE_STAGE2_MODEL:-m-a-p/YuE-s2-1B-general}
+      AURA_YUE_STAGE2_BATCH_SIZE: ${AURA_YUE_STAGE2_BATCH_SIZE:-4}
+      AURA_YUE_MAX_NEW_TOKENS: ${AURA_YUE_MAX_NEW_TOKENS:-3000}
+      AURA_YUE_POLL_SECONDS: ${AURA_YUE_POLL_SECONDS:-5}
+      AURA_REQUIRE_LIVE_RENDERER: "true"
+    depends_on:
+      yue:
+        condition: service_healthy
+
+  aura-worker:
+    environment:
+      AURA_YUE_API_URL: http://yue:8011
+      AURA_YUE_CMD: python -m aura_music_studio.yue_remote_command
+      YUE_API_KEY: ${YUE_API_KEY:-}
+      AURA_YUE_MAX_SEGMENTS: ${AURA_YUE_MAX_SEGMENTS:-2}
+      AURA_YUE_STAGE1_MODEL: ${AURA_YUE_STAGE1_MODEL:-m-a-p/YuE-s1-7B-anneal-en-cot}
+      AURA_YUE_STAGE2_MODEL: ${AURA_YUE_STAGE2_MODEL:-m-a-p/YuE-s2-1B-general}
+      AURA_YUE_STAGE2_BATCH_SIZE: ${AURA_YUE_STAGE2_BATCH_SIZE:-4}
+      AURA_YUE_MAX_NEW_TOKENS: ${AURA_YUE_MAX_NEW_TOKENS:-3000}
+      AURA_YUE_POLL_SECONDS: ${AURA_YUE_POLL_SECONDS:-5}
+      AURA_YUE_TIMEOUT: ${AURA_YUE_TIMEOUT:-7200}
+      AURA_REQUIRE_LIVE_RENDERER: "true"
+    depends_on:
+      yue:
+        condition: service_healthy
+
+  yue:
+    build:
+      context: .
+      dockerfile: deploy/yue/Dockerfile
+      args:
+        YUE_COMMIT: 9f1394bae1d8d218fea750c1413c2d9d731c7310
+    container_name: live-sound-studio-yue
+    restart: unless-stopped
+    gpus: all
+    environment:
+      YUE_API_KEY: ${YUE_API_KEY:-}
+      YUE_WORK_ROOT: /var/lib/yue
+      YUE_SOURCE_ROOT: /opt/yue
+      YUE_CUDA_IDX: ${YUE_CUDA_IDX:-0}
+      YUE_JOB_TIMEOUT_SECONDS: ${YUE_JOB_TIMEOUT_SECONDS:-7200}
+      YUE_REPETITION_PENALTY: ${YUE_REPETITION_PENALTY:-1.1}
+      HF_HOME: /root/.cache/huggingface
+      TOKENIZERS_PARALLELISM: "false"
+    expose:
+      - "8011"
+    volumes:
+      - yue_hf_cache:/root/.cache/huggingface
+      - yue_work:/var/lib/yue
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8011/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    # Deliberately no host port. Only ESP Live Sound Studio services can call this renderer.
+
+volumes:
+  yue_hf_cache:
+  yue_work:
