@@ -130,7 +130,7 @@ def owner_dashboard(request: Request):
     else:
         payment_html = "<div class='card'><p class='muted'>No approved members are waiting for payment verification.</p></div>"
 
-    body = f"""<div class='top'><div><div class='gold'><b>ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div>
+    body = f"""<div class='top'><div><div class='gold'><b>ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><div class='row'><a class='btn activate' href='/owner/backups'>Backups & Migration</a><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div></div>
 <div class='grid'><div class='card'><b>Free</b><h2>$0</h2><span class='muted'>Basic studio</span></div><div class='card'><b>Base</b><h2>$4.99</h2><span class='muted'>1 confirmed track/day</span></div><div class='card'><b>Pro</b><h2>$9.99</h2><span class='muted'>Unlimited full studio</span></div></div>
 {_address_panel()}
 <h2>Pending membership requests</h2>{pending_html}
