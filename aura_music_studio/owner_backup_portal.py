@@ -17,7 +17,7 @@ from .studio_settings import StudioSettings
 router = APIRouter()
 ADMIN_COOKIE = "lss_admin_session"
 manager = StudioBackupManager()
-settings = StudioSettings(manager.store)
+settings = StudioSettings()
 
 
 def _authorized(request: Request) -> bool:
