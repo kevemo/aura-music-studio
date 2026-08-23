@@ -54,7 +54,7 @@ def _required_feature(path: str, method: str) -> str | None:
         return PRODUCER_CHAT
     if "/producer" in path:
         return PRODUCER_CHAT
-    if path.endswith("/produce"):
+    if path.endswith("/produce") or path.endswith("/render-jobs"):
         return FULL_TRACK
     if path.endswith("/restore"):
         return AUDIO_CLEANUP
@@ -86,12 +86,7 @@ def _required_feature(path: str, method: str) -> str | None:
 
 
 class MembershipAccessMiddleware(BaseHTTPMiddleware):
-    """Server-side membership, entitlement and tenant-boundary enforcement.
-
-    UI state is never trusted. For every protected request, the authenticated member id is
-    placed into a ContextVar so project/session storage resolves to that member's private
-    namespace. The value is always reset after the request, even on errors.
-    """
+    """Server-side membership, entitlement and tenant-boundary enforcement."""
 
     def __init__(self, app):
         super().__init__(app)
@@ -137,6 +132,8 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
 
+            # Legacy synchronous rendering still supports the same Base daily-slot policy.
+            # The newer /render-jobs endpoint performs its own slot check before enqueueing.
             project_id = None
             base_slot = None
             if request.method == "POST" and path.endswith("/produce"):
@@ -155,9 +152,7 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                         return JSONResponse({"detail": str(exc)}, status_code=403)
                     if base_slot.get("state") == "confirmed":
                         return JSONResponse(
-                            {
-                                "detail": "This track has already been confirmed. Start a new daily project to create another finished song."
-                            },
+                            {"detail": "This track has already been confirmed. Start a new daily project to create another finished song."},
                             status_code=403,
                         )
 
@@ -167,7 +162,6 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                 try:
                     self.store.record_regeneration(member.user_id, project_id)
                 except Exception:
-                    # A logging failure must not corrupt a successfully generated response.
                     pass
             return response
         finally:
