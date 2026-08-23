@@ -24,6 +24,8 @@ from .rights import RightsLedger
 from .samples import SampleRequest, analyze_sample, generate_sample, make_loop
 from .separation import StemSeparator
 from .session import StudioSession
+from .speech_api import router as speech_api_router
+from .speech_portal import router as speech_portal_router
 from .studio_portal import router as studio_portal_router
 from .styles import StyleBlend, build_style_dna, style_prompt
 from .tenant_storage import list_project_dirs, project_path, projects_root
@@ -34,15 +36,17 @@ from .web_portal import router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.7.1",
+    version="0.7.2",
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
 app.add_middleware(MembershipAccessMiddleware)
 app.include_router(web_portal_router)
 app.include_router(studio_portal_router)
+app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
 app.include_router(engineering_router)
+app.include_router(speech_api_router)
 app.include_router(web_api_router)
 
 
@@ -76,10 +80,11 @@ def health():
         "studio_workspace": True,
         "owner_portal": True,
         "spoken_aura": True,
+        "spoken_aura_browser_control_room": True,
         "advanced_engineering_api": True,
         "controlled_web_gateway": True,
         "per_member_project_isolation": True,
-        "api_version": "0.7.1",
+        "api_version": "0.7.2",
     }
 
 
