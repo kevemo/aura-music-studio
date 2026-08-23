@@ -7,6 +7,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from . import __version__
 from .access_control import MembershipAccessMiddleware
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
@@ -21,6 +22,7 @@ from .membership_api import router as membership_router
 from .mixer import render_session
 from .pipeline import AuraPipeline
 from .producer import llm_plan
+from .revisions import create_revision
 from .rights import RightsLedger
 from .samples import SampleRequest, analyze_sample, generate_sample, make_loop
 from .security import StudioSecurityMiddleware
@@ -38,7 +40,7 @@ from .web_portal import router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
-    version="0.8.1",
+    version=__version__,
     description=f"{PRODUCT_FULL_NAME} — {TAGLINE}. Real-audio-first autonomous generative music studio API, powered by Aura.",
 )
 # Membership middleware establishes the authenticated member/tenant context. Security middleware
@@ -85,17 +87,22 @@ def health():
         "customer_portal": True,
         "studio_workspace": True,
         "owner_portal": True,
+        "official_esp_brand_theme": True,
         "spoken_aura": True,
         "spoken_aura_browser_control_room": True,
         "advanced_engineering_api": True,
+        "background_engineering_jobs": True,
         "controlled_web_gateway": True,
         "per_member_project_isolation": True,
         "async_production_jobs": True,
+        "project_revision_history": True,
+        "pro_take_manager": True,
+        "phrase_level_take_comping": True,
         "signed_provenance_manifests": True,
         "security_headers": True,
         "cookie_write_origin_protection": True,
         "auth_rate_limiting": True,
-        "api_version": "0.8.1",
+        "api_version": __version__,
     }
 
 
@@ -166,8 +173,20 @@ def get_session(project_name: str):
 @app.put("/projects/{project_name}/session")
 def put_session(project_name: str, session: StudioSession):
     project = _project(project_name)
-    session.save(_session_path(project))
-    return {"saved": True, "session_id": session.id}
+    path = _session_path(project)
+    if path.exists():
+        try:
+            create_revision(
+                project,
+                label="Before multitrack session save",
+                reason="session_save",
+                actor="Aura Studio",
+                keep=200,
+            )
+        except Exception:
+            pass
+    session.save(path)
+    return {"saved": True, "session_id": session.id, "revision_snapshot": path.exists()}
 
 
 @app.post("/projects/{project_name}/session/render")
@@ -262,6 +281,7 @@ def style_blend(project_name: str, blend: StyleBlend):
 
 @app.post("/projects/{project_name}/separate")
 def separate(project_name: str, asset_id: str, mode: str = "six_stems"):
+    """Legacy synchronous splitter. Production clients should prefer background engineering jobs."""
     project = _project(project_name)
     library = AssetLibrary(project)
     record = library.get(asset_id)
@@ -289,6 +309,7 @@ def master_asset(
     preset: str = "streaming",
     reference_asset_id: str | None = None,
 ):
+    """Legacy synchronous master. Production clients should prefer background engineering jobs."""
     project = _project(project_name)
     library = AssetLibrary(project)
     source_record = library.get(asset_id)
