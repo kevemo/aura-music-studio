@@ -96,17 +96,20 @@ CATALOG: dict[str, list[InstrumentType]] = {
 }
 
 
+# Automatic defaults intentionally use only non-Pro instrument types so Base members never
+# receive a hidden advanced entitlement simply because of a genre choice. Pro sounds remain
+# available explicitly through the switch-board.
 DEFAULT_BY_GENRE: dict[str, list[tuple[str, str]]] = {
     "pop": [("drums", "studio_pop"), ("bass", "electric_precision"), ("guitar", "electric_clean"), ("keyboard", "grand_piano"), ("synth", "analog_pad")],
     "rock": [("drums", "rock"), ("bass", "electric_precision"), ("guitar", "electric_crunch"), ("keyboard", "upright_piano")],
     "acoustic": [("drums", "studio_pop"), ("bass", "upright"), ("guitar", "acoustic_steel"), ("keyboard", "grand_piano")],
     "country": [("drums", "studio_pop"), ("bass", "electric_precision"), ("guitar", "acoustic_steel"), ("guitar", "electric_clean")],
-    "jazz": [("drums", "jazz"), ("bass", "upright"), ("guitar", "electric_jazz"), ("keyboard", "grand_piano")],
-    "funk": [("drums", "funk"), ("bass", "electric_jazz"), ("guitar", "electric_clean"), ("keyboard", "clav")],
-    "metal": [("drums", "metal"), ("bass", "five_string"), ("guitar", "electric_high_gain")],
-    "electronic": [("drums", "electronic"), ("bass", "synth"), ("synth", "poly"), ("synth", "arp")],
-    "hiphop": [("drums", "trap"), ("bass", "synth"), ("keyboard", "electric_piano"), ("synth", "analog_pad")],
-    "cinematic": [("percussion", "cinematic"), ("strings", "ensemble"), ("brass", "orchestral"), ("keyboard", "grand_piano")],
+    "jazz": [("drums", "jazz"), ("bass", "upright"), ("guitar", "electric_clean"), ("keyboard", "grand_piano")],
+    "funk": [("drums", "funk"), ("bass", "electric_jazz"), ("guitar", "electric_clean"), ("keyboard", "electric_piano")],
+    "metal": [("drums", "rock"), ("bass", "pick"), ("guitar", "electric_crunch")],
+    "electronic": [("drums", "electronic"), ("bass", "electric_precision"), ("synth", "poly"), ("synth", "analog_pad")],
+    "hiphop": [("drums", "electronic"), ("bass", "electric_precision"), ("keyboard", "electric_piano"), ("synth", "analog_pad")],
+    "cinematic": [("percussion", "shaker_tambourine"), ("strings", "ensemble"), ("brass", "pop_horns"), ("keyboard", "grand_piano")],
 }
 
 
