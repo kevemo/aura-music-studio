@@ -1,3 +1,3 @@
 """The Live Sound Studio by Elevate Souls Productions, powered by Aura."""
 
-__version__ = "0.4.1"
+__version__ = "0.8.0"
