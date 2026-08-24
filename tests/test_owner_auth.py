@@ -29,13 +29,13 @@ def test_owner_session_revocation_is_immediate(tmp_path):
     assert sessions.valid(token) is False
 
 
-def test_admin_key_is_only_a_bootstrap_credential(monkeypatch):
+def test_admin_key_is_only_a_bootstrap_credential(monkeypatch, tmp_path):
     monkeypatch.setenv("LSS_ADMIN_KEY", "test-bootstrap-owner-key")
     assert owner_key_matches("test-bootstrap-owner-key") is True
     assert owner_key_matches("wrong-key") is False
 
     # An owner session is independent from the bootstrap credential and therefore never
     # needs to use the deployment key as its bearer token.
-    sessions = OwnerSessionStore(":memory:")
+    sessions = OwnerSessionStore(tmp_path / "separate-owner.sqlite3")
     token = sessions.create()
     assert token != "test-bootstrap-owner-key"
