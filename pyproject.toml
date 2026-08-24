@@ -61,6 +61,7 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [project.scripts]
 aura = "aura_music_studio.cli:app"
+aura-task-worker = "aura_music_studio.aura_task_worker:run_worker"
 
 [tool.setuptools.packages.find]
 include = ["aura_music_studio*"]
