@@ -11,6 +11,7 @@ from aura_music_studio.api import app
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
+from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
@@ -85,6 +86,9 @@ from aura_music_studio.voice_house_portal import router as voice_house_portal_ro
 #    no owner suspension. These policies are installed before requests are handled.
 install_esp_access_subscription_separation()
 install_social_access_control()
+# Aura Core's additional cross-media tools are installed centrally so normal and realtime
+# chat share the exact same tool registry, write gates and idempotency behavior.
+install_aura_tool_extensions()
 
 # ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
 # Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
