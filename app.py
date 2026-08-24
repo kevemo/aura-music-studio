@@ -9,6 +9,7 @@ identifier for existing installs, project data and deployment configuration.
 
 from aura_music_studio.api import app
 from aura_music_studio.aura_artifacts import install_aura_artifacts, router as aura_artifacts_router
+from aura_music_studio.aura_artifacts_ui import AuraArtifactsUIMiddleware, router as aura_artifacts_ui_router
 from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
 from aura_music_studio.aura_avatar_runtime import AuraAvatarRuntimeMiddleware, router as aura_avatar_router
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
@@ -105,10 +106,12 @@ install_aura_research_tools()
 install_aura_table_tools()
 install_aura_project_knowledge()
 install_aura_attachment_tools()
-install_aura_workflow_engine()
-# Versioned text/code artifacts are part of Aura's tool chain, but never execute code on the
-# FastAPI host. Future execution requires an independently configured isolated sandbox.
+# Versioned Artifacts participate in the same tool registry, but code is stored only and is
+# never executed on the FastAPI host.
 install_aura_artifacts()
+# Install workflow resolution last among tool wrappers so every tool class can contribute a
+# verified result to $stepN/$previous references while preserving its own gates.
+install_aura_workflow_engine()
 install_aura_chat_hardening()
 install_aura_context_extensions()
 install_aura_profiles()
@@ -126,6 +129,7 @@ app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_profiles_router)
 app.include_router(aura_artifacts_router)
+app.include_router(aura_artifacts_ui_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_voice_conversation_router)
 app.include_router(aura_avatar_router)
@@ -191,6 +195,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
+app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
 app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
