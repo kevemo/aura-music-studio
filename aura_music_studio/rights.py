@@ -47,10 +47,19 @@ class VoiceProfile(BaseModel):
     def require_consent_text(self):
         if self.consent_confirmed and len(self.consent_statement.strip()) < 10:
             raise ValueError("A meaningful consent statement is required before enabling a Voice Profile.")
+        if self.revoked_at:
+            object.__setattr__(self, "verification_state", "revoked")
+            object.__setattr__(self, "consent_confirmed", False)
+            return self
+        # Backwards-compatible migration: older profiles stored a meaningful signed/typed
+        # consent statement but predate the explicit verification_state field. Treat that
+        # evidence as an attestation, not biometric/high-confidence verification.
+        if self.consent_confirmed and self.verification_state == "unverified":
+            object.__setattr__(self, "verification_state", "attested")
+            if not self.verification_method:
+                object.__setattr__(self, "verification_method", "consent_statement_attestation")
         if self.verification_state == "verified" and not self.consent_confirmed:
             raise ValueError("A Voice Profile cannot be verified before consent is confirmed.")
-        if self.revoked_at and self.verification_state != "revoked":
-            object.__setattr__(self, "verification_state", "revoked")
         return self
 
     @property
