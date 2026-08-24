@@ -37,25 +37,25 @@ def _member(request: Request):
     return member
 
 
-def _owned_chat_source(user_id: str, thread_id: str, attachment: dict) -> Path:
+def _owned_chat_source(chat_store: AuraChatStore, user_id: str, thread_id: str, attachment: dict) -> Path:
     root = Path(os.getenv("AURA_CHAT_ATTACHMENT_DIR", "data/aura/attachments")).resolve()
     thread_root = (root / user_id / thread_id).resolve()
     source = Path(str(attachment.get("stored_path") or "")).resolve()
     if root not in thread_root.parents or thread_root not in source.parents or not source.is_file():
-        raise HTTPException(409, "Aura attachment storage record is no longer valid")
+        raise ValueError("Aura attachment storage record is no longer valid")
     return source
 
 
-def _project_name(user_id: str, thread_id: str, requested: str | None) -> str:
-    thread = store.thread(user_id, thread_id)
+def _project_name(chat_store: AuraChatStore, user_id: str, thread_id: str, requested: str | None) -> str:
+    thread = chat_store.thread(user_id, thread_id)
     if not thread:
-        raise HTTPException(404, "Aura conversation not found")
+        raise KeyError("Aura conversation not found")
     name = (requested or thread.get("project_name") or "").strip()
     if not name:
-        raise HTTPException(409, "Pin a project to this Aura conversation before adding the attachment")
+        raise ValueError("Pin a project to this Aura conversation before adding the attachment")
     owned = {path.name for path in list_project_dirs()}
     if name not in owned:
-        raise HTTPException(404, "Pinned project is not available to this member")
+        raise FileNotFoundError("Pinned project is not available to this member")
     return name
 
 
@@ -93,29 +93,30 @@ def _ensure_creative_store(project: Path, project_name_value: str) -> CreativePr
 def _public_asset(asset):
     if asset is None:
         return None
-    return {
-        "id": asset.id,
-        "name": asset.name,
-        "kind": asset.kind,
-        "sha256": asset.sha256,
-        "analysis": asset.analysis,
-    }
+    return {"id": asset.id, "name": asset.name, "kind": asset.kind, "sha256": asset.sha256, "analysis": asset.analysis}
 
 
-@router.post("/aura-intelligence/api/threads/{thread_id}/attachments/{attachment_id}/promote")
-def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachmentRequest, request: Request):
-    member = _member(request)
+def promote_attachment_for_member(
+    member,
+    thread_id: str,
+    attachment_id: str,
+    body: PromoteAttachmentRequest,
+    *,
+    chat_store: AuraChatStore | None = None,
+) -> dict:
+    """Promote one owned chat upload into a tenant project after explicit rights confirmation."""
+    chat_store = chat_store or store
     if not body.rights_confirmed:
-        raise HTTPException(400, "Confirm that you own or are authorised to use this attachment before adding it to a project")
-    attachment = store.attachment(member.user_id, thread_id, attachment_id)
+        raise PermissionError("Confirm that you own or are authorised to use this attachment before adding it to a project")
+    attachment = chat_store.attachment(member.user_id, thread_id, attachment_id)
     if not attachment:
-        raise HTTPException(404, "Aura attachment not found")
-    source = _owned_chat_source(member.user_id, thread_id, attachment)
-    name = _project_name(member.user_id, thread_id, body.project_name)
+        raise KeyError("Aura attachment not found")
+    source = _owned_chat_source(chat_store, member.user_id, thread_id, attachment)
+    name = _project_name(chat_store, member.user_id, thread_id, body.project_name)
     try:
         project = project_path(name, must_exist=True)
     except (ValueError, FileNotFoundError) as exc:
-        raise HTTPException(404, "Project not found") from exc
+        raise FileNotFoundError("Project not found") from exc
 
     ledger = RightsLedger(project / ".aura_rights")
     digest = str(attachment.get("sha256") or ledger.sha256(source))
@@ -123,13 +124,7 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
     creative = _ensure_creative_store(project, name)
     manifest = creative.load()
 
-    # A Creative DNA reference is the canonical promotion marker. If the same bytes were
-    # already promoted, return the existing project objects without recording a second
-    # rights event or rewriting the project asset index.
-    existing_reference = next(
-        (item for item in manifest.references if str(item.metadata.get("sha256") or "") == digest),
-        None,
-    )
+    existing_reference = next((item for item in manifest.references if str(item.metadata.get("sha256") or "") == digest), None)
     existing_asset = next((item for item in library.list() if item.sha256 == digest), None)
     if existing_reference is not None:
         return {
@@ -147,7 +142,6 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
     detected = library.detect_kind(source)
     asset = existing_asset
     rights_record_id = asset.rights_record_id if asset is not None else None
-
     if detected != "unsupported":
         if asset is None:
             asset = library.ingest(
@@ -191,7 +185,6 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
     )
     manifest = creative.add_reference(reference)
     saved_reference = next(item for item in manifest.references if item.id == reference.id)
-
     return {
         "project_name": name,
         "attachment_id": attachment_id,
@@ -205,4 +198,19 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
     }
 
 
-__all__ = ["router"]
+@router.post("/aura-intelligence/api/threads/{thread_id}/attachments/{attachment_id}/promote")
+def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachmentRequest, request: Request):
+    member = _member(request)
+    try:
+        return promote_attachment_for_member(member, thread_id, attachment_id, body, chat_store=store)
+    except PermissionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, str(exc).strip("'")) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+__all__ = ["router", "PromoteAttachmentRequest", "promote_attachment_for_member"]
