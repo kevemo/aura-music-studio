@@ -26,6 +26,7 @@ from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
+from aura_music_studio.aura_workflow_engine import install_aura_workflow_engine
 from aura_music_studio.aura_workspace_api import router as aura_workspace_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
@@ -108,6 +109,9 @@ install_aura_project_knowledge()
 # Attachment tools sit after table/knowledge tools so a rights-confirmed current file can be
 # promoted and then analysed in the same turn using the already-registered project copy.
 install_aura_attachment_tools()
+# Verified workflow references allow later calls to consume actual prior tool outputs while
+# failing closed on missing/failed steps. All ordinary write/rights/tier gates still apply.
+install_aura_workflow_engine()
 # Harden Regenerate/branch/edit semantics before profile context wraps the final normal,
 # streaming and regenerated response paths.
 install_aura_chat_hardening()
