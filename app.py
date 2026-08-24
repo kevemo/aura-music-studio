@@ -9,6 +9,7 @@ identifier for existing installs, project data and deployment configuration.
 
 from aura_music_studio.api import app
 from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
+from aura_music_studio.aura_avatar_runtime import AuraAvatarRuntimeMiddleware, router as aura_avatar_router
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_context_extensions import install_aura_context_extensions
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
@@ -122,6 +123,7 @@ app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_profiles_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_voice_conversation_router)
+app.include_router(aura_avatar_router)
 app.include_router(aura_project_bridge_router)
 app.include_router(aura_workspace_router)
 app.include_router(brand_router)
@@ -185,6 +187,7 @@ app.include_router(system_router)
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
+app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
