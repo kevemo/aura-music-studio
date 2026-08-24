@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from contextvars import ContextVar
+from threading import RLock
+from typing import Callable
+
+from . import aura_agent_core as core
+
+ContextProvider = Callable[[str, str], str | None]
+
+_INSTALLED = False
+_PROVIDERS: list[ContextProvider] = []
+_PROVIDER_LOCK = RLock()
+_ACTIVE_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar("aura_context_extension_scope", default=None)
+_CORE_SIGNATURE = "You are Aura, the general AI co-creator and operating intelligence inside Pulsar-Frequency House"
+
+
+def register_context_provider(provider: ContextProvider) -> None:
+    """Register one bounded private context provider.
+
+    Providers receive only the authenticated user id and current Aura thread id. They must
+    return plain text suitable for appending after Aura Core's immutable safety contract.
+    A failing provider is ignored so personalization can never take the assistant offline.
+    """
+    with _PROVIDER_LOCK:
+        if provider not in _PROVIDERS:
+            _PROVIDERS.append(provider)
+
+
+def context_extensions(user_id: str, thread_id: str, *, max_chars: int = 18000) -> list[str]:
+    rows: list[str] = []
+    used = 0
+    with _PROVIDER_LOCK:
+        providers = list(_PROVIDERS)
+    for provider in providers:
+        try:
+            value = str(provider(user_id, thread_id) or "").strip()
+        except Exception:
+            continue
+        if not value:
+            continue
+        remaining = max_chars - used
+        if remaining <= 0:
+            break
+        value = value[:remaining]
+        rows.append(value)
+        used += len(value)
+    return rows
+
+
+def _inject_messages(messages: list[dict], user_id: str, thread_id: str) -> list[dict]:
+    if not messages:
+        return messages
+    first = messages[0]
+    if first.get("role") != "system" or _CORE_SIGNATURE not in str(first.get("content") or ""):
+        return messages
+    extensions = context_extensions(user_id, thread_id)
+    if not extensions:
+        return messages
+    copied = [dict(item) for item in messages]
+    copied[0]["content"] = str(copied[0].get("content") or "") + "\n\n" + "\n\n".join(extensions)
+    return copied
+
+
+def install_aura_context_extensions() -> None:
+    """Inject registered private context into normal, streaming and regenerated Aura turns.
+
+    The active user/thread scope is a ContextVar, so concurrent requests cannot inherit one
+    another's profile/workspace context. Normal model calls are injected only when the first
+    system message is Aura Core itself; private tool routing and summarisation prompts remain
+    unaffected by user profile instructions.
+    """
+    global _INSTALLED
+    if _INSTALLED:
+        return
+
+    original_respond = core.AuraAgent.respond
+    original_complete = core.AuraModelClient.complete
+    original_regenerate = getattr(core.AuraAgent, "regenerate", None)
+
+    def respond(self: core.AuraAgent, *, member, thread_id: str, **kwargs):
+        token = _ACTIVE_SCOPE.set((member.user_id, thread_id))
+        try:
+            return original_respond(self, member=member, thread_id=thread_id, **kwargs)
+        finally:
+            _ACTIVE_SCOPE.reset(token)
+
+    def complete(self: core.AuraModelClient, messages: list[dict], **kwargs):
+        scope = _ACTIVE_SCOPE.get()
+        if scope:
+            messages = _inject_messages(messages, scope[0], scope[1])
+        return original_complete(self, messages, **kwargs)
+
+    core.AuraAgent.respond = respond
+    core.AuraModelClient.complete = complete
+
+    if original_regenerate is not None:
+        def regenerate(self: core.AuraAgent, *, member, thread_id: str, **kwargs):
+            token = _ACTIVE_SCOPE.set((member.user_id, thread_id))
+            try:
+                return original_regenerate(self, member=member, thread_id=thread_id, **kwargs)
+            finally:
+                _ACTIVE_SCOPE.reset(token)
+        core.AuraAgent.regenerate = regenerate
+
+    # Streaming bypasses AuraModelClient.complete for token delivery, so append the same
+    # registered context directly to the already-built private system message bundle.
+    from . import aura_streaming
+
+    original_build_generation = aura_streaming._build_generation
+
+    def build_generation(*, member, thread_id: str, text: str, attachment_ids: list[str]):
+        user_message, messages, tool_results, memory_saved = original_build_generation(
+            member=member,
+            thread_id=thread_id,
+            text=text,
+            attachment_ids=attachment_ids,
+        )
+        messages = _inject_messages(messages, member.user_id, thread_id)
+        return user_message, messages, tool_results, memory_saved
+
+    aura_streaming._build_generation = build_generation
+    _INSTALLED = True
+
+
+__all__ = [
+    "ContextProvider",
+    "register_context_provider",
+    "context_extensions",
+    "install_aura_context_extensions",
+]
