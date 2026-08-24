@@ -8,6 +8,7 @@ identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
@@ -18,6 +19,7 @@ from aura_music_studio.aura_project_knowledge import install_aura_project_knowle
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
 from aura_music_studio.aura_research_tools import install_aura_research_tools
+from aura_music_studio.aura_runtime_context import install_aura_runtime_context
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -89,6 +91,10 @@ from aura_music_studio.voice_house_portal import router as voice_house_portal_ro
 
 install_esp_access_subscription_separation()
 install_social_access_control()
+# Capture the current user turn before tool routing so one-turn attachment workflows can
+# reference only files owned by this exact member/message. ContextVars keep concurrent turns
+# isolated; durable ownership is still rechecked by the project bridge.
+install_aura_runtime_context()
 # Common Aura tool chain. Every layer delegates unknown calls to the previously-installed
 # layer, so streaming and normal chat share the same permissions and execution semantics.
 install_aura_tool_extensions()
@@ -97,6 +103,9 @@ install_aura_daw_tools()
 install_aura_research_tools()
 install_aura_table_tools()
 install_aura_project_knowledge()
+# Attachment tools sit after table/knowledge tools so a rights-confirmed current file can be
+# promoted and then analysed in the same turn using the already-registered project copy.
+install_aura_attachment_tools()
 install_aura_chat_hardening()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
