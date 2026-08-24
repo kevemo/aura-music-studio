@@ -5,7 +5,8 @@ import smtplib
 from email.message import EmailMessage
 from pathlib import Path
 
-from .branding import PRODUCT_FULL_NAME
+from .branding import ENDORSEMENT, PRODUCT_FULL_NAME
+from .brand_migration import rebrand_text
 
 DEFAULT_ADMIN_EMAIL = "elevatesoulsproductions@gmail.com"
 
@@ -32,11 +33,14 @@ def _truthy(value: str | None, default: bool = False) -> bool:
 
 
 def send_email(to_address: str, subject: str, body: str) -> dict:
-    """Send through configured SMTP.
+    """Send through configured SMTP using authoritative 4Infinity branding.
 
     If SMTP is not configured, write a development outbox file rather than pretending
     the message was delivered. Production deployment should configure SMTP credentials.
     """
+    subject = rebrand_text(subject)
+    body = rebrand_text(body)
+
     host = (os.getenv("LSS_SMTP_HOST") or "").strip()
     user = (os.getenv("LSS_SMTP_USERNAME") or os.getenv("LSS_SMTP_USER") or "").strip()
     password = os.getenv("LSS_SMTP_PASSWORD") or ""
@@ -91,6 +95,8 @@ Review and approve/reject:
 {review_url}
 
 This approval link is single-use and expires automatically.
+
+{ENDORSEMENT}
 """
     return send_email(admin_email, subject, body)
 
@@ -103,8 +109,8 @@ def notify_membership_decision(*, applicant_email: str, display_name: str, appro
             body += f"\nComplete payment here to activate your paid membership:\n{payment_url}\n"
         else:
             body += "\nYour membership is now active.\n"
-        body += f"\nWelcome to {PRODUCT_FULL_NAME}.\n"
+        body += f"\nWelcome to {PRODUCT_FULL_NAME}.\n{ENDORSEMENT}\n"
     else:
         subject = f"Update on your {PRODUCT_FULL_NAME} membership request"
-        body = f"Hello {display_name},\n\nYour membership request was not approved at this time.\n"
+        body = f"Hello {display_name},\n\nYour membership request was not approved at this time.\n\n{ENDORSEMENT}\n"
     return send_email(applicant_email, subject, body)
