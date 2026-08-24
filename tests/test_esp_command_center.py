@@ -5,7 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_command_center import EspStore, RESOURCE_CATALOG, _resource_allowed
+from aura_music_studio.esp_level_up import install_esp_access_subscription_separation
 from aura_music_studio.subscriptions import SubscriptionLedger
+
+# Test the canonical production policy, not the pre-Level-Up legacy coupling.
+install_esp_access_subscription_separation()
 
 
 def _active_free_user(store: AccountStore, email: str):
@@ -25,24 +29,24 @@ def _approve_esp(store: AccountStore, esp: EspStore, email: str, role: str = "cr
     return signup, approved
 
 
-def test_esp_approval_grants_base_without_payment(tmp_path):
+def test_esp_approval_preserves_free_subscription(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(store)
     _signup, approved = _approve_esp(store, esp, "creator@example.com", "creator")
 
-    assert approved["plan_id"] == "base"
-    assert approved["billing_status"] == "esp_comped"
+    assert approved["plan_id"] == "free"
+    assert approved["billing_status"] == "not_required"
     membership = esp.membership(approved["id"])
     assert membership["status"] == "active"
     assert membership["roles"] == "creator"
 
     enforced = SubscriptionLedger(store).enforce(store.get_user(approved["id"]))
     assert enforced["status"] == "active"
-    assert enforced["plan_id"] == "base"
-    assert enforced["billing_status"] == "esp_comped"
+    assert enforced["plan_id"] == "free"
+    assert enforced["billing_status"] == "not_required"
 
 
-def test_esp_revoke_removes_comped_base(tmp_path):
+def test_esp_revoke_preserves_public_subscription(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(store)
     _signup, approved = _approve_esp(store, esp, "revoke@example.com", "agent")
@@ -57,7 +61,7 @@ def test_esp_revoke_removes_comped_base(tmp_path):
     assert user["billing_status"] == "not_required"
 
 
-def test_expired_paid_pro_falls_back_to_esp_base(tmp_path):
+def test_expired_paid_pro_falls_back_to_normal_free_even_when_esp_active(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(store)
     _signup, approved = _approve_esp(store, esp, "pro@example.com", "both")
@@ -73,20 +77,24 @@ def test_expired_paid_pro_falls_back_to_esp_base(tmp_path):
         )
 
     enforced = ledger.enforce(store.get_user(approved["id"]))
-    assert enforced["status"] == "active"
-    assert enforced["plan_id"] == "base"
-    assert enforced["billing_status"] == "esp_comped"
+    assert enforced["plan_id"] == "free"
+    assert enforced["billing_status"] == "not_required"
+    # ESP role remains a separate permission dimension.
+    assert esp.membership(approved["id"])["status"] == "active"
+    assert esp.membership(approved["id"])["roles"] == "both"
 
 
-def test_owner_can_switch_creator_agent_and_both(tmp_path):
+def test_owner_can_switch_creator_agent_and_both_without_plan_change(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(store)
     _signup, approved = _approve_esp(store, esp, "roles@example.com", "creator")
 
     esp.set_role(approved["id"], "agent", "Mary")
     assert esp.membership(approved["id"])["roles"] == "agent"
+    assert store.get_user(approved["id"])["plan_id"] == "free"
     esp.set_role(approved["id"], "both", "Kev")
     assert esp.membership(approved["id"])["roles"] == "both"
+    assert store.get_user(approved["id"])["plan_id"] == "free"
 
 
 def test_role_gates_keep_agent_training_away_from_creator_only_accounts():
