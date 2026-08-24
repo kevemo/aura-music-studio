@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from aura_music_studio.lyric_alignment import estimate_alignment, line_is_surgically_aligned, verify_line
 from aura_music_studio.song_dna import create_song_dna
 
@@ -46,13 +48,8 @@ def test_manual_verification_unlocks_only_the_verified_line(tmp_path):
 
 def test_invalid_manual_range_is_rejected(tmp_path):
     project = _song(tmp_path)
-    line_id = create_song_dna(project, project_name="ignored", title="ignored").lyric_lines[0].id if False else None
     dna = estimate_alignment(project, start_seconds=0.0, end_seconds=20.0)
     line_id = dna.lyric_lines[0].id
 
-    try:
+    with pytest.raises(ValueError, match="end after the start"):
         verify_line(project, line_id, start_seconds=5.0, end_seconds=4.0)
-    except ValueError as exc:
-        assert "end after the start" in str(exc)
-    else:
-        raise AssertionError("Invalid lyric range should fail")
