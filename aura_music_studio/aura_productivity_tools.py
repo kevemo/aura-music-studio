@@ -155,7 +155,6 @@ def _extract_calculation(text: str) -> str | None:
         match = re.match(pattern, clean, flags=re.I | re.S)
         if match:
             expression = match.group(1).strip().replace("^", "**")
-            # Natural-language thousands separators are harmless in prose but invalid in Python AST.
             expression = re.sub(r"(?<=\d),(?=\d{3}(?:\D|$))", "", expression)
             if expression:
                 return expression[:500]
@@ -174,17 +173,65 @@ def _extract_statistics(text: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def _source_wrap(result: Any) -> Any:
+def _source_wrap(result: Any, *, start: int = 0) -> tuple[Any, int]:
     if not isinstance(result, list):
-        return result
+        return result, start
     rows = []
-    for index, item in enumerate(result, start=1):
+    counter = start
+    for item in result:
         if not isinstance(item, dict):
             continue
+        counter += 1
         row = dict(item)
-        row["source_id"] = f"S{index}"
+        row["source_id"] = f"S{counter}"
         rows.append(row)
+    return rows, counter
+
+
+def source_records(tool_results: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for run in tool_results or []:
+        if not run.get("ok"):
+            continue
+        name = run.get("tool")
+        result = run.get("result")
+        items = result if name == "web_search" and isinstance(result, list) else [result] if name == "web_fetch" and isinstance(result, dict) else []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            rows.append(
+                {
+                    "source_id": str(item.get("source_id") or f"S{len(rows) + 1}"),
+                    "title": " ".join(str(item.get("title") or item.get("url") or "Source").split())[:300],
+                    "url": url,
+                    "snippet": " ".join(str(item.get("content") or "").split())[:600],
+                }
+            )
     return rows
+
+
+def source_markdown(tool_results: list[dict]) -> str:
+    records = source_records(tool_results)
+    if not records:
+        return ""
+    lines = ["Sources:"]
+    for item in records[:12]:
+        lines.append(f"- [{item['source_id']}] {item['title']} — {item['url']}")
+    return "\n".join(lines)
+
+
+def _append_sources(text: str, tool_results: list[dict]) -> str:
+    block = source_markdown(tool_results)
+    if not block:
+        return text
+    # Always append the verified retrieval list. Inline citations are still useful, but the
+    # source trail must not disappear just because a small local model forgot to cite them.
+    return text.rstrip() + "\n\n" + block
 
 
 def install_aura_productivity_tools() -> None:
@@ -201,6 +248,7 @@ def install_aura_productivity_tools() -> None:
     original_execute = tools.AuraToolRegistry.execute
     original_direct = core._direct_tool_plan
     original_needs = core._needs_model_tool_router
+    original_respond = core.AuraAgent.respond
 
     def execute(self, call: tools.ToolCall, *, latest_user_message: str):
         if call.name == "calculator":
@@ -213,10 +261,14 @@ def install_aura_productivity_tools() -> None:
             return statistics_summary((call.arguments or {}).get("values"))
         result = original_execute(self, call, latest_user_message=latest_user_message)
         if call.name == "web_search":
-            return _source_wrap(result)
+            wrapped, counter = _source_wrap(result, start=int(getattr(self, "_aura_source_counter", 0)))
+            self._aura_source_counter = counter
+            return wrapped
         if call.name == "web_fetch" and isinstance(result, dict):
+            counter = int(getattr(self, "_aura_source_counter", 0)) + 1
+            self._aura_source_counter = counter
             value = dict(result)
-            value["source_id"] = "S1"
+            value["source_id"] = f"S{counter}"
             return value
         return result
 
@@ -237,9 +289,24 @@ def install_aura_productivity_tools() -> None:
             return True
         return original_needs(text, pinned_project, tools_enabled, web_enabled)
 
+    def respond(self, *args, **kwargs):
+        result = original_respond(self, *args, **kwargs)
+        tool_results = result.get("tool_runs") or []
+        message = result.get("message") or {}
+        content = str(message.get("content") or "")
+        enriched = _append_sources(content, tool_results)
+        if enriched != content and message.get("id"):
+            with self.store._connect() as con:
+                con.execute("UPDATE aura_chat_messages SET content=? WHERE id=?", (enriched, message["id"]))
+            message = {**message, "content": enriched}
+            result["message"] = message
+            result["sources"] = source_records(tool_results)
+        return result
+
     tools.AuraToolRegistry.execute = execute
     core._direct_tool_plan = direct_tool_plan
     core._needs_model_tool_router = needs_model_tool_router
+    core.AuraAgent.respond = respond
     core.AURA_CORE_SYSTEM += """
 
 Research/source contract:
@@ -250,4 +317,10 @@ Research/source contract:
     _INSTALLED = True
 
 
-__all__ = ["install_aura_productivity_tools", "safe_calculate", "statistics_summary"]
+__all__ = [
+    "install_aura_productivity_tools",
+    "safe_calculate",
+    "statistics_summary",
+    "source_markdown",
+    "source_records",
+]
