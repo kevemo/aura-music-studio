@@ -26,6 +26,7 @@ from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
+from aura_music_studio.aura_voice_conversation import AuraVoiceConversationMiddleware, router as aura_voice_conversation_router
 from aura_music_studio.aura_workflow_engine import install_aura_workflow_engine
 from aura_music_studio.aura_workspace_api import router as aura_workspace_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
@@ -94,26 +95,15 @@ from aura_music_studio.voice_house_portal import router as voice_house_portal_ro
 
 install_esp_access_subscription_separation()
 install_social_access_control()
-# Capture the current user turn before tool routing so one-turn attachment workflows can
-# reference only files owned by this exact member/message. ContextVars keep concurrent turns
-# isolated; durable ownership is still rechecked by the project bridge.
 install_aura_runtime_context()
-# Common Aura tool chain. Every layer delegates unknown calls to the previously-installed
-# layer, so streaming and normal chat share the same permissions and execution semantics.
 install_aura_tool_extensions()
 install_aura_productivity_tools()
 install_aura_daw_tools()
 install_aura_research_tools()
 install_aura_table_tools()
 install_aura_project_knowledge()
-# Attachment tools sit after table/knowledge tools so a rights-confirmed current file can be
-# promoted and then analysed in the same turn using the already-registered project copy.
 install_aura_attachment_tools()
-# Verified workflow references allow later calls to consume actual prior tool outputs while
-# failing closed on missing/failed steps. All ordinary write/rights/tier gates still apply.
 install_aura_workflow_engine()
-# Harden Regenerate/branch/edit semantics before profile context wraps the final normal,
-# streaming and regenerated response paths.
 install_aura_chat_hardening()
 install_aura_context_extensions()
 install_aura_profiles()
@@ -131,6 +121,7 @@ app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_profiles_router)
 app.include_router(aura_ui_extension_router)
+app.include_router(aura_voice_conversation_router)
 app.include_router(aura_project_bridge_router)
 app.include_router(aura_workspace_router)
 app.include_router(brand_router)
@@ -193,6 +184,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
+app.add_middleware(AuraVoiceConversationMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
