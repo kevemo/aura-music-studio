@@ -60,6 +60,17 @@ class VoiceProfile(BaseModel):
                 object.__setattr__(self, "verification_method", "consent_statement_attestation")
         if self.verification_state == "verified" and not self.consent_confirmed:
             raise ValueError("A Voice Profile cannot be verified before consent is confirmed.")
+        # A transcript match proves only that the challenge phrase was spoken. It does not
+        # prove the speaker is the same person as every reference file. High-confidence
+        # `verified` state is reserved for a method that also compares speaker identity or
+        # an explicit trusted owner-review workflow.
+        verified_methods = {"speaker_verification_plus_phrase_match", "trusted_owner_review"}
+        if self.verification_state == "verified" and self.verification_method not in verified_methods:
+            object.__setattr__(self, "verification_state", "attested")
+            if self.verification_method:
+                self.metadata.setdefault("phrase_verification_method", self.verification_method)
+        if self.verification_state != "verified" and self.similarity_limit > 0.8:
+            object.__setattr__(self, "similarity_limit", 0.8)
         return self
 
     @property
