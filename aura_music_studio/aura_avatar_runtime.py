@@ -9,6 +9,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 router = APIRouter(tags=["Aura Avatar"])
 
+# This flips only when a real GLB-capable browser renderer is implemented in source and
+# validated. An environment variable alone must never make an unfinished renderer look live.
+BROWSER_3D_RENDERER_IMPLEMENTED = False
+
 AVATAR_STATES = (
     "idle",
     "welcoming",
@@ -61,8 +65,10 @@ def avatar_status() -> dict:
     except Exception as exc:
         model_installed = False
         config_error = f"{type(exc).__name__}: {exc}"
-    renderer_connected = _truthy("AURA_AVATAR_3D_RENDERER_READY", False)
-    production_ready = bool(model_installed and renderer_connected and _truthy("AURA_AVATAR_ENABLED", True))
+    renderer_requested = _truthy("AURA_AVATAR_3D_RENDERER_READY", False)
+    renderer_connected = bool(renderer_requested and BROWSER_3D_RENDERER_IMPLEMENTED)
+    enabled = _truthy("AURA_AVATAR_ENABLED", True)
+    production_ready = bool(model_installed and renderer_connected and enabled)
     if production_ready:
         truthful_state = "production_3d_avatar_ready"
     elif model_installed:
@@ -70,12 +76,13 @@ def avatar_status() -> dict:
     else:
         truthful_state = "runtime_ready_model_asset_missing"
     return {
-        "enabled": _truthy("AURA_AVATAR_ENABLED", True),
+        "enabled": enabled,
         "software_runtime_connected": True,
         "state_bus_connected": True,
         "model_installed": model_installed,
-        # Compatibility alias for older capability clients.
         "model_configured": model_installed,
+        "renderer_requested": renderer_requested,
+        "renderer_implemented": BROWSER_3D_RENDERER_IMPLEMENTED,
         "renderer_connected": renderer_connected,
         "production_3d_ready": production_ready,
         "model_url": "/aura-intelligence/avatar/model.glb" if model_installed else None,
@@ -197,4 +204,4 @@ class AuraAvatarRuntimeMiddleware(BaseHTTPMiddleware):
         return migrated
 
 
-__all__ = ["router", "AuraAvatarRuntimeMiddleware", "avatar_status", "AVATAR_STATES", "_model_path"]
+__all__ = ["router", "AuraAvatarRuntimeMiddleware", "avatar_status", "AVATAR_STATES", "_model_path", "BROWSER_3D_RENDERER_IMPLEMENTED"]
