@@ -5,7 +5,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .aura_tasks_ui import router as aura_tasks_ui_router
+
 router = APIRouter(include_in_schema=False)
+router.include_router(aura_tasks_ui_router)
 
 ARTIFACT_UI_SCRIPT = r"""
 (()=>{
@@ -62,9 +65,13 @@ class AuraArtifactsUIMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/artifacts-ui.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        markers = (
+            "<script src='/aura-intelligence/artifacts-ui.js'></script>",
+            "<script src='/aura-intelligence/tasks-ui.js'></script>",
+        )
+        for marker in markers:
+            if marker not in text:
+                text = text.replace("</body>", marker + "</body>")
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]
