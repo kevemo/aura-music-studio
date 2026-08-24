@@ -143,6 +143,9 @@ def _auto_perceive(store: AuraChatStore, user_id: str, thread_id: str, item: dic
         return item
     kind = str(item.get("kind") or "")
     path = Path(str(item.get("stored_path") or "")).resolve()
+    metadata = dict(item.get("metadata") or {})
+    if item.get("extracted_text") or metadata.get("vision_analyzed") or metadata.get("audio_transcribed") or metadata.get("video_vision_analyzed"):
+        return item
     if not path.is_file() or kind not in {"image", "audio", "video"}:
         return item
     try:
@@ -150,7 +153,6 @@ def _auto_perceive(store: AuraChatStore, user_id: str, thread_id: str, item: dic
         from .speech import AuraSpeechService
 
         text = None
-        metadata = dict(item.get("metadata") or {})
         if kind == "image":
             vision = AuraVisionService()
             if not vision.configured:
@@ -195,7 +197,7 @@ def _auto_perceive(store: AuraChatStore, user_id: str, thread_id: str, item: dic
             )
         return store.attachment(user_id, thread_id, item["id"]) or item
     except Exception as exc:
-        metadata = {**(item.get("metadata") or {}), "auto_perception_error": f"{type(exc).__name__}: {exc}"}
+        metadata = {**metadata, "auto_perception_error": f"{type(exc).__name__}: {exc}"}
         try:
             with store._connect() as con:
                 con.execute(
@@ -236,15 +238,49 @@ def install_aura_chat_hardening() -> None:
                     (thread_id, row["created_at"]),
                 ).fetchall()
             ]
+            later_ids = [
+                item["id"]
+                for item in con.execute(
+                    "SELECT id FROM aura_chat_messages WHERE thread_id=? AND created_at>?",
+                    (thread_id, row["created_at"]),
+                ).fetchall()
+            ]
+            stale_attachments = []
+            if later_ids:
+                placeholders = ",".join("?" for _ in later_ids)
+                stale_attachments = [
+                    dict(item)
+                    for item in con.execute(
+                        f"SELECT id,stored_path FROM aura_chat_attachments WHERE user_id=? AND thread_id=? AND message_id IN ({placeholders})",
+                        (user_id, thread_id, *later_ids),
+                    ).fetchall()
+                ]
         result = original_edit(self, user_id, thread_id, message_id, content)
-        if affected:
-            placeholders = ",".join("?" for _ in affected)
-            with self._connect() as con:
+        with self._connect() as con:
+            if affected:
+                placeholders = ",".join("?" for _ in affected)
                 con.execute(
                     f"DELETE FROM aura_chat_tool_runs WHERE user_id=? AND thread_id=? AND message_id IN ({placeholders})",
                     (user_id, thread_id, *affected),
                 )
-                con.execute("DELETE FROM aura_chat_summaries WHERE user_id=? AND thread_id=?", (user_id, thread_id))
+            if stale_attachments:
+                stale_ids = [item["id"] for item in stale_attachments]
+                placeholders = ",".join("?" for _ in stale_ids)
+                con.execute(
+                    f"DELETE FROM aura_chat_attachments WHERE user_id=? AND thread_id=? AND id IN ({placeholders})",
+                    (user_id, thread_id, *stale_ids),
+                )
+            con.execute("DELETE FROM aura_chat_summaries WHERE user_id=? AND thread_id=?", (user_id, thread_id))
+        root = Path(os.getenv("AURA_CHAT_ATTACHMENT_DIR", "data/aura/attachments")).resolve()
+        expected = (root / user_id / thread_id).resolve()
+        for item in stale_attachments:
+            try:
+                path = Path(str(item["stored_path"])).resolve()
+                if root in expected.parents or expected == root:
+                    if path != expected and expected in path.parents:
+                        path.unlink(missing_ok=True)
+            except Exception:
+                pass
         return result
 
     def fork_thread(self: AuraChatStore, user_id: str, thread_id: str, through_message_id: str):
