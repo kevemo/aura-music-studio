@@ -35,14 +35,7 @@ def _stem_paths(project: Path, metadata: dict) -> list[str]:
 
 
 def build_around_upload(project: Path, request: BuildAroundRequest) -> dict:
-    """Run Build Around and finish it as a release-gated editable master.
-
-    The core generator preserves the uploaded real performance and produces either a
-    complete neural mix or editable multitrack stems. This wrapper makes the quality
-    contract consistent with normal song generation: ensure Song DNA, master the rendered
-    mix, run measurable release QC, preserve stems/session state, and publish the accepted
-    master as `Aura_Final_Master.wav`.
-    """
+    """Run Build Around and finish it as a release-gated editable master."""
     metadata = build_around_core(project, request)
     workspace = ProjectWorkspace(project)
     manifest = workspace.load_manifest()
@@ -100,4 +93,18 @@ def build_around_upload(project: Path, request: BuildAroundRequest) -> dict:
     return metadata
 
 
-__all__ = ["BuildAroundRequest", "build_around_upload"]
+def install_release_gated_build_around() -> None:
+    """Patch the legacy module export before queued jobs dynamically import it.
+
+    This keeps compatibility with existing job/compute code that imports
+    `aura_music_studio.build_around.build_around_upload` while making the production web
+    process use the release-gated implementation. Standalone remote compute nodes should
+    import this installer at startup as part of the next node-agent migration.
+    """
+    from . import build_around as module
+
+    if module.build_around_upload is not build_around_upload:
+        module.build_around_upload = build_around_upload
+
+
+__all__ = ["BuildAroundRequest", "build_around_upload", "install_release_gated_build_around"]
