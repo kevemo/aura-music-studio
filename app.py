@@ -1,4 +1,4 @@
-"""Production entrypoint for Elevate Souls Productions Presents: The Live Sound Studio.
+"""Production entrypoint for 4Infinity Creative Studios.
 
 Run locally:
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -11,6 +11,7 @@ from aura_music_studio.aura_avatar_bridge import router as aura_avatar_bridge_ro
 from aura_music_studio import aura_avatar_theme_tools as _aura_avatar_theme_tools  # installs niche energy behaviour
 from aura_music_studio import aura_avatar_mobile_loader_tools as _aura_avatar_mobile_loader_tools  # KTX2/Meshopt decoders
 from aura_music_studio import aura_avatar_ai_tools as _aura_avatar_ai_tools  # installs safe embodied tool hooks
+from aura_music_studio import aura_workspace_theme_tools as _aura_workspace_theme_tools  # preview/confirm/revert workspace design
 from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
 from aura_music_studio.aura_voice_api import router as aura_voice_router
@@ -53,14 +54,18 @@ from aura_music_studio.video_api import router as video_router
 from aura_music_studio.visual_fx_api import router as visual_fx_router
 from aura_music_studio.visual_portal import router as visual_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
+from aura_music_studio.workspace_theme import WorkspaceThemeMiddleware, router as workspace_theme_router
 
 # Modular creative routers share the core app's authentication, plan enforcement and tenant isolation.
 # ESP command-center/niche routes retain separate ESP role gates and are not ordinary customer features.
 # OwnerIdentityMiddleware never grants owner access: it adds signed Kev/Mary attribution inside the
 # independently authenticated owner session and records successful owner writes in the audit chain.
+# Workspace themes are token-based, per-user/per-owner, preview-first and reversible; arbitrary CSS/JS
+# is never persisted or executed by Aura.
 app.add_middleware(EspNicheDashboardMiddleware)
 app.add_middleware(EspCommandCenterViewMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
+app.add_middleware(WorkspaceThemeMiddleware)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
@@ -72,6 +77,7 @@ app.include_router(aura_voice_router)
 app.include_router(aura_avatar_router)
 app.include_router(aura_avatar_bootstrap_router)
 app.include_router(aura_avatar_bridge_router)
+app.include_router(workspace_theme_router)
 app.include_router(daw_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
