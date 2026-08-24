@@ -35,6 +35,8 @@ from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
+from aura_music_studio.social_management_api import router as social_management_router
+from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
@@ -54,6 +56,8 @@ app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
+app.include_router(social_management_router)
+app.include_router(social_management_portal_router)
 app.include_router(daw_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
