@@ -80,7 +80,7 @@ def owner_login(request: Request, error: str | None = None):
     if _authorized(request):
         return RedirectResponse("/owner/dashboard", status_code=303)
     message = f"<p style='color:var(--red)'>{escape(error)}</p>" if error else ""
-    return _page(f"<div class='card' style='max-width:520px;margin:80px auto'><div class='gold'><b>Elevate Souls Productions</b></div><h1>The Live Sound Studio Owner Access</h1><p class='muted'>For authorised ESP owners/administrators only.</p>{message}<form method='post' action='/owner/login'><input type='password' name='admin_key' placeholder='Owner admin key' required style='width:100%;margin:12px 0'><button class='approve' type='submit'>Enter owner dashboard</button></form></div>")
+    return _page(f"<div class='card' style='max-width:520px;margin:80px auto'><div class='gold'><b>Elevate Souls Productions</b></div><h1>Pulsar-Frequency House Owner Access</h1><p class='muted'>For authorised ESP owners/administrators only.</p>{message}<form method='post' action='/owner/login'><input type='password' name='admin_key' placeholder='Owner admin key' required style='width:100%;margin:12px 0'><button class='approve' type='submit'>Enter owner dashboard</button></form></div>")
 
 
 @router.post("/owner/login")
@@ -130,8 +130,9 @@ def owner_dashboard(request: Request):
     else:
         payment_html = "<div class='card'><p class='muted'>No approved members are waiting for payment verification.</p></div>"
 
-    body = f"""<div class='top'><div><div class='gold'><b>ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><div class='row'><a class='btn activate' href='/owner/backups'>Backups & Migration</a><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div></div>
-<div class='grid'><div class='card'><b>Free</b><h2>$0</h2><span class='muted'>Basic studio</span></div><div class='card'><b>Base</b><h2>$4.99</h2><span class='muted'>1 confirmed track/day</span></div><div class='card'><b>Pro</b><h2>$9.99</h2><span class='muted'>Unlimited full studio</span></div></div>
+    body = f"""<div class='top'><div><div class='gold'><b>MARY & KEV · ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><div class='row'><a class='btn approve' href='/owner/users'>Users & ESP Access</a><a class='btn activate' href='/owner/backups'>Backups & Migration</a><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div></div>
+<div class='grid'><div class='card'><b>Free</b><h2>$0</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>Base</b><h2>$4.99</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>Pro</b><h2>$9.99</h2><span class='muted'>Full Creative Studio access only unless separately ESP-approved</span></div></div>
+<div class='card'><div class='row'><div><h2>User & ESP management</h2><p class='muted'>Every account is listed in the protected owner directory. Mary/Kev can manually set Free/Base/Pro separately from Regular / ESP Creator / ESP Agent / Both, review ESP access requests, niches, creation activity, training and LIVE/video progress.</p></div><a class='btn approve' href='/owner/users'>Open User Directory</a></div></div>
 {_address_panel()}
 <h2>Pending membership requests</h2>{pending_html}
 <h2>Approved — waiting for PayPal verification</h2>{payment_html}
