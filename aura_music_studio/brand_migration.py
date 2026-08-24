@@ -5,25 +5,37 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 
-# Compatibility bridge: old product copy may still exist inside legacy modules and
-# persisted templates. This middleware makes the new public brand authoritative at
-# the HTTP boundary without renaming storage keys, cookies or package imports.
+# Compatibility bridge: historical product copy may still exist inside legacy modules
+# and persisted templates. This middleware makes Pulsar-Frequency House authoritative
+# at the HTTP boundary without renaming storage keys, cookies or package imports.
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     (
+        "Powered by Elevate Souls Productions and Aura AI Systems",
+        "Powered by Elevate Souls Productions & Aura AI Systems",
+    ),
+    (
         "Elevate Souls Productions Presents: The Live Sound Studio",
-        "4Infinity Creative Studios",
+        "Pulsar-Frequency House",
     ),
     (
         "Elevate Souls Productions Presents: Live Sound Studio",
-        "4Infinity Creative Studios",
+        "Pulsar-Frequency House",
     ),
     (
         "Elevate Souls Productions Presents",
-        "Powered by Elevate Souls Productions and Aura AI Systems",
+        "Powered by Elevate Souls Productions & Aura AI Systems",
     ),
-    ("The Live Sound Studio", "4Infinity Creative Studios"),
-    ("Live Sound Studio", "4Infinity Creative Studios"),
-    ("Music Making for Professionals", "Music, Video, Image & Creator Intelligence"),
+    ("4Infinity Creative Studios", "Pulsar-Frequency House"),
+    ("Cosmic Creative Studios", "Pulsar-Frequency House"),
+    ("Cosmic Creation Studios", "Pulsar-Frequency House"),
+    ("The Live Sound Studio", "Pulsar-Frequency House"),
+    ("Live Sound Studio", "Pulsar-Frequency House"),
+    ("4Infinity", "Pulsar-Frequency"),
+    (
+        "Music, Video, Image & Creator Intelligence",
+        "For Professional Creation Beyond The Cosmos",
+    ),
+    ("Music Making for Professionals", "For Professional Creation Beyond The Cosmos"),
 )
 
 _TEXTUAL_CONTENT_TYPES = (
@@ -43,7 +55,7 @@ def rebrand_text(value: str) -> str:
 
 
 class BrandMigrationMiddleware(BaseHTTPMiddleware):
-    """Rewrite legacy public-facing product copy to 4Infinity Creative Studios.
+    """Rewrite legacy public-facing product copy to Pulsar-Frequency House.
 
     Binary audio/video/image responses are passed through untouched. Response headers,
     including repeated Set-Cookie headers, are preserved while Content-Length is
