@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
+from .content_safety import enforce_creation_policy
 from .lyrics import LyricRequest, generate_lyrics
 from .presets import get_preset, preset_dict
 
@@ -39,6 +40,13 @@ class CreateSongRequest(BaseModel):
 
 
 def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
+    enforce_creation_policy(
+        request.title,
+        request.concept,
+        request.lyrics,
+        request.extra_prompt,
+        context="Music creation",
+    )
     slug = re.sub(r"[^a-z0-9]+", "-", request.title.lower()).strip("-") or "new-song"
     project = projects_root / slug
     input_dir = project / "input"
@@ -57,6 +65,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             duration_minutes=request.duration_seconds / 60.0,
             extra=request.extra_prompt,
         ))
+        enforce_creation_policy(lyrics, context="Generated lyrics")
     if lyrics:
         (input_dir / "lyrics.txt").write_text(lyrics, encoding="utf-8")
 
