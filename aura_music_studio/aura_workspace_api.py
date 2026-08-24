@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from .aura_agent_core import AuraAgent
 from .aura_agent_tools import public_tool_specs
+from .aura_avatar_runtime import avatar_status
 from .aura_chat_store import AuraChatStore
 from .aura_multimodal import AuraVisionService
 from .creative_renderers import renderer_states
@@ -66,6 +67,7 @@ def capabilities(request: Request):
     speech = _speech_status()
     web = _web_status()
     renderers = _safe_renderers()
+    avatar = avatar_status()
     tools = public_tool_specs(web_enabled=True, tools_enabled=True)
     return {
         "member_plan": member.plan.id,
@@ -75,10 +77,13 @@ def capabilities(request: Request):
             "conversation_search_edit_branch_regenerate": True,
             "explicit_memory": True,
             "fast_auto_deep_creative_modes": True,
+            "private_custom_aura_profiles": True,
             "project_pinning": True,
             "project_knowledge_search": True,
             "file_upload_and_extraction": True,
             "rights_gated_attachment_promotion": True,
+            "current_turn_attachment_workflows": True,
+            "verified_multi_step_tool_workflows": True,
             "image_audio_video_perception_adapters": True,
             "safe_calculator": True,
             "safe_statistics": True,
@@ -91,6 +96,9 @@ def capabilities(request: Request):
             "song_dna_tools": True,
             "creative_image_video_tools": True,
             "voice_profile_inspection": True,
+            "single_turn_voice_input": True,
+            "hands_free_voice_conversation": True,
+            "embodied_aura_state_runtime": True,
             "conversation_markdown_export": True,
         },
         "runtime": {
@@ -99,12 +107,15 @@ def capabilities(request: Request):
             "speech": speech,
             "web": web,
             "creative_renderers": renderers,
+            "avatar": avatar,
             "deep_research_ready": bool(web.get("enabled") and web.get("search_configured")),
+            "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_configured")),
             "image_generation_ready": bool((renderers.get("image") or {}).get("configured")),
             "video_generation_ready": bool((renderers.get("video") or {}).get("configured")),
+            "production_3d_avatar_ready": bool(avatar.get("enabled") and avatar.get("model_configured")),
         },
         "tools": tools,
-        "truthfulness_contract": "A software feature can be connected while its external/local model service remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
+        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
     }
 
 
