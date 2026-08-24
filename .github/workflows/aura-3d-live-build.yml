@@ -55,8 +55,11 @@ jobs:
           from pathlib import Path
           source = Path('data/aura_character_references/front.b64')
           target = Path('data/aura_character_references/front.jpg')
-          target.write_bytes(base64.b64decode(source.read_text(encoding='utf-8').strip(), validate=True))
+          encoded = ''.join(source.read_text(encoding='utf-8').split())
+          encoded += '=' * (-len(encoded) % 4)
+          target.write_bytes(base64.b64decode(encoded, validate=True))
           assert target.stat().st_size > 4096
+          assert target.read_bytes()[:2] == b'\xff\xd8'
           print(f'Decoded Aura reference: {target} ({target.stat().st_size} bytes)')
           PY
 
