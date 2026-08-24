@@ -1,407 +1,266 @@
-# Pulsar-Frequency House — Social Media Management Expansion
+# ESP Social Management — Niche-Specific Creator & Agent Hub
 
-## Purpose
+## Architectural boundary
 
-Pulsar-Frequency House will include a first-class Social Media Management House alongside music, video, image, voice, Aura and the private ESP Creator Network Hub.
+Social-media management is **not** a public Pulsar-Frequency House Creative Studio feature.
 
-The feature direction is informed by public research into modern social-media management products, including Rella, but the implementation, data model, interface, branding and workflows must remain independently designed for Pulsar-Frequency House.
+It belongs exclusively to the private **Elevate Souls Productions Creator & Agent Hub** and is available only after ESP membership/role approval and completion of the member's ESP niche profile.
 
-The goal is not to clone another product. The goal is feature-class parity and then to go beyond it by connecting social planning directly to Pulsar-Frequency House's own music, video, image, voice, creator-network and Aura systems.
+The Creative Studio and the ESP Creator & Agent Hub are intentionally separate product surfaces:
 
-## Publicly observed Rella feature classes researched in August 2026
+- **Pulsar-Frequency House Creative Studio** — music, video, image, voice and other professional creation workflows available according to normal studio membership/entitlements.
+- **ESP Creator & Agent Hub** — private Creator Network training, creator operations, agent operations, niche coaching and ESP social-media management.
 
-Rella publicly describes itself as an all-in-one workspace combining social scheduling, project/task management, analytics, AI assistance and content approvals. Its support material also documents multi-brand workspaces, calendar/board/table views, media libraries, feed previews, approvals, social-account connection, automated publishing, analytics reports, project/task/notes systems, an Instagram feed planner, AI-assisted planning and repurposing, integrations, and a social inbox.
+A normal Creative Studio subscriber does not gain ESP social-management access by buying a studio plan.
 
-### 1. Multi-brand / multi-client workspaces
+## No-poaching rule
 
-Comparable Pulsar-Frequency implementation:
+ESP Social Management is not a recruitment or poaching tool.
 
-- Social Houses: isolated workspaces per creator, artist, business, client, campaign brand or ESP-managed account.
-- independent connected social accounts per Social House;
-- independent brand persona, media library, hashtags, content pillars, statuses and workflow rules;
-- independent analytics and reports;
-- independent approval links and collaborators;
-- per-space roles and permissions;
-- fast account/brand switching from one master dashboard.
+The server-side authorization model requires all of the following before social-management routes can be used:
 
-### 2. Content planning
+1. authenticated Pulsar-Frequency House account;
+2. active ESP membership status;
+3. ESP role of Creator, Agent, Creator+Agent, or Owner;
+4. completed ESP niche profile;
+5. affiliation confirmation that the relevant account is not represented by another Creator Network.
 
-Implement:
+If the member declares that the account is represented by another Creator Network, ESP Social Management remains locked. The interface should use neutral wording and direct the person to an ESP owner only if their recorded affiliation is incorrect. It must not encourage them to leave another network.
+
+This protection is enforced in the API, not merely by hiding a button.
+
+## Niche Select experience
+
+When an approved ESP creator/agent enters the ESP Hub for the first time, the hub routes them through **Niche Select**.
+
+The niche profile stores:
+
+- primary niche;
+- optional sub-niche;
+- audience description;
+- creator goals;
+- Creator Network affiliation status.
+
+The niche then drives:
+
+- hub colour/theme treatment;
+- Aura coaching context;
+- training priorities;
+- content pillars;
+- suggested LIVE formats;
+- short-form video strategy;
+- campaign planning;
+- social-management prompts and workflows;
+- future analytics interpretation and recommendations.
+
+Current niche catalogue includes music/performing arts, gaming, beauty, fashion, fitness, food, travel, education, business, technology/AI, art/design/crafts, comedy/entertainment, spirituality/mindful community, lifestyle, family/parenting, talk/podcast, battles/interactive entertainment, sports, automotive, books/writing, pets/animals, wellness/self-care, and a custom/other path.
+
+## Rella research: feature-class benchmark only
+
+Public research into Rella is used as a feature-class benchmark. Pulsar-Frequency House/ESP must not copy Rella's proprietary code, protected interface assets or private implementation.
+
+The objective is independent implementation of comparable social-management capabilities, then expansion through ESP niche training and Aura intelligence.
+
+### Feature classes to match or exceed
+
+#### Multi-brand / multi-account workspaces
+
+ESP Social Houses support the architectural concept of separate creator/brand/campaign spaces with their own:
+
+- connected platform accounts;
+- content calendar;
+- projects/campaigns;
+- tasks and notes;
+- media references;
+- Persona/brand voice;
+- approvals;
+- analytics/reporting state;
+- activity history.
+
+Agents can eventually manage multiple **approved ESP** creator workspaces according to their role. This must not become a mechanism for managing creators belonging to another network.
+
+#### Content planning
+
+Target capabilities:
 
 - calendar view;
 - Kanban/board view;
 - table/list view;
-- unscheduled-content queue;
+- unscheduled idea queue;
 - drafts;
-- scheduled posts;
-- recurring content;
-- content campaigns/projects;
-- content pillars and tags;
 - custom statuses;
+- platform variants;
+- content pillars and tags;
+- projects/campaigns;
+- recurring content concepts;
 - assignees;
 - due dates;
+- tasks and dependencies;
 - notes;
-- post-level tasks/checklists;
-- reusable task templates;
-- all-day placeholders;
-- drag-and-drop rescheduling;
-- bulk actions;
-- duplicated posts/campaigns;
-- platform-specific variants.
+- reusable campaign templates.
 
-### 3. Supported social destinations
+#### Platform-specific content
 
-Plan and compatibility-check content for:
+Architectural support exists for:
 
-- TikTok video and photo posts;
-- Instagram posts, Reels and Stories;
-- Facebook posts, Reels and Stories;
-- YouTube long-form and Shorts;
-- LinkedIn personal and organization content;
+- TikTok;
+- Instagram;
+- Facebook;
+- YouTube;
+- LinkedIn;
 - Pinterest;
 - Threads;
 - X;
-- podcasts;
+- podcast workflows;
 - Google Business Profile;
-- custom planning-only platforms;
-- future platforms through an adapter registry.
+- custom channels.
 
-Platform constraints must be stored as data and updated independently of the UI. The system should validate caption limits, media counts, aspect ratios, duration, file formats and platform-specific publishing requirements before a post can enter an auto-publish queue.
+Each platform variant can carry its own caption, hashtags, media references, cover, aspect ratio, schedule, timezone, publishing state and external-post metadata.
 
-### 4. Scheduling and auto-publishing
+Platform limits and available publishing features change over time; they must be verified against official APIs rather than hard-coded forever.
 
-Implement an official-API publishing adapter layer with truthful capability reporting.
+#### Scheduling and publishing
 
-A post can be:
+Target flow:
 
-- idea;
-- draft;
-- in production;
-- pending approval;
-- approved;
-- scheduled;
-- publishing;
-- published;
-- failed;
-- archived.
+1. create content;
+2. create platform-native variants;
+3. attach approved media;
+4. pass required approval gates;
+5. schedule by timezone;
+6. validate against the destination platform;
+7. publish only through an authorised official integration;
+8. record confirmation/external post ID;
+9. ingest subsequent analytics where permitted.
 
-The scheduler must:
+The application must never pretend a platform is connected when an OAuth/API integration has not been authorised.
 
-- support exact time and timezone;
-- support all-day placeholders;
-- support multi-platform scheduling;
-- support different captions/dates/settings by platform;
-- enforce approval gates before auto-publishing;
-- verify connection/token health before queueing;
-- perform platform validation before posting;
-- retry safely where the target API permits it;
-- never mark content as published until the platform API confirms it;
-- preserve a full publishing audit trail.
+#### Approvals and collaboration
 
-### 5. Repurposing
+Target capabilities:
 
-One Pulsar-Frequency creative asset can fan out into multiple platform-native posts.
-
-Aura should be able to convert:
-
-- long-form video → Shorts/Reels/TikToks;
-- music video → teasers/trailers/stories;
-- song → lyric cards, cover art, behind-the-scenes posts and launch campaign;
-- livestream recording → highlights, clips, quotes and promotional assets;
-- YouTube video → LinkedIn post, Threads post, X post, carousel outline and newsletter copy;
-- image/poster → alternate aspect ratios and platform-specific layouts.
-
-Each repurposed variant should remain linked to the parent creative asset while having independent caption, hashtags, schedule, cover, crop and publishing state.
-
-### 6. Media library
-
-Implement a private media library inside every Social House:
-
-- folders;
-- campaign folders;
-- batch upload;
-- search;
-- tags;
-- favourites;
-- media metadata;
-- image/video/PDF support;
-- generated Pulsar-Frequency assets automatically available without downloading/re-uploading;
-- import from authorised cloud storage;
-- media previews;
-- download/export;
-- crop and aspect-ratio transformations;
-- version history;
-- duplicate detection;
-- rights/provenance data;
-- usage history so users can see where an asset has been posted.
-
-### 7. Visual feed and platform previews
-
-Implement:
-
-- Instagram grid/feed planner;
-- platform-native preview modes;
-- TikTok preview;
-- Reels/Stories preview;
-- YouTube thumbnail/title preview;
-- LinkedIn preview;
-- X/Threads preview;
-- carousel preview;
-- mobile/desktop variants where useful;
-- drag/reorder feed planning where the platform supports a visual feed concept.
-
-### 8. Collaboration and approvals
-
-Implement:
-
-- internal/private chat;
-- external/public feedback thread;
+- internal creator/agent comments;
+- owner/mentor review where appropriate;
+- approval-required content;
+- approved/rejected/revision states;
+- external approval links where business/client workflows need them;
 - activity history;
-- @mentions;
-- assignees;
-- notification preferences;
-- public review links that do not require an account;
-- post-level, project-level and Social-House-level sharing;
-- configurable view/download/comment/approve permissions;
-- expiring links;
-- client asset-upload requests;
-- approval status changes;
-- approval rules preventing unapproved auto-posting;
-- internal comments kept invisible to external reviewers;
-- dynamic preview links that reflect the newest approved draft.
+- publishing block until required approvals are satisfied.
 
-### 9. Project and task management
+#### Media library and previews
 
-Implement:
+Target capabilities:
 
-- campaign projects;
-- task lists;
-- task templates;
-- recurring tasks;
-- due dates;
-- priority;
-- assignees;
-- custom statuses;
-- board/table/calendar views;
-- notes and briefs;
-- dependencies;
-- automated status changes;
-- roadmaps and launch checklists;
-- campaign completeness indicators.
+- private ESP member media library;
+- folders and collections;
+- campaign media;
+- aspect-ratio preparation;
+- cover selection;
+- platform-native preview frames;
+- Instagram-style feed planning;
+- reusable approved assets;
+- links to relevant creative outputs when the same user has access to both systems.
 
-### 10. Analytics and reporting
+Linking an asset from the Creative Studio does **not** merge the products or expose ESP tools publicly. It is a controlled asset handoff available only to the authorised member.
 
-Implement an analytics data-normalisation layer above official platform APIs.
+#### Analytics and reporting
 
-Dashboard targets:
+Target capabilities:
 
-- views/reach/impressions;
-- followers and follower growth;
+- account-level trends;
+- post-level performance;
+- LIVE/social campaign comparisons where official data permits;
+- follower/audience trends;
+- reach/impressions/views;
 - engagement;
-- comments/shares/saves;
-- watch time and retention where available;
-- clicks/conversions where available;
-- organic vs paid where APIs expose it;
-- demographics where authorised and available;
-- top-performing content;
-- content-type comparisons;
-- posting-time analysis;
-- platform comparisons;
-- campaign/project performance;
-- creator/account trends;
-- anomaly alerts;
-- exportable/shareable reports;
-- recurring scheduled reports;
-- client-facing branded reporting.
+- watch-time/retention where available;
+- conversion/CTA tracking where available;
+- campaign reporting;
+- exported reports;
+- Aura summaries and next-action recommendations.
 
-Aura should interpret the metrics rather than merely displaying charts.
+Aura should interpret performance through the member's selected ESP niche rather than giving generic advice.
 
-### 11. Aura social intelligence
+#### Social inbox / community management
 
-Aura becomes the social-management counterpart to Rella's AI assistant, but integrated with the entire Pulsar-Frequency creative system.
-
-Aura should be able to:
-
-- learn a Social House brand persona;
-- preserve tone, banned phrases, preferred vocabulary, CTA style and target audience;
-- generate content calendars;
-- identify gaps in the schedule;
-- recommend content pillars;
-- create captions;
-- rewrite captions for each platform;
-- suggest and evaluate hashtags/keywords;
-- summarize uploaded videos and derive post ideas;
-- repurpose existing content;
-- analyze past performance;
-- recommend posting times;
-- recommend what content type to create next;
-- search current public trends when requested;
-- create tasks and campaign projects;
-- change statuses and schedules through explicit user commands;
-- produce monthly strategies and reports;
-- remember brand-specific instructions separately for each Social House;
-- use Pulsar-Frequency image/video/music tools to create missing campaign assets.
-
-### 12. Social inbox / community management
-
-Target a unified community inbox where official APIs permit access:
+Where official APIs and permissions permit:
 
 - comments;
-- DMs/messages;
-- story replies;
+- messages/DMs;
 - mentions;
-- filtering by account/platform/status;
-- assignment to team members;
-- saved replies;
-- labels;
-- response-time metrics;
-- escalation flags;
-- Aura-assisted response drafts;
-- spam/safety filtering;
-- creator-network escalation paths for ESP accounts.
+- reply queues;
+- assigned conversations;
+- moderation status;
+- saved response guidance;
+- escalation to mentor/agent where appropriate.
 
-Each platform must truthfully declare whether its APIs permit reading/replying to each message type.
+No feature should claim universal inbox support because platform APIs differ significantly.
 
-### 13. Integrations
+#### Aura niche intelligence
 
-Target integrations for:
+Aura's ESP social role is broader than a generic caption generator. The target is a niche-aware creator coach that can:
 
-- Google Drive;
-- Google Calendar;
-- Canva where an approved integration is available;
-- cloud asset storage;
-- email notifications;
-- webhooks;
-- an MCP-style tool surface so authorised external AI/operator clients can manage a Social House;
-- Pulsar-Frequency House internal Creative DNA projects;
-- ESP Creator Network records where the user's role permits it.
+- build a content strategy from the ESP niche profile;
+- create a weekly/monthly calendar;
+- identify calendar gaps;
+- turn one idea into multiple platform variants;
+- draft captions/CTAs in the creator's established voice;
+- build content-pillar rotations;
+- recommend LIVE-to-short-form repurposing;
+- create campaign tasks;
+- explain why a piece of content is recommended;
+- interpret authorised performance data;
+- update recommendations as results change;
+- respect ESP training and professional standards.
 
-### 14. Brand persona / memory
+## Separation from Creative Studio
 
-Every Social House receives an isolated Aura Social Persona containing:
+There must be no public Social House navigation inside the general Creative Studio.
 
-- brand name;
-- industry/niche;
-- audience;
-- goals;
-- brand voice;
-- vocabulary;
-- prohibited language;
-- content pillars;
-- style references;
-- CTA rules;
-- hashtag/keyword banks;
-- visual guidelines;
-- creator presentation rules;
-- posting cadence;
-- platform priorities;
-- historic successful content patterns.
+The canonical private paths are:
 
-### 15. Automations
+- `/command-center` — ESP Creator & Agent Hub;
+- `/command-center/niche` — ESP Niche Select;
+- `/command-center/social` — ESP Social Management;
+- `/command-center/api/social/...` — private social-management API.
 
-Implement a workflow engine for events such as:
+The old public-style `/social-house` route is intentionally removed.
 
-- when status becomes Approved → make post eligible for publishing;
-- when media is missing → create a task;
-- when approval is requested → send notification;
-- when an approver comments → notify assignee;
-- when a scheduled post fails → alert manager;
-- when a campaign reaches a date → generate report;
-- when analytics fall/rise beyond threshold → ask Aura for analysis;
-- when a long-form video enters the library → propose repurposed clips;
-- when a Pulsar-Frequency creative project is completed → offer to build a launch campaign.
+## Current implementation status
 
-### 16. Search and global command
+Implemented foundation:
 
-Users should be able to search across:
-
-- posts;
-- campaigns/projects;
+- persistent ESP niche profiles;
+- niche-specific themes and training priorities;
+- first-entry niche selection for active ESP members;
+- explicit Creator Network affiliation attestation;
+- server-side no-poaching access gate;
+- ESP-only Social Management portal path;
+- ESP-only Social Management API path;
+- multi-Social-House storage;
+- Persona model;
+- platform variants;
+- projects/campaigns;
 - tasks;
 - notes;
-- media;
-- hashtags;
-- tags;
-- collaborators;
-- analytics reports;
-- social connections;
-- Aura conversations.
+- content statuses;
+- approval state;
+- publishing-readiness foundation;
+- connection capability state;
+- per-member isolated social storage.
 
-Aura should support command-style operations over the same indexed data.
+Still requires live provider integration before it can truthfully claim end-to-end publishing/analytics/inbox operation:
 
-## Beyond Rella: native Pulsar-Frequency advantages
+- platform OAuth applications;
+- official publishing adapters;
+- platform webhook/event ingestion where available;
+- analytics ingestion;
+- social inbox adapters;
+- media-upload adapters;
+- production scheduler/queue;
+- richer approval collaboration;
+- full Aura social-strategy execution layer.
 
-The social system should be more tightly integrated with creation itself:
+## Non-negotiable product principle
 
-1. A finished song can generate its release campaign automatically.
-2. Aura can create the artwork, vertical video, teaser, captions, hashtags and schedule from the same project.
-3. Every social post can link back to the exact Creative DNA assets that created it.
-4. A user can ask Aura to revise the underlying image/video/music and automatically propagate a new approved version into pending posts.
-5. ESP creators/agents can have role-specific social-management training and approved agency workflows without exposing ESP-only systems to ordinary subscribers.
-6. Analytics can feed directly back into creation: e.g. “short acoustic clips are outperforming full-production teasers; create three new variants.”
-7. Content strategy, asset production, scheduling, approvals and reporting therefore live in one product rather than being separate applications.
-
-## Delivery order
-
-### Phase S1 — Social House foundation
-
-- tenant-isolated Social Houses;
-- projects/campaigns;
-- content cards;
-- tasks/notes;
-- statuses/tags;
-- calendar/board/table data model;
-- brand persona;
-- internal media references to Pulsar-Frequency assets.
-
-### Phase S2 — collaboration
-
-- team roles;
-- assignees;
-- comments;
-- approvals;
-- share links;
-- client asset requests;
-- activity logs;
-- notifications.
-
-### Phase S3 — platform adapters
-
-- OAuth/account links;
-- platform capability registry;
-- validation;
-- scheduling;
-- official-API publishing;
-- post status/audit history;
-- repurposing by platform.
-
-### Phase S4 — analytics
-
-- official API ingest;
-- normalized metrics;
-- dashboards;
-- reports;
-- scheduled reporting;
-- Aura performance insights.
-
-### Phase S5 — community management
-
-- inbox/comment adapters where permitted;
-- assignment;
-- response workflows;
-- Aura response assistance.
-
-### Phase S6 — advanced Aura automation
-
-- calendar creation;
-- workflow automation;
-- predictive recommendations;
-- trend-assisted planning;
-- campaign generation from Creative DNA;
-- social strategy that learns from account performance.
-
-## Truthful capability rule
-
-Planning functionality can exist without a linked social account. Auto-posting, analytics, inbox and account-specific functions must only be marked available when the required official integration is configured and authorised.
-
-No UI may claim a post was published, an inbox was read or analytics were imported unless an actual platform/API operation succeeded.
+ESP social tooling exists to train, support and help **ESP's own approved creators and agents** operate professionally. It must not be marketed or technically exposed as a general social-media-management product for creators in other Creator Networks.
