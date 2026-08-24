@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Build the canonical Aura GLB/VRM through externally installed 3D tools.
+"""Build the canonical Aura production GLB/VRM through real external 3D tools.
 
-This script intentionally does not vendor or pretend to implement third-party 3D foundation
-models. It orchestrates real configured render/rig/VRM commands, verifies every produced
-artifact, and only installs the result when the Live Sound Studio Aura validator accepts it.
+This orchestrator is deliberately fail-closed. A mesh that merely loads in Three.js is not
+sufficient. The candidate must pass reconstruction, rigging, facial/morph finalisation,
+authored animation, VRM 1.0 finalisation, mobile packaging, structural validation and the
+strict Aura production-quality gate before it can atomically replace the deployed model.
 
-Suggested external stages:
-- image/multiview -> textured PBR GLB: TRELLIS.2 or Hunyuan3D
-- GLB -> humanoid skeleton + skinning: UniRig or RigAnything
-- humanoid rig -> VRM 1.0 + facial expressions: a production DCC/VRM export adapter
+Recommended 2026 build-host stack:
+- high-fidelity PBR reconstruction: Microsoft TRELLIS.2
+- skeleton + skinning: VAST-AI-Research SkinTokens / TokenRig
+- face: production DCC/face-rig stage providing VRM presets + Aura custom expressions +
+  ARKit-compatible detailed morph targets
+- animation: authored/retargeted Aura action clips
+- VRM: VRM 1.0 humanoid + expressions + LookAt + SpringBone
+- mobile packaging: KTX2/Basis textures + Meshopt-compatible glTF compression
 
-The final visual likeness must still be manually reviewed against the approved Aura references.
+No third-party foundation model is vendored into Live Sound Studio. Build-host adapters are
+configured by environment commands and must create real artifacts or fail.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shlex
@@ -26,6 +33,7 @@ import tempfile
 from pathlib import Path
 
 from aura_music_studio.aura_avatar import validate_aura_model
+from aura_music_studio.aura_avatar_quality import validate_aura_production_model
 
 
 class BuildError(RuntimeError):
@@ -51,23 +59,44 @@ def _require_file(path: Path, stage: str, min_bytes: int = 4096) -> None:
         raise BuildError(f"{stage} did not produce a valid artifact: {path}")
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _stage_command(env_name: str, default: str = "") -> str:
+    return (os.getenv(env_name) or default).strip()
+
+
 def build(reference_dir: Path, output: Path) -> dict:
     front = reference_dir / "front.png"
     left = reference_dir / "left.png"
     right = reference_dir / "right.png"
     back = reference_dir / "back.png"
-    for required in (front,):
-        _require_file(required, "Aura reference input", min_bytes=512)
+    face = reference_dir / "face.png"
+    turnaround = reference_dir / "turnaround.png"
+    _require_file(front, "Aura reference input", min_bytes=512)
 
-    image_to_3d_cmd = os.getenv("AURA_AVATAR_IMAGE_TO_3D_CMD", "")
-    rig_cmd = os.getenv("AURA_AVATAR_RIG_CMD", "")
-    vrm_cmd = os.getenv("AURA_AVATAR_VRM_CMD", "")
+    commands = {
+        "reconstruct": _stage_command("AURA_AVATAR_IMAGE_TO_3D_CMD"),
+        "rig": _stage_command("AURA_AVATAR_RIG_CMD"),
+        "face": _stage_command("AURA_AVATAR_FACE_CMD"),
+        "animate": _stage_command("AURA_AVATAR_ANIMATION_CMD"),
+        "vrm": _stage_command("AURA_AVATAR_VRM_CMD"),
+        "mobile": _stage_command("AURA_AVATAR_MOBILE_CMD"),
+    }
 
     with tempfile.TemporaryDirectory(prefix="aura-avatar-build-") as tmp:
         work = Path(tmp)
-        base_mesh = work / "aura_base.glb"
-        rigged_mesh = work / "aura_rigged.glb"
-        final_model = work / "aura.glb"
+        base_mesh = work / "01_aura_pbr.glb"
+        rigged_mesh = work / "02_aura_rigged.glb"
+        facial_mesh = work / "03_aura_face.glb"
+        animated_mesh = work / "04_aura_animated.glb"
+        vrm_model = work / "05_aura_vrm.glb"
+        mobile_model = work / "06_aura_mobile.glb"
 
         common = {
             "reference_dir": reference_dir,
@@ -75,64 +104,92 @@ def build(reference_dir: Path, output: Path) -> dict:
             "left": left if left.exists() else "",
             "right": right if right.exists() else "",
             "back": back if back.exists() else "",
+            "face": face if face.exists() else front,
+            "turnaround": turnaround if turnaround.exists() else front,
+            "spec": "docs/AURA_CANONICAL_3D_CHARACTER.md",
+            "identity": "Aura",
         }
 
-        _run(
-            image_to_3d_cmd,
-            {**common, "output": base_mesh},
-            "Aura image-to-3D reconstruction",
-        )
-        _require_file(base_mesh, "Aura image-to-3D reconstruction")
+        _run(commands["reconstruct"], {**common, "output": base_mesh}, "Aura PBR image-to-3D reconstruction")
+        _require_file(base_mesh, "Aura PBR image-to-3D reconstruction")
+
+        _run(commands["rig"], {**common, "input": base_mesh, "output": rigged_mesh}, "Aura humanoid rigging and skinning")
+        _require_file(rigged_mesh, "Aura humanoid rigging and skinning")
 
         _run(
-            rig_cmd,
-            {**common, "input": base_mesh, "output": rigged_mesh},
-            "Aura humanoid auto-rigging",
+            commands["face"],
+            {**common, "input": rigged_mesh, "output": facial_mesh},
+            "Aura facial rig, viseme and expression finalisation",
         )
-        _require_file(rigged_mesh, "Aura humanoid auto-rigging")
+        _require_file(facial_mesh, "Aura facial rig, viseme and expression finalisation")
 
         _run(
-            vrm_cmd,
-            {
-                **common,
-                "input": rigged_mesh,
-                "output": final_model,
-                "identity": "Aura",
-                "spec": "docs/AURA_CANONICAL_3D_CHARACTER.md",
-            },
-            "Aura VRM 1.0/facial finalization",
+            commands["animate"],
+            {**common, "input": facial_mesh, "output": animated_mesh},
+            "Aura authored animation and locomotion finalisation",
         )
-        _require_file(final_model, "Aura VRM 1.0/facial finalization")
+        _require_file(animated_mesh, "Aura authored animation and locomotion finalisation")
 
-        validation = validate_aura_model(final_model)
-        if not validation.get("ready_for_embodied_runtime"):
-            raise BuildError("Final Aura model failed the structural acceptance gate: " + json.dumps(validation, indent=2))
+        _run(
+            commands["vrm"],
+            {**common, "input": animated_mesh, "output": vrm_model},
+            "Aura VRM 1.0, LookAt, SpringBone and semantic-material finalisation",
+        )
+        _require_file(vrm_model, "Aura VRM 1.0 finalisation")
+
+        runtime_validation = validate_aura_model(vrm_model)
+        if not runtime_validation.get("ready_for_embodied_runtime"):
+            raise BuildError(
+                "Aura failed the pre-mobile VRM runtime gate: " + json.dumps(runtime_validation, indent=2)
+            )
+
+        _run(
+            commands["mobile"],
+            {**common, "input": vrm_model, "output": mobile_model},
+            "Aura mobile GLB packaging and compression",
+        )
+        _require_file(mobile_model, "Aura mobile GLB packaging and compression")
+
+        production_validation = validate_aura_production_model(mobile_model)
+        if not production_validation.get("production_ready"):
+            raise BuildError(
+                "Final Aura model failed the strict production gate: "
+                + json.dumps(production_validation, indent=2)
+            )
 
         output.parent.mkdir(parents=True, exist_ok=True)
         staging = output.with_suffix(output.suffix + ".staging")
-        shutil.copy2(final_model, staging)
+        shutil.copy2(mobile_model, staging)
         os.replace(staging, output)
         return {
             "installed": True,
             "output": str(output),
             "bytes": output.stat().st_size,
-            "validation": validation,
+            "sha256": _sha256(output),
+            "runtime_validation": validate_aura_model(output),
+            "production_validation": validate_aura_production_model(output),
             "manual_visual_review_required": True,
             "visual_review_spec": "docs/AURA_CANONICAL_3D_CHARACTER.md",
+            "reference_files": {
+                name: str(path) for name, path in {
+                    "front": front, "left": left, "right": right, "back": back,
+                    "face": face, "turnaround": turnaround,
+                }.items() if path.exists()
+            },
         }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build and validate the canonical Aura VRM/GLB")
+    parser = argparse.ArgumentParser(description="Build and strictly validate the canonical Aura production VRM/GLB")
     parser.add_argument(
         "--references",
         default=os.getenv("AURA_AVATAR_REFERENCE_DIR", "data/aura_character_references"),
-        help="Directory containing at least front.png; left/right/back are strongly recommended",
+        help="Reference directory. front.png is required; left/right/back/face/turnaround are strongly recommended.",
     )
     parser.add_argument(
         "--output",
         default=os.getenv("AURA_AVATAR_MODEL_PATH", "aura_music_studio/static/aura/aura.glb"),
-        help="Canonical Aura GLB output path",
+        help="Canonical Aura production GLB output path",
     )
     args = parser.parse_args()
     try:
