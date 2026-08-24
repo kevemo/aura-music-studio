@@ -15,8 +15,10 @@ from .models import ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 from .provenance import build_provenance, write_provenance
 from .quality import evaluate_audio
+from .release_quality import build_release_quality_report, enforce_release_quality
 from .renderer_runtime import probe_real_audio, require_live_renderer
 from .renderers import render_with_failover
+from .song_dna import SongDNAStore, ensure_song_dna_from_manifest
 
 
 class AuraPipeline:
@@ -34,6 +36,15 @@ class AuraPipeline:
         }
         self._write_status(status)
         try:
+            status["stage"] = "editable_song_dna"
+            self._write_status(status)
+            # Older projects are upgraded lazily. A final master must retain a structured,
+            # editable representation even when the project predates Song DNA.
+            ensure_song_dna_from_manifest(
+                self.workspace.root,
+                self.manifest.model_dump(mode="json"),
+            )
+
             status["stage"] = "analysis"
             self._write_status(status)
             analysis = analyze_project(self.workspace, self.manifest)
@@ -121,6 +132,40 @@ class AuraPipeline:
                 production_metadata,
             )
 
+            status["stage"] = "editable_song_dna_sync"
+            self._write_status(status)
+            dna_store = SongDNAStore(self.workspace.root)
+            session_path = self.workspace.root / "aura_session.json"
+            try:
+                if session_path.is_file():
+                    dna_store.sync_session(session_path)
+                dna_store.sync_exports(exports.get("master_wav"), exports.get("stems") or [])
+            except Exception as exc:
+                # The core DNA file already exists. A failed optional session/stem sync is
+                # recorded for diagnosis but does not destroy a valid master render.
+                self.workspace.log(
+                    f"Song DNA render sync warning: {type(exc).__name__}: {exc}",
+                    "song_dna.log",
+                )
+
+            status["stage"] = "release_quality_gate"
+            self._write_status(status)
+            release_report = build_release_quality_report(
+                self.workspace.root,
+                exports=exports,
+                manifest=self.manifest,
+                render_qc=qc,
+            )
+            release_report_path = self.workspace.output_dir / "release_quality_report.json"
+            exports["release_quality_report"] = str(release_report_path)
+            status["release_quality"] = {
+                "technical_gate_passed": release_report["technical_gate_passed"],
+                "perceptual_review_required": release_report["perceptual_review_required"],
+                "issues": release_report["issues"],
+                "warnings": release_report["warnings"],
+            }
+            enforce_release_quality(release_report)
+
             status["stage"] = "provenance"
             self._write_status(status)
             provenance = build_provenance(
@@ -129,7 +174,7 @@ class AuraPipeline:
                 renderer=render.renderer,
                 renderer_metadata=render.metadata,
                 audio_origin=render.audio_origin,
-                quality_control=qc,
+                quality_control={**qc, "release_quality": release_report},
                 exports=exports,
             )
             provenance_path = write_provenance(self.workspace, provenance)
