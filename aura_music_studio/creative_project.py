@@ -8,6 +8,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from .content_safety import enforce_creation_policy
+
 CreativeKind = Literal["music", "audio", "video", "image", "voice", "text", "reference"]
 ElementStatus = Literal["draft", "planned", "queued", "rendering", "ready", "failed", "archived"]
 DirectiveStatus = Literal["planned", "ready_for_renderer", "queued", "running", "completed", "failed"]
@@ -139,6 +141,7 @@ class CreativeProjectStore:
         project_intent: str = "",
         metadata: dict | None = None,
     ) -> CreativeManifest:
+        enforce_creation_policy(title, project_intent, context="Creative project")
         self.project_dir.mkdir(parents=True, exist_ok=True)
         if self.exists():
             return self.load()
@@ -166,6 +169,7 @@ class CreativeProjectStore:
         return manifest
 
     def add_element(self, element: CreativeElement) -> CreativeManifest:
+        enforce_creation_policy(element.label, element.role, element.prompt, context=f"{element.kind.title()} creation")
         manifest = self.load()
         existing = {item.id for item in manifest.elements}
         if element.id in existing:
@@ -189,6 +193,7 @@ class CreativeProjectStore:
         prompt: str | None = None,
         metadata: dict | None = None,
     ) -> CreativeManifest:
+        enforce_creation_policy(label, role, prompt, context="Creative edit")
         manifest = self.load()
         element = next((item for item in manifest.elements if item.id == element_id), None)
         if element is None:
@@ -213,6 +218,7 @@ class CreativeProjectStore:
         return self.save(manifest)
 
     def add_reference(self, reference: CreativeReference) -> CreativeManifest:
+        enforce_creation_policy(reference.label, reference.usage, context="Creative reference")
         manifest = self.load()
         if any(item.id == reference.id for item in manifest.references):
             raise ValueError(f"Creative reference already exists: {reference.id}")
@@ -220,6 +226,7 @@ class CreativeProjectStore:
         return self.save(manifest)
 
     def add_directive(self, directive: CreativeDirective) -> CreativeManifest:
+        enforce_creation_policy(directive.instruction, context="Aura creative directive")
         manifest = self.load()
         element_ids = {item.id for item in manifest.elements}
         reference_ids = {item.id for item in manifest.references}
