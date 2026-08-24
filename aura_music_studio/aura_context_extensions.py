@@ -16,15 +16,17 @@ _CORE_SIGNATURE = "You are Aura, the general AI co-creator and operating intelli
 
 
 def register_context_provider(provider: ContextProvider) -> None:
-    """Register one bounded private context provider.
-
-    Providers receive only the authenticated user id and current Aura thread id. They must
-    return plain text suitable for appending after Aura Core's immutable safety contract.
-    A failing provider is ignored so personalization can never take the assistant offline.
-    """
+    """Register one bounded private context provider."""
     with _PROVIDER_LOCK:
         if provider not in _PROVIDERS:
             _PROVIDERS.append(provider)
+
+
+def unregister_context_provider(provider: ContextProvider) -> None:
+    """Remove a previously registered provider without disturbing other extensions."""
+    with _PROVIDER_LOCK:
+        while provider in _PROVIDERS:
+            _PROVIDERS.remove(provider)
 
 
 def context_extensions(user_id: str, thread_id: str, *, max_chars: int = 18000) -> list[str]:
@@ -103,8 +105,6 @@ def install_aura_context_extensions() -> None:
                 _ACTIVE_SCOPE.reset(token)
         core.AuraAgent.regenerate = regenerate
 
-    # Streaming bypasses AuraModelClient.complete for token delivery, so append the same
-    # registered context directly to the already-built private system message bundle.
     from . import aura_streaming
 
     original_build_generation = aura_streaming._build_generation
@@ -126,6 +126,7 @@ def install_aura_context_extensions() -> None:
 __all__ = [
     "ContextProvider",
     "register_context_provider",
+    "unregister_context_provider",
     "context_extensions",
     "install_aura_context_extensions",
 ]
