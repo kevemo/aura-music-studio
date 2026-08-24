@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
 from .social_management import (
     BrandPersona,
@@ -120,12 +121,20 @@ def _load(space_id: str):
         raise HTTPException(400, str(exc)) from exc
 
 
+def _enforce(*texts: str | None) -> None:
+    try:
+        enforce_creation_policy(*texts, context="ESP social content")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.get("/platforms")
 def social_platforms(request: Request):
     _member(request)
     return {
         "capabilities": platform_capabilities(),
         "scope": "private_esp_creator_agent_hub",
+        "content_safety": public_policy_summary(),
         "truthful_state": "Planning is active. Publishing/analytics/inbox require official platform adapters and authorised connections.",
     }
 
@@ -139,6 +148,7 @@ def list_spaces(request: Request):
 @router.post("/spaces")
 def create_space(body: CreateSpaceRequest, request: Request):
     _member(request)
+    _enforce(body.name, body.description)
     house = _store().create_space(body.name, body.description)
     return house.model_dump(mode="json")
 
@@ -152,6 +162,16 @@ def get_space(space_id: str, request: Request):
 @router.put("/spaces/{space_id}/persona")
 def update_persona(space_id: str, body: PersonaRequest, request: Request):
     _member(request)
+    _enforce(
+        body.brand_name,
+        body.niche,
+        body.audience,
+        body.voice,
+        body.visual_guidelines,
+        body.cta_rules,
+        *body.goals,
+        *body.content_pillars,
+    )
     try:
         house = _store().update_persona(space_id, BrandPersona.model_validate(body.model_dump()))
     except FileNotFoundError as exc:
@@ -162,6 +182,7 @@ def update_persona(space_id: str, body: PersonaRequest, request: Request):
 @router.post("/spaces/{space_id}/projects")
 def create_project(space_id: str, body: CreateProjectRequest, request: Request):
     _member(request)
+    _enforce(body.name, body.description, *body.tags)
     project = SocialProject(**body.model_dump())
     try:
         house = _store().add_project(space_id, project)
@@ -173,6 +194,7 @@ def create_project(space_id: str, body: CreateProjectRequest, request: Request):
 @router.post("/spaces/{space_id}/tasks")
 def create_task(space_id: str, body: CreateTaskRequest, request: Request):
     _member(request)
+    _enforce(body.title, body.description, *body.tags)
     try:
         task = SocialTask.model_validate(body.model_dump())
         house = _store().add_task(space_id, task)
@@ -186,6 +208,7 @@ def create_task(space_id: str, body: CreateTaskRequest, request: Request):
 @router.post("/spaces/{space_id}/notes")
 def create_note(space_id: str, body: CreateNoteRequest, request: Request):
     _member(request)
+    _enforce(body.title, body.body, *body.tags)
     note = SocialNote(**body.model_dump())
     try:
         house = _store().add_note(space_id, note)
@@ -197,6 +220,10 @@ def create_note(space_id: str, body: CreateNoteRequest, request: Request):
 @router.post("/spaces/{space_id}/content")
 def create_content(space_id: str, body: CreateContentRequest, request: Request):
     _member(request)
+    variant_texts: list[str] = []
+    for variant in body.variants:
+        variant_texts.extend([variant.caption, variant.first_comment, *variant.hashtags])
+    _enforce(body.title, body.notes, *body.tags, *body.content_pillars, *variant_texts)
     content = SocialContent(**body.model_dump())
     try:
         house = _store().add_content(space_id, content)
@@ -247,6 +274,7 @@ def publishing_readiness(space_id: str, content_id: str, request: Request):
 @router.post("/spaces/{space_id}/connections")
 def register_connection_state(space_id: str, body: ConnectionRequest, request: Request):
     _member(request)
+    _enforce(body.account_label)
     # This endpoint stores only connection/capability state. OAuth access tokens belong in
     # deployment secret storage and must be referenced indirectly through token_secret_ref.
     try:
