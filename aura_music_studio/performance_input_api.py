@@ -9,7 +9,11 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from .assets import AssetLibrary
-from .build_around import BuildAroundRequest, build_around_upload
+from .build_around_release import (
+    BuildAroundRequest,
+    build_around_upload,
+    install_release_gated_build_around,
+)
 from .content_safety import enforce_creation_policy
 from .performance_generation import generate_from_performance_guide
 from .performance_inputs import (
@@ -21,6 +25,10 @@ from .performance_inputs import (
     register_input,
 )
 from .tenant_storage import project_path
+
+# The app imports this module during startup. Patch legacy dynamic Build Around imports so
+# queued jobs executed in the web/worker process also use the release-gated implementation.
+install_release_gated_build_around()
 
 router = APIRouter(tags=["Music Performance Inputs"])
 
