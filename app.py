@@ -26,9 +26,11 @@ from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
+from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
+from aura_music_studio.owner_users_portal import router as owner_users_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -61,11 +63,15 @@ app.include_router(creative_workspace_router)
 # ESP niche selection must be registered before the legacy Command Center route so
 # active ESP members enter the niche-personalised gateway first. Social-management
 # routes are nested under /command-center and enforce ESP/niche/affiliation access
-# independently at the API layer. The private social API is deliberately omitted from
-# the public OpenAPI schema as an additional separation boundary.
+# independently at the API layer. Progress is private to ESP members and visible to
+# the protected owner console.
 app.include_router(esp_niche_portal_router)
+app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
 app.include_router(social_management_portal_router)
+
+# Mary/Kev-only user controls share the existing protected owner-session boundary.
+app.include_router(owner_users_router)
 
 app.include_router(daw_router)
 app.include_router(daw_portal_router)
