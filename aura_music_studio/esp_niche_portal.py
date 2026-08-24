@@ -131,8 +131,8 @@ def _niche_banner(profile: dict, membership: dict) -> str:
     return f"""
 <style>:root{{--gold:{accent};--purple:{secondary}}}</style>
 <section class='card' style='border-color:{accent}66;background:linear-gradient(135deg,{accent}14,{secondary}16,#120b19);'>
-<div class='top'><div><div class='brand'>{escape(definition['icon'])} {escape(definition['title'])} ESP Hub</div><h2 style='margin:.35em 0'>Your niche-specific creator system</h2><p class='muted'>Role: {escape(str(role).title())} · Sub-niche: {escape(profile.get('sub_niche') or 'Not specified')}</p></div><div><a class='btn secondary' href='/command-center/niche'>Change Niche</a></div></div>
-<div class='grid2'><div><h3>Aura training priorities</h3><ul class='muted' style='padding-left:20px'>{training}</ul></div><div><h3>Your current goals</h3><div>{goals}</div><h3 style='margin-top:18px'>ESP Social Growth Tools</h3><p class='muted'>Private planning, content management, approvals and social training for this ESP niche. This is separate from the public creative studio.</p>{social}</div></div></section>
+<div class='top'><div><div class='brand'>{escape(definition['icon'])} {escape(definition['title'])} ESP Hub</div><h2 style='margin:.35em 0'>Your niche-specific creator system</h2><p class='muted'>Role: {escape(str(role).title())} · Sub-niche: {escape(profile.get('sub_niche') or 'Not specified')}</p></div><div><a class='btn secondary' href='/command-center/niche'>Change Niche</a> <a class='btn secondary' href='/command-center/progress'>LIVE & Video Progress</a></div></div>
+<div class='grid2'><div><h3>Aura training priorities</h3><ul class='muted' style='padding-left:20px'>{training}</ul><a class='btn' href='/command-center/progress' style='margin-top:8px'>Upload Analytics & Get Aura Guidance</a></div><div><h3>Your current goals</h3><div>{goals}</div><h3 style='margin-top:18px'>ESP Social Growth Tools</h3><p class='muted'>Private planning, content management, approvals and social training for this ESP niche. This is separate from the public creative studio.</p>{social}</div></div></section>
 """
 
 
