@@ -59,6 +59,7 @@ from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
+from aura_music_studio.song_dna_portal import router as song_dna_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
@@ -132,8 +133,9 @@ app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
-# Editable Song DNA sits beside the generative edit routes: Aura/UI can target lyric lines,
-# instrument layers and sections by stable IDs before invoking renderer-specific edits.
+# The visual Song DNA editor and the structured API share the same tenant-scoped project
+# representation. Planning is explicit; renderer execution remains separate until audio exists.
+app.include_router(song_dna_portal_router)
 app.include_router(song_dna_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
