@@ -30,6 +30,8 @@ from aura_music_studio.esp_progress_portal import router as esp_progress_portal_
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
+from aura_music_studio.owner_control_center import router as owner_control_center_router
+from aura_music_studio.owner_identity import OwnerIdentityMiddleware
 from aura_music_studio.owner_users_portal import router as owner_users_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
@@ -46,11 +48,13 @@ from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
-# ``aura_music_studio.api`` already registers the legacy public homepage. Remove only
-# that route and replace it with the Pulsar-Frequency House master landing page.
-# Pricing, sign-in, membership, studio and API routes remain intact.
+# ``aura_music_studio.api`` already registers the historical public homepage and owner
+# dashboard. Replace only those surfaces; existing sign-in, membership/payment, backup,
+# compute and other owner action routes remain intact.
 app.router.routes[:] = [
-    route for route in app.router.routes if getattr(route, "path", None) != "/"
+    route
+    for route in app.router.routes
+    if getattr(route, "path", None) not in {"/", "/owner/dashboard"}
 ]
 app.include_router(creative_portal_router)
 
@@ -70,7 +74,10 @@ app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
 app.include_router(social_management_portal_router)
 
-# Mary/Kev-only user controls share the existing protected owner-session boundary.
+# Mary/Kev owner command centre and user controls share the protected owner-session
+# boundary. The owner identity is a separately signed context used for theme/Aura
+# personalisation and the audit trail; selecting Mary or Kev never changes permissions.
+app.include_router(owner_control_center_router)
 app.include_router(owner_users_router)
 
 app.include_router(daw_router)
@@ -98,6 +105,10 @@ app.include_router(take_router)
 app.include_router(take_portal_router)
 app.include_router(source_detection_router)
 app.include_router(system_router)
+
+# Bind the signed Mary/Kev owner identity for owner routes so downstream owner actions
+# receive the correct audit actor without trusting form fields.
+app.add_middleware(OwnerIdentityMiddleware)
 
 # Applied last so all legacy text emitted by older modules is rewritten at the public
 # HTTP boundary. Binary media responses are not modified.
