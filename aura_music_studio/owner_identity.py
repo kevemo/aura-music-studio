@@ -11,9 +11,10 @@ from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
+from .owner_auth import owner_authorized
+
 OwnerPersona = Literal["mary", "kev"]
 OWNER_PERSONA_COOKIE = "pfh_owner_persona"
-OWNER_ADMIN_COOKIE = "lss_admin_session"
 
 
 @dataclass(frozen=True)
@@ -51,19 +52,13 @@ _owner_context: contextvars.ContextVar[OwnerPersona | None] = contextvars.Contex
 
 
 def _admin_key() -> str:
+    # The deployment key is now used only to sign the owner-persona cookie and bootstrap
+    # a login. Owner authentication itself is handled by an opaque hashed server session.
     return (os.getenv("LSS_ADMIN_KEY") or "").strip()
 
 
 def owner_session_authorized(request: Request) -> bool:
-    """Validate the existing owner bootstrap session without exposing the secret.
-
-    The current owner login stores the deployment admin key in an HttpOnly cookie for
-    backwards compatibility. New owner-specific state is signed separately and never
-    accepts an unsigned client-provided persona value.
-    """
-    configured = _admin_key()
-    supplied = request.cookies.get(OWNER_ADMIN_COOKIE) or ""
-    return bool(configured and supplied and hmac.compare_digest(configured, supplied))
+    return owner_authorized(request)
 
 
 def _signature(persona: OwnerPersona) -> str:
@@ -92,6 +87,9 @@ def decode_persona_cookie(value: str | None) -> OwnerPersona | None:
 
 
 def request_owner_persona(request: Request) -> OwnerPersona | None:
+    # A persona cookie has no authorization value by itself. Owner routes independently
+    # require a valid owner session; this cookie only selects Mary/Kev presentation and
+    # audit context after authentication.
     return decode_persona_cookie(request.cookies.get(OWNER_PERSONA_COOKIE))
 
 
