@@ -14,6 +14,7 @@ from aura_music_studio.aura_intelligence import router as aura_intelligence_rout
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
 from aura_music_studio.aura_project_bridge import router as aura_project_bridge_router
+from aura_music_studio.aura_project_knowledge import install_aura_project_knowledge
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
 from aura_music_studio.aura_research_tools import install_aura_research_tools
@@ -21,6 +22,7 @@ from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
+from aura_music_studio.aura_workspace_api import router as aura_workspace_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
@@ -87,13 +89,14 @@ from aura_music_studio.voice_house_portal import router as voice_house_portal_ro
 
 install_esp_access_subscription_separation()
 install_social_access_control()
-# Common Aura tool chain. Each layer delegates unknown calls to the previously-installed
-# layer, so normal and realtime chat share one registry and one set of permission gates.
+# Common Aura tool chain. Every layer delegates unknown calls to the previously-installed
+# layer, so streaming and normal chat share the same permissions and execution semantics.
 install_aura_tool_extensions()
 install_aura_productivity_tools()
 install_aura_daw_tools()
 install_aura_research_tools()
 install_aura_table_tools()
+install_aura_project_knowledge()
 install_aura_chat_hardening()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
@@ -109,6 +112,7 @@ app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_project_bridge_router)
+app.include_router(aura_workspace_router)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
