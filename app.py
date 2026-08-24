@@ -40,6 +40,7 @@ from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.owner_identity import OwnerIdentityMiddleware, router as owner_identity_router
+from aura_music_studio.owner_workspace_theme_bridge import OwnerWorkspaceThemeBridgeMiddleware
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -64,11 +65,14 @@ from aura_music_studio.workspace_theme_client import WorkspaceThemeClientMiddlew
 # independently authenticated owner session and records successful owner writes in the audit chain.
 # Workspace themes are token-based, per-user/per-owner, preview-first and reversible; arbitrary CSS/JS
 # is never persisted or executed by Aura. The small browser client applies only server-generated safe CSS.
+# OwnerWorkspaceThemeBridgeMiddleware lets the selected Kev/Mary profile follow the owner into Aura and
+# creative Studio pages without using the actor cookie as an authorization credential.
 app.add_middleware(EspNicheDashboardMiddleware)
 app.add_middleware(EspCommandCenterViewMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(WorkspaceThemeMiddleware)
 app.add_middleware(WorkspaceThemeClientMiddleware)
+app.add_middleware(OwnerWorkspaceThemeBridgeMiddleware)
 app.include_router(brand_router)
 app.include_router(workspace_theme_client_router)
 app.include_router(discovery_router)
