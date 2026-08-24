@@ -21,6 +21,7 @@ from .aura_agent_core import (
 )
 from .aura_agent_tools import AuraToolRegistry, project_snapshot
 from .aura_chat_store import AuraChatStore
+from .aura_productivity_tools import source_markdown, source_records
 
 router = APIRouter(tags=["Aura Realtime"])
 store = AuraChatStore()
@@ -225,11 +226,13 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
             yield _event("error", error=f"{type(exc).__name__}: {exc}")
             return
 
+        verified_sources = source_records(tool_results)
         yield _event(
             "start",
             user_message_id=user_message["id"],
             tools=[{"name": row["tool"], "ok": row["ok"]} for row in tool_results],
             memory_saved=bool(memory_saved),
+            sources=verified_sources,
         )
         for row in tool_results:
             yield _event("tool", name=row["tool"], ok=row["ok"], error=row.get("error"))
@@ -278,6 +281,12 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
         if not text_out:
             yield _event("error", error="Aura produced an empty response")
             return
+        sources_block = source_markdown(tool_results)
+        if sources_block:
+            text_out = text_out.rstrip() + "\n\n" + sources_block
+            # Stream the verified source trail after model generation so the visible answer
+            # and the persisted message stay identical.
+            yield _event("delta", text="\n\n" + sources_block)
         assistant = store.add_message(member.user_id, thread_id, "assistant", text_out)
         saved = True
         yield _event(
@@ -285,6 +294,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
             message=assistant,
             provider=provider_used,
             model=model_used,
+            sources=verified_sources,
             thread=store.thread(member.user_id, thread_id),
         )
     except GeneratorExit:
