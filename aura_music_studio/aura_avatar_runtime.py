@@ -56,16 +56,29 @@ def _model_path() -> Path:
 def avatar_status() -> dict:
     try:
         model = _model_path()
-        model_configured = model.is_file() and model.suffix.lower() == ".glb"
+        model_installed = model.is_file() and model.suffix.lower() == ".glb"
         config_error = None
     except Exception as exc:
-        model_configured = False
+        model_installed = False
         config_error = f"{type(exc).__name__}: {exc}"
+    renderer_connected = _truthy("AURA_AVATAR_3D_RENDERER_READY", False)
+    production_ready = bool(model_installed and renderer_connected and _truthy("AURA_AVATAR_ENABLED", True))
+    if production_ready:
+        truthful_state = "production_3d_avatar_ready"
+    elif model_installed:
+        truthful_state = "model_asset_installed_renderer_pending"
+    else:
+        truthful_state = "runtime_ready_model_asset_missing"
     return {
         "enabled": _truthy("AURA_AVATAR_ENABLED", True),
         "software_runtime_connected": True,
-        "model_configured": model_configured,
-        "model_url": "/aura-intelligence/avatar/model.glb" if model_configured else None,
+        "state_bus_connected": True,
+        "model_installed": model_installed,
+        # Compatibility alias for older capability clients.
+        "model_configured": model_installed,
+        "renderer_connected": renderer_connected,
+        "production_3d_ready": production_ready,
+        "model_url": "/aura-intelligence/avatar/model.glb" if model_installed else None,
         "config_error": config_error,
         "states": list(AVATAR_STATES),
         "rig_contract": {
@@ -76,7 +89,7 @@ def avatar_status() -> dict:
             "lod_expected": True,
             "animations_expected": ["idle", "welcome", "listen", "think", "speak", "gesture", "celebrate", "warn"],
         },
-        "truthful_state": "production_3d_model_ready" if model_configured else "runtime_ready_model_asset_missing",
+        "truthful_state": truthful_state,
     }
 
 
@@ -128,15 +141,16 @@ AVATAR_SCRIPT = r"""
   document.head.append(style);
 
   async function mount(){
-    let status={software_runtime_connected:true,model_configured:false};try{status=await fetch(API,{credentials:'same-origin'}).then(r=>r.json())}catch(_){}
+    let status={software_runtime_connected:true,model_installed:false,renderer_connected:false};try{status=await fetch(API,{credentials:'same-origin'}).then(r=>r.json())}catch(_){}
     if(status.enabled===false)return;
-    const dock=document.createElement('div');dock.id='auraAvatarDock';dock.dataset.state='idle';dock.innerHTML=`<div class="auraAvatarHead"><div class="auraAvatarTitle">Aura<small data-aura-state>idle</small></div><button class="auraAvatarToggle" title="Minimise Aura">−</button></div><div class="auraAvatarBody"><div class="auraOrb" aria-label="Aura host visual"></div></div><div class="auraAvatarMeta">${status.model_configured?'3D rig connected':'Aura Core visual · production 3D rig pending'}</div>`;document.body.append(dock);
+    let meta='Aura Core state visual · production 3D rig pending';
+    if(status.model_installed&&!status.renderer_connected)meta='3D rig asset detected · browser renderer pending';
+    if(status.production_3d_ready)meta='Production 3D Aura ready';
+    const dock=document.createElement('div');dock.id='auraAvatarDock';dock.dataset.state='idle';dock.innerHTML=`<div class="auraAvatarHead"><div class="auraAvatarTitle">Aura<small data-aura-state>idle</small></div><button class="auraAvatarToggle" title="Minimise Aura">−</button></div><div class="auraAvatarBody"><div class="auraOrb" aria-label="Aura Core host state visual"></div></div><div class="auraAvatarMeta">${meta}</div>`;document.body.append(dock);
     dock.querySelector('.auraAvatarToggle').onclick=()=>dock.classList.toggle('min');setState('welcoming');setTimeout(()=>setState('idle'),1100);
   }
   mount();
 
-  // Bind the visual host to the existing auditable chat runtime. A 3D renderer can subscribe
-  // to the same aura:state events without changing the AI/tool execution layer.
   if(typeof send==='function'){
     const baseSend=send;send=async function(...args){setState('thinking');try{return await baseSend(...args)}catch(error){setState('warning',{error:String(error)});throw error}finally{if(currentState!=='speaking')setState('idle')}};
   }
@@ -183,4 +197,4 @@ class AuraAvatarRuntimeMiddleware(BaseHTTPMiddleware):
         return migrated
 
 
-__all__ = ["router", "AuraAvatarRuntimeMiddleware", "avatar_status", "AVATAR_STATES"]
+__all__ = ["router", "AuraAvatarRuntimeMiddleware", "avatar_status", "AVATAR_STATES", "_model_path"]
