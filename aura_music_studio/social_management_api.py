@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .esp_niche import require_esp_social_member
 from .social_management import (
     BrandPersona,
     ContentStatus,
@@ -16,7 +17,9 @@ from .social_management import (
     platform_capabilities,
 )
 
-router = APIRouter(prefix="/social", tags=["social-management"])
+# Social management is deliberately nested under the private ESP Command Center.
+# It is not a general Pulsar-Frequency House / Creative Studio API.
+router = APIRouter(prefix="/command-center/api/social", tags=["esp-social-management"])
 
 
 class CreateSpaceRequest(BaseModel):
@@ -92,9 +95,15 @@ class ConnectionRequest(BaseModel):
 
 
 def _member(request: Request):
-    member = getattr(request.state, "member", None)
-    if member is None:
-        raise HTTPException(401, "Membership context unavailable")
+    """Return the signed-in member only after all ESP social gates pass.
+
+    Required gates are enforced independently of the user interface:
+    - normal authenticated site membership;
+    - active ESP Creator/Agent/Owner membership;
+    - completed ESP niche profile;
+    - affiliation attestation that the account is not represented by another Creator Network.
+    """
+    member, _esp_membership, _profile = require_esp_social_member(request)
     return member
 
 
@@ -106,7 +115,7 @@ def _load(space_id: str):
     try:
         return _store().load(space_id)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -116,6 +125,7 @@ def social_platforms(request: Request):
     _member(request)
     return {
         "capabilities": platform_capabilities(),
+        "scope": "private_esp_creator_agent_hub",
         "truthful_state": "Planning is active. Publishing/analytics/inbox require official platform adapters and authorised connections.",
     }
 
@@ -123,7 +133,7 @@ def social_platforms(request: Request):
 @router.get("/spaces")
 def list_spaces(request: Request):
     member = _member(request)
-    return {"plan": member.plan.id, "spaces": _store().list_spaces()}
+    return {"plan": member.plan.id, "scope": "ESP", "spaces": _store().list_spaces()}
 
 
 @router.post("/spaces")
@@ -145,7 +155,7 @@ def update_persona(space_id: str, body: PersonaRequest, request: Request):
     try:
         house = _store().update_persona(space_id, BrandPersona.model_validate(body.model_dump()))
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     return house.model_dump(mode="json")
 
 
@@ -156,7 +166,7 @@ def create_project(space_id: str, body: CreateProjectRequest, request: Request):
     try:
         house = _store().add_project(space_id, project)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     return {"project": project.model_dump(mode="json"), "house": house.model_dump(mode="json")}
 
 
@@ -167,7 +177,7 @@ def create_task(space_id: str, body: CreateTaskRequest, request: Request):
         task = SocialTask.model_validate(body.model_dump())
         house = _store().add_task(space_id, task)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"task": task.model_dump(mode="json"), "house": house.model_dump(mode="json")}
@@ -180,7 +190,7 @@ def create_note(space_id: str, body: CreateNoteRequest, request: Request):
     try:
         house = _store().add_note(space_id, note)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     return {"note": note.model_dump(mode="json"), "house": house.model_dump(mode="json")}
 
 
@@ -191,7 +201,7 @@ def create_content(space_id: str, body: CreateContentRequest, request: Request):
     try:
         house = _store().add_content(space_id, content)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"content": content.model_dump(mode="json"), "house": house.model_dump(mode="json")}
@@ -203,7 +213,7 @@ def update_status(space_id: str, content_id: str, body: UpdateStatusRequest, req
     try:
         house = _store().update_content_status(space_id, content_id, body.status, actor=member.user_id)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except KeyError as exc:
         raise HTTPException(404, "Content not found") from exc
     return house.model_dump(mode="json")
@@ -215,7 +225,7 @@ def approve_content(space_id: str, content_id: str, body: ApproveRequest, reques
     try:
         house = _store().approve_content(space_id, content_id, body.approver)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except KeyError as exc:
         raise HTTPException(404, "Content not found") from exc
     return house.model_dump(mode="json")
@@ -227,7 +237,7 @@ def publishing_readiness(space_id: str, content_id: str, request: Request):
     try:
         return _store().publishing_readiness(space_id, content_id)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except KeyError as exc:
         raise HTTPException(404, "Content not found") from exc
     except ValueError as exc:
@@ -243,7 +253,7 @@ def register_connection_state(space_id: str, body: ConnectionRequest, request: R
         connection = SocialConnection.model_validate(body.model_dump())
         house = _store().connect_placeholder(space_id, connection)
     except FileNotFoundError as exc:
-        raise HTTPException(404, "Social House not found") from exc
+        raise HTTPException(404, "ESP Social House not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"connection": connection.model_dump(mode="json"), "house": house.model_dump(mode="json")}
