@@ -33,6 +33,7 @@ import tempfile
 from pathlib import Path
 
 from aura_music_studio.aura_avatar import validate_aura_model
+from aura_music_studio.aura_avatar_energy_contract import validate_aura_live_energy_materials
 from aura_music_studio.aura_avatar_quality import validate_aura_production_model
 
 
@@ -157,6 +158,13 @@ def build(reference_dir: Path, output: Path) -> dict:
                 + json.dumps(production_validation, indent=2)
             )
 
+        energy_validation = validate_aura_live_energy_materials(mobile_model)
+        if not energy_validation.get("ready"):
+            raise BuildError(
+                "Final Aura model failed the live eyes/heart/circuitry energy gate: "
+                + json.dumps(energy_validation, indent=2)
+            )
+
         output.parent.mkdir(parents=True, exist_ok=True)
         staging = output.with_suffix(output.suffix + ".staging")
         shutil.copy2(mobile_model, staging)
@@ -168,6 +176,7 @@ def build(reference_dir: Path, output: Path) -> dict:
             "sha256": _sha256(output),
             "runtime_validation": validate_aura_model(output),
             "production_validation": validate_aura_production_model(output),
+            "live_energy_validation": validate_aura_live_energy_materials(output),
             "manual_visual_review_required": True,
             "visual_review_spec": "docs/AURA_CANONICAL_3D_CHARACTER.md",
             "reference_files": {
