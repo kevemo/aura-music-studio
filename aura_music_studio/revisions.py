@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-TRACKED_ROOT_FILES = ("project.yaml", "project.yml", "project.json", "aura_session.json")
+TRACKED_ROOT_FILES = (
+    "project.yaml",
+    "project.yml",
+    "project.json",
+    "aura_session.json",
+    "creative_manifest.json",
+)
 TRACKED_WORK_FILES = (
     "build_around_last.json",
     "style_dna.json",
@@ -49,10 +55,11 @@ def _tracked_files(project: Path) -> list[tuple[str, Path]]:
 
 
 def create_revision(project: Path, *, label: str, reason: str = "manual", actor: str = "Aura", keep: int = 100) -> dict:
-    """Snapshot project/session metadata without duplicating audio.
+    """Snapshot project/session/creative metadata without duplicating media.
 
-    Audio remains immutable in input/work/output locations and is referenced by the session. Revisions
-    copy only small manifests/session/plan files, which keeps undo history inexpensive even for large songs.
+    Audio, video and image binaries remain immutable in input/work/output locations and are
+    referenced by project metadata. Revisions copy only small manifests/session/plan files,
+    keeping deep undo history inexpensive even for large cross-media projects.
     """
     project = project.resolve()
     rid = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8]
@@ -75,6 +82,7 @@ def create_revision(project: Path, *, label: str, reason: str = "manual", actor:
         "actor": (actor or "Aura")[:120],
         "files": files,
         "audio_copied": False,
+        "media_copied": False,
         "project": project.name,
     }
     (dest / "revision.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -135,7 +143,12 @@ def restore_revision(project: Path, revision_id: str, *, create_backup: bool = T
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         restored.append(rel)
-    return {"restored_revision": revision_id, "restored_files": restored, "audio_restored": False}
+    return {
+        "restored_revision": revision_id,
+        "restored_files": restored,
+        "audio_restored": False,
+        "media_restored": False,
+    }
 
 
 def prune_revisions(project: Path, *, keep: int) -> int:
