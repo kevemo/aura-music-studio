@@ -9,6 +9,7 @@ from aura_music_studio.creative_project import (
     CreativeReference,
     public_capabilities,
 )
+from aura_music_studio.revisions import create_revision, restore_revision
 
 
 def test_creative_manifest_round_trip_and_element_lineage(tmp_path: Path):
@@ -131,6 +132,24 @@ def test_archiving_removes_element_from_active_selection(tmp_path: Path):
     assert updated.status == "archived"
     assert updated.metadata["reason"] == "superseded"
     assert element.id not in manifest.active_element_ids
+
+
+def test_creative_manifest_is_part_of_metadata_only_undo_history(tmp_path: Path):
+    project = tmp_path / "revision-project"
+    store = CreativeProjectStore(project)
+    store.initialize(project_name="revision-project", title="Before")
+    original = store.path.read_text(encoding="utf-8")
+
+    revision = create_revision(project, label="Before creative change")
+    assert "creative_manifest.json" in {item["path"] for item in revision["files"]}
+    assert revision["media_copied"] is False
+
+    manifest = store.load()
+    manifest.title = "After"
+    store.save(manifest)
+    restored = restore_revision(project, revision["id"], create_backup=False)
+    assert "creative_manifest.json" in restored["restored_files"]
+    assert store.path.read_text(encoding="utf-8") == original
 
 
 def test_capability_registry_exposes_connected_and_staged_media_truthfully():
