@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 OWNER_COOKIE = "lss_admin_session"
@@ -78,7 +79,6 @@ class OwnerSessionStore:
                 "INSERT INTO owner_sessions(id,token_hash,created_at,expires_at,last_seen_at) VALUES (?,?,?,?,?)",
                 (uuid4().hex, _hash(token), _iso(now), _iso(now + timedelta(hours=OWNER_SESSION_HOURS)), _iso(now)),
             )
-            # Opportunistic cleanup prevents indefinite accumulation.
             con.execute(
                 "DELETE FROM owner_sessions WHERE expires_at<? OR (revoked_at IS NOT NULL AND revoked_at<?)",
                 (_iso(now - timedelta(days=1)), _iso(now - timedelta(days=30))),
@@ -131,9 +131,8 @@ def owner_authorized(request: Request) -> bool:
     token = request.cookies.get(OWNER_COOKIE) or ""
     if sessions().valid(token):
         return True
-    # Temporary compatibility bridge for a deployment that still has a pre-migration
-    # cookie. Successful legacy use should be followed by a fresh login to obtain an
-    # opaque owner session. New logins never write the admin key into a cookie.
+    # Temporary compatibility for an already-open pre-migration browser session.
+    # New logins never write the deployment admin key into a cookie.
     return owner_key_matches(token)
 
 
@@ -154,3 +153,28 @@ def end_owner_session(request: Request, response: Response) -> None:
     token = request.cookies.get(OWNER_COOKIE)
     sessions().revoke(token)
     response.delete_cookie(OWNER_COOKIE)
+
+
+class OwnerLegacyCompatibilityMiddleware(BaseHTTPMiddleware):
+    """Temporary server-only compatibility for older owner route modules.
+
+    A few mature backup/compute/payment route functions still compare the owner cookie
+    with LSS_ADMIN_KEY directly. When the browser presents a valid opaque owner session,
+    this middleware changes only the in-process Request cookie cache seen by those legacy
+    handlers. It never sends the admin key to the client. New/refactored owner routes use
+    `owner_authorized()` directly. Remove this bridge after the remaining legacy modules
+    have migrated.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if not request.url.path.startswith("/owner"):
+            return await call_next(request)
+        token = request.cookies.get(OWNER_COOKIE) or ""
+        if sessions().valid(token):
+            configured = (os.getenv("LSS_ADMIN_KEY") or "").strip()
+            if configured:
+                # `request.cookies` is a parsed, in-process per-request cache. This does
+                # not alter the HTTP Cookie header and is never written to the response.
+                request.cookies[OWNER_COOKIE] = configured
+                request.state.owner_opaque_session = token
+        return await call_next(request)
