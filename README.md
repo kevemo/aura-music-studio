@@ -1,15 +1,17 @@
-# 4Infinity Creative Studios
+# Pulsar-Frequency House
 
-**Music, Video, Image & Creator Intelligence**  
-**Powered by Elevate Souls Productions and Aura AI Systems**
+**For Professional Creation Beyond The Cosmos**  
+**Powered by Elevate Souls Productions & Aura AI Systems**
 
-4Infinity Creative Studios is the master product brand for ESP's expanding AI creation platform. The existing real-audio music engine, generative DAW, Aura producer, memberships, private project system, owner controls and ESP Creator Network hub are being brought together with video and image creation under one project-centred creative environment.
+Pulsar-Frequency House is the master product brand for ESP's expanding AI creation platform. The existing real-audio music engine, generative DAW, Aura producer, memberships, private project system, owner controls and ESP Creator Network hub are being brought together with video, image, voice and broader creative-art tooling under one project-centred environment.
+
+The accepted cosmic multimedia brand language combines pulsar/frequency energy, musical notation, film/video, camera and artistic-creation motifs. The web build includes the approved logo artwork as a packaged brand asset.
 
 > Legacy repository, Python package, cookie and environment-variable names may still use `aura-music-studio`, `aura_music_studio` or `LSS_*`. Those identifiers are retained strictly for backwards compatibility and are not the public product name.
 
 ## Product direction
 
-4Infinity is designed around a simple principle: generation is only the beginning.
+Pulsar-Frequency House is designed around a simple principle: generation is only the beginning.
 
 A member should be able to:
 
@@ -17,28 +19,28 @@ A member should be able to:
 2. upload lyrics, audio, images, video, sketches or other authorised references;
 3. let Aura create an initial result;
 4. change individual details without throwing the whole project away;
-5. preserve versions, takes, stems, scenes and project history;
-6. move between music, video, image and creator workflows while keeping shared project context.
+5. preserve versions, takes, stems, scenes, layers and project history;
+6. move between music, video, image, voice and creator workflows while keeping shared project context.
 
 Aura is the conversational creative director and orchestration layer across the platform.
 
 ## Current integrated foundation
 
-### 4Infinity public experience
+### Pulsar-Frequency House public experience
 
-- new cosmic 4Infinity Creative Studios landing experience;
+- cosmic Pulsar-Frequency House landing experience using the approved multimedia brand artwork;
 - authoritative global brand layer that rewrites legacy public product copy;
 - membership, sign-up, sign-in and pricing workflows;
 - Free / Base / Pro server-side entitlements;
 - private member projects;
 - owner approval controls;
 - PWA/public discovery architecture;
-- system emails automatically rebranded to 4Infinity;
+- system emails automatically rebranded to Pulsar-Frequency House;
 - protected ESP Creator Network surfaces separated from normal members.
 
 ### Music Studio — working core
 
-The music system is the most developed production engine currently underneath 4Infinity.
+The music system is the most developed production engine currently underneath Pulsar-Frequency House.
 
 - prompt → original complete song project;
 - user lyrics → complete song;
@@ -72,7 +74,7 @@ Final audible exports must originate from:
 
 If the required real-audio renderer is unavailable, the system should fail the render rather than silently substitute General MIDI or a SoundFont as the finished master.
 
-## Aura Creative Copilot
+## Aura Creative Director
 
 Aura is intended to remain present through the entire creative process rather than functioning as a one-shot prompt box.
 
@@ -87,9 +89,9 @@ Examples:
 
 The architecture already includes spoken Aura routes, project-aware producer planning, controlled web research and persistent project/session state.
 
-## Video Studio
+## Video Creation House
 
-The 4Infinity product architecture now treats video as a first-class creative workspace rather than an unrelated external tool.
+The Pulsar-Frequency product architecture treats video as a first-class creative workspace rather than an unrelated external tool.
 
 Planned/integration targets include:
 
@@ -108,7 +110,7 @@ Planned/integration targets include:
 
 Video functionality must clearly report which renderer/provider is active and must not pretend that a generated result exists when no renderer is available.
 
-## Image Studio
+## Image & Art House
 
 The image workspace is being integrated around the same editable-project philosophy.
 
@@ -162,7 +164,7 @@ Base and Pro music workflows include browser recording infrastructure for:
 - natural/classic/hard/robot/custom tuning modes;
 - vocal and instrument FX banks.
 
-4Infinity is not intended to provide unrestricted impersonation tooling. Voice workflows are designed around the voice owner's consent or explicit authorisation.
+Pulsar-Frequency House is not intended to provide unrestricted impersonation tooling. Voice workflows are designed around the voice owner's consent or explicit authorisation.
 
 ## Generative DAW
 
@@ -225,11 +227,11 @@ The current production architecture includes:
 - Style DNA and Sample Lab;
 - consent-approved voice features;
 - advanced editing and production tools;
-- the full enabled 4Infinity creative-suite feature set as video/image integrations activate.
+- the full enabled Pulsar-Frequency creative-house feature set as video/image integrations activate.
 
 ## Elevate Souls Productions Creator Network Hub
 
-4Infinity also contains a private, permission-gated ESP side.
+Pulsar-Frequency House also contains a private, permission-gated ESP side.
 
 Regular studio members cannot see the internal Creator Network materials.
 
@@ -283,11 +285,12 @@ Run locally:
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-The new public homepage is served from `/`.
+The public homepage is served from `/`.
 
 Important routes in the current build include:
 
-- `/` — 4Infinity public landing page;
+- `/` — Pulsar-Frequency House public landing page;
+- `/brand/pulsar-frequency-house-logo.svg` — packaged web brand artwork;
 - `/signup` — membership request;
 - `/signin` — member login;
 - `/pricing` — membership comparison;
@@ -302,14 +305,18 @@ Important routes in the current build include:
 
 Public product name:
 
-**4Infinity Creative Studios**
+**Pulsar-Frequency House**
 
-Descriptor:
+Tagline:
 
-**Music, Video, Image & Creator Intelligence**
+**For Professional Creation Beyond The Cosmos**
 
 Endorsement:
 
-**Powered by Elevate Souls Productions and Aura AI Systems**
+**Powered by Elevate Souls Productions & Aura AI Systems**
 
-Any remaining references to previous product names inside legacy source files are compatibility debt. Runtime public HTTP output and outbound mail are passed through the 4Infinity brand migration layer so old wording is not presented as the customer-facing product identity.
+Platform descriptor:
+
+**Music, Video, Image, Voice & Creator Intelligence**
+
+Any remaining references to previous product names inside legacy source files are compatibility debt. Runtime public HTTP output and outbound mail are passed through the Pulsar-Frequency brand migration layer so old wording is not presented as the customer-facing product identity.
