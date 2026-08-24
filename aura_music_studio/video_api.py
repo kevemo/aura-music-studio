@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import mimetypes
 import re
+import subprocess
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assets import AssetLibrary
@@ -101,6 +105,19 @@ def _visual(project: Path, asset_id: str):
     return record, path
 
 
+def _video_output(project: Path, relative_path: str) -> Path:
+    video_root = (project / "output" / "video").resolve()
+    target = (video_root / relative_path).resolve()
+    if video_root not in target.parents or not target.is_file() or target.suffix.lower() not in {".mp4", ".mov", ".webm", ".m4v"}:
+        raise HTTPException(404, "Video output not found")
+    return target
+
+
+def _stream_url(project_name: str, output_relative: str) -> str:
+    video_relative = Path(output_relative).relative_to("video").as_posix()
+    return f"/video/projects/{quote(project_name, safe='')}/stream/{quote(video_relative, safe='/')}"
+
+
 @router.get("/capabilities")
 def capabilities(request: Request):
     member = _member(request)
@@ -179,12 +196,13 @@ def render_local(project_name: str, body: MusicVideoRequest, request: Request):
                 audio, target, visual=first_visual, aspect=body.aspect, fps=body.fps,
                 quality=quality, duration_limit=duration_limit, waveform=body.include_waveform,
             )
-    except (ValueError, FileNotFoundError, RuntimeError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
+    except (ValueError, FileNotFoundError, RuntimeError, subprocess.SubprocessError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
     relative = rendered.relative_to(project / "output").as_posix()
     return {
         "output": relative,
+        "stream_url": _stream_url(project_name, relative),
         "report": report,
         "preview_only": preview_only,
         "download_unlocked": member.plan.has(VIDEO_EXPORT),
@@ -217,7 +235,21 @@ def neural_scene(project_name: str, body: NeuralSceneRequest, request: Request):
             fps=body.fps,
             seed=body.seed,
         )
-        validate_music_video(rendered, minimum_seconds=1.0) if audio else None
-    except (ValueError, FileNotFoundError, RuntimeError, subprocess.SubprocessError) as exc:  # type: ignore[name-defined]
+        if audio:
+            validate_music_video(rendered, minimum_seconds=1.0)
+    except (ValueError, FileNotFoundError, RuntimeError, subprocess.SubprocessError) as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"output": rendered.relative_to(project / "output").as_posix(), "report": report}
+    relative = rendered.relative_to(project / "output").as_posix()
+    return {"output": relative, "stream_url": _stream_url(project_name, relative), "report": report}
+
+
+@router.get("/projects/{project_name}/stream/{relative_path:path}")
+def stream_video(project_name: str, relative_path: str, request: Request):
+    _require(_member(request), BASIC_VIDEO_STUDIO)
+    project = _project(project_name)
+    target = _video_output(project, relative_path)
+    return FileResponse(
+        target,
+        media_type=mimetypes.guess_type(target.name)[0] or "video/mp4",
+        headers={"Content-Disposition": "inline"},
+    )
