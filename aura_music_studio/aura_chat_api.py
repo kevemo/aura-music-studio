@@ -18,6 +18,8 @@ from .aura_companion import AuraCompanionError
 from .aura_persona import AURA_PERSONA_NAME, persona_context
 from .aura_system_companion import AuraSystemCompanionService
 from .localization import LocalePreferenceStore
+from .owner_identity import actor_from_request
+from .request_context import reset_current_owner_actor, set_current_owner_actor
 
 router = APIRouter(prefix="/api/aura", tags=["Aura Workpage"])
 service = AuraSystemCompanionService()
@@ -188,6 +190,14 @@ def _member(request: Request):
     return member
 
 
+def _active_owner_actor(request: Request) -> dict | None:
+    """Return a selected owner actor only when the separate owner session also authorizes it."""
+    try:
+        return actor_from_request(request)
+    except Exception:
+        return None
+
+
 def _public_attachment(item: dict) -> dict:
     return {
         "id": item["id"],
@@ -204,6 +214,7 @@ def _public_attachment(item: dict) -> dict:
 def aura_capabilities(request: Request):
     member = _member(request)
     locale = locale_store.get_user_locale(member.user_id) or "en"
+    owner_actor = _active_owner_actor(request)
     return {
         **service.capabilities(member),
         "persona": AURA_PERSONA_NAME,
@@ -225,7 +236,12 @@ def aura_capabilities(request: Request):
             "project_context": True,
             "memory": True,
             "system_workflow_tools": True,
+            "owner_actor_aware": True,
         },
+        "owner_actor": (
+            {"id": owner_actor["id"], "display_name": owner_actor["display_name"]}
+            if owner_actor else None
+        ),
         "locale": locale,
     }
 
@@ -323,17 +339,31 @@ def aura_chat(body: AuraChatBody, request: Request):
             raise HTTPException(410, f"Aura attachment has expired: {exc}") from exc
 
     locale = locale_store.get_user_locale(member.user_id) or "en"
+    owner_actor = _active_owner_actor(request)
     context = {
         "workspace": "Aura full chat workpage",
         "aura_persona": persona_context(locale, body.workspace_mode),
         "workspace_mode": body.workspace_mode,
         "response_locale": locale,
         "attachments": attachment_context,
+        "owner_actor": (
+            {
+                "id": owner_actor["id"],
+                "display_name": owner_actor["display_name"],
+                "audit_name": owner_actor["audit_name"],
+                "note": "This is attribution/personalization inside the separately authorized shared ESP owner session; it does not grant permissions.",
+            }
+            if owner_actor else None
+        ),
         "attachment_note": (
             "Use only the attachment analysis actually present. Parsed document text, real audio analysis/transcripts and video metadata/transcripts "
             "may be used directly. If visual_analysis_available is false, never claim to see or describe the image/video visuals."
         ),
     }
+    owner_tokens = set_current_owner_actor(
+        owner_actor["id"] if owner_actor else None,
+        owner_actor["display_name"] if owner_actor else None,
+    )
     try:
         result = service.chat(
             member,
@@ -345,6 +375,8 @@ def aura_chat(body: AuraChatBody, request: Request):
         )
     except AuraCompanionError as exc:
         raise HTTPException(422, str(exc)) from exc
+    finally:
+        reset_current_owner_actor(owner_tokens)
 
     thread_id = result["thread"]["id"]
     if body.attachment_ids:
@@ -355,4 +387,8 @@ def aura_chat(body: AuraChatBody, request: Request):
     result["attachments"] = [_public_attachment(attachments.get(member.user_id, x)) for x in body.attachment_ids]
     result["locale"] = locale
     result["persona"] = AURA_PERSONA_NAME
+    result["owner_actor"] = (
+        {"id": owner_actor["id"], "display_name": owner_actor["display_name"]}
+        if owner_actor else None
+    )
     return result
