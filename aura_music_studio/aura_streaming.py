@@ -22,6 +22,7 @@ from .aura_agent_core import (
 from .aura_agent_tools import AuraToolRegistry, project_snapshot
 from .aura_chat_store import AuraChatStore
 from .aura_productivity_tools import source_markdown, source_records
+from .aura_reasoning_modes import detect_mode_command, get_reasoning_mode, mode_config, set_reasoning_mode
 
 router = APIRouter(tags=["Aura Realtime"])
 store = AuraChatStore()
@@ -51,7 +52,7 @@ def _event(kind: str, **payload) -> bytes:
     return (json.dumps({"type": kind, **payload}, ensure_ascii=False, default=str) + "\n").encode("utf-8")
 
 
-def _stream_ollama(model: AuraModelClient, messages: list[dict]) -> Generator[str, None, None]:
+def _stream_ollama(model: AuraModelClient, messages: list[dict], *, temperature: float) -> Generator[str, None, None]:
     if not model.ollama_base:
         raise RuntimeError("OLLAMA_BASE_URL is not configured")
     response = requests.post(
@@ -60,7 +61,7 @@ def _stream_ollama(model: AuraModelClient, messages: list[dict]) -> Generator[st
             "model": model.ollama_model,
             "stream": True,
             "messages": messages,
-            "options": {"temperature": 0.42},
+            "options": {"temperature": temperature},
         },
         timeout=(15, model.timeout),
         stream=True,
@@ -81,7 +82,7 @@ def _stream_ollama(model: AuraModelClient, messages: list[dict]) -> Generator[st
                 break
 
 
-def _stream_openai_compatible(model: AuraModelClient, messages: list[dict]) -> Generator[str, None, None]:
+def _stream_openai_compatible(model: AuraModelClient, messages: list[dict], *, temperature: float) -> Generator[str, None, None]:
     if not model.openai_base or not model.openai_model:
         raise RuntimeError("OpenAI-compatible local endpoint/model is not configured")
     headers = {"Content-Type": "application/json"}
@@ -93,7 +94,7 @@ def _stream_openai_compatible(model: AuraModelClient, messages: list[dict]) -> G
         json={
             "model": model.openai_model,
             "messages": messages,
-            "temperature": 0.42,
+            "temperature": temperature,
             "stream": True,
         },
         timeout=(15, model.timeout),
@@ -134,11 +135,19 @@ def _build_generation(
     thread_id: str,
     text: str,
     attachment_ids: list[str],
-) -> tuple[dict, list[dict], list[dict], dict | None]:
+):
     user_id = member.user_id
     thread = store.thread(user_id, thread_id)
     if not thread:
         raise KeyError(thread_id)
+
+    requested_mode = detect_mode_command(text)
+    if requested_mode:
+        active_mode = set_reasoning_mode(store, user_id, thread_id, requested_mode)
+    else:
+        active_mode = get_reasoning_mode(store, user_id, thread_id)
+    config = mode_config(active_mode)
+
     user_message = store.add_message(user_id, thread_id, "user", text)
     if attachment_ids:
         store.bind_attachments(user_id, thread_id, user_message["id"], attachment_ids)
@@ -181,7 +190,9 @@ def _build_generation(
     rows = store.messages(user_id, thread_id, limit=400)
     summary = base_agent._maybe_summarize(user_id, thread_id, rows)
     memories = store.memories(user_id, enabled_only=True, limit=50)
-    system_parts = [AURA_CORE_SYSTEM]
+    system_parts = [AURA_CORE_SYSTEM, config.instruction]
+    if requested_mode:
+        system_parts.append(f"The member just switched this conversation to Aura {active_mode.title()} mode. Acknowledge that briefly if relevant.")
     if summary:
         system_parts.append("Conversation summary from older turns:\n" + summary)
     memory_text = _memory_context(memories)
@@ -203,8 +214,8 @@ def _build_generation(
     if memory_saved:
         system_parts.append("The member explicitly requested this memory and it was saved successfully.")
     messages = [{"role": "system", "content": "\n\n".join(system_parts)}]
-    messages.extend(_history_messages(rows, maximum=70))
-    return user_message, messages, tool_results, memory_saved
+    messages.extend(_history_messages(rows, maximum=config.history_messages))
+    return user_message, messages, tool_results, memory_saved, config
 
 
 def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str]):
@@ -216,7 +227,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
     saved = False
     try:
         try:
-            user_message, messages, tool_results, memory_saved = _build_generation(
+            user_message, messages, tool_results, memory_saved, config = _build_generation(
                 member=member,
                 thread_id=thread_id,
                 text=text,
@@ -233,6 +244,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
             tools=[{"name": row["tool"], "ok": row["ok"]} for row in tool_results],
             memory_saved=bool(memory_saved),
             sources=verified_sources,
+            reasoning_mode=config.name,
         )
         for row in tool_results:
             yield _event("tool", name=row["tool"], ok=row["ok"], error=row.get("error"))
@@ -247,10 +259,10 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
                 break
             try:
                 if provider == "ollama":
-                    stream = _stream_ollama(model, messages)
+                    stream = _stream_ollama(model, messages, temperature=config.temperature)
                     model_name = model.ollama_model
                 else:
-                    stream = _stream_openai_compatible(model, messages)
+                    stream = _stream_openai_compatible(model, messages, temperature=config.temperature)
                     model_name = model.openai_model
                 for token in stream:
                     emitted = True
@@ -267,7 +279,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
 
         if not collected:
             try:
-                fallback: ModelReply = model.complete(messages, temperature=.42)
+                fallback: ModelReply = model.complete(messages, temperature=config.temperature)
                 provider_used = fallback.provider
                 model_used = fallback.model
                 collected.append(fallback.text)
@@ -284,8 +296,6 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
         sources_block = source_markdown(tool_results)
         if sources_block:
             text_out = text_out.rstrip() + "\n\n" + sources_block
-            # Stream the verified source trail after model generation so the visible answer
-            # and the persisted message stay identical.
             yield _event("delta", text="\n\n" + sources_block)
         assistant = store.add_message(member.user_id, thread_id, "assistant", text_out)
         saved = True
@@ -295,6 +305,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
             provider=provider_used,
             model=model_used,
             sources=verified_sources,
+            reasoning_mode=config.name,
             thread=store.thread(member.user_id, thread_id),
         )
     except GeneratorExit:
