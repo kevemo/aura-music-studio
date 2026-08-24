@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from .content_safety import enforce_creation_policy
 from .lyrics import LyricRequest, generate_lyrics
 from .presets import get_preset, preset_dict
+from .song_dna import create_song_dna
 
 
 class CreateSongRequest(BaseModel):
@@ -71,7 +72,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
 
     style_bits = [request.genre, request.subgenre, request.mood]
     style_bits += [
-        "real performed-sounding instruments, not General MIDI",
+        "release-grade finished record with ultra-real performed-sounding instruments, never General MIDI-like final audio",
         "instruments: " + ", ".join(instruments),
         f"energy {request.energy:.2f}",
         f"arrangement: {preset.arrangement}",
@@ -80,14 +81,25 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
         f"vocal production: {preset.vocal_style}",
         f"mix: {preset.mix_notes}",
         f"typical genre tempo range {preset.default_bpm[0]}-{preset.default_bpm[1]} BPM",
-        "commercial studio production with believable human dynamics and transients",
+        "commercial studio production with believable human timing, dynamics, articulation and transients",
+        "natural note attacks, decays, room or amp tails and performance variation appropriate to each instrument",
+        "stable instrument identity across the arrangement with intentional fills and transitions rather than random timbre changes",
+        "clean frequency separation, controlled low end, clear lead focus and professional stereo depth",
+        "avoid AI warble, metallic ringing, phasey doubling, smeared transients, lyric corruption and abrupt voice or instrument identity shifts",
+        "finish as a professional mixed and mastered track while retaining an editable multitrack project underneath",
     ]
     if request.vocal_mode == "instrumental":
         style_bits += ["instrumental only", "no lead vocal"]
     elif request.vocal_mode == "approved_voice":
-        style_bits.append("render lead vocal through selected consent-approved Aura Voice Profile")
+        style_bits += [
+            "render lead vocal through selected consent-approved Aura Voice Profile",
+            "preserve intelligible lyrics, natural breathing, emotional phrasing and stable vocal identity across sections",
+        ]
     else:
-        style_bits.append("natural expressive lead vocal")
+        style_bits += [
+            "natural expressive lead vocal",
+            "clear intelligible lyrics, believable breath and phrasing, emotional dynamics and stable vocal identity across sections",
+        ]
     if request.extra_prompt:
         style_bits.append(request.extra_prompt)
 
@@ -110,8 +122,8 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "duration_limit_seconds": request.duration_seconds,
             "max_attempts_per_host": 3,
             "retry_seconds": 45,
-            "quality_retries": 2,
-            "minimum_quality_score": 0.55,
+            "quality_retries": 3,
+            "minimum_quality_score": 0.72,
             "require_real_audio": True,
             "allow_symbolic_guide_as_final": False,
         },
@@ -147,12 +159,49 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "requested_instruments": instruments,
             "structure": request.structure,
             "energy": request.energy,
+            "mood": request.mood,
             "language": request.language,
             "vocal_mode": request.vocal_mode,
             "voice_profile_id": request.voice_profile_id,
             "seed": request.seed,
+            "release_quality_standard": "release_grade_editable_master",
+            "targeted_editing": {
+                "lyrics": True,
+                "sections": True,
+                "instrument_replacement": True,
+                "voice_replacement": True,
+                "remix": True,
+                "remaster": True,
+            },
         },
         "aura_create_request": request.model_dump(),
     }
     (project / "project.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8")
+
+    # Every new generated song starts with an editable representation. The stereo master is
+    # a render of this project, not the only surviving form of the music.
+    create_song_dna(
+        project,
+        project_name=slug,
+        title=request.title,
+        genre=request.genre,
+        mood=request.mood,
+        language=request.language,
+        bpm=request.bpm,
+        key=request.key,
+        meter=request.meter,
+        target_duration_seconds=request.duration_seconds,
+        structure=request.structure,
+        lyrics=lyrics,
+        instruments=instruments,
+        vocal_mode=request.vocal_mode,
+        voice_profile_id=request.voice_profile_id,
+        master_profile=manifest["mix"],
+        metadata={
+            "source": "create_song_request",
+            "reference_audio": request.reference_audio,
+            "reference_strength": request.reference_strength,
+            "seed": request.seed,
+        },
+    )
     return project
