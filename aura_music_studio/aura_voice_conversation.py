@@ -14,6 +14,7 @@ VOICE_SCRIPT = r"""
   let baselineSamples=[],heardVoice=false,lastVoiceAt=0,startedAt=0;
 
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
+  function hostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
   function button(){return document.getElementById('auraHandsFree')}
   function setButton(){const b=button();if(!b)return;b.textContent=enabled?'■ Stop Aura Voice':'◉ Aura Voice';b.style.borderColor=enabled?'#73e2aa66':''}
   function cleanupCapture(){
@@ -22,7 +23,7 @@ VOICE_SCRIPT = r"""
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
     if(audioCtx){try{audioCtx.close()}catch(_){}}audioCtx=null;analyser=null;media=null;
   }
-  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}cleanupCapture();setButton();toast('Aura Voice Conversation stopped.')}
+  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
 
   function rmsLevel(){
     if(!analyser)return 0;const data=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(data);let total=0;
@@ -32,6 +33,7 @@ VOICE_SCRIPT = r"""
 
   async function transcribeAndSend(blob){
     if(!enabled||!current)return;
+    hostState('thinking',{phase:'transcription'});
     const fd=new FormData();fd.append('file',blob,'aura-handsfree.webm');
     try{
       const response=await fetch(`${api}/threads/${encodeURIComponent(current)}/voice-transcribe`,{method:'POST',credentials:'same-origin',body:fd});
@@ -39,10 +41,10 @@ VOICE_SCRIPT = r"""
       const transcript=String(body.transcript||'').trim();
       if(!transcript){toast('I did not catch speech. Listening again…');return listen()}
       if(!enabled)return;
-      await send(transcript);
+      hostState('thinking',{phase:'reasoning'});await send(transcript);
       if(!enabled)return;
       await speakLatestThenListen();
-    }catch(error){toast(error.message,true);stopVoice()}
+    }catch(error){hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
   }
 
   async function speakLatestThenListen(){
@@ -50,14 +52,15 @@ VOICE_SCRIPT = r"""
     const message=[...(messagesCache||[])].reverse().find(row=>row.role==='assistant'&&row.id&&!String(row.id).startsWith('local_'));
     if(!message){return listen()}
     try{
+      hostState('speaking',{message_id:message.id});
       activeAudio=new Audio(`${api}/threads/${encodeURIComponent(current)}/messages/${encodeURIComponent(message.id)}/speech`);
       await new Promise((resolve,reject)=>{activeAudio.onended=resolve;activeAudio.onerror=()=>reject(new Error('Aura speech output is unavailable'));activeAudio.play().catch(reject)});
-      activeAudio=null;if(enabled)await listen();
-    }catch(error){activeAudio=null;toast(error.message,true);stopVoice()}
+      activeAudio=null;if(enabled)await listen();else hostState('idle');
+    }catch(error){activeAudio=null;hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
   }
 
   async function listen(){
-    if(!enabled||starting||controller)return;starting=true;cleanupCapture();setButton();
+    if(!enabled||starting||controller)return;starting=true;cleanupCapture();setButton();hostState('listening');
     try{
       stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm';
@@ -79,7 +82,7 @@ VOICE_SCRIPT = r"""
         raf=requestAnimationFrame(monitor);
       };
       raf=requestAnimationFrame(monitor);
-    }catch(error){starting=false;cleanupCapture();toast('Microphone access or Aura speech is unavailable.',true);stopVoice()}
+    }catch(error){starting=false;cleanupCapture();hostState('warning',{error:String(error)});toast('Microphone access or Aura speech is unavailable.',true);stopVoice()}
   }
 
   async function startVoice(){
@@ -92,7 +95,7 @@ VOICE_SCRIPT = r"""
       if(!status.speech?.stt_configured)throw new Error('Aura speech-to-text is not configured on this host.');
       if(!status.speech?.tts_configured)throw new Error('Aura text-to-speech is not configured on this host.');
       enabled=true;setButton();await listen();
-    }catch(error){enabled=false;setButton();toast(error.message||'Aura Voice is unavailable.',true)}
+    }catch(error){enabled=false;setButton();hostState('warning',{error:String(error)});toast(error.message||'Aura Voice is unavailable.',true)}
   }
 
   const foot=document.querySelector('.sideFoot');
