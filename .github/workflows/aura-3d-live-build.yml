@@ -9,12 +9,19 @@ on:
       - .github/workflows/aura-3d-live-build.yml
       - data/aura_character_references/front.b64
       - scripts/aura_3d/hf_anigen_generate.py
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/aura-3d-live-build.yml
+      - data/aura_character_references/front.b64
+      - scripts/aura_3d/hf_anigen_generate.py
 
 permissions:
   contents: write
 
 concurrency:
-  group: aura-3d-live-build
+  group: aura-3d-live-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -90,6 +97,7 @@ jobs:
             data/aura_3d_build/anigen_api.json
 
       - name: Commit verified rigged intermediate to private branch
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         run: |
           git config user.name 'Aura 3D Build Bot'
           git config user.email 'actions@users.noreply.github.com'
