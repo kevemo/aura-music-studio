@@ -6,8 +6,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from . import aura_agent_core as core
 from .aura_agent_core import (
-    AURA_CORE_SYSTEM,
     AuraAgent,
     ModelReply,
     _attachment_context,
@@ -16,6 +16,8 @@ from .aura_agent_core import (
 )
 from .aura_agent_tools import project_snapshot
 from .aura_chat_store import AuraChatStore, sha256_file
+from .aura_productivity_tools import source_markdown, source_records
+from .aura_reasoning_modes import get_reasoning_mode, mode_config
 
 _INSTALLED = False
 
@@ -66,11 +68,7 @@ def _tool_results_for_message(store: AuraChatStore, user_id: str, thread_id: str
 
 
 def _safe_regenerate(self: AuraAgent, *, member, thread_id: str) -> dict:
-    """Regenerate prose without re-running project-changing or external tools.
-
-    Tool results are evidence from the original user turn and are reused verbatim. This makes
-    'Regenerate' semantically equivalent to 'give me another answer' rather than 'do the work again'.
-    """
+    """Regenerate prose from durable evidence without re-running any tool side effect."""
     user_id = member.user_id
     thread = self.store.thread(user_id, thread_id)
     if not thread:
@@ -89,9 +87,16 @@ def _safe_regenerate(self: AuraAgent, *, member, thread_id: str) -> dict:
             project_context = project_snapshot(pinned_project)
         except Exception as exc:
             project_context = {"project_name": pinned_project, "context_error": f"{type(exc).__name__}: {exc}"}
+
+    try:
+        active_mode = get_reasoning_mode(self.store, user_id, thread_id)
+    except Exception:
+        active_mode = "auto"
+    config = mode_config(active_mode)
+
     summary = self._maybe_summarize(user_id, thread_id, rows)
     memories = self.store.memories(user_id, enabled_only=True, limit=50)
-    system_parts = [AURA_CORE_SYSTEM]
+    system_parts = [core.AURA_CORE_SYSTEM, config.instruction]
     if summary:
         system_parts.append("Conversation summary from older turns:\n" + summary)
     memory_text = _memory_context(memories)
@@ -108,9 +113,9 @@ def _safe_regenerate(self: AuraAgent, *, member, thread_id: str) -> dict:
             + json.dumps(tool_results, ensure_ascii=False, default=str)[:65000]
         )
     messages = [{"role": "system", "content": "\n\n".join(system_parts)}]
-    messages.extend(_history_messages(rows, maximum=70))
+    messages.extend(_history_messages(rows, maximum=config.history_messages))
     try:
-        reply = self.model.complete(messages, temperature=0.52)
+        reply = self.model.complete(messages, temperature=config.temperature)
         text = reply.text
     except Exception as exc:
         if tool_results:
@@ -118,13 +123,19 @@ def _safe_regenerate(self: AuraAgent, *, member, thread_id: str) -> dict:
             reply = ModelReply(text=text, provider="tool_result_fallback", model="none")
         else:
             raise RuntimeError(f"Aura reasoning is unavailable: {type(exc).__name__}: {exc}") from exc
+
+    sources_block = source_markdown(tool_results)
+    if sources_block:
+        text = text.rstrip() + "\n\n" + sources_block
     assistant = self.store.add_message(user_id, thread_id, "assistant", text)
     return {
         "message": assistant,
         "thread": self.store.thread(user_id, thread_id),
         "tool_runs": tool_results,
+        "sources": source_records(tool_results),
         "provider": reply.provider,
         "model": reply.model,
+        "reasoning_mode": config.name,
         "pinned_project": pinned_project,
         "regenerated_without_reexecuting_tools": True,
     }
@@ -138,7 +149,6 @@ def _truthy_env(name: str, default: bool = False) -> bool:
 
 
 def _auto_perceive(store: AuraChatStore, user_id: str, thread_id: str, item: dict) -> dict:
-    """Populate semantic context while the upload is idle, before the member sends a turn."""
     if not _truthy_env("AURA_CHAT_AUTO_PERCEPTION", True):
         return item
     kind = str(item.get("kind") or "")
