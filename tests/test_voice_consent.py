@@ -30,6 +30,38 @@ def test_attested_profile_does_not_gain_unbounded_similarity_by_default():
     assert profile.similarity_limit == 0.8
 
 
+def test_phrase_match_alone_does_not_claim_verified_speaker_identity():
+    profile = VoiceProfile(
+        name="Phrase Match",
+        owner_label="Owner",
+        consent_confirmed=True,
+        consent_statement="I authorise this voice profile and have recorded the requested verification phrase.",
+        verification_state="verified",
+        verification_method="local_stt_phrase_match",
+        verification_confidence=0.99,
+        similarity_limit=1.0,
+        metadata={},
+    )
+    assert profile.verification_state == "attested"
+    assert profile.similarity_limit == 0.8
+    assert profile.metadata["phrase_verification_method"] == "local_stt_phrase_match"
+
+
+def test_trusted_speaker_plus_phrase_method_can_retain_verified_state():
+    profile = VoiceProfile(
+        name="Speaker Verified",
+        owner_label="Owner",
+        consent_confirmed=True,
+        consent_statement="I authorise this verified voice profile for the explicitly selected uses.",
+        verification_state="verified",
+        verification_method="speaker_verification_plus_phrase_match",
+        verification_confidence=0.94,
+        similarity_limit=0.95,
+    )
+    assert profile.verification_state == "verified"
+    assert profile.similarity_limit == 0.95
+
+
 def test_voice_revocation_fails_closed_for_all_uses(tmp_path):
     ledger = RightsLedger(tmp_path / "rights")
     profile = ledger.save_voice(
