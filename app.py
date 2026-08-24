@@ -10,10 +10,12 @@ identifier for existing installs, project data and deployment configuration.
 from aura_music_studio.api import app
 from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
+from aura_music_studio.aura_context_extensions import install_aura_context_extensions
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
+from aura_music_studio.aura_profiles import install_aura_profiles, router as aura_profiles_router
 from aura_music_studio.aura_project_bridge import router as aura_project_bridge_router
 from aura_music_studio.aura_project_knowledge import install_aura_project_knowledge
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
@@ -106,7 +108,11 @@ install_aura_project_knowledge()
 # Attachment tools sit after table/knowledge tools so a rights-confirmed current file can be
 # promoted and then analysed in the same turn using the already-registered project copy.
 install_aura_attachment_tools()
+# Harden Regenerate/branch/edit semantics before profile context wraps the final normal,
+# streaming and regenerated response paths.
 install_aura_chat_hardening()
+install_aura_context_extensions()
+install_aura_profiles()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
 app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
@@ -119,6 +125,7 @@ app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
 app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
+app.include_router(aura_profiles_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_project_bridge_router)
 app.include_router(aura_workspace_router)
