@@ -18,6 +18,7 @@ from aura_music_studio.aura_realtime_portal import router as aura_realtime_porta
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
 from aura_music_studio.aura_research_tools import install_aura_research_tools
 from aura_music_studio.aura_streaming import router as aura_streaming_router
+from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
@@ -37,10 +38,7 @@ from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
-from aura_music_studio.esp_level_up import (
-    install_esp_access_subscription_separation,
-    router as esp_level_up_router,
-)
+from aura_music_studio.esp_level_up import install_esp_access_subscription_separation, router as esp_level_up_router
 from aura_music_studio.esp_level_up_gateway import router as esp_level_up_gateway_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.esp_owner_access_portal import router as esp_owner_access_router
@@ -87,58 +85,30 @@ from aura_music_studio.voice_house_api import router as voice_house_router
 from aura_music_studio.voice_house_assets_api import router as voice_house_assets_router
 from aura_music_studio.voice_house_portal import router as voice_house_portal_router
 
-# Final permission model:
-# 1. Free/Basic/Pro controls public creative features only.
-# 2. ESP Creator/Agent/Both is a separate Mary/Kev-controlled permission.
-# 3. Social Media Centre additionally requires ESP-only affiliation, niche selection and
-#    no owner suspension. These policies are installed before requests are handled.
 install_esp_access_subscription_separation()
 install_social_access_control()
-# Aura Core's additional cross-media tools are installed centrally so normal and realtime
-# chat share the exact same tool registry, write gates and idempotency behavior.
+# Common Aura tool chain. Each layer delegates unknown calls to the previously-installed
+# layer, so normal and realtime chat share one registry and one set of permission gates.
 install_aura_tool_extensions()
-# Research/calculation tools wrap the already-installed creative tool registry. Web results
-# gain stable source ids and arithmetic uses a non-eval safe interpreter.
 install_aura_productivity_tools()
-# Conversational DAW tools reuse the existing DAW/session primitives, plan entitlements and
-# revision system rather than creating a second mixer.
 install_aura_daw_tools()
-# Bounded multi-source research adds domain-diverse parallel page retrieval through the
-# existing protected web gateway. It inherits source ids and citation persistence.
 install_aura_research_tools()
-# Regeneration reuses prior tool results rather than repeating side effects; edited threads
-# invalidate stale tool runs and branches receive independent copies of their attachments.
+install_aura_table_tools()
 install_aura_chat_hardening()
 
-# ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
-# Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
-# routes are removed so new browser sessions never store LSS_ADMIN_KEY as the session value.
-_REPLACED_ROUTES = {
-    "/",
-    "/dashboard",
-    "/owner",
-    "/owner/login",
-    "/owner/logout",
-    "/owner/dashboard",
-}
-app.router.routes[:] = [
-    route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES
-]
+_REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
+app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
+
 app.include_router(creative_portal_router)
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
-# The realtime portal owns the visible /aura-intelligence page. The underlying API router
-# remains mounted afterwards for durable threads/memory/files, while the streaming router
-# provides token/tool events.
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
 app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_ui_extension_router)
-# Chat uploads can be promoted into the pinned project only after explicit rights confirmation.
 app.include_router(aura_project_bridge_router)
-
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
@@ -154,7 +124,6 @@ app.include_router(esp_social_intelligence_router, include_in_schema=False)
 app.include_router(esp_social_insights_router)
 app.include_router(esp_social_portal_overlay_router)
 app.include_router(social_management_portal_router)
-
 app.include_router(owner_auth_router)
 app.include_router(esp_owner_access_router)
 app.include_router(owner_control_center_router)
@@ -199,11 +168,9 @@ app.include_router(source_detection_router)
 app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
-# Extend only the Aura HTML page with reasoning-mode/project-promotion controls.
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
-# Applied last so all legacy text emitted by older modules is rewritten at the public boundary.
 app.add_middleware(BrandMigrationMiddleware)
 
 __all__ = ["app"]
