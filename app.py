@@ -33,6 +33,8 @@ from aura_music_studio.esp_social_intelligence_api import router as esp_social_i
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
+from aura_music_studio.owner_auth import OwnerLegacyCompatibilityMiddleware
+from aura_music_studio.owner_auth_portal import router as owner_auth_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.owner_control_center import router as owner_control_center_router
@@ -56,12 +58,18 @@ from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
 
 # ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
-# Replace only the homepage, member dashboard and owner dashboard; existing sign-in,
-# membership/payment, backup, compute and other action routes remain intact.
+# Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
+# routes are removed so new browser sessions never store LSS_ADMIN_KEY as the session value.
+_REPLACED_ROUTES = {
+    "/",
+    "/dashboard",
+    "/owner",
+    "/owner/login",
+    "/owner/logout",
+    "/owner/dashboard",
+}
 app.router.routes[:] = [
-    route
-    for route in app.router.routes
-    if getattr(route, "path", None) not in {"/", "/dashboard", "/owner/dashboard"}
+    route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES
 ]
 app.include_router(creative_portal_router)
 app.include_router(member_dashboard_router)
@@ -82,14 +90,14 @@ app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
 app.include_router(esp_social_intelligence_router, include_in_schema=False)
 app.include_router(esp_social_insights_router)
-# The overlay is before the original Social Management page and only adds navigation to
-# the intelligence workspace; it reuses the existing mature Social Management renderer.
 app.include_router(esp_social_portal_overlay_router)
 app.include_router(social_management_portal_router)
 
-# Mary/Kev owner command centre and enhanced user directory are registered before the
-# legacy owner-user write routes. The new GET views therefore win route matching while
-# existing proven POST role/plan actions remain available underneath them.
+# Owner login uses an opaque hashed server-side session. The command centre and enhanced
+# user directory sit above legacy owner action routes, which remain available through a
+# temporary server-only compatibility layer until each mature backup/compute/payment
+# handler has been migrated to owner_authorized() directly.
+app.include_router(owner_auth_router)
 app.include_router(owner_control_center_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
@@ -124,9 +132,13 @@ app.include_router(system_router)
 # category/event metadata, not the user's private creative content itself.
 app.add_middleware(CreativeUsageMiddleware)
 
-# Bind the signed Mary/Kev owner identity for owner routes so downstream owner actions
-# receive the correct audit actor without trusting form fields.
+# Bind the signed Mary/Kev owner identity to owner actions without trusting form fields.
 app.add_middleware(OwnerIdentityMiddleware)
+
+# Temporary compatibility bridge: a valid opaque owner session is translated only in
+# the in-process Request cookie cache for legacy backup/compute/payment route functions.
+# The deployment key is never written to the response/browser by this middleware.
+app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 
 # Applied last so all legacy text emitted by older modules is rewritten at the public
 # HTTP boundary. Binary media responses are not modified.
