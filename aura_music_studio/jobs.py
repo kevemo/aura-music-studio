@@ -257,6 +257,23 @@ class AuraJobWorker:
             elif job_type.startswith("engineering:"):
                 from .engineering_jobs import run_engineering_job
                 result = run_engineering_job(project, self._payload(job))
+            elif job_type == "music_video_start":
+                from .music_video_orchestrator import AuraMusicVideoDirector
+
+                payload = self._payload(job)
+                result = AuraMusicVideoDirector(self.store.db_path).start(
+                    user_id=job["user_id"],
+                    source_project=project,
+                    title=str(payload.get("title") or project.name),
+                    concept=str(payload.get("concept") or "cinematic music video"),
+                    aspect_ratio=str(payload.get("aspect_ratio") or "16:9"),
+                    provider=str(payload.get("provider") or "auto"),
+                    quality=str(payload.get("quality") or "standard"),
+                    continuity=str(
+                        payload.get("continuity")
+                        or "consistent principal subject, wardrobe, locations, lighting, color palette and cinematic visual language"
+                    ),
+                )
             else:
                 raise ValueError(f"Unsupported job type: {job_type}")
 

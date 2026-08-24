@@ -75,6 +75,41 @@ AUDIO_TO_MIDI_CONTROL = "audio_to_midi_control"
 NEURAL_AMP = "neural_amp"
 SPATIAL_AUDIO = "spatial_audio"
 VIDEO_SYNC = "video_sync"
+
+# Visual creation — available to ordinary Studio customers as part of the public creative product.
+IMAGE_GENERATION = "image_generation"
+POSTER_GENERATION = "poster_generation"
+BASIC_IMAGE_EDIT = "basic_image_edit"
+BASIC_VISUAL_FX = "basic_visual_fx"
+ADVANCED_IMAGE_GENERATION = "advanced_image_generation"
+IMAGE_HIGH_QUALITY = "image_high_quality"
+IMAGE_PROVIDER_CONTROL = "image_provider_control"
+IMAGE_ADVANCED_EDIT = "image_advanced_edit"
+IMAGE_TRANSPARENT_BACKGROUND = "image_transparent_background"
+IMAGE_LAYER_COMPOSITOR = "image_layer_compositor"
+BRAND_KIT_COMPOSITOR = "brand_kit_compositor"
+VISUAL_FX_STUDIO = "visual_fx_studio"
+MULTITRACK_VISUAL_TIMELINE = "multitrack_visual_timeline"
+VISUAL_KEYFRAMES = "visual_keyframes"
+VISUAL_MASKING = "visual_masking"
+VISUAL_BLEND_MODES = "visual_blend_modes"
+VISUAL_MOTION_TRACKING = "visual_motion_tracking"
+VISUAL_CHROMA_KEY = "visual_chroma_key"
+VISUAL_BACKGROUND_REMOVAL = "visual_background_removal"
+VISUAL_OBJECT_EDIT = "visual_object_edit"
+VISUAL_COLOR_GRADING = "visual_color_grading"
+VISUAL_SPEED_CURVES = "visual_speed_curves"
+VISUAL_ADVANCED_CAPTIONS = "visual_advanced_captions"
+VISUAL_ADVANCED_EXPORT = "visual_advanced_export"
+
+VIDEO_GENERATION = "video_generation"
+ADVANCED_VIDEO_GENERATION = "advanced_video_generation"
+VIDEO_DIRECTOR = "video_director"
+VIDEO_TO_VIDEO = "video_to_video"
+VIDEO_EXTENDED_DURATION = "video_extended_duration"
+VIDEO_HIGH_QUALITY = "video_high_quality"
+VIDEO_PROVIDER_CONTROL = "video_provider_control"
+VIDEO_ADVANCED_EXPORT = "video_advanced_export"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
@@ -109,6 +144,11 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
     BASIC_TIMELINE,
+    VIDEO_GENERATION,
+    IMAGE_GENERATION,
+    POSTER_GENERATION,
+    BASIC_IMAGE_EDIT,
+    BASIC_VISUAL_FX,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -137,6 +177,33 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     NEURAL_AMP,
     SPATIAL_AUDIO,
     VIDEO_SYNC,
+    ADVANCED_VIDEO_GENERATION,
+    VIDEO_DIRECTOR,
+    VIDEO_TO_VIDEO,
+    VIDEO_EXTENDED_DURATION,
+    VIDEO_HIGH_QUALITY,
+    VIDEO_PROVIDER_CONTROL,
+    VIDEO_ADVANCED_EXPORT,
+    ADVANCED_IMAGE_GENERATION,
+    IMAGE_HIGH_QUALITY,
+    IMAGE_PROVIDER_CONTROL,
+    IMAGE_ADVANCED_EDIT,
+    IMAGE_TRANSPARENT_BACKGROUND,
+    IMAGE_LAYER_COMPOSITOR,
+    BRAND_KIT_COMPOSITOR,
+    VISUAL_FX_STUDIO,
+    MULTITRACK_VISUAL_TIMELINE,
+    VISUAL_KEYFRAMES,
+    VISUAL_MASKING,
+    VISUAL_BLEND_MODES,
+    VISUAL_MOTION_TRACKING,
+    VISUAL_CHROMA_KEY,
+    VISUAL_BACKGROUND_REMOVAL,
+    VISUAL_OBJECT_EDIT,
+    VISUAL_COLOR_GRADING,
+    VISUAL_SPEED_CURVES,
+    VISUAL_ADVANCED_CAPTIONS,
+    VISUAL_ADVANCED_EXPORT,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
 })
@@ -149,7 +216,7 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Base."
+            "starter FX, basic Aura Tune and basic mastering. Full music, video, image/poster and timeline creation unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -160,9 +227,10 @@ PLANS: dict[str, Plan] = {
         name="Base",
         monthly_price_usd=Decimal("4.99"),
         description=(
-            "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
-            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools, project revision history and basic waveform timeline editing."
+            "Core Live Sound Studio creation: one confirmed full track every day with unlimited regenerations until confirmation, "
+            "upload-to-song production, MP3/WAV, standard instruments and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
+            "cleanup, backing tracks, harmony tools and basic waveform timeline editing; standard AI video creation; and genuine AI "
+            "image/poster generation with core visual editing and effects."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -173,11 +241,12 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
-            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
+            "The complete professional Live Sound Studio. Includes unlimited full-track creation plus advanced controls across music, "
+            "audio, video, image and poster workflows: expanded instruments, visual multitrack DAW, take lanes, routing and automation, "
+            "full FX, advanced Aura Tune, detailed stems, deep revisions, advanced mastering, Sample Lab, Style DNA, voice tools, Aura "
+            "Video Director, video-to-video, extended/high-quality video rendering, advanced image generation/editing, transparent outputs, "
+            "branded poster composition, and the Visual FX Studio with a layered timeline, keyframes, masks, blend modes, motion tracking, "
+            "chroma key, AI background/object editing, professional color grading, speed curves, advanced captions/exports and priority processing."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,

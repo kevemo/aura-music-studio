@@ -19,6 +19,7 @@ from .plans import (
     BASIC_TIMELINE,
     FULL_TRACK,
     HARMONY_ARCHITECT,
+    IMAGE_GENERATION,
     MP3_DOWNLOAD,
     MULTITRACK_DAW,
     NEURAL_AMP,
@@ -29,7 +30,9 @@ from .plans import (
     STEM_SPLITTER,
     STYLE_DNA,
     UPLOAD_AUDIO,
+    VIDEO_GENERATION,
     VIDEO_SYNC,
+    VISUAL_FX_STUDIO,
     WAV_DOWNLOAD,
 )
 from .request_context import reset_current_user_id, set_current_user_id
@@ -42,8 +45,13 @@ PUBLIC_EXACT = {
     "/ai-music-studio", "/ai-song-generator", "/backing-track-maker", "/stem-splitter",
     "/ai-mastering", "/ai-vocal-studio",
 }
+# Privacy endpoints authenticate themselves with a valid session but deliberately do not require
+# an active paid/free entitlement, so pending/past-due members can still export/delete their data.
+# Brand assets/localization/public node coordination have their own boundaries. ESP creator/agent/
+# admin products keep their own ESP-role gates and never rely on ordinary Studio plan entitlements.
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    "/localization/",
 )
 
 
@@ -57,6 +65,15 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
+    if path == "/aura" or path.startswith("/api/aura/"):
+        return PRODUCER_CHAT
+    # Capability endpoints remain readable to signed-in Free members so the UI can explain upgrades.
+    if path.startswith("/api/video/") and path != "/api/video/capabilities":
+        return VIDEO_GENERATION
+    if path.startswith("/api/image/") and path != "/api/image/capabilities":
+        return IMAGE_GENERATION
+    if path.startswith("/api/visual-fx/") and path != "/api/visual-fx/capabilities":
+        return VISUAL_FX_STUDIO
     if path.startswith("/speech/"):
         return AURA_SPEECH
     if path.startswith("/web/"):
@@ -182,6 +199,10 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                 )
 
             if path.endswith("/download"):
+                # Generated visual/Aura downloads are already bound to generation entitlement and
+                # tenant-specific job/attachment records. Audio and stem downloads use format rules.
+                if path.startswith("/api/video/") or path.startswith("/api/image/") or path.startswith("/api/aura/attachments/"):
+                    return await call_next(request)
                 requested = (request.query_params.get("path") or "").lower()
                 if requested.endswith(".mp3"):
                     needed = MP3_DOWNLOAD

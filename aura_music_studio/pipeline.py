@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .analysis import analyze_project
+from .approved_voice_song import apply_approved_voice
 from .arrangement import build_plan
 from .audio import finalize_render
 from .guide import ensure_score_guide
@@ -63,6 +64,13 @@ class AuraPipeline:
             status["stage"] = "real_audio_render_and_qc"
             self._write_status(status)
             render, qc, takes = self._render_with_quality_control(plan)
+
+            if (self.manifest.project_dna or {}).get("vocal_mode") == "approved_voice":
+                status["stage"] = "approved_voice_conversion"
+                self._write_status(status)
+                render = apply_approved_voice(render, self.workspace, self.manifest)
+                qc = self._evaluate_final_real_audio(render.audio_path, plan)
+                status["approved_voice_applied"] = True
 
             status["stage"] = "real_audio_layers"
             self._write_status(status)

@@ -16,6 +16,7 @@ router = APIRouter(prefix="/speech", tags=["Spoken Aura"])
 
 class SpeakRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
+    locale: str = Field(default="en", min_length=2, max_length=64)
 
 
 class TextCommandRequest(BaseModel):
@@ -43,7 +44,7 @@ def synthesize(request: SpeakRequest, background_tasks: BackgroundTasks):
     os.close(fd)
     target = Path(filename)
     try:
-        AuraSpeechService().speak(request.text, target)
+        AuraSpeechService().speak(request.text, target, locale=request.locale)
     except Exception as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(503, f"Aura speech synthesis is unavailable: {type(exc).__name__}: {exc}") from exc

@@ -10,6 +10,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .aura_avatar_bootstrap import avatar_bootstrap_html
+
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 AUTH_RATE_PATHS = {"/auth/login", "/auth/signup", "/owner/login"}
 PUBLIC_PWA_PATHS = {
@@ -45,6 +47,7 @@ def _client_key(request: Request) -> str:
 
 
 def _same_origin(request: Request) -> bool:
+    """Protect cookie-authenticated writes against cross-site requests."""
     fetch_site = (request.headers.get("sec-fetch-site") or "").lower()
     if fetch_site == "cross-site":
         return False
@@ -68,7 +71,30 @@ def _known_public_url() -> str:
         return ""
 
 
+def _show_aura_entry(path: str) -> bool:
+    direct = {
+        "/dashboard",
+        "/studio",
+        "/production-suite",
+        "/recording-studio",
+        "/visual-studio",
+        "/history",
+        "/take-manager",
+        "/daw",
+        "/aura",
+        "/command-center",
+    }
+    return path in direct or path.startswith("/esp")
+
+
+def _show_embodied_aura(path: str) -> bool:
+    # Only authenticated product surfaces receive the persistent embodied interface.
+    # Public marketing/auth pages stay lightweight and do not load the 3D runtime.
+    return _show_aura_entry(path)
+
+
 async def _inject_esp_brand(response, path: str):
+    """Attach the shared ESP/PWA theme plus signed-in Aura product controls."""
     content_type = (response.headers.get("content-type") or "").lower()
     if "text/html" not in content_type or not hasattr(response, "body_iterator"):
         return response
@@ -114,6 +140,24 @@ async def _inject_esp_brand(response, path: str):
         extras += "<script src='/daw/mixer-ui.js'></script>"
     if path == "/owner/dashboard" and "href='/owner/compute-nodes'" not in text:
         extras += "<a class='esp-history-fab' href='/owner/compute-nodes' title='Manage ESP compute machines'>🖥 Compute Nodes</a>"
+    if _show_aura_entry(path) and "aura-companion-fab" not in text:
+        extras += (
+            "<a class='aura-companion-fab' href='/aura' title='Open Aura full AI workpage' "
+            "style=\"position:fixed;left:18px;bottom:18px;z-index:10000;text-decoration:none;"
+            "background:linear-gradient(135deg,#24132f,#6f2f91);border:1px solid #c89ce2;"
+            "color:#fff;padding:11px 16px;border-radius:999px;font-weight:900;box-shadow:0 10px 35px #0009,0 0 28px #a64bd355;\">"
+            "✨ Aura</a>"
+        )
+        extras += (
+            "<button class='aura-tour-fab' type='button' title='Let Aura show you around this screen' "
+            "onclick=\"window.AuraAvatar&&window.AuraAvatar.startTour&&window.AuraAvatar.startTour()\" "
+            "style=\"position:fixed;left:18px;bottom:66px;z-index:10000;"
+            "background:linear-gradient(135deg,#17101f,#352047);border:1px solid #82549c;"
+            "color:#f5e9ff;padding:9px 13px;border-radius:999px;font-weight:800;cursor:pointer;"
+            "box-shadow:0 8px 26px #0007;\">✦ Show me around</button>"
+        )
+    if _show_embodied_aura(path) and "aura-avatar-runtime" not in text:
+        extras += avatar_bootstrap_html()
     if path in PUBLIC_PWA_PATHS and "serviceWorker.register" not in text:
         extras += "<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/service-worker.js').catch(()=>{}));}</script>"
     if extras:
@@ -124,6 +168,8 @@ async def _inject_esp_brand(response, path: str):
 
 
 class StudioSecurityMiddleware(BaseHTTPMiddleware):
+    """Security envelope around the public membership/studio application."""
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if path in AUTH_RATE_PATHS and request.method == "POST":
@@ -131,7 +177,11 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             window = int(os.getenv("LSS_AUTH_RATE_WINDOW_SECONDS", "900"))
             allowed, retry = _LIMITER.allow((_client_key(request), path), limit=limit, window_seconds=window)
             if not allowed:
-                return JSONResponse({"detail": "Too many authentication attempts. Try again later."}, status_code=429, headers={"Retry-After": str(retry)})
+                return JSONResponse(
+                    {"detail": "Too many authentication attempts. Try again later."},
+                    status_code=429,
+                    headers={"Retry-After": str(retry)},
+                )
 
         if request.method in UNSAFE_METHODS:
             has_cookie_auth = bool(request.cookies.get("lss_session") or request.cookies.get("lss_admin_session"))
@@ -149,7 +199,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'; "
             "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
-            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
         )
         if path.startswith(("/auth", "/owner", "/dashboard", "/membership", "/node-coordinator")):
             response.headers.setdefault("Cache-Control", "no-store")
