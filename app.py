@@ -18,6 +18,7 @@ from aura_music_studio.aura_realtime_portal import router as aura_realtime_porta
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
+from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
@@ -133,6 +134,7 @@ app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
 app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
+app.include_router(aura_ui_extension_router)
 # Chat uploads can be promoted into the pinned project only after an explicit rights
 # confirmation. The bridge never exposes the private chat-storage path to the browser.
 app.include_router(aura_project_bridge_router)
@@ -216,6 +218,10 @@ app.include_router(system_router)
 # Cross-media creation activity is recorded only after successful writes and stores
 # category/event metadata, not the user's private creative content itself.
 app.add_middleware(CreativeUsageMiddleware)
+
+# Extend only the Aura HTML page with reasoning-mode/project-promotion controls. The base
+# realtime portal remains independently usable and all non-HTML/API/media responses bypass it.
+app.add_middleware(AuraUIExtensionMiddleware)
 
 # Bind the signed Mary/Kev owner identity to owner actions without trusting form fields.
 app.add_middleware(OwnerIdentityMiddleware)
