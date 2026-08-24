@@ -27,6 +27,7 @@ from aura_music_studio.engineering_job_api import router as engineering_job_rout
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
+from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
@@ -49,15 +50,16 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
 
-# ``aura_music_studio.api`` already registers the historical public homepage and owner
-# dashboard. Replace only those surfaces; existing sign-in, membership/payment, backup,
-# compute and other owner action routes remain intact.
+# ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
+# Replace only the homepage, member dashboard and owner dashboard; existing sign-in,
+# membership/payment, backup, compute and other action routes remain intact.
 app.router.routes[:] = [
     route
     for route in app.router.routes
-    if getattr(route, "path", None) not in {"/", "/owner/dashboard"}
+    if getattr(route, "path", None) not in {"/", "/dashboard", "/owner/dashboard"}
 ]
 app.include_router(creative_portal_router)
+app.include_router(member_dashboard_router)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
