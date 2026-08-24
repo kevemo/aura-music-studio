@@ -8,6 +8,7 @@ identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
@@ -60,6 +61,7 @@ app.router.routes[:] = [
 ]
 app.include_router(creative_portal_router)
 app.include_router(member_dashboard_router)
+app.include_router(aura_intelligence_router)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
