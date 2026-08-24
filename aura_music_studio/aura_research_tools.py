@@ -96,7 +96,10 @@ def _research(registry, query: str, max_sources: int) -> list[dict]:
     output: list[dict] = []
     for row in selected:
         counter += 1
-        item = fetched_by_url.get(str(row.get("url") or ""), _fetch_one(row))
+        url = str(row.get("url") or "")
+        item = fetched_by_url.get(url)
+        if item is None:
+            item = _fetch_one(row)
         item["source_id"] = f"S{counter}"
         output.append(item)
     registry._aura_source_counter = counter
@@ -155,4 +158,4 @@ def install_aura_research_tools() -> None:
     _INSTALLED = True
 
 
-__all__ = ["install_aura_research_tools"]
+__all__ = ["install_aura_research_tools", "_select_diverse"]
