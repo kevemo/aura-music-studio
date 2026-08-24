@@ -33,7 +33,7 @@ def _truthy(value: str | None, default: bool = False) -> bool:
 
 
 def send_email(to_address: str, subject: str, body: str) -> dict:
-    """Send through configured SMTP using authoritative 4Infinity branding.
+    """Send through configured SMTP using authoritative Pulsar-Frequency branding.
 
     If SMTP is not configured, write a development outbox file rather than pretending
     the message was delivered. Production deployment should configure SMTP credentials.
