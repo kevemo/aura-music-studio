@@ -196,7 +196,12 @@ def source_records(tool_results: list[dict]) -> list[dict]:
             continue
         name = run.get("tool")
         result = run.get("result")
-        items = result if name == "web_search" and isinstance(result, list) else [result] if name == "web_fetch" and isinstance(result, dict) else []
+        if name in {"web_search", "web_research"} and isinstance(result, list):
+            items = result
+        elif name == "web_fetch" and isinstance(result, dict):
+            items = [result]
+        else:
+            items = []
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -229,8 +234,6 @@ def _append_sources(text: str, tool_results: list[dict]) -> str:
     block = source_markdown(tool_results)
     if not block:
         return text
-    # Always append the verified retrieval list. Inline citations are still useful, but the
-    # source trail must not disappear just because a small local model forgot to cite them.
     return text.rstrip() + "\n\n" + block
 
 
@@ -310,7 +313,7 @@ def install_aura_productivity_tools() -> None:
     core.AURA_CORE_SYSTEM += """
 
 Research/source contract:
-- Web-search results may include stable source_id values such as S1, S2 and S3. When a factual claim materially relies on a web result, cite its source id inline in square brackets, e.g. [S1].
+- Web-search/research results may include stable source_id values such as S1, S2 and S3. When a factual claim materially relies on a web result, cite its source id inline in square brackets, e.g. [S1].
 - Never invent a source id, URL, title, quotation or publication detail. If retrieved evidence is weak or conflicting, say so.
 - Calculator/statistics tool results are authoritative for the arithmetic they actually returned; do not replace them with mental arithmetic when a tool result is available.
 """
