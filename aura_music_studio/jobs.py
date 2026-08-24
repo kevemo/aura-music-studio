@@ -121,6 +121,7 @@ class StudioJobQueue:
             "backend": "sqlite_wal",
             "payload_jobs": True,
             "remote_node_leases": True,
+            "video_jobs": True,
         }
 
     def requeue_stale(self, *, stale_after_seconds: int = 10_800, max_attempts: int = 3) -> int:
@@ -257,6 +258,9 @@ class AuraJobWorker:
             elif job_type.startswith("engineering:"):
                 from .engineering_jobs import run_engineering_job
                 result = run_engineering_job(project, self._payload(job))
+            elif job_type.startswith("video:"):
+                from .video_jobs import run_video_job
+                result = run_video_job(project, job_type, self._payload(job))
             else:
                 raise ValueError(f"Unsupported job type: {job_type}")
 
