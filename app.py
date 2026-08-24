@@ -26,6 +26,10 @@ from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
+from aura_music_studio.esp_level_up import (
+    install_esp_access_subscription_separation,
+    router as esp_level_up_router,
+)
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
@@ -58,6 +62,12 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
 
+# Enforce the final permission model before any ESP owner/member route handles requests:
+# Free/Basic/Pro is the public creative subscription; ESP Creator/Agent/Both is a separate
+# Mary/Kev-controlled permission. Approving or revoking ESP access must not silently change
+# a user's creative plan or billing state.
+install_esp_access_subscription_separation()
+
 # ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
 # Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
 # routes are removed so new browser sessions never store LSS_ADMIN_KEY as the session value.
@@ -86,10 +96,12 @@ app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
 
 # ESP niche selection must be registered before the legacy Command Center route so
-# active ESP members enter the niche-personalised gateway first. All social-management,
-# analytics, approval and media-library routes live below /command-center and independently
-# enforce ESP role + niche + no-other-network affiliation at the API boundary.
+# active ESP members enter the niche-personalised gateway first. The Level Up Hub is the
+# private ESP operating system; all social-management, analytics, approval and media-library
+# routes live below /command-center and independently enforce ESP role + niche + no-other-
+# network affiliation at the API boundary.
 app.include_router(esp_niche_portal_router)
+app.include_router(esp_level_up_router)
 app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
 app.include_router(esp_social_intelligence_router, include_in_schema=False)
