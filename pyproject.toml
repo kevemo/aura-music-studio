@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # Retained as a compatibility distribution identifier. The authoritative public
 # product brand is Pulsar-Frequency House.
 name = "aura-music-studio"
-version = "0.19.0"
+version = "0.20.0"
 description = "Pulsar-Frequency House — professional music, video, image, voice and creator intelligence powered by Elevate Souls Productions & Aura AI Systems"
 requires-python = ">=3.10"
 dependencies = [
