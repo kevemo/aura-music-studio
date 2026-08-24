@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -8,14 +9,16 @@ from pydantic import BaseModel, Field
 from .creative_project import (
     CreativeDirective,
     CreativeElement,
+    CreativeKind,
     CreativeProjectStore,
     CreativeReference,
     DirectiveOperation,
     ElementStatus,
     InputMode,
-    CreativeKind,
     public_capabilities,
 )
+from .plans import DEEP_REVISION_HISTORY, REVISION_HISTORY
+from .revisions import create_revision
 from .tenant_storage import list_project_dirs, project_path
 
 router = APIRouter(prefix="/creative", tags=["creative-projects"])
@@ -32,7 +35,7 @@ class CreateElementRequest(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     role: str = Field(default="", max_length=120)
     status: ElementStatus = "draft"
-    source_type: str = "generated"
+    source_type: Literal["generated", "uploaded", "recorded", "reference", "derived", "legacy"] = "generated"
     source_ref: str | None = Field(default=None, max_length=1000)
     parent_ids: list[str] = Field(default_factory=list, max_length=100)
     prompt: str = Field(default="", max_length=6000)
@@ -101,6 +104,24 @@ def _manifest(store: CreativeProjectStore):
         ) from exc
 
 
+def _snapshot(member, store: CreativeProjectStore, *, label: str, reason: str) -> dict | None:
+    """Create a cheap metadata-only undo point when the member owns revision history."""
+    if not member.plan.has(REVISION_HISTORY) or not store.exists():
+        return None
+    keep = 200 if member.plan.has(DEEP_REVISION_HISTORY) else 20
+    try:
+        return create_revision(
+            store.project_dir,
+            label=label,
+            reason=reason,
+            actor="Aura Creative House",
+            keep=keep,
+        )
+    except Exception:
+        # A failed optional snapshot must not corrupt or block the primary creative edit.
+        return None
+
+
 @router.get("/capabilities")
 def capabilities(request: Request):
     member = _member(request)
@@ -159,7 +180,7 @@ def get_manifest(project_name: str, request: Request):
 
 @router.post("/projects/{project_name}/elements")
 def add_element(project_name: str, body: CreateElementRequest, request: Request):
-    _member(request)
+    member = _member(request)
     store = _store(project_name)
     _manifest(store)
     try:
@@ -174,10 +195,15 @@ def add_element(project_name: str, body: CreateElementRequest, request: Request)
             prompt=body.prompt,
             metadata=body.metadata,
         )
+        revision = _snapshot(member, store, label=f"Before adding {body.label}", reason="creative_element_add")
         manifest = store.add_element(element)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"element": element.model_dump(mode="json"), "manifest": manifest.model_dump(mode="json")}
+    return {
+        "element": element.model_dump(mode="json"),
+        "manifest": manifest.model_dump(mode="json"),
+        "revision_snapshot": revision,
+    }
 
 
 @router.patch("/projects/{project_name}/elements/{element_id}")
@@ -187,9 +213,10 @@ def update_element(
     body: UpdateElementRequest,
     request: Request,
 ):
-    _member(request)
+    member = _member(request)
     store = _store(project_name)
     _manifest(store)
+    revision = _snapshot(member, store, label="Before creative element edit", reason="creative_element_edit")
     try:
         manifest = store.update_element(
             element_id,
@@ -205,12 +232,16 @@ def update_element(
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     element = next(item for item in manifest.elements if item.id == element_id)
-    return {"element": element.model_dump(mode="json"), "manifest": manifest.model_dump(mode="json")}
+    return {
+        "element": element.model_dump(mode="json"),
+        "manifest": manifest.model_dump(mode="json"),
+        "revision_snapshot": revision,
+    }
 
 
 @router.post("/projects/{project_name}/references")
 def add_reference(project_name: str, body: CreateReferenceRequest, request: Request):
-    _member(request)
+    member = _member(request)
     if not body.rights_confirmed:
         raise HTTPException(400, "Confirm that you have the right or authorization to use this reference")
     store = _store(project_name)
@@ -224,15 +255,20 @@ def add_reference(project_name: str, body: CreateReferenceRequest, request: Requ
             rights_confirmed=body.rights_confirmed,
             metadata=body.metadata,
         )
+        revision = _snapshot(member, store, label=f"Before attaching {body.label}", reason="creative_reference_add")
         manifest = store.add_reference(reference)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"reference": reference.model_dump(mode="json"), "manifest": manifest.model_dump(mode="json")}
+    return {
+        "reference": reference.model_dump(mode="json"),
+        "manifest": manifest.model_dump(mode="json"),
+        "revision_snapshot": revision,
+    }
 
 
 @router.post("/projects/{project_name}/directives")
 def add_directive(project_name: str, body: CreateDirectiveRequest, request: Request):
-    _member(request)
+    member = _member(request)
     store = _store(project_name)
     _manifest(store)
     directive = CreativeDirective(
@@ -245,6 +281,7 @@ def add_directive(project_name: str, body: CreateDirectiveRequest, request: Requ
         preserve_element_ids=body.preserve_element_ids,
         metadata=body.metadata,
     )
+    revision = _snapshot(member, store, label="Before Aura directive", reason="creative_directive_add")
     try:
         manifest = store.add_directive(directive)
     except ValueError as exc:
@@ -252,6 +289,7 @@ def add_directive(project_name: str, body: CreateDirectiveRequest, request: Requ
     return {
         "directive": directive.model_dump(mode="json"),
         "manifest": manifest.model_dump(mode="json"),
+        "revision_snapshot": revision,
         "truthful_execution_state": {
             "status": directive.status,
             "capability_state": directive.capability_state,
