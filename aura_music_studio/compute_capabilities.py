@@ -18,6 +18,12 @@ def job_types_for_capabilities(capabilities: list[str]) -> list[str]:
             "engineering:restore",
             "engineering:spatial",
         })
+    if "video" in caps or "all" in caps:
+        result.update({"video:local", "video:neural"})
+    if "video_local" in caps:
+        result.add("video:local")
+    if "video_neural" in caps:
+        result.add("video:neural")
     if "stem_separation" in caps:
         result.add("engineering:split")
     if "mastering" in caps:

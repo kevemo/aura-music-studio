@@ -64,6 +64,7 @@ def collect_software() -> dict:
         "python": platform.python_version(),
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "git": bool(shutil.which("git")),
+        "video_engines": {},
     }
     try:
         from .acestep_api import AceStepClient
@@ -72,6 +73,14 @@ def collect_software() -> dict:
         result["acestep_reachable"] = bool(url and AceStepClient(base_url=url).health())
     except Exception:
         result["acestep_reachable"] = False
+    try:
+        from .video_engines import public_video_engine_status
+        result["video_engines"] = {
+            item["id"]: bool(item["configured"])
+            for item in public_video_engine_status()
+        }
+    except Exception:
+        result["video_engines"] = {}
     return result
 
 
@@ -223,6 +232,9 @@ class ESPComputeNodeAgent:
         if job_type.startswith("engineering:"):
             from .engineering_jobs import run_engineering_job
             return run_engineering_job(project, payload)
+        if job_type.startswith("video:"):
+            from .video_jobs import run_video_job
+            return run_video_job(project, job_type, payload)
         raise ValueError(f"Unsupported ESP node job type: {job_type}")
 
     def _upload_result(self, job: dict, result_bundle: Path) -> dict:

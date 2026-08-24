@@ -12,6 +12,7 @@ from .compute_nodes import ComputeNodeRegistry
 from .doctor import system_report
 from .model_catalog import public_catalog
 from .renderer_runtime import renderer_runtime_status
+from .video_engines import public_video_engine_status
 
 router = APIRouter(prefix="/system", tags=["Studio System"])
 
@@ -75,6 +76,11 @@ def doctor():
     report = system_report()
     report["independence"] = independence_status()
     report["live_renderers"] = renderer_runtime_status()
+    report["video_renderers"] = {
+        "local_ffmpeg_renderer": True,
+        "neural_engines": public_video_engine_status(),
+        "engine_commands_exposed": False,
+    }
     return report
 
 
@@ -82,6 +88,15 @@ def doctor():
 def live_renderers():
     """Member-safe renderer readiness; internal renderer URLs and credentials are never returned."""
     return renderer_runtime_status()
+
+
+@router.get("/video-renderers")
+def video_renderers():
+    return {
+        "local_ffmpeg_renderer": True,
+        "neural_engines": public_video_engine_status(),
+        "engine_commands_exposed": False,
+    }
 
 
 @router.get("/independence")
@@ -94,7 +109,7 @@ def model_catalog():
     return {
         "policy": (
             "ESP Live Sound Studio never assumes that an open repository or downloadable checkpoint is "
-            "commercially unrestricted. Code and model/voice licences are tracked separately."
+            "commercially unrestricted. Code and model/voice/video licences are tracked separately."
         ),
         "components": public_catalog(),
     }

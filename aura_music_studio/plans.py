@@ -75,6 +75,14 @@ AUDIO_TO_MIDI_CONTROL = "audio_to_midi_control"
 NEURAL_AMP = "neural_amp"
 SPATIAL_AUDIO = "spatial_audio"
 VIDEO_SYNC = "video_sync"
+BASIC_VIDEO_STUDIO = "basic_video_studio"
+VIDEO_EXPORT = "video_export"
+LYRIC_VIDEO = "lyric_video"
+AUDIO_REACTIVE_VIDEO = "audio_reactive_video"
+VIDEO_STORYBOARD = "video_storyboard"
+NEURAL_VIDEO = "neural_video"
+VIDEO_4K_EXPORT = "video_4k_export"
+VIDEO_TIMELINE = "video_timeline"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
@@ -90,6 +98,7 @@ FREE_FEATURES = frozenset({
     BASIC_FX,
     BASIC_AUTOTUNE,
     BASIC_MASTERING,
+    BASIC_VIDEO_STUDIO,
 })
 
 BASE_FEATURES = FREE_FEATURES | frozenset({
@@ -109,6 +118,9 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
     BASIC_TIMELINE,
+    VIDEO_EXPORT,
+    LYRIC_VIDEO,
+    AUDIO_REACTIVE_VIDEO,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -137,6 +149,10 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     NEURAL_AMP,
     SPATIAL_AUDIO,
     VIDEO_SYNC,
+    VIDEO_STORYBOARD,
+    NEURAL_VIDEO,
+    VIDEO_4K_EXPORT,
+    VIDEO_TIMELINE,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
 })
@@ -149,7 +165,8 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Base."
+            "starter FX, basic Aura Tune/mastering and short ESP Video Studio visualizer previews. Finished full-song "
+            "and full-length video production unlock on Base."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -161,8 +178,9 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("4.99"),
         description=(
             "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
-            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools, project revision history and basic waveform timeline editing."
+            "production, MP3/WAV, standard instruments/FX, Aura Tune, AutoMix, useful stem splitting, mastering, cleanup, "
+            "backing/harmony tools, project history and basic waveform editing, plus full-length local music-video exports, "
+            "lyric videos and audio-reactive visualizers in social/landscape formats."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -173,11 +191,12 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
-            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
+            "Unlimited full-track creation and the complete Live Sound Studio: expanded instruments, editable multitrack "
+            "Build Around, full FX banks, Aura AI FX Designer, owner-approved native plugins, advanced/custom Aura Tune, "
+            "detailed splitter/stems, visual DAW/takes/automation/deep history, advanced/reference/album mastering, Sample Lab, "
+            "Style DNA, covers/repaint, Harmony Architect, consent-approved voice tools, neural amps and spatial audio. Pro also "
+            "unlocks Aura storyboard planning, 4K local video finishing, video timeline tools and approved self-hosted neural "
+            "video engines for AI music-video scenes when those GPU models are installed."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,

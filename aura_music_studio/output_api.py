@@ -7,12 +7,13 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from .plans import FLAC_DOWNLOAD, MP3_DOWNLOAD, STEM_DOWNLOAD, WAV_DOWNLOAD
+from .plans import FLAC_DOWNLOAD, MP3_DOWNLOAD, STEM_DOWNLOAD, VIDEO_EXPORT, WAV_DOWNLOAD
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Studio Outputs"])
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
+VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 
 
 def _project(name: str) -> Path:
@@ -32,6 +33,8 @@ def _member(request: Request):
 def _required_download_feature(relative_path: str) -> str:
     lower = relative_path.lower()
     suffix = Path(lower).suffix
+    if suffix in VIDEO_EXTS or lower.startswith("video/"):
+        return VIDEO_EXPORT
     stem_like = any(token in lower for token in ("stem", "stems/", "bandlab", "separated", "harmonies/", "voices/"))
     if stem_like:
         return STEM_DOWNLOAD
@@ -73,6 +76,7 @@ def list_outputs(project_name: str, request: Request):
         needed = _required_download_feature(rel)
         allowed = member.plan.has(needed)
         audio = path.suffix.lower() in AUDIO_EXTS
+        video = path.suffix.lower() in VIDEO_EXTS
         encoded_project = quote(project_name, safe="")
         encoded_rel = quote(rel, safe="/")
         records.append(
@@ -82,6 +86,7 @@ def list_outputs(project_name: str, request: Request):
                 "bytes": path.stat().st_size,
                 "content_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
                 "audio": audio,
+                "video": video,
                 "download_allowed": allowed,
                 "download_url": (
                     f"/projects/{encoded_project}/outputs/file/{encoded_rel}" if allowed else None
@@ -110,7 +115,7 @@ def stream_output(project_name: str, relative_path: str, request: Request):
     project = _project(project_name)
     target, _ = _allowed_output(project, relative_path, request)
     if target.suffix.lower() not in AUDIO_EXTS:
-        raise HTTPException(400, "Only audio outputs can be streamed inline")
+        raise HTTPException(400, "Only audio outputs can be streamed through this endpoint")
     return FileResponse(
         target,
         media_type=mimetypes.guess_type(target.name)[0] or "audio/wav",

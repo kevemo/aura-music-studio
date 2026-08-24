@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -42,6 +43,28 @@ def _command_ready(name: str) -> bool:
     return bool(shutil.which(executable) or Path(executable).is_file())
 
 
+def _smoke_status() -> dict[str, Any]:
+    path = Path(os.getenv("AURA_RENDERER_SMOKE_STATUS", "data/renderer_smoke.json"))
+    if not path.is_file():
+        return {"present": False, "real_audio_verified": False}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"present": True, "real_audio_verified": False, "readable": False}
+    return {
+        "present": True,
+        "readable": True,
+        "real_audio_verified": bool(raw.get("real_audio_verified")),
+        "engine": raw.get("engine"),
+        "model": raw.get("model"),
+        "duration_seconds": raw.get("duration_seconds"),
+        "sample_rate": raw.get("sample_rate"),
+        "channels": raw.get("channels"),
+        "completed_at": raw.get("completed_at"),
+        "elapsed_seconds": raw.get("elapsed_seconds"),
+    }
+
+
 def probe_real_audio(path: str | Path, *, minimum_seconds: float = 1.0) -> AudioProbe:
     """Verify that a renderer result is a decodable waveform, not a symbolic/control file."""
     p = Path(path)
@@ -63,8 +86,6 @@ def probe_real_audio(path: str | Path, *, minimum_seconds: float = 1.0) -> Audio
         if not shutil.which("ffprobe"):
             return AudioProbe(str(p), False, error=f"soundfile decode failed and ffprobe unavailable: {sf_exc}")
         try:
-            import json
-
             raw = subprocess.check_output(
                 [
                     "ffprobe", "-v", "error", "-show_entries", "format=duration",
@@ -91,8 +112,9 @@ def probe_real_audio(path: str | Path, *, minimum_seconds: float = 1.0) -> Audio
 
 def _ace_step_status() -> dict[str, Any]:
     url = (os.getenv("AURA_ACESTEP_API_URL") or "").strip()
+    smoke = _smoke_status()
     if not url:
-        return {"id": "ace-step", "configured": False, "reachable": False, "primary": True}
+        return {"id": "ace-step", "configured": False, "reachable": False, "primary": True, "inference_smoke": smoke}
     try:
         from .acestep_api import AceStepClient
 
@@ -122,16 +144,19 @@ def _ace_step_status() -> dict[str, Any]:
             "configured": True,
             "reachable": reachable,
             "primary": True,
-            "full_song_model": os.getenv("AURA_ACESTEP_FULL_MODEL", "acestep-v15-xl-turbo"),
+            "full_song_model": os.getenv("AURA_ACESTEP_FULL_MODEL", "acestep-v15-turbo"),
             "track_model": os.getenv("AURA_ACESTEP_TRACK_MODEL", "acestep-v15-base"),
             "models_reported": sorted(set(models))[:40],
             "supports": ["text2music", "cover", "repaint", "complete", "lego", "extract"],
+            "inference_smoke": smoke,
+            "inference_verified": bool(smoke.get("real_audio_verified")),
             "internal_url_exposed": False,
         }
     except Exception as exc:
         return {
             "id": "ace-step", "configured": True, "reachable": False, "primary": True,
-            "error": f"{type(exc).__name__}: {exc}", "internal_url_exposed": False,
+            "error": f"{type(exc).__name__}: {exc}", "inference_smoke": smoke,
+            "inference_verified": bool(smoke.get("real_audio_verified")), "internal_url_exposed": False,
         }
 
 
@@ -180,9 +205,14 @@ def renderer_runtime_status() -> dict[str, Any]:
         "audiocraft": _command_ready("AURA_AUDIOCRAFT_CMD"),
         "stable_audio": _command_ready("AURA_STABLE_AUDIO_CMD"),
     }
-    self_hosted_ready = bool(ace.get("reachable") or yue.get("reachable") or any(local_commands.values()))
+    fail_closed = _bool_env("AURA_REQUIRE_LIVE_RENDERER", False)
+    # In the live GPU profile, ACE-Step only counts as production-ready after the startup smoke
+    # service has completed a real waveform inference. Development mode may still use reachability.
+    ace_ready = bool(ace.get("reachable") and (ace.get("inference_verified") or not fail_closed))
+    yue_ready = bool(yue.get("reachable"))
+    self_hosted_ready = bool(ace_ready or yue_ready or any(local_commands.values()))
     authenticated_hosted_ready = any(hosted.values())
-    primary = "ace-step" if ace.get("reachable") else ("yue" if yue.get("reachable") else None)
+    primary = "ace-step" if ace_ready else ("yue" if yue_ready else None)
     return {
         "real_audio_required": True,
         "symbolic_final_allowed": False,
@@ -194,17 +224,19 @@ def renderer_runtime_status() -> dict[str, Any]:
         "other_local_commands": local_commands,
         "optional_authenticated_hosted": hosted,
         "public_space_fallback_enabled": bool((os.getenv("AURA_ACESTEP_SPACES") or "").strip()),
-        # Base/development mode may inspect or edit projects without a GPU. The live GPU overlays
-        # force this true so queued Final Master jobs fail immediately if the renderer disappears.
-        "fail_closed_without_real_renderer": _bool_env("AURA_REQUIRE_LIVE_RENDERER", False),
+        "fail_closed_without_real_renderer": fail_closed,
+        "ace_step_live_mode_requires_successful_inference_smoke": fail_closed,
     }
 
 
 def require_live_renderer() -> dict[str, Any]:
     status = renderer_runtime_status()
     if status["fail_closed_without_real_renderer"] and not status["final_master_renderer_ready"]:
+        # Keep the established error prefix stable for API clients/tests while adding the stronger
+        # production requirement that ACE-Step must have proved a real neural waveform inference.
         raise RuntimeError(
-            "No live real-audio music renderer is reachable/configured. Start the private ACE-Step GPU "
-            "renderer (preferred), enable the optional YuE worker, or configure an authenticated real-audio fallback."
+            "No live real-audio music renderer is ready/proven. Start the private ACE-Step GPU renderer and "
+            "allow its real inference smoke gate to pass, enable the optional YuE worker, or configure an "
+            "authenticated real-audio fallback."
         )
     return status

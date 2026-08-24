@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -19,7 +20,9 @@ class RendererConfig(BaseModel):
     preferred: list[str] = Field(default_factory=lambda: [
         "acestep_api", "local_acestep", "muser", "yue", "deapi", "eleven_music", "mureka"
     ])
-    model: str = "acestep-v15-xl-turbo"
+    # Resolve the deployment's selected full-song model when a project is created. This lets an
+    # 8 GB consumer-GPU installation choose the 2B turbo model while a larger ESP node can select XL.
+    model: str = Field(default_factory=lambda: os.getenv("AURA_ACESTEP_FULL_MODEL", "acestep-v15-turbo"))
     cover_strength: float = Field(default=0.78, ge=0.0, le=1.0)
     duration_limit_seconds: int = 300
     max_attempts_per_host: int = 3
