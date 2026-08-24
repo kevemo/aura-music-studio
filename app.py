@@ -9,6 +9,7 @@ identifier for existing installs, project data and deployment configuration.
 
 from aura_music_studio.api import app
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
+from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
@@ -104,8 +105,11 @@ app.include_router(creative_portal_router)
 # member_dashboard, so /video-studio and /image-designer open real media workspaces.
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
-# Aura Core v2 keeps the stable /aura-intelligence path while adding persistent memory,
-# attachments, tools and true token streaming through a separate realtime endpoint.
+# The realtime portal owns the visible /aura-intelligence page. The underlying API router
+# remains mounted afterwards for durable threads/memory/files, while the separate streaming
+# router provides token/tool events. Route order prevents the older compatibility page from
+# shadowing the realtime interface.
+app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
 
