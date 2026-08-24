@@ -25,6 +25,7 @@ from aura_music_studio.aura_realtime_portal import router as aura_realtime_porta
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
 from aura_music_studio.aura_research_tools import install_aura_research_tools
 from aura_music_studio.aura_runtime_context import install_aura_runtime_context
+from aura_music_studio.aura_sandbox import install_aura_sandbox_tools, router as aura_sandbox_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -106,9 +107,10 @@ install_aura_research_tools()
 install_aura_table_tools()
 install_aura_project_knowledge()
 install_aura_attachment_tools()
-# Versioned Artifacts participate in the same tool registry, but code is stored only and is
-# never executed on the FastAPI host.
 install_aura_artifacts()
+# Code execution is available only through a separately configured isolated sandbox service.
+# Member code is never executed in the FastAPI process or host shell.
+install_aura_sandbox_tools()
 # Install workflow resolution last among tool wrappers so every tool class can contribute a
 # verified result to $stepN/$previous references while preserving its own gates.
 install_aura_workflow_engine()
@@ -130,6 +132,7 @@ app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_profiles_router)
 app.include_router(aura_artifacts_router)
 app.include_router(aura_artifacts_ui_router)
+app.include_router(aura_sandbox_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_voice_conversation_router)
 app.include_router(aura_avatar_router)
