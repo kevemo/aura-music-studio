@@ -5,4 +5,4 @@ For Professional Creation Beyond The Cosmos.
 The ``aura_music_studio`` package identifier remains for backwards compatibility.
 """
 
-__version__ = "0.19.0"
+__version__ = "0.20.0"
