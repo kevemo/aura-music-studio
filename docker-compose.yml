@@ -55,6 +55,26 @@ services:
       searxng:
         condition: service_started
 
+  aura-task-worker:
+    build: .
+    container_name: pulsar-frequency-house-aura-task-worker
+    restart: unless-stopped
+    command: ["python", "-m", "aura_music_studio.aura_task_worker"]
+    env_file:
+      - .env
+    environment:
+      LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      AURA_TASK_POLL_SECONDS: "5"
+      AURA_WEB_ENABLED: "true"
+      AURA_SEARXNG_URL: http://searxng:8080
+    volumes:
+      # Tasks and Aura conversations intentionally share the same durable member database.
+      # This worker does not mount project storage because background project writes are forbidden.
+      - live_sound_data:/app/data
+    depends_on:
+      searxng:
+        condition: service_started
+
   aura-backup-scheduler:
     build: .
     container_name: live-sound-studio-backup-scheduler
