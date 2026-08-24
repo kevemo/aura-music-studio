@@ -25,6 +25,7 @@ from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
+from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
@@ -56,8 +57,15 @@ app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
+
+# ESP niche selection must be registered before the legacy Command Center route so
+# active ESP members enter the niche-personalised gateway first. Social-management
+# routes are nested under /command-center and enforce ESP/niche/affiliation access
+# independently at the API layer.
+app.include_router(esp_niche_portal_router)
 app.include_router(social_management_router)
 app.include_router(social_management_portal_router)
+
 app.include_router(daw_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
