@@ -27,7 +27,11 @@ def _authorized(request: Request) -> bool:
 
 
 def _page(body: str) -> HTMLResponse:
-    return HTMLResponse(f"<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>ESP Owner Users</title><style>{CSS}</style></head><body><main class='wrap'>{body}</main></body></html>")
+    return HTMLResponse(
+        "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<meta name='robots' content='noindex,nofollow'><title>ESP Owner Users</title>"
+        f"<style>{CSS}</style></head><body><main class='wrap'>{body}</main></body></html>"
+    )
 
 
 def _esp_label(row: dict) -> str:
@@ -40,6 +44,61 @@ def _esp_label(row: dict) -> str:
     if status == "pending":
         return "ESP Request Pending"
     return "Regular"
+
+
+def _user_row(row: dict) -> str:
+    handle_html = ""
+    if row.get("tiktok_handle"):
+        handle_html = f"<br><span class='gold small'>@{escape(row['tiktok_handle'])}</span>"
+    sub_html = ""
+    if row.get("sub_niche"):
+        sub_html = f"<br><span class='muted small'>{escape(row['sub_niche'])}</span>"
+    user_id = escape(row["id"], quote=True)
+    return (
+        f"<tr><td><a class='gold' href='/owner/users/{user_id}'><b>{escape(row['display_name'])}</b></a>"
+        f"<br><span class='muted small'>{escape(row['email'])}</span></td>"
+        f"<td><span class='pill'>{escape(str(row['plan_id']).upper())}</span><br>"
+        f"<span class='muted small'>{escape(row.get('billing_status') or '')}</span></td>"
+        f"<td><span class='pill'>{escape(_esp_label(row))}</span>{handle_html}</td>"
+        f"<td>{escape((row.get('niche') or 'Not selected').replace('_',' ').title())}{sub_html}</td>"
+        f"<td>{int(row.get('usage_events') or 0)} events<br><span class='muted small'>{int(row.get('project_count') or 0)} projects</span></td>"
+        f"<td>{int(row.get('progress_submissions') or 0)} uploads<br><span class='muted small'>{round(float(row.get('avg_training_percent') or 0))}% training</span></td>"
+        f"<td><a class='btn secondary' href='/owner/users/{user_id}'>Open user</a></td></tr>"
+    )
+
+
+def _progress_card(row: dict) -> str:
+    metric_html = "".join(
+        f"<span class='pill'>{escape(key.replace('_',' ').title())}: {escape(str(value))}</span>"
+        for key, value in list(row.get("metrics", {}).items())[:10]
+    )
+    guidance_html = "".join(
+        f"<li>{escape(item)}</li>" for item in row.get("aura_guidance", [])[:5]
+    )
+    upload_html = ""
+    if row.get("upload_name"):
+        upload_html = f"<span class='good small'>Analytics file uploaded: {escape(row['upload_name'])}</span>"
+    return (
+        f"<div class='card'><div class='row'><b>{escape(row['kind'].upper())} · {escape(row.get('period_label') or 'Progress')}</b>"
+        f"<small class='muted'>{escape(row['created_at'][:16].replace('T',' '))}</small></div>"
+        f"<div>{metric_html}</div><ul>{guidance_html}</ul>{upload_html}</div>"
+    )
+
+
+def _request_card(row: dict) -> str:
+    note_html = ""
+    if row.get("note"):
+        note_html = f"<p>{escape(row['note'])}</p>"
+    return (
+        f"<div class='card request'><div class='row'><div><b>{escape(row['requested_role'].title())} request</b> · "
+        f"@{escape(row.get('tiktok_handle') or '')}<br><span class='muted'>{escape(row.get('region') or '')} · "
+        f"{escape(row['status'].title())}</span></div><small>{escape(row['created_at'][:16].replace('T',' '))}</small></div>"
+        f"{note_html}</div>"
+    )
+
+
+def _selected(actual: str, expected: str) -> str:
+    return " selected" if actual == expected else ""
 
 
 @router.get("/owner/users", response_class=HTMLResponse, include_in_schema=False)
@@ -60,10 +119,9 @@ def owner_users(request: Request, q: str = ""):
     pending = [row for row in rows if row.get("esp_status") == "pending"]
     creator_count = sum(1 for row in rows if row.get("esp_status") == "active" and row.get("esp_roles") in {"creator", "both"})
     agent_count = sum(1 for row in rows if row.get("esp_status") == "active" and row.get("esp_roles") in {"agent", "both"})
-    body_rows = "".join(
-        f"""<tr><td><a class='gold' href='/owner/users/{escape(row['id'], quote=True)}'><b>{escape(row['display_name'])}</b></a><br><span class='muted small'>{escape(row['email'])}</span></td><td><span class='pill'>{escape(str(row['plan_id']).upper())}</span><br><span class='muted small'>{escape(row.get('billing_status') or '')}</span></td><td><span class='pill'>{escape(_esp_label(row))}</span>{f"<br><span class='gold small'>@{escape(row.get('tiktok_handle') or '')}</span>" if row.get('tiktok_handle') else ''}</td><td>{escape((row.get('niche') or 'Not selected').replace('_',' ').title())}{f"<br><span class='muted small'>{escape(row.get('sub_niche') or '')}</span>" if row.get('sub_niche') else ''}</td><td>{int(row.get('usage_events') or 0)} events<br><span class='muted small'>{int(row.get('project_count') or 0)} projects</span></td><td>{int(row.get('progress_submissions') or 0)} uploads<br><span class='muted small'>{round(float(row.get('avg_training_percent') or 0))}% training</span></td><td><a class='btn secondary' href='/owner/users/{escape(row['id'], quote=True)}'>Open user</a></td></tr>"""
-        for row in rows
-    ) or "<tr><td colspan='7' class='muted'>No users match this filter.</td></tr>"
+    body_rows = "".join(_user_row(row) for row in rows)
+    if not body_rows:
+        body_rows = "<tr><td colspan='7' class='muted'>No users match this filter.</td></tr>"
 
     body = f"""<div class='top'><div><div class='gold'><b>MARY & KEV · ESP OWNER CONTROL</b></div><h1>User Directory</h1><p class='muted'>Every account is visible here. Subscription level and ESP role are separate controls.</p></div><div><a class='btn secondary' href='/owner/dashboard'>Owner Dashboard</a></div></div>
 <div class='grid'><div class='metric'><small class='muted'>Users shown</small><b>{len(rows)}</b></div><div class='metric'><small class='muted'>ESP requests</small><b>{len(pending)}</b></div><div class='metric'><small class='muted'>ESP creators</small><b>{creator_count}</b></div><div class='metric'><small class='muted'>ESP agents</small><b>{agent_count}</b></div></div>
@@ -96,23 +154,34 @@ def owner_user_detail(user_id: str, request: Request, message: str = ""):
         for key, value in data.get("training", {}).items()
     ) or "<div class='muted'>No training progress recorded yet.</div>"
     progress_rows = control.progress.list_for_user(user_id, 20)
-    progress_html = "".join(
-        f"<div class='card'><div class='row'><b>{escape(row['kind'].upper())} · {escape(row.get('period_label') or 'Progress')}</b><small class='muted'>{escape(row['created_at'][:16].replace('T',' '))}</small></div><div>{''.join(f"<span class='pill'>{escape(k.replace('_',' ').title())}: {escape(str(v))}</span>" for k,v in list(row.get('metrics',{}).items())[:10])}</div><ul>{''.join(f"<li>{escape(item)}</li>" for item in row.get('aura_guidance',[])[:5])}</ul>{f"<span class='good small'>Analytics file uploaded: {escape(row.get('upload_name') or '')}</span>" if row.get('upload_name') else ''}</div>"
-        for row in progress_rows
-    ) or "<p class='muted'>No LIVE/video analysis submitted yet.</p>"
+    progress_html = "".join(_progress_card(row) for row in progress_rows) or "<p class='muted'>No LIVE/video analysis submitted yet.</p>"
     requests = data.get("esp_requests", [])
-    requests_html = "".join(
-        f"<div class='card request'><div class='row'><div><b>{escape(row['requested_role'].title())} request</b> · @{escape(row.get('tiktok_handle') or '')}<br><span class='muted'>{escape(row.get('region') or '')} · {escape(row['status'].title())}</span></div><small>{escape(row['created_at'][:16].replace('T',' '))}</small></div>{f"<p>{escape(row.get('note') or '')}</p>" if row.get('note') else ''}</div>"
-        for row in requests
-    ) or "<p class='muted'>No ESP access requests from this user.</p>"
+    requests_html = "".join(_request_card(row) for row in requests) or "<p class='muted'>No ESP access requests from this user.</p>"
     latest_request_pending = any(row.get("status") == "pending" for row in requests)
     message_html = f"<div class='card good'>{escape(message)}</div>" if message else ""
+    decline_html = ""
+    if latest_request_pending:
+        decline_html = (
+            f"<form method='post' action='/owner/users/{escape(user_id, quote=True)}/esp-decline' style='margin-top:8px'>"
+            "<button class='danger'>Decline pending ESP request</button></form>"
+        )
+    audience_html = ""
+    if profile.get("audience"):
+        audience_html = f"<p><b>Audience:</b> {escape(profile['audience'])}</p>"
+    goals_html = ""
+    if profile.get("goals"):
+        goals_html = "<p><b>Goals:</b> " + " · ".join(escape(goal) for goal in profile["goals"]) + "</p>"
+
+    esp_label = _esp_label({"esp_status": membership.get("status"), "esp_roles": membership.get("roles")})
+    tiktok_label = "—"
+    if membership.get("tiktok_handle"):
+        tiktok_label = "@" + membership["tiktok_handle"]
 
     body = f"""<div class='top'><div><div class='gold'><b>ESP USER CONTROL</b></div><h1>{escape(user['display_name'])}</h1><p class='muted'>{escape(user['email'])} · account {escape(user['status'])}</p></div><div><a class='btn secondary' href='/owner/users'>All users</a> <a class='btn secondary' href='/owner/dashboard'>Dashboard</a></div></div>{message_html}
-<div class='grid'><div class='metric'><small class='muted'>Subscription</small><b>{escape(str(user['plan_id']).upper())}</b></div><div class='metric'><small class='muted'>ESP role</small><b>{escape(_esp_label({'esp_status': membership.get('status'),'esp_roles': membership.get('roles')}))}</b></div><div class='metric'><small class='muted'>Creation projects</small><b>{int(data.get('projects') or 0)}</b></div><div class='metric'><small class='muted'>Progress uploads</small><b>{int(performance.get('total') or 0)}</b></div></div>
-<div class='grid2'><div class='card'><h2>Subscription level</h2><p class='muted'>Controls Creative Studio entitlement only. It does not grant ESP access.</p><form method='post' action='/owner/users/{escape(user_id, quote=True)}/plan'><select name='plan_id'><option value='free'{' selected' if user['plan_id']=='free' else ''}>Free</option><option value='base'{' selected' if user['plan_id']=='base' else ''}>Base</option><option value='pro'{' selected' if user['plan_id']=='pro' else ''}>Pro</option></select> <button>Set subscription</button></form></div>
-<div class='card'><h2>ESP access role</h2><p class='muted'>Only Mary/Kev owner control can activate this. Regular users cannot self-upgrade into ESP.</p><form method='post' action='/owner/users/{escape(user_id, quote=True)}/esp-role'><select name='role'><option value='regular'{' selected' if role=='regular' else ''}>Regular / Non-ESP</option><option value='creator'{' selected' if role=='creator' else ''}>ESP Creator</option><option value='agent'{' selected' if role=='agent' else ''}>ESP Agent</option><option value='both'{' selected' if role=='both' else ''}>ESP Creator + Agent</option></select> <button class='success'>Apply ESP role</button></form>{f"<form method='post' action='/owner/users/{escape(user_id, quote=True)}/esp-decline' style='margin-top:8px'><button class='danger'>Decline pending ESP request</button></form>" if latest_request_pending else ''}</div></div>
-<div class='card'><h2>Niche & profile</h2><div class='grid'><div class='metric'><small class='muted'>Primary niche</small><b>{escape((profile.get('niche') or 'Not selected').replace('_',' ').title())}</b></div><div class='metric'><small class='muted'>Sub-niche</small><b>{escape(profile.get('sub_niche') or '—')}</b></div><div class='metric'><small class='muted'>Network declaration</small><b>{escape((profile.get('network_status') or '—').replace('_',' ').title())}</b></div><div class='metric'><small class='muted'>TikTok</small><b>{escape('@'+membership.get('tiktok_handle') if membership.get('tiktok_handle') else '—')}</b></div></div>{f"<p><b>Audience:</b> {escape(profile.get('audience') or '')}</p>" if profile.get('audience') else ''}{f"<p><b>Goals:</b> {' · '.join(escape(g) for g in profile.get('goals',[]))}</p>" if profile.get('goals') else ''}</div>
+<div class='grid'><div class='metric'><small class='muted'>Subscription</small><b>{escape(str(user['plan_id']).upper())}</b></div><div class='metric'><small class='muted'>ESP role</small><b>{escape(esp_label)}</b></div><div class='metric'><small class='muted'>Creation projects</small><b>{int(data.get('projects') or 0)}</b></div><div class='metric'><small class='muted'>Progress uploads</small><b>{int(performance.get('total') or 0)}</b></div></div>
+<div class='grid2'><div class='card'><h2>Subscription level</h2><p class='muted'>Controls Creative Studio entitlement only. It does not grant ESP access.</p><form method='post' action='/owner/users/{escape(user_id, quote=True)}/plan'><select name='plan_id'><option value='free'{_selected(user['plan_id'],'free')}>Free</option><option value='base'{_selected(user['plan_id'],'base')}>Base</option><option value='pro'{_selected(user['plan_id'],'pro')}>Pro</option></select> <button>Set subscription</button></form></div>
+<div class='card'><h2>ESP access role</h2><p class='muted'>Only Mary/Kev owner control can activate this. Regular users cannot self-upgrade into ESP.</p><form method='post' action='/owner/users/{escape(user_id, quote=True)}/esp-role'><select name='role'><option value='regular'{_selected(role,'regular')}>Regular / Non-ESP</option><option value='creator'{_selected(role,'creator')}>ESP Creator</option><option value='agent'{_selected(role,'agent')}>ESP Agent</option><option value='both'{_selected(role,'both')}>ESP Creator + Agent</option></select> <button class='success'>Apply ESP role</button></form>{decline_html}</div></div>
+<div class='card'><h2>Niche & profile</h2><div class='grid'><div class='metric'><small class='muted'>Primary niche</small><b>{escape((profile.get('niche') or 'Not selected').replace('_',' ').title())}</b></div><div class='metric'><small class='muted'>Sub-niche</small><b>{escape(profile.get('sub_niche') or '—')}</b></div><div class='metric'><small class='muted'>Network declaration</small><b>{escape((profile.get('network_status') or '—').replace('_',' ').title())}</b></div><div class='metric'><small class='muted'>TikTok</small><b>{escape(tiktok_label)}</b></div></div>{audience_html}{goals_html}</div>
 <div class='card'><h2>Creation/activity categories</h2>{usage_html}</div>
 <div class='card'><h2>ESP training progress</h2><div class='grid'>{training_html}</div></div>
 <h2>ESP access request history</h2>{requests_html}
