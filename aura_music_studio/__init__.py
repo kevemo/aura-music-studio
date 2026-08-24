@@ -1,4 +1,6 @@
-"""4Infinity Creative Studios — powered by Elevate Souls Productions and Aura AI Systems.
+"""Pulsar-Frequency House — Powered by Elevate Souls Productions & Aura AI Systems.
+
+For Professional Creation Beyond The Cosmos.
 
 The ``aura_music_studio`` package identifier remains for backwards compatibility.
 """
