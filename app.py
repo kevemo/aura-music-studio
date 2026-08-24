@@ -9,6 +9,7 @@ identifier for existing installs, project data and deployment configuration.
 
 from aura_music_studio.api import app
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
+from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
@@ -72,6 +73,9 @@ from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
+from aura_music_studio.voice_house_api import router as voice_house_router
+from aura_music_studio.voice_house_assets_api import router as voice_house_assets_router
+from aura_music_studio.voice_house_portal import router as voice_house_portal_router
 
 # Final permission model:
 # 1. Free/Basic/Pro controls public creative features only.
@@ -100,7 +104,10 @@ app.include_router(creative_portal_router)
 # member_dashboard, so /video-studio and /image-designer open real media workspaces.
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
+# Aura Core v2 keeps the stable /aura-intelligence path while adding persistent memory,
+# attachments, tools and true token streaming through a separate realtime endpoint.
 app.include_router(aura_intelligence_router)
+app.include_router(aura_streaming_router)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
@@ -139,6 +146,12 @@ app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
+# Voice House uses explicit consent evidence, purpose-scoped permissions, conservative
+# similarity caps and immediate revocation. The asset selector is mounted separately so
+# raw server paths never need to be exposed to the browser.
+app.include_router(voice_house_router)
+app.include_router(voice_house_assets_router)
+app.include_router(voice_house_portal_router)
 # Song DNA v2: the mature editor remains the source/planning surface. The execution
 # console adds Generate → Audition → Reject/Commit, while lyric alignment keeps estimated
 # timestamps separate from verified/forced-aligned timing. The guard is registered before
