@@ -11,6 +11,7 @@ from aura_music_studio.api import app
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
+from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -91,6 +92,9 @@ install_social_access_control()
 # Aura Core's additional cross-media tools are installed centrally so normal and realtime
 # chat share the exact same tool registry, write gates and idempotency behavior.
 install_aura_tool_extensions()
+# Research/calculation tools wrap the already-installed creative tool registry. Web results
+# gain stable source ids and arithmetic uses a non-eval safe interpreter.
+install_aura_productivity_tools()
 # Regeneration reuses prior tool results rather than repeating side effects; edited threads
 # invalidate stale tool runs and branches receive independent copies of their attachments.
 install_aura_chat_hardening()
