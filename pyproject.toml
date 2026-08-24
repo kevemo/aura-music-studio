@@ -3,9 +3,11 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# Retained as a compatibility distribution identifier. The authoritative public
+# product brand is 4Infinity Creative Studios.
 name = "aura-music-studio"
 version = "0.18.0"
-description = "ESP Live Sound Studio — real-audio-first autonomous AI music creation and professional production platform powered by Aura"
+description = "4Infinity Creative Studios — music, video, image and creator intelligence powered by Elevate Souls Productions and Aura AI Systems"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
