@@ -61,9 +61,10 @@ app.include_router(creative_workspace_router)
 # ESP niche selection must be registered before the legacy Command Center route so
 # active ESP members enter the niche-personalised gateway first. Social-management
 # routes are nested under /command-center and enforce ESP/niche/affiliation access
-# independently at the API layer.
+# independently at the API layer. The private social API is deliberately omitted from
+# the public OpenAPI schema as an additional separation boundary.
 app.include_router(esp_niche_portal_router)
-app.include_router(social_management_router)
+app.include_router(social_management_router, include_in_schema=False)
 app.include_router(social_management_portal_router)
 
 app.include_router(daw_router)
