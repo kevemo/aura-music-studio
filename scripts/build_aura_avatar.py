@@ -3,7 +3,7 @@
 
 This orchestrator is deliberately fail-closed. A mesh that merely loads in Three.js is not
 sufficient. The candidate must pass reconstruction, rigging, facial/morph finalisation,
-authored animation, VRM 1.0 finalisation, mobile packaging, structural validation and the
+authored animation, mobile packaging, VRM 1.0 finalisation, structural validation and the
 strict Aura production-quality gate before it can atomically replace the deployed model.
 
 Recommended 2026 build-host stack:
@@ -12,8 +12,13 @@ Recommended 2026 build-host stack:
 - face: production DCC/face-rig stage providing VRM presets + Aura custom expressions +
   ARKit-compatible detailed morph targets
 - animation: authored/retargeted Aura action clips
-- VRM: VRM 1.0 humanoid + expressions + LookAt + SpringBone
 - mobile packaging: KTX2/Basis textures + Meshopt-compatible glTF compression
+- VRM finalisation LAST: VRM 1.0 humanoid + expressions + LookAt + SpringBone, added without
+  destroying the already-compressed geometry, morph, animation or texture data
+
+Mobile compression intentionally runs before VRM finalisation. General-purpose glTF optimisers
+may discard extension data they do not understand, so the final VRM stage must preserve the
+existing KTX2/Meshopt payload while adding the canonical VRM metadata.
 
 No third-party foundation model is vendored into Live Sound Studio. Build-host adapters are
 configured by environment commands and must create real artifacts or fail.
@@ -86,8 +91,8 @@ def build(reference_dir: Path, output: Path) -> dict:
         "rig": _stage_command("AURA_AVATAR_RIG_CMD"),
         "face": _stage_command("AURA_AVATAR_FACE_CMD"),
         "animate": _stage_command("AURA_AVATAR_ANIMATION_CMD"),
-        "vrm": _stage_command("AURA_AVATAR_VRM_CMD"),
         "mobile": _stage_command("AURA_AVATAR_MOBILE_CMD"),
+        "vrm": _stage_command("AURA_AVATAR_VRM_CMD"),
     }
 
     with tempfile.TemporaryDirectory(prefix="aura-avatar-build-") as tmp:
@@ -96,8 +101,8 @@ def build(reference_dir: Path, output: Path) -> dict:
         rigged_mesh = work / "02_aura_rigged.glb"
         facial_mesh = work / "03_aura_face.glb"
         animated_mesh = work / "04_aura_animated.glb"
-        vrm_model = work / "05_aura_vrm.glb"
-        mobile_model = work / "06_aura_mobile.glb"
+        mobile_model = work / "05_aura_mobile.glb"
+        final_model = work / "06_aura_vrm.glb"
 
         common = {
             "reference_dir": reference_dir,
@@ -131,34 +136,36 @@ def build(reference_dir: Path, output: Path) -> dict:
         )
         _require_file(animated_mesh, "Aura authored animation and locomotion finalisation")
 
-        _run(
-            commands["vrm"],
-            {**common, "input": animated_mesh, "output": vrm_model},
-            "Aura VRM 1.0, LookAt, SpringBone and semantic-material finalisation",
-        )
-        _require_file(vrm_model, "Aura VRM 1.0 finalisation")
-
-        runtime_validation = validate_aura_model(vrm_model)
-        if not runtime_validation.get("ready_for_embodied_runtime"):
-            raise BuildError(
-                "Aura failed the pre-mobile VRM runtime gate: " + json.dumps(runtime_validation, indent=2)
-            )
-
+        # Compress before VRM extension injection. Generic optimisers can discard unknown VRM
+        # extension data, so the final metadata stage must come last.
         _run(
             commands["mobile"],
-            {**common, "input": vrm_model, "output": mobile_model},
+            {**common, "input": animated_mesh, "output": mobile_model},
             "Aura mobile GLB packaging and compression",
         )
         _require_file(mobile_model, "Aura mobile GLB packaging and compression")
 
-        production_validation = validate_aura_production_model(mobile_model)
+        _run(
+            commands["vrm"],
+            {**common, "input": mobile_model, "output": final_model},
+            "Aura VRM 1.0, LookAt, SpringBone and semantic-material finalisation",
+        )
+        _require_file(final_model, "Aura VRM 1.0 finalisation")
+
+        runtime_validation = validate_aura_model(final_model)
+        if not runtime_validation.get("ready_for_embodied_runtime"):
+            raise BuildError(
+                "Aura failed the VRM runtime gate: " + json.dumps(runtime_validation, indent=2)
+            )
+
+        production_validation = validate_aura_production_model(final_model)
         if not production_validation.get("production_ready"):
             raise BuildError(
                 "Final Aura model failed the strict production gate: "
                 + json.dumps(production_validation, indent=2)
             )
 
-        energy_validation = validate_aura_live_energy_materials(mobile_model)
+        energy_validation = validate_aura_live_energy_materials(final_model)
         if not energy_validation.get("ready"):
             raise BuildError(
                 "Final Aura model failed the live eyes/heart/circuitry energy gate: "
@@ -167,7 +174,7 @@ def build(reference_dir: Path, output: Path) -> dict:
 
         output.parent.mkdir(parents=True, exist_ok=True)
         staging = output.with_suffix(output.suffix + ".staging")
-        shutil.copy2(mobile_model, staging)
+        shutil.copy2(final_model, staging)
         os.replace(staging, output)
         return {
             "installed": True,
