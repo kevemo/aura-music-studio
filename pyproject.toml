@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # Retained as a compatibility distribution identifier. The authoritative public
-# product brand is 4Infinity Creative Studios.
+# product brand is Pulsar-Frequency House.
 name = "aura-music-studio"
 version = "0.18.0"
-description = "4Infinity Creative Studios — music, video, image and creator intelligence powered by Elevate Souls Productions and Aura AI Systems"
+description = "Pulsar-Frequency House — professional music, video, image, voice and creator intelligence powered by Elevate Souls Productions & Aura AI Systems"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
@@ -62,7 +62,7 @@ aura = "aura_music_studio.cli:app"
 include = ["aura_music_studio*"]
 
 [tool.setuptools.package-data]
-aura_music_studio = ["static/*.webp"]
+aura_music_studio = ["static/*.webp", "static/*.svg"]
 
 [tool.ruff]
 line-length = 100
