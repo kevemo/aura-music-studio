@@ -30,8 +30,11 @@ from aura_music_studio.esp_level_up import (
     install_esp_access_subscription_separation,
     router as esp_level_up_router,
 )
+from aura_music_studio.esp_level_up_gateway import router as esp_level_up_gateway_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
+from aura_music_studio.esp_owner_access_portal import router as esp_owner_access_router
 from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
+from aura_music_studio.esp_social_access_control import install_social_access_control
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
@@ -62,11 +65,13 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
 
-# Enforce the final permission model before any ESP owner/member route handles requests:
-# Free/Basic/Pro is the public creative subscription; ESP Creator/Agent/Both is a separate
-# Mary/Kev-controlled permission. Approving or revoking ESP access must not silently change
-# a user's creative plan or billing state.
+# Final permission model:
+# 1. Free/Basic/Pro controls public creative features only.
+# 2. ESP Creator/Agent/Both is a separate Mary/Kev-controlled permission.
+# 3. Social Media Centre additionally requires ESP-only affiliation, niche selection and
+#    no owner suspension. These policies are installed before requests are handled.
 install_esp_access_subscription_separation()
+install_social_access_control()
 
 # ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
 # Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
@@ -95,11 +100,11 @@ app.include_router(compute_node_router)
 app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
 
-# ESP niche selection must be registered before the legacy Command Center route so
-# active ESP members enter the niche-personalised gateway first. The Level Up Hub is the
-# private ESP operating system; all social-management, analytics, approval and media-library
-# routes live below /command-center and independently enforce ESP role + niche + no-other-
-# network affiliation at the API boundary.
+# Canonical ESP gateway is first: signed-in regular users can request ESP verification,
+# active ESP users are sent through niche selection and then into Level Up Hub. The older
+# command center remains mounted later for training-resource routes, but no longer owns the
+# top-level /command-center user journey.
+app.include_router(esp_level_up_gateway_router)
 app.include_router(esp_niche_portal_router)
 app.include_router(esp_level_up_router)
 app.include_router(esp_progress_portal_router)
@@ -109,11 +114,11 @@ app.include_router(esp_social_insights_router)
 app.include_router(esp_social_portal_overlay_router)
 app.include_router(social_management_portal_router)
 
-# Owner login uses an opaque hashed server-side session. The command centre and enhanced
-# user directory sit above legacy owner action routes, which remain available through a
-# temporary server-only compatibility layer until each mature backup/compute/payment
-# handler has been migrated to owner_authorized() directly.
+# Owner login uses an opaque hashed server-side session. Mary/Kev also have a dedicated
+# ESP access console for role activation/revocation, Social Media Centre suspension and
+# explicit Agent→Creator assignments.
 app.include_router(owner_auth_router)
+app.include_router(esp_owner_access_router)
 app.include_router(owner_control_center_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
