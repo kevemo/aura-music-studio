@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import tempfile
 from pathlib import Path
 
 from .aura_agent_core import (
@@ -129,6 +130,83 @@ def _safe_regenerate(self: AuraAgent, *, member, thread_id: str) -> dict:
     }
 
 
+def _truthy_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _auto_perceive(store: AuraChatStore, user_id: str, thread_id: str, item: dict) -> dict:
+    """Populate semantic context while the upload is idle, before the member sends a turn."""
+    if not _truthy_env("AURA_CHAT_AUTO_PERCEPTION", True):
+        return item
+    kind = str(item.get("kind") or "")
+    path = Path(str(item.get("stored_path") or "")).resolve()
+    if not path.is_file() or kind not in {"image", "audio", "video"}:
+        return item
+    try:
+        from .aura_multimodal import AuraVisionService, _sample_video
+        from .speech import AuraSpeechService
+
+        text = None
+        metadata = dict(item.get("metadata") or {})
+        if kind == "image":
+            vision = AuraVisionService()
+            if not vision.configured:
+                return item
+            analysis = vision.analyze_images(
+                [path],
+                "Describe this uploaded image for the current Aura conversation. Read visible text, explain composition and objects, and note useful editing/creative details. Do not identify real people.",
+            )
+            text = "Aura visual analysis:\n" + analysis
+            metadata.update({"vision_analyzed": True, "vision_model": vision.model})
+        elif kind == "audio":
+            speech = AuraSpeechService()
+            diagnostics = speech.diagnostics()
+            available = bool(
+                diagnostics.get("stt_command_configured")
+                or (diagnostics.get("whisper_cli") and diagnostics.get("whisper_model_configured"))
+            )
+            if not available:
+                return item
+            transcript = speech.transcribe(path).strip()
+            if transcript:
+                text = "Aura audio transcript:\n" + transcript
+                metadata["audio_transcribed"] = True
+        elif kind == "video" and _truthy_env("AURA_CHAT_AUTO_VIDEO_PERCEPTION", False):
+            vision = AuraVisionService()
+            if not vision.configured:
+                return item
+            with tempfile.TemporaryDirectory(prefix="aura-auto-video-") as tmp:
+                frames = _sample_video(path, Path(tmp))
+                analysis = vision.analyze_images(
+                    frames,
+                    "These are chronological sampled frames from one uploaded video. Summarize the visual sequence, visible text, continuity, composition and likely edit opportunities. State that this is sampled-frame analysis rather than frame-perfect review.",
+                )
+            text = "Aura sampled-frame video analysis:\n" + analysis
+            metadata.update({"video_vision_analyzed": True, "sampled_frames": len(frames), "vision_model": vision.model})
+        if text is None:
+            return item
+        with store._connect() as con:
+            con.execute(
+                "UPDATE aura_chat_attachments SET extracted_text=?,metadata_json=? WHERE id=? AND user_id=? AND thread_id=?",
+                (text[:80000], json.dumps(metadata, ensure_ascii=False, default=str), item["id"], user_id, thread_id),
+            )
+        return store.attachment(user_id, thread_id, item["id"]) or item
+    except Exception as exc:
+        metadata = {**(item.get("metadata") or {}), "auto_perception_error": f"{type(exc).__name__}: {exc}"}
+        try:
+            with store._connect() as con:
+                con.execute(
+                    "UPDATE aura_chat_attachments SET metadata_json=? WHERE id=? AND user_id=? AND thread_id=?",
+                    (json.dumps(metadata, ensure_ascii=False), item["id"], user_id, thread_id),
+                )
+        except Exception:
+            pass
+        return store.attachment(user_id, thread_id, item["id"]) or item
+
+
 def install_aura_chat_hardening() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -137,6 +215,11 @@ def install_aura_chat_hardening() -> None:
     original_edit = AuraChatStore.edit_user_message
     original_fork = AuraChatStore.fork_thread
     original_delete = AuraChatStore.delete_thread
+    original_add_attachment = AuraChatStore.add_attachment
+
+    def add_attachment(self: AuraChatStore, user_id: str, thread_id: str, **kwargs):
+        item = original_add_attachment(self, user_id, thread_id, **kwargs)
+        return _auto_perceive(self, user_id, thread_id, item)
 
     def edit_user_message(self: AuraChatStore, user_id: str, thread_id: str, message_id: str, content: str):
         with self._connect() as con:
@@ -186,6 +269,7 @@ def install_aura_chat_hardening() -> None:
         original_delete(self, user_id, thread_id)
         shutil.rmtree(owned_dir, ignore_errors=True)
 
+    AuraChatStore.add_attachment = add_attachment
     AuraChatStore.edit_user_message = edit_user_message
     AuraChatStore.fork_thread = fork_thread
     AuraChatStore.delete_thread = delete_thread
