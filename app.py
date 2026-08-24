@@ -1,12 +1,17 @@
-"""Production entrypoint for Elevate Souls Productions Presents: The Live Sound Studio.
+"""Production entrypoint for 4Infinity Creative Studios.
 
 Run locally:
     uvicorn app:app --host 0.0.0.0 --port 8000
+
+The legacy ``aura_music_studio`` Python package name is retained as a compatibility
+identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.daw_api import router as daw_router
 from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
 from aura_music_studio.daw_portal import router as daw_portal_router
@@ -33,6 +38,14 @@ from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
+
+# ``aura_music_studio.api`` already registers the legacy public homepage. Remove only
+# that route and replace it with the 4Infinity Creative Studios master landing page.
+# Pricing, sign-in, membership, studio and API routes remain intact.
+app.router.routes[:] = [
+    route for route in app.router.routes if getattr(route, "path", None) != "/"
+]
+app.include_router(creative_portal_router)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
@@ -62,5 +75,9 @@ app.include_router(take_router)
 app.include_router(take_portal_router)
 app.include_router(source_detection_router)
 app.include_router(system_router)
+
+# Applied last so all legacy text emitted by older modules is rewritten at the public
+# HTTP boundary. Binary media responses are not modified.
+app.add_middleware(BrandMigrationMiddleware)
 
 __all__ = ["app"]
