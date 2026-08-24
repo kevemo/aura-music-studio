@@ -8,6 +8,7 @@ identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
@@ -89,6 +90,9 @@ install_social_access_control()
 # Aura Core's additional cross-media tools are installed centrally so normal and realtime
 # chat share the exact same tool registry, write gates and idempotency behavior.
 install_aura_tool_extensions()
+# Regeneration reuses prior tool results rather than repeating side effects; edited threads
+# invalidate stale tool runs and branches receive independent copies of their attachments.
+install_aura_chat_hardening()
 
 # ``aura_music_studio.api`` already registers historical public/member/owner surfaces.
 # Replace only the surfaces now owned by Pulsar-Frequency House. The old owner login/logout
