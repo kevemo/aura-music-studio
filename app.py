@@ -10,6 +10,7 @@ identifier for existing installs, project data and deployment configuration.
 from aura_music_studio.api import app
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
+from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -120,6 +121,7 @@ app.include_router(member_dashboard_router)
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
+app.include_router(aura_multimodal_router)
 
 app.include_router(brand_router)
 app.include_router(discovery_router)
