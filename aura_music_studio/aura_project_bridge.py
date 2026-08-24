@@ -90,6 +90,18 @@ def _ensure_creative_store(project: Path, project_name_value: str) -> CreativePr
     return creative
 
 
+def _public_asset(asset):
+    if asset is None:
+        return None
+    return {
+        "id": asset.id,
+        "name": asset.name,
+        "kind": asset.kind,
+        "sha256": asset.sha256,
+        "analysis": asset.analysis,
+    }
+
+
 @router.post("/aura-intelligence/api/threads/{thread_id}/attachments/{attachment_id}/promote")
 def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachmentRequest, request: Request):
     member = _member(request)
@@ -105,26 +117,50 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Project not found") from exc
 
+    ledger = RightsLedger(project / ".aura_rights")
+    digest = str(attachment.get("sha256") or ledger.sha256(source))
     library = AssetLibrary(project)
+    creative = _ensure_creative_store(project, name)
+    manifest = creative.load()
+
+    # A Creative DNA reference is the canonical promotion marker. If the same bytes were
+    # already promoted, return the existing project objects without recording a second
+    # rights event or rewriting the project asset index.
+    existing_reference = next(
+        (item for item in manifest.references if str(item.metadata.get("sha256") or "") == digest),
+        None,
+    )
+    existing_asset = next((item for item in library.list() if item.sha256 == digest), None)
+    if existing_reference is not None:
+        return {
+            "project_name": name,
+            "attachment_id": attachment_id,
+            "project_source_ref": existing_reference.source_ref,
+            "asset": _public_asset(existing_asset),
+            "creative_reference": existing_reference.model_dump(mode="json"),
+            "rights_confirmed": True,
+            "rights_recorded": bool(existing_reference.metadata.get("rights_record_id")),
+            "raw_private_chat_path_exposed": False,
+            "idempotent": True,
+        }
+
     detected = library.detect_kind(source)
-    asset = None
-    rights_record_id = None
+    asset = existing_asset
+    rights_record_id = asset.rights_record_id if asset is not None else None
 
     if detected != "unsupported":
-        # AssetLibrary is sha-idempotent at the file/index level and records the rights attestation.
-        asset = library.ingest(
-            source,
-            kind=detected,
-            rights_basis="user_owned_or_authorized_chat_attachment",
-            attestation=body.attestation,
-            tags=["aura-chat", "promoted"],
-            notes=f"Promoted from private Aura attachment {attachment_id}",
-        )
+        if asset is None:
+            asset = library.ingest(
+                source,
+                kind=detected,
+                rights_basis="user_owned_or_authorized_chat_attachment",
+                attestation=body.attestation,
+                tags=["aura-chat", "promoted"],
+                notes=f"Promoted from private Aura attachment {attachment_id}",
+            )
+            rights_record_id = asset.rights_record_id
         project_relative = asset.path
-        rights_record_id = asset.rights_record_id
     else:
-        ledger = RightsLedger(project / ".aura_rights")
-        digest = ledger.sha256(source)
         reference_dir = project / "input" / "references"
         reference_dir.mkdir(parents=True, exist_ok=True)
         destination = reference_dir / f"{digest[:12]}_{_safe_name(str(attachment.get('name') or source.name))}"
@@ -140,55 +176,32 @@ def promote_attachment(thread_id: str, attachment_id: str, body: PromoteAttachme
         rights_record_id = rights.id
         project_relative = destination.relative_to(project).as_posix()
 
-    creative = _ensure_creative_store(project, name)
-    manifest = creative.load()
-    digest = str(attachment.get("sha256") or "")
-    existing = next(
-        (
-            item
-            for item in manifest.references
-            if str(item.metadata.get("sha256") or "") == digest
-            or item.source_ref == project_relative
-        ),
-        None,
+    reference = CreativeReference(
+        kind=_reference_kind(attachment, source),
+        label=Path(str(attachment.get("name") or source.name)).name[:200],
+        source_ref=project_relative,
+        usage=body.usage,
+        rights_confirmed=True,
+        metadata={
+            "sha256": digest,
+            "aura_chat_attachment_id": attachment_id,
+            "promoted_by_user_id": member.user_id,
+            "rights_record_id": rights_record_id,
+        },
     )
-    if existing is None:
-        reference = CreativeReference(
-            kind=_reference_kind(attachment, source),
-            label=Path(str(attachment.get("name") or source.name)).name[:200],
-            source_ref=project_relative,
-            usage=body.usage,
-            rights_confirmed=True,
-            metadata={
-                "sha256": digest,
-                "aura_chat_attachment_id": attachment_id,
-                "promoted_by_user_id": member.user_id,
-                "rights_record_id": rights_record_id,
-            },
-        )
-        manifest = creative.add_reference(reference)
-        existing = next(item for item in manifest.references if item.id == reference.id)
+    manifest = creative.add_reference(reference)
+    saved_reference = next(item for item in manifest.references if item.id == reference.id)
 
     return {
         "project_name": name,
         "attachment_id": attachment_id,
         "project_source_ref": project_relative,
-        "asset": (
-            {
-                "id": asset.id,
-                "name": asset.name,
-                "kind": asset.kind,
-                "sha256": asset.sha256,
-                "analysis": asset.analysis,
-            }
-            if asset is not None
-            else None
-        ),
-        "creative_reference": existing.model_dump(mode="json"),
+        "asset": _public_asset(asset),
+        "creative_reference": saved_reference.model_dump(mode="json"),
         "rights_confirmed": True,
         "rights_recorded": bool(rights_record_id),
         "raw_private_chat_path_exposed": False,
-        "idempotent": existing is not None and existing.metadata.get("aura_chat_attachment_id") != attachment_id,
+        "idempotent": False,
     }
 
 
