@@ -31,6 +31,7 @@ from aura_music_studio.esp_progress_portal import router as esp_progress_portal_
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
+from aura_music_studio.media_studios import router as media_studios_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_auth import OwnerLegacyCompatibilityMiddleware
@@ -72,6 +73,9 @@ app.router.routes[:] = [
     route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES
 ]
 app.include_router(creative_portal_router)
+# Dedicated media routes are registered before the compatibility redirects living in
+# member_dashboard, so /video-studio and /image-designer open real media workspaces.
+app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
 app.include_router(aura_intelligence_router)
 
