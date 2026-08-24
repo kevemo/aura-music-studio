@@ -1,318 +1,315 @@
-# Elevate Souls Productions Presents: The Live Sound Studio
+# 4Infinity Creative Studios
 
-## Music Making for Professionals · Powered by Aura
+**Music, Video, Image & Creator Intelligence**  
+**Powered by Elevate Souls Productions and Aura AI Systems**
 
-**The Live Sound Studio v0.12.0** is ESP's real-audio-first AI music creation, recording and production platform. **Aura** is the internal autonomous producer/orchestrator.
+4Infinity Creative Studios is the master product brand for ESP's expanding AI creation platform. The existing real-audio music engine, generative DAW, Aura producer, memberships, private project system, owner controls and ESP Creator Network hub are being brought together with video and image creation under one project-centred creative environment.
 
-The project is being built as a generative DAW and self-hostable music service rather than a single text-to-song endpoint. It combines original-song creation, backing tracks, upload-to-full-production, recording, consent-gated vocal tools, stem separation, take lanes/comping, effects, tuning, mixing, mastering, project history, memberships, owner administration, independent public addressing and owner-controlled migration in one tenant-isolated application.
+> Legacy repository, Python package, cookie and environment-variable names may still use `aura-music-studio`, `aura_music_studio` or `LSS_*`. Those identifiers are retained strictly for backwards compatibility and are not the public product name.
 
-## Real-audio guarantee
+## Product direction
 
-**MIDI, MusicXML, notation, SoundFonts and score-guide audio are control data only. They are never accepted as the finished music.**
+4Infinity is designed around a simple principle: generation is only the beginning.
 
-Aura may use symbolic information internally to preserve notes, chords, melody, harmony, rhythm, form and timing. Final audible exports must originate from:
+A member should be able to:
+
+1. describe an idea by voice or text;
+2. upload lyrics, audio, images, video, sketches or other authorised references;
+3. let Aura create an initial result;
+4. change individual details without throwing the whole project away;
+5. preserve versions, takes, stems, scenes and project history;
+6. move between music, video, image and creator workflows while keeping shared project context.
+
+Aura is the conversational creative director and orchestration layer across the platform.
+
+## Current integrated foundation
+
+### 4Infinity public experience
+
+- new cosmic 4Infinity Creative Studios landing experience;
+- authoritative global brand layer that rewrites legacy public product copy;
+- membership, sign-up, sign-in and pricing workflows;
+- Free / Base / Pro server-side entitlements;
+- private member projects;
+- owner approval controls;
+- PWA/public discovery architecture;
+- system emails automatically rebranded to 4Infinity;
+- protected ESP Creator Network surfaces separated from normal members.
+
+### Music Studio — working core
+
+The music system is the most developed production engine currently underneath 4Infinity.
+
+- prompt → original complete song project;
+- user lyrics → complete song;
+- instrumental and backing-track creation;
+- browser recording;
+- Build Around Upload;
+- real-audio-first rendering;
+- multitrack sessions;
+- generated and recorded stems;
+- take lanes and comping;
+- non-destructive region edits;
+- automation;
+- fader, pan and effect racks;
+- Aura Tune;
+- AutoMix;
+- stem separation;
+- mastering;
+- revision history and restore;
+- asset rights/provenance records;
+- WAV/MP3 and detailed production outputs.
+
+### Real-audio guarantee
+
+MIDI, MusicXML, notation, score data and other symbolic formats may guide timing, melody, harmony or arrangement, but they are control data only.
+
+Final audible exports must originate from:
 
 - a neural music/singing waveform engine;
-- real recorded/uploaded audio;
+- real recorded or uploaded audio;
 - or a hybrid production constructed from real/neural waveform layers.
 
-If a real-audio renderer is unavailable, the Studio fails the render instead of silently substituting General MIDI or a SoundFont master.
+If the required real-audio renderer is unavailable, the system should fail the render rather than silently substitute General MIDI or a SoundFont as the finished master.
 
-## Current product architecture
+## Aura Creative Copilot
 
-### Public product + membership
-
-- ESP-branded landing page, pricing, sign-up and sign-in
-- exact ESP logo packaged with the app
-- shared black/cosmic-purple, gold, magenta, silver and ruby visual identity
-- public SEO/use-case pages, sitemap and robots controls
-- installable PWA manifest with a public-only cache allow-list
-- membership requests routed to `elevatesoulsproductions@gmail.com`
-- Free / Base / Pro server-side entitlements
-- ESP owner approval dashboard
-- PayPal manual-payment bridge + verified 31-day billing periods
-- Base daily confirmed-track accounting
-- private per-member project namespaces
-- account/data export and deletion tooling
-
-### Membership progression
-
-**Free — $0**
-
-Basic creative access, Aura Producer, songwriting/lyric assistance, starter instruments/FX, basic previews and entry-level Studio functions.
-
-**Base — $4.99/month**
-
-One confirmed full track per day, with regenerations of that draft until the member confirms the result. Includes the core full-song/backing-track workflow, WAV/MP3 finished exports, browser recording, Build Around Upload, standard Aura Tune/FX/AutoMix, useful mastering and reduced splitter modes.
-
-**Pro — $9.99/month**
-
-Unlimited full-song production and the complete enabled Studio: editable multitrack Build Around, full splitter/stems, detailed downloads, Take Manager, phrase comping, automation, advanced instrument variants, Aura FX Designer, trusted plugin rack, advanced/custom Aura Tune, reference/album mastering, Sample Lab, Style DNA, generative DAW edits, consent-approved voice tools, spatial/video/tone engineering and priority production jobs.
-
-## Music creation
-
-- Prompt → original complete song project
-- User lyrics → full song
-- local/self-hosted lyric-generation route
-- instrumental and backing-track creation
-- genre/subgenre/mood/energy/BPM/key/meter/duration controls
-- genre-aware production DNA
-- structural song-section control
-- authorized reference audio
-- weighted multi-reference Style DNA
-- model-independent production manifests
-
-## Build Around Upload
-
-Upload or record a performance and let Aura create the rest of the production around it.
+Aura is intended to remain present through the entire creative process rather than functioning as a one-shot prompt box.
 
 Examples:
 
-- **lead vocal → full band** while preserving the uploaded vocal as the anchor;
-- **guitar → drums/bass/keys/other instruments + optional original lead/backing vocals**;
-- piano, bass, drums, synth, strings and other instrument roles can also anchor the production.
+- “Keep my uploaded vocal exactly as the anchor and build the band around it.”
+- “Make only the final chorus bigger.”
+- “Add harmonies but keep the lead vocal unchanged.”
+- “Change the background of the artwork without changing the person.”
+- “Make scene four darker and leave every other scene alone.”
+- “Turn this song structure into a music-video storyboard.”
 
-Base can create the completed production. Pro can create separate editable generated stems/tracks in `aura_session.json`.
+The architecture already includes spoken Aura routes, project-aware producer planning, controlled web research and persistent project/session state.
+
+## Video Studio
+
+The 4Infinity product architecture now treats video as a first-class creative workspace rather than an unrelated external tool.
+
+Planned/integration targets include:
+
+- prompt → video;
+- song → music video;
+- upload/reference-guided video creation;
+- shot and scene timeline;
+- per-scene regeneration;
+- object/background/style changes;
+- lyric/beat/section synchronisation;
+- character and visual continuity controls;
+- image-to-video workflows;
+- Aura-directed revisions;
+- reusable project references and style DNA;
+- export preparation for social and music platforms.
+
+Video functionality must clearly report which renderer/provider is active and must not pretend that a generated result exists when no renderer is available.
+
+## Image Studio
+
+The image workspace is being integrated around the same editable-project philosophy.
+
+Target workflows include:
+
+- artwork and album/single covers;
+- posters and promotional creative;
+- creator social assets;
+- prompt-to-image;
+- reference-image workflows;
+- localised object/background edits;
+- text/layout revisions;
+- brand kits and reusable visual DNA;
+- multi-format campaign exports;
+- Aura-guided iteration.
+
+## Build Around Upload
+
+Upload or record a performance and let Aura create the production around the source material.
+
+Examples:
+
+- lead vocal → full band while preserving the original vocal;
+- guitar → drums, bass, keys and supporting instrumentation;
+- piano, bass, drums, synth, strings or other instruments as the anchor;
+- existing audio → harmony, mix, master and supporting production;
+- future cross-media projects can use the finished music as the timing/story spine for video and artwork.
 
 ## Recording Studio
 
-Base and Pro can record directly in the browser:
+Base and Pro music workflows include browser recording infrastructure for:
 
-- microphone/input-device selection
-- vocal/instrument role
-- BPM + metronome
-- count-in
-- input level meter
-- record/stop/discard/preview
-- dry-capture workflow
-- browser-format decoding and normalization to **24-bit / 48 kHz WAV**
-- automatic private asset-library registration and rights attestation
+- microphone/input selection;
+- vocal/instrument role;
+- BPM and metronome;
+- count-in;
+- input level display;
+- record/stop/discard/preview;
+- dry capture;
+- format decoding and normalisation;
+- automatic private asset registration;
+- rights attestation.
 
-## Instrument switchboard
+## Voice and performance
 
-Aura's arrangement model supports selectable instrument families/performance types rather than a single generic `guitar` or `drums` prompt, including multiple guitar, bass, drum-kit, keyboard/piano, synth, strings, brass, woodwind, percussion and vocal-ensemble variants.
+- Harmony Architect;
+- backing-vocal generation paths;
+- consent-gated Aura Voice Profiles;
+- approved voice-conversion adapters;
+- provenance and rights records;
+- natural/classic/hard/robot/custom tuning modes;
+- vocal and instrument FX banks.
 
-Advanced performance types are tier-gated.
-
-## Aura Tune + effects
-
-- Natural / Classic / Hard / Robot / custom-scale tuning modes
-- key/scale controls
-- intensity, retune speed and humanization
-- built-in offline correction fallback
-- optional professional local tuning backend
-- vocal, guitar, bass, drum and creative FX preset banks
-- pedal/modulation-style processors
-- AI FX Designer constrained to approved DSP types
-- trusted owner-approved VST/LV2/plugin catalog hooks for Pro
+4Infinity is not intended to provide unrestricted impersonation tooling. Voice workflows are designed around the voice owner's consent or explicit authorisation.
 
 ## Generative DAW
 
-- persistent `StudioSession`
-- real waveform clips + symbolic control clips
-- non-destructive region replace/repaint/extend
-- generated complementary tracks
-- automation curves
-- fader/pan/effect racks
-- **take lanes**
-- newest generated take becomes the default audition
-- choose an older whole take
-- phrase-level comping from multiple takes
-- previous takes remain intact
-- project/session revision history and restore
+The current production architecture includes:
 
-## Mixing, splitter and mastering
+- persistent StudioSession state;
+- real waveform clips plus symbolic control clips;
+- region replace/repaint/extend;
+- complementary generated tracks;
+- take lanes;
+- phrase-level comping;
+- automation curves;
+- mixing controls;
+- project revisions;
+- restore points;
+- background render jobs.
 
-- genre-aware editable AutoMix
-- 2-, 4-, 6-stem and detailed separation routes
-- advanced separator → audio-separator/Demucs fallbacks
-- background splitter jobs
-- mastering character presets
-- LUFS/true-peak control
-- EQ/stereo-width controls
-- reference mastering when the local backend is installed
-- album/EP consistency workflow
-- translation/mono checks
-- background mastering/tuning/restoration/spatial jobs
+## Mixing, separation and mastering
 
-## Vocals + harmony
+- genre-aware AutoMix;
+- 2-, 4-, 6-stem and detailed separation routes;
+- Demucs/audio-separator fallbacks where configured;
+- mastering characters and intensity;
+- LUFS and true-peak controls;
+- EQ and stereo width;
+- reference mastering when supported;
+- album/EP consistency workflows;
+- translation and mono checks;
+- restoration and spatial processing jobs.
 
-- Harmony Architect
-- contextual ACE-Step backing-vocal generation
-- scored harmony control paths
-- consent-gated Aura Voice Profiles
-- Seed-VC/RVC-style approved voice adapters
-- voice provenance/rights records
+## Memberships
 
-The Studio does not provide unrestricted impersonation tooling. Voice conversion is designed around the voice owner's consent or explicit authorization.
+### Free — $0
 
-## Aura speech + Internet
+- Aura creative guidance;
+- songwriting and ideation;
+- starter creation tools;
+- basic previews;
+- entry-level Studio functions.
 
-- offline-first speech-to-text hooks
-- offline/self-hosted text-to-speech hooks
-- spoken Aura producer commands
-- controlled HTTPS Web Gateway
-- SSRF/private-network blocking
-- self-hosted SearXNG support for free public-web search
-- local-first reasoning through Ollama-compatible services
+### Base — $4.99/month
 
-Commercial search/chat APIs are not required by the core architecture.
+- one confirmed full track per day;
+- regenerations of the active draft until confirmation;
+- core full-song and backing-track workflow;
+- browser recording;
+- Build Around Upload;
+- useful mastering;
+- standard tuning/FX/AutoMix;
+- WAV/MP3 finished exports.
 
-## Public discovery
+### Pro — $9.99/month
 
-Once ESP gives Aura a reachable hostname or public IP, the app already exposes public search-focused pages for:
+- unlimited enabled full-song production;
+- full multitrack editing;
+- advanced stems and detailed downloads;
+- take manager and phrase comping;
+- advanced instrument/FX/tuning workflows;
+- advanced/reference mastering;
+- Style DNA and Sample Lab;
+- consent-approved voice features;
+- advanced editing and production tools;
+- the full enabled 4Infinity creative-suite feature set as video/image integrations activate.
 
-- `/ai-music-studio`
-- `/ai-song-generator`
-- `/backing-track-maker`
-- `/stem-splitter`
-- `/ai-mastering`
-- `/ai-vocal-studio`
+## Elevate Souls Productions Creator Network Hub
 
-`robots.txt` and `sitemap.xml` expose only the intended public marketing surfaces. Member dashboards, projects, owner tools, membership actions and private audio routes are deliberately excluded. The service worker caches only a small public allow-list and never caches member/project/payment routes.
+4Infinity also contains a private, permission-gated ESP side.
 
-## Self-hosted public access — no paid domain required
+Regular studio members cannot see the internal Creator Network materials.
 
-The v0.12 stack includes **Aura Public Address Manager**. Cloudflare is not part of this deployment path.
+Supported permission concepts include:
 
-Supported modes:
+- Creator;
+- Agent;
+- Creator + Agent;
+- Owner.
 
-- local-only;
-- direct public IP;
-- FreeDNS/afraid.org free hostname;
-- DuckDNS free hostname.
+The ESP Command Center contains role-gated training and operations resources, progress tracking, access requests and owner controls. Approved ESP members can receive the configured Base entitlement without exposing ESP-only content to the normal customer population.
 
-Aura can monitor the current public address, maintain the selected DDNS record, inspect router UPnP where available, warn about likely CGNAT and report HTTPS/DNS readiness in the ESP owner dashboard.
+## Owner administration
 
-Caddy is included as the optional locally run public reverse proxy/TLS terminator. With a real free hostname that resolves to the Studio host and reachable ports 80/443, it can manage browser-trusted HTTPS automatically.
+The protected owner layer includes infrastructure for:
 
-The main FastAPI service binds only to `127.0.0.1:8000` on the host in the default Docker configuration; public traffic enters through the Caddy profile instead of exposing the application server directly.
+- membership approval;
+- payment verification;
+- ESP access approval/revocation;
+- role changes;
+- usage/operations visibility;
+- compute and service status;
+- backups and migration;
+- private owner tools.
 
-See [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md).
+Owner-facing logic remains protected by authentication and is not part of the public sitemap or cache allow-list.
 
-## Secure self-host initialization
+## Security and privacy principles
 
-From a Git checkout, before installing the package:
+- member project namespaces are isolated;
+- private routes are excluded from public discovery;
+- service-worker caching excludes private/member/payment surfaces;
+- security headers are enabled;
+- write-origin protection is supported;
+- authentication rate limiting is supported;
+- uploaded assets carry rights/provenance metadata;
+- binary project/media routes are not modified by the branding middleware;
+- ESP internal resources remain role-gated.
 
-```bash
-python scripts/setup_self_host.py --provider direct
-```
+## Self-hosting and compute
 
-Or, after installing the package:
+The repository already contains self-hosted deployment infrastructure, public-address management, compute-node concepts and Docker profiles for local/remote AI services.
 
-```bash
-aura self-host-init --provider direct
-```
+Existing compatibility environment variables continue to use the `LSS_*` prefix for now. They must not be renamed casually because deployed systems may already depend on them.
 
-For DuckDNS:
+## Development
 
-```bash
-aura self-host-init --provider duckdns --duckdns-subdomain esp-live-sound-studio
-```
-
-For FreeDNS:
-
-```bash
-aura self-host-init --provider freedns --hostname your-selected-free-host.example
-```
-
-The initializer generates the ESP owner-admin/provenance secrets itself. DDNS tokens are deliberately **not accepted on the command line**, so they do not land in shell history.
-
-Then:
-
-```bash
-docker compose --profile public up -d --build
-```
-
-Convenience launchers are also included:
+Run locally:
 
 ```bash
-bash scripts/start_self_host.sh
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Windows PowerShell:
+The new public homepage is served from `/`.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/start_self_host.ps1
-```
+Important routes in the current build include:
 
-## Aura public-address commands
+- `/` — 4Infinity public landing page;
+- `/signup` — membership request;
+- `/signin` — member login;
+- `/pricing` — membership comparison;
+- `/studio` — music creation workspace;
+- `/production-suite` — advanced music production;
+- `/aura` — spoken/conversational Aura surface;
+- `/command-center` — ESP Creator Network member hub;
+- `/owner` — protected owner administration;
+- `/health` — application health/capability summary.
 
-```bash
-aura public-address --refresh
-aura public-address --status-only
-aura public-address --serve
-```
+## Brand authority
 
-Full LAN/router address information is shown only in the authenticated ESP owner dashboard. Member-facing diagnostics are redacted.
+Public product name:
 
-## Owner-controlled backup and migration
+**4Infinity Creative Studios**
 
-Accounts, billing state, production jobs and private project files can be exported into a checksummed portable archive without a cloud backup provider.
+Descriptor:
 
-```bash
-aura backup
-aura backup-inspect backups/ESP_Live_Sound_Studio_....zip
-```
+**Music, Video, Image & Creator Intelligence**
 
-Optional standard `age` encryption:
+Endorsement:
 
-```bash
-aura backup --age-recipient age1...
-```
+**Powered by Elevate Souls Productions and Aura AI Systems**
 
-Restore is intentionally offline-only:
-
-```bash
-aura restore-backup backup.zip --offline-confirmed
-```
-
-The archive excludes `.env`, DDNS credentials, SMTP passwords, payment/provider secrets and model API keys. Every archived file is SHA-256 verified before restore, and the previous database/project tree is preserved by default. ESP owners can also create/list/download backups from `/owner/backups`.
-
-Docker stores backups in a dedicated persistent volume separate from member project/output storage.
-
-## Core development install
-
-```bash
-pip install -e .
-aura doctor
-aura serve
-```
-
-Optional audio production stack:
-
-```bash
-pip install -e '.[all-audio]'
-```
-
-Optional Python UPnP integration:
-
-```bash
-pip install -e '.[selfhost]'
-```
-
-The Docker image also includes the local `upnpc` utility so router-first address inspection can work without that Python optional extra. It also includes the standard `age` command for optional owner-encrypted backups.
-
-## Self-hosted neural generation
-
-The Studio orchestrator prefers a self-hosted **ACE-Step 1.5 REST worker**. Open/local engine adapters also exist for additional music, singing, separation and audio systems.
-
-MIDI/notation can control neural performances but cannot become Final Master.
-
-GPU compute is a physical resource. The software can avoid paid generation APIs, but truly unlimited public generation is limited by the GPU hardware actually available to ESP.
-
-## Documentation
-
-- [`docs/FEATURE_MATRIX.md`](docs/FEATURE_MATRIX.md) — feature/engine research matrix
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — backend/DAW/engine architecture
-- [`docs/PRODUCT_DEPLOYMENT.md`](docs/PRODUCT_DEPLOYMENT.md) — accounts/billing/self-host deployment
-- [`docs/SELF_HOSTING.md`](docs/SELF_HOSTING.md) — domain-independent £0-additional-hosting deployment path
-- [`docs/SETUP.md`](docs/SETUP.md) — engine/setup notes
-
----
-
-**Product:** ESP Live Sound Studio  
-**Presented by:** Elevate Souls Productions  
-**AI producer:** Aura  
-**Tagline:** Music Making for Professionals  
-**Current code milestone:** v0.12.0
+Any remaining references to previous product names inside legacy source files are compatibility debt. Runtime public HTTP output and outbound mail are passed through the 4Infinity brand migration layer so old wording is not presented as the customer-facing product identity.
