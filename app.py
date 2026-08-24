@@ -16,6 +16,7 @@ from aura_music_studio.aura_productivity_tools import install_aura_productivity_
 from aura_music_studio.aura_project_bridge import router as aura_project_bridge_router
 from aura_music_studio.aura_realtime_portal import router as aura_realtime_portal_router
 from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_modes_router
+from aura_music_studio.aura_research_tools import install_aura_research_tools
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
 from aura_music_studio.aura_ui_extension import AuraUIExtensionMiddleware, router as aura_ui_extension_router
@@ -99,9 +100,12 @@ install_aura_tool_extensions()
 # Research/calculation tools wrap the already-installed creative tool registry. Web results
 # gain stable source ids and arithmetic uses a non-eval safe interpreter.
 install_aura_productivity_tools()
-# Conversational DAW tools wrap the same registry and reuse the existing DAW/session
-# primitives, plan entitlements and revision system rather than creating a second mixer.
+# Conversational DAW tools reuse the existing DAW/session primitives, plan entitlements and
+# revision system rather than creating a second mixer.
 install_aura_daw_tools()
+# Bounded multi-source research adds domain-diverse parallel page retrieval through the
+# existing protected web gateway. It inherits source ids and citation persistence.
+install_aura_research_tools()
 # Regeneration reuses prior tool results rather than repeating side effects; edited threads
 # invalidate stale tool runs and branches receive independent copies of their attachments.
 install_aura_chat_hardening()
@@ -121,22 +125,18 @@ app.router.routes[:] = [
     route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES
 ]
 app.include_router(creative_portal_router)
-# Dedicated media routes are registered before the compatibility redirects living in
-# member_dashboard, so /video-studio and /image-designer open real media workspaces.
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
 # The realtime portal owns the visible /aura-intelligence page. The underlying API router
-# remains mounted afterwards for durable threads/memory/files, while the separate streaming
-# router provides token/tool events. Route order prevents the older compatibility page from
-# shadowing the realtime interface.
+# remains mounted afterwards for durable threads/memory/files, while the streaming router
+# provides token/tool events.
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
 app.include_router(aura_multimodal_router)
 app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_ui_extension_router)
-# Chat uploads can be promoted into the pinned project only after an explicit rights
-# confirmation. The bridge never exposes the private chat-storage path to the browser.
+# Chat uploads can be promoted into the pinned project only after explicit rights confirmation.
 app.include_router(aura_project_bridge_router)
 
 app.include_router(brand_router)
@@ -145,10 +145,6 @@ app.include_router(compute_node_router)
 app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
 
-# Canonical ESP gateway is first: signed-in regular users can request ESP verification,
-# active ESP users are sent through niche selection and then into Level Up Hub. The older
-# command center remains mounted later for training-resource routes, but no longer owns the
-# top-level /command-center user journey.
 app.include_router(esp_level_up_gateway_router)
 app.include_router(esp_niche_portal_router)
 app.include_router(esp_level_up_router)
@@ -159,9 +155,6 @@ app.include_router(esp_social_insights_router)
 app.include_router(esp_social_portal_overlay_router)
 app.include_router(social_management_portal_router)
 
-# Owner login uses an opaque hashed server-side session. Mary/Kev also have a dedicated
-# ESP access console for role activation/revocation, Social Media Centre suspension and
-# explicit Agent→Creator assignments.
 app.include_router(owner_auth_router)
 app.include_router(esp_owner_access_router)
 app.include_router(owner_control_center_router)
@@ -176,16 +169,9 @@ app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
-# Voice House uses explicit consent evidence, purpose-scoped permissions, conservative
-# similarity caps and immediate revocation. The asset selector is mounted separately so
-# raw server paths never need to be exposed to the browser.
 app.include_router(voice_house_router)
 app.include_router(voice_house_assets_router)
 app.include_router(voice_house_portal_router)
-# Song DNA v2: the mature editor remains the source/planning surface. The execution
-# console adds Generate → Audition → Reject/Commit, while lyric alignment keeps estimated
-# timestamps separate from verified/forced-aligned timing. The guard is registered before
-# the base Song DNA API so public surgical vocal rendering cannot use unverified timing.
 app.include_router(song_dna_execution_portal_router)
 app.include_router(lyric_alignment_portal_router)
 app.include_router(song_dna_execution_overlay_router)
@@ -193,9 +179,6 @@ app.include_router(song_dna_portal_router)
 app.include_router(song_dna_execution_guard_router)
 app.include_router(song_dna_router)
 app.include_router(lyric_alignment_router)
-# Performance inputs accept a user-owned rhythm, beatbox, hum, melody or instrument
-# performance and convert it into editable timing/MIDI guidance without treating MIDI as
-# final audio. The original real audio stays part of project DNA as the performance anchor.
 app.include_router(performance_input_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
@@ -215,24 +198,12 @@ app.include_router(take_portal_router)
 app.include_router(source_detection_router)
 app.include_router(system_router)
 
-# Cross-media creation activity is recorded only after successful writes and stores
-# category/event metadata, not the user's private creative content itself.
 app.add_middleware(CreativeUsageMiddleware)
-
-# Extend only the Aura HTML page with reasoning-mode/project-promotion controls. The base
-# realtime portal remains independently usable and all non-HTML/API/media responses bypass it.
+# Extend only the Aura HTML page with reasoning-mode/project-promotion controls.
 app.add_middleware(AuraUIExtensionMiddleware)
-
-# Bind the signed Mary/Kev owner identity to owner actions without trusting form fields.
 app.add_middleware(OwnerIdentityMiddleware)
-
-# Temporary compatibility bridge: a valid opaque owner session is translated only in
-# the in-process Request cookie cache for legacy backup/compute/payment route functions.
-# The deployment key is never written to the response/browser by this middleware.
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
-
-# Applied last so all legacy text emitted by older modules is rewritten at the public
-# HTTP boundary. Binary media responses are not modified.
+# Applied last so all legacy text emitted by older modules is rewritten at the public boundary.
 app.add_middleware(BrandMigrationMiddleware)
 
 __all__ = ["app"]
