@@ -9,6 +9,7 @@ identifier for existing installs, project data and deployment configuration.
 
 from aura_music_studio.api import app
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
+from aura_music_studio.aura_daw_tools import install_aura_daw_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
@@ -96,6 +97,9 @@ install_aura_tool_extensions()
 # Research/calculation tools wrap the already-installed creative tool registry. Web results
 # gain stable source ids and arithmetic uses a non-eval safe interpreter.
 install_aura_productivity_tools()
+# Conversational DAW tools wrap the same registry and reuse the existing DAW/session
+# primitives, plan entitlements and revision system rather than creating a second mixer.
+install_aura_daw_tools()
 # Regeneration reuses prior tool results rather than repeating side effects; edited threads
 # invalidate stale tool runs and branches receive independent copies of their attachments.
 install_aura_chat_hardening()
