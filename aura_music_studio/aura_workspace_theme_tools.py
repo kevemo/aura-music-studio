@@ -4,6 +4,7 @@ from typing import Any
 
 from .aura_companion import AuraCompanionError
 from .aura_system_companion import AuraSystemCompanionService
+from .request_context import current_owner_actor_id, current_owner_actor_name
 from .workspace_theme import themes
 
 _ORIGINAL_DEFINITIONS = AuraSystemCompanionService._tool_definitions
@@ -13,7 +14,18 @@ _INSTALLED = False
 
 
 def _subject(member) -> str:
+    owner_id = current_owner_actor_id()
+    if owner_id in {"kev", "mary"}:
+        return f"owner:{owner_id}"
     return f"member:{member.user_id}"
+
+
+def _actor_label(member) -> str:
+    owner_id = current_owner_actor_id()
+    owner_name = current_owner_actor_name()
+    if owner_id in {"kev", "mary"} and owner_name:
+        return f"Aura for {owner_name} — ESP Co-Owner"
+    return f"Aura for member {member.user_id}"
 
 
 def _tool_definitions(self, member) -> list[dict[str, Any]]:
@@ -26,7 +38,7 @@ def _tool_definitions(self, member) -> list[dict[str, Any]]:
             {
                 "type": "function",
                 "name": "get_workspace_theme",
-                "description": "Read the signed-in user's currently saved 4Infinity Creative Studios workspace theme.",
+                "description": "Read the current 4Infinity Creative Studios workspace theme for this signed-in member or selected ESP owner.",
                 "strict": True,
                 "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
             },
@@ -91,7 +103,7 @@ def _tool_definitions(self, member) -> list[dict[str, Any]]:
             {
                 "type": "function",
                 "name": "revert_workspace_theme",
-                "description": "Revert the signed-in user's last saved workspace theme change when they explicitly ask to undo/revert it.",
+                "description": "Revert the current member/selected owner's last saved workspace theme change when they explicitly ask to undo/revert it.",
                 "strict": True,
                 "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
             },
@@ -102,45 +114,53 @@ def _tool_definitions(self, member) -> list[dict[str, Any]]:
 
 def _system_prompt(self, member, *, project_context: dict | None = None) -> str:
     base = _ORIGINAL_PROMPT(self, member, project_context=project_context)
+    owner_name = current_owner_actor_name()
+    owner_note = (
+        f" The active shared-admin operator is {owner_name}; personalize theme changes to that owner's own workspace profile without changing permissions or the other owner's theme."
+        if current_owner_actor_id() in {"kev", "mary"} and owner_name else ""
+    )
     return base + (
-        " You can personalize the signed-in user's 4Infinity Creative Studios workspace through safe theme tokens. "
+        " You can personalize the current member or selected ESP owner's 4Infinity Creative Studios workspace through safe theme tokens. "
         "When asked to change colours, layout feel, corner style, font feel, spacing, motion or Aura glow, use preview_workspace_theme first. "
         "A preview is not acceptance: describe what changed and ask the user whether to keep it. Only call confirm_workspace_theme after explicit acceptance. "
         "If they reject it, use discard_workspace_theme_preview. If they ask to undo the last saved design, use revert_workspace_theme. "
         "Never claim arbitrary CSS or JavaScript was installed; the theme engine intentionally allows only validated design tokens."
+        + owner_note
     )
 
 
 def _execute_tool(self, member, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     subject = _subject(member)
-    actor = f"Aura for member {member.user_id}"
+    actor = _actor_label(member)
+    subject_type = "owner" if subject.startswith("owner:") else "member"
 
     if name == "get_workspace_theme":
         current = themes.current(subject)
-        return {**current, "subject": "member"}
+        return {**current, "subject": subject_type, "owner_actor": current_owner_actor_id() if subject_type == "owner" else None}
 
     if name == "preview_workspace_theme":
         changes = {key: value for key, value in arguments.items() if key != "reason" and value is not None}
         try:
-            return themes.create_preview(subject, changes, str(arguments.get("reason") or "Aura workspace customization"))
+            result = themes.create_preview(subject, changes, str(arguments.get("reason") or "Aura workspace customization"))
+            return {**result, "subject": subject_type}
         except ValueError as exc:
             raise AuraCompanionError(str(exc)) from exc
 
     if name == "confirm_workspace_theme":
         try:
-            return themes.confirm(subject, str(arguments.get("preview_id") or ""), actor)
+            return {**themes.confirm(subject, str(arguments.get("preview_id") or ""), actor), "subject": subject_type}
         except ValueError as exc:
             raise AuraCompanionError(str(exc)) from exc
 
     if name == "discard_workspace_theme_preview":
         try:
-            return themes.discard(subject, str(arguments.get("preview_id") or ""))
+            return {**themes.discard(subject, str(arguments.get("preview_id") or "")), "subject": subject_type}
         except ValueError as exc:
             raise AuraCompanionError(str(exc)) from exc
 
     if name == "revert_workspace_theme":
         try:
-            return themes.revert_last(subject, actor)
+            return {**themes.revert_last(subject, actor), "subject": subject_type}
         except ValueError as exc:
             raise AuraCompanionError(str(exc)) from exc
 
