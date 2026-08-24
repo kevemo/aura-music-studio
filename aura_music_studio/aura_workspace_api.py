@@ -11,6 +11,7 @@ from .aura_agent_tools import public_tool_specs
 from .aura_avatar_runtime import avatar_status
 from .aura_chat_store import AuraChatStore
 from .aura_multimodal import AuraVisionService
+from .aura_sandbox import sandbox
 from .creative_renderers import renderer_states
 from .speech import AuraSpeechService
 from .web_access import AuraWebGateway
@@ -68,6 +69,7 @@ def capabilities(request: Request):
     web = _web_status()
     renderers = _safe_renderers()
     avatar = avatar_status()
+    sandbox_state = sandbox.diagnostics()
     tools = public_tool_specs(web_enabled=True, tools_enabled=True)
     return {
         "member_plan": member.plan.id,
@@ -78,6 +80,8 @@ def capabilities(request: Request):
             "explicit_memory": True,
             "fast_auto_deep_creative_modes": True,
             "private_custom_aura_profiles": True,
+            "private_versioned_artifacts": True,
+            "isolated_code_sandbox_adapter": True,
             "project_pinning": True,
             "project_knowledge_search": True,
             "file_upload_and_extraction": True,
@@ -108,14 +112,16 @@ def capabilities(request: Request):
             "web": web,
             "creative_renderers": renderers,
             "avatar": avatar,
+            "sandbox": sandbox_state,
             "deep_research_ready": bool(web.get("enabled") and web.get("search_configured")),
             "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_configured")),
             "image_generation_ready": bool((renderers.get("image") or {}).get("configured")),
             "video_generation_ready": bool((renderers.get("video") or {}).get("configured")),
             "production_3d_avatar_ready": bool(avatar.get("production_3d_ready")),
+            "isolated_code_execution_ready": bool(sandbox_state.get("configured")),
         },
         "tools": tools,
-        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
+        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service, isolated sandbox or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
     }
 
 
