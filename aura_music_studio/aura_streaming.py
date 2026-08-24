@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from . import aura_agent_core as core
 from .aura_agent_core import (
-    AURA_CORE_SYSTEM,
     AuraAgent,
     AuraModelClient,
     ModelReply,
@@ -190,7 +190,7 @@ def _build_generation(
     rows = store.messages(user_id, thread_id, limit=400)
     summary = base_agent._maybe_summarize(user_id, thread_id, rows)
     memories = store.memories(user_id, enabled_only=True, limit=50)
-    system_parts = [AURA_CORE_SYSTEM, config.instruction]
+    system_parts = [core.AURA_CORE_SYSTEM, config.instruction]
     if requested_mode:
         system_parts.append(f"The member just switched this conversation to Aura {active_mode.title()} mode. Acknowledge that briefly if relevant.")
     if summary:
