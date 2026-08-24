@@ -1,4 +1,4 @@
-"""Production entrypoint for 4Infinity Creative Studios.
+"""Production entrypoint for Pulsar-Frequency House.
 
 Run locally:
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -40,7 +40,7 @@ from aura_music_studio.take_portal import router as take_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 # ``aura_music_studio.api`` already registers the legacy public homepage. Remove only
-# that route and replace it with the 4Infinity Creative Studios master landing page.
+# that route and replace it with the Pulsar-Frequency House master landing page.
 # Pricing, sign-in, membership, studio and API routes remain intact.
 app.router.routes[:] = [
     route for route in app.router.routes if getattr(route, "path", None) != "/"
