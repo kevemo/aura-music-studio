@@ -13,8 +13,6 @@ UI_SCRIPT = r"""
   function request(url,opt={}){return fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt}).then(async r=>{let b={};try{b=await r.json()}catch(_){}if(!r.ok)throw new Error(b.detail||`Request failed (${r.status})`);return b})}
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
 
-  // Linkify only text nodes using DOM-created HTTPS anchors. Never interpolate a user URL
-  // directly into an HTML attribute string.
   function linkifyHttps(html){
     const root=document.createElement('div');root.innerHTML=html;
     const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);const nodes=[];
@@ -35,7 +33,6 @@ UI_SCRIPT = r"""
   }
   if(typeof markdown==='function'){const baseMarkdown=markdown;markdown=function(value){return linkifyHttps(baseMarkdown(value))}}
 
-  // Rights-gated project promotion beside every chat attachment.
   if(typeof messageHTML==='function'){
     const baseMessageHTML=messageHTML;
     messageHTML=function(message,tools=[]){
@@ -57,18 +54,70 @@ UI_SCRIPT = r"""
     }catch(error){button.disabled=false;button.textContent='＋ Add to project';toast(error.message,true)}
   });
 
-  // Persistent reasoning mode selector.
   const top=document.querySelector('.top');const projectSelect=document.getElementById('project');
+  let reasoningSelect=null;
   if(top&&projectSelect&&!document.getElementById('auraReasoningMode')){
-    const select=document.createElement('select');select.id='auraReasoningMode';select.className='select';select.title='Aura reasoning mode';select.innerHTML='<option value="fast">⚡ Fast</option><option value="auto">✦ Auto</option><option value="deep">◈ Deep</option><option value="creative">✧ Creative</option>';top.insertBefore(select,projectSelect);
-    select.addEventListener('change',async()=>{try{if(typeof current==='undefined'||!current)return;const result=await request(`${api}/threads/${encodeURIComponent(current)}/reasoning-mode`,{method:'PUT',body:JSON.stringify({mode:select.value})});toast(result.detail||`Aura ${select.value} mode active.`)}catch(error){toast(error.message,true)}});
-    window.__auraSyncReasoningMode=async function(){try{if(typeof current==='undefined'||!current)return;const result=await request(`${api}/threads/${encodeURIComponent(current)}/reasoning-mode`);select.value=result.mode||'auto'}catch(_){select.value='auto'}};
-    if(typeof openThread==='function'){const baseOpenThread=openThread;openThread=async function(id){const result=await baseOpenThread(id);await window.__auraSyncReasoningMode();return result}};
-    setTimeout(()=>window.__auraSyncReasoningMode(),400);
+    reasoningSelect=document.createElement('select');reasoningSelect.id='auraReasoningMode';reasoningSelect.className='select';reasoningSelect.title='Aura reasoning mode';reasoningSelect.innerHTML='<option value="fast">⚡ Fast</option><option value="auto">✦ Auto</option><option value="deep">◈ Deep</option><option value="creative">✧ Creative</option>';top.insertBefore(reasoningSelect,projectSelect);
+    reasoningSelect.addEventListener('change',async()=>{try{if(typeof current==='undefined'||!current)return;const result=await request(`${api}/threads/${encodeURIComponent(current)}/reasoning-mode`,{method:'PUT',body:JSON.stringify({mode:reasoningSelect.value})});toast(result.detail||`Aura ${reasoningSelect.value} mode active.`)}catch(error){toast(error.message,true)}});
+    window.__auraSyncReasoningMode=async function(){try{if(typeof current==='undefined'||!current)return;const result=await request(`${api}/threads/${encodeURIComponent(current)}/reasoning-mode`);reasoningSelect.value=result.mode||'auto'}catch(_){reasoningSelect.value='auto'}};
   }
 
-  // Lightweight workspace controls in the existing sidebar.
+  // Custom-GPT-style private Aura Profiles. Profiles personalize expertise/workflow only;
+  // the server keeps them subordinate to Aura Core access, rights and safety rules.
+  let auraProfiles=[];
+  let profileSelect=null;
+  async function loadProfiles(){
+    try{auraProfiles=await request(`${api}/profiles`)}catch(_){auraProfiles=[]}
+    if(profileSelect){const old=profileSelect.value;profileSelect.innerHTML='<option value="">Aura · Default profile</option>'+auraProfiles.map(p=>`<option value="${esc(p.id)}">Aura · ${esc(p.name)}</option>`).join('');if(auraProfiles.some(p=>p.id===old))profileSelect.value=old}
+    renderProfileList();
+  }
+  async function syncProfile(){
+    if(!profileSelect||typeof current==='undefined'||!current)return;
+    try{const result=await request(`${api}/threads/${encodeURIComponent(current)}/profile`);profileSelect.value=result.profile?.id||''}catch(_){profileSelect.value=''}
+  }
+  if(top&&projectSelect&&!document.getElementById('auraProfileSelect')){
+    profileSelect=document.createElement('select');profileSelect.id='auraProfileSelect';profileSelect.className='select';profileSelect.title='Private Aura Profile';profileSelect.innerHTML='<option value="">Aura · Default profile</option>';top.insertBefore(profileSelect,reasoningSelect||projectSelect);
+    profileSelect.addEventListener('change',async()=>{
+      try{
+        if(typeof current==='undefined'||!current)return;
+        const result=await request(`${api}/threads/${encodeURIComponent(current)}/profile`,{method:'PUT',body:JSON.stringify({profile_id:profileSelect.value||null,apply_default_mode:true})});
+        toast(result.detail||'Aura Profile updated.');if(window.__auraSyncReasoningMode)await window.__auraSyncReasoningMode();
+      }catch(error){toast(error.message,true);await syncProfile()}
+    });
+  }
+
   const foot=document.querySelector('.sideFoot');
+  let profilePanel=null,editingProfileId=null;
+  function profilePanelHTML(){return `<div style="display:flex;justify-content:space-between;gap:10px"><b>Aura Profile Studio</b><button id="auraCloseProfiles" class="mini">✕</button></div><p style="color:#a9b2c8">Create private specialist versions of Aura. Profiles cannot grant access or bypass safety/rights.</p><input id="auraProfileName" class="search" maxlength="100" placeholder="Profile name · e.g. Studio Producer"><input id="auraProfileDescription" class="search" maxlength="1000" placeholder="Short description"><select id="auraProfileMode" class="select" style="margin-top:8px"><option value="auto">✦ Auto default</option><option value="fast">⚡ Fast default</option><option value="deep">◈ Deep default</option><option value="creative">✧ Creative default</option></select><textarea id="auraProfileInstructions" class="search" style="min-height:160px;resize:vertical" maxlength="8000" placeholder="How should this Aura profile work? Expertise, response style, workflow priorities, creative direction…"></textarea><div style="display:flex;gap:7px;margin-top:8px"><button id="auraSaveProfile" class="btn primary">Save profile</button><button id="auraCancelProfileEdit" class="btn">Clear form</button></div><div id="auraProfileList" style="margin-top:16px"></div>`}
+  function clearProfileForm(){editingProfileId=null;for(const id of ['auraProfileName','auraProfileDescription','auraProfileInstructions']){const el=document.getElementById(id);if(el)el.value=''}const mode=document.getElementById('auraProfileMode');if(mode)mode.value='auto';const save=document.getElementById('auraSaveProfile');if(save)save.textContent='Save profile'}
+  function renderProfileList(){
+    const list=document.getElementById('auraProfileList');if(!list)return;
+    list.innerHTML=auraProfiles.length?auraProfiles.map(p=>`<div style="border:1px solid #ffffff18;border-radius:12px;padding:10px;margin:8px 0;background:#ffffff05"><b>${esc(p.name)}</b><div style="color:#a9b2c8;font-size:.78rem">${esc(p.description||'No description')} · ${esc(p.default_mode)} mode</div><div style="margin-top:7px;display:flex;gap:5px;flex-wrap:wrap"><button class="mini" data-profile-use="${esc(p.id)}">Use</button><button class="mini" data-profile-edit="${esc(p.id)}">Edit</button><button class="mini" data-profile-delete="${esc(p.id)}">Delete</button></div></div>`).join(''):'<p style="color:#a9b2c8">No custom profiles yet.</p>';
+  }
+  if(foot&&!document.getElementById('auraProfileStudio')){
+    const profileBtn=document.createElement('button');profileBtn.id='auraProfileStudio';profileBtn.className='btn';profileBtn.textContent='✦ Aura profiles';foot.prepend(profileBtn);
+    profilePanel=document.createElement('div');profilePanel.id='auraProfilePanel';profilePanel.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(500px,100%);z-index:98;background:#080c18fb;border-left:1px solid #ffffff20;padding:18px;overflow:auto;display:none;box-shadow:-20px 0 70px #0009';profilePanel.innerHTML=profilePanelHTML();document.body.append(profilePanel);
+    profileBtn.onclick=async()=>{profilePanel.style.display=profilePanel.style.display==='block'?'none':'block';if(profilePanel.style.display==='block')await loadProfiles()};
+    document.getElementById('auraCloseProfiles').onclick=()=>profilePanel.style.display='none';
+    document.getElementById('auraCancelProfileEdit').onclick=clearProfileForm;
+    document.getElementById('auraSaveProfile').onclick=async()=>{
+      const name=document.getElementById('auraProfileName').value.trim(),description=document.getElementById('auraProfileDescription').value.trim(),instructions=document.getElementById('auraProfileInstructions').value.trim(),default_mode=document.getElementById('auraProfileMode').value;
+      if(!name||!instructions)return toast('Profile name and instructions are required.',true);
+      try{
+        if(editingProfileId)await request(`${api}/profiles/${encodeURIComponent(editingProfileId)}`,{method:'PATCH',body:JSON.stringify({name,description,instructions,default_mode})});
+        else await request(`${api}/profiles`,{method:'POST',body:JSON.stringify({name,description,instructions,default_mode})});
+        toast(editingProfileId?'Aura Profile updated.':'Aura Profile created.');clearProfileForm();await loadProfiles();await syncProfile();
+      }catch(error){toast(error.message,true)}
+    };
+    profilePanel.addEventListener('click',async event=>{
+      const use=event.target.closest('[data-profile-use]'),edit=event.target.closest('[data-profile-edit]'),del=event.target.closest('[data-profile-delete]');
+      const id=use?.dataset.profileUse||edit?.dataset.profileEdit||del?.dataset.profileDelete;if(!id)return;const profile=auraProfiles.find(p=>p.id===id);if(!profile)return;
+      if(use){if(typeof current==='undefined'||!current)return toast('Open a conversation first.',true);try{await request(`${api}/threads/${encodeURIComponent(current)}/profile`,{method:'PUT',body:JSON.stringify({profile_id:id,apply_default_mode:true})});profileSelect.value=id;if(window.__auraSyncReasoningMode)await window.__auraSyncReasoningMode();toast(`${profile.name} is now active.`)}catch(error){toast(error.message,true)}return}
+      if(edit){editingProfileId=id;document.getElementById('auraProfileName').value=profile.name||'';document.getElementById('auraProfileDescription').value=profile.description||'';document.getElementById('auraProfileInstructions').value=profile.instructions||'';document.getElementById('auraProfileMode').value=profile.default_mode||'auto';document.getElementById('auraSaveProfile').textContent='Update profile';profilePanel.scrollTop=0;return}
+      if(del){if(!confirm(`Delete Aura Profile “${profile.name}”?`))return;try{await request(`${api}/profiles/${encodeURIComponent(id)}`,{method:'DELETE'});toast('Aura Profile deleted.');await loadProfiles();await syncProfile()}catch(error){toast(error.message,true)}}
+    });
+  }
+
   if(foot&&!document.getElementById('auraExportChat')){
     const exportBtn=document.createElement('button');exportBtn.id='auraExportChat';exportBtn.className='btn';exportBtn.textContent='↓ Export chat';exportBtn.onclick=()=>{if(typeof current==='undefined'||!current)return toast('Open a conversation first.',true);window.location.href=`${api}/threads/${encodeURIComponent(current)}/export.md`};foot.prepend(exportBtn);
     const capBtn=document.createElement('button');capBtn.id='auraCapabilities';capBtn.className='btn';capBtn.textContent='⚙ Aura capabilities';foot.prepend(capBtn);
@@ -84,6 +133,14 @@ UI_SCRIPT = r"""
       }catch(error){panel.innerHTML=`<b>Aura capabilities</b><p style="color:#ff8fa6">${esc(error.message)}</p>`}
     };
   }
+
+  // Keep mode/profile selectors synchronized when the base portal opens another thread.
+  if(typeof openThread==='function'){
+    const baseOpenThread=openThread;
+    openThread=async function(id){const result=await baseOpenThread(id);if(window.__auraSyncReasoningMode)await window.__auraSyncReasoningMode();await syncProfile();return result};
+  }
+  loadProfiles().then(()=>syncProfile());
+  setTimeout(()=>{if(window.__auraSyncReasoningMode)window.__auraSyncReasoningMode()},400);
 })();
 """
 
