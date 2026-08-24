@@ -4,9 +4,14 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class RightsRecord(BaseModel):
@@ -15,7 +20,7 @@ class RightsRecord(BaseModel):
     asset_sha256: str | None = None
     rights_basis: str
     user_attestation: str
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    created_at: str = Field(default_factory=_now)
 
 
 class VoiceProfile(BaseModel):
@@ -27,20 +32,38 @@ class VoiceProfile(BaseModel):
     consent_statement: str = ""
     verification_phrase: str | None = None
     verification_recording: str | None = None
+    verification_state: Literal["unverified", "attested", "verified", "failed", "revoked"] = "unverified"
+    verification_method: str | None = None
+    verification_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     allowed_uses: list[str] = Field(default_factory=lambda: ["singing", "backing_harmony", "voice_conversion"])
-    similarity_limit: float = Field(default=1.0, ge=0.0, le=1.0)
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    similarity_limit: float = Field(default=0.8, ge=0.0, le=1.0)
+    created_at: str = Field(default_factory=_now)
+    updated_at: str = Field(default_factory=_now)
+    revoked_at: str | None = None
+    revoked_reason: str | None = None
     metadata: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_consent_text(self):
         if self.consent_confirmed and len(self.consent_statement.strip()) < 10:
             raise ValueError("A meaningful consent statement is required before enabling a Voice Profile.")
+        if self.verification_state == "verified" and not self.consent_confirmed:
+            raise ValueError("A Voice Profile cannot be verified before consent is confirmed.")
+        if self.revoked_at and self.verification_state != "revoked":
+            object.__setattr__(self, "verification_state", "revoked")
         return self
 
+    @property
+    def active(self) -> bool:
+        return bool(self.consent_confirmed and not self.revoked_at and self.verification_state != "revoked")
+
     def assert_usable(self, purpose: str) -> None:
+        if self.revoked_at or self.verification_state == "revoked":
+            raise PermissionError("Voice Profile consent has been revoked and the profile is disabled.")
         if not self.consent_confirmed:
             raise PermissionError("Voice Profile is locked until consent is confirmed.")
+        if self.verification_state not in {"attested", "verified"}:
+            raise PermissionError("Voice Profile requires a valid consent/verification state before use.")
         if purpose not in self.allowed_uses:
             raise PermissionError(f"Voice Profile is not approved for {purpose!r}.")
 
@@ -67,6 +90,7 @@ class RightsLedger:
         return record
 
     def save_voice(self, profile: VoiceProfile) -> VoiceProfile:
+        profile.updated_at = _now()
         data = self._read_list(self.voices_path)
         data = [x for x in data if x.get("id") != profile.id]
         data.append(profile.model_dump())
@@ -82,6 +106,15 @@ class RightsLedger:
     def list_voices(self) -> list[VoiceProfile]:
         return [VoiceProfile.model_validate(x) for x in self._read_list(self.voices_path)]
 
+    def revoke_voice(self, profile_id: str, reason: str = "Consent withdrawn") -> VoiceProfile:
+        profile = self.get_voice(profile_id)
+        if not profile.revoked_at:
+            profile.revoked_at = _now()
+        profile.revoked_reason = (reason or "Consent withdrawn").strip()[:1000]
+        profile.verification_state = "revoked"
+        profile.consent_confirmed = False
+        return self.save_voice(profile)
+
     @staticmethod
     def _read_list(path: Path) -> list[dict]:
         if not path.exists():
@@ -94,4 +127,6 @@ class RightsLedger:
 
     @staticmethod
     def _write_list(path: Path, data: list[dict]) -> None:
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        tmp.replace(path)
