@@ -12,6 +12,8 @@ from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
 from aura_music_studio.creative_portal import router as creative_portal_router
+from aura_music_studio.creative_project_api import router as creative_project_router
+from aura_music_studio.creative_workspace import router as creative_workspace_router
 from aura_music_studio.daw_api import router as daw_router
 from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
 from aura_music_studio.daw_portal import router as daw_portal_router
@@ -50,6 +52,8 @@ app.include_router(creative_portal_router)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
+app.include_router(creative_project_router)
+app.include_router(creative_workspace_router)
 app.include_router(daw_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
