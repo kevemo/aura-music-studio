@@ -232,8 +232,10 @@ def renderer_runtime_status() -> dict[str, Any]:
 def require_live_renderer() -> dict[str, Any]:
     status = renderer_runtime_status()
     if status["fail_closed_without_real_renderer"] and not status["final_master_renderer_ready"]:
+        # Keep the established error prefix stable for API clients/tests while adding the stronger
+        # production requirement that ACE-Step must have proved a real neural waveform inference.
         raise RuntimeError(
-            "No proven live real-audio music renderer is ready. Start the private ACE-Step GPU renderer and "
+            "No live real-audio music renderer is ready/proven. Start the private ACE-Step GPU renderer and "
             "allow its real inference smoke gate to pass, enable the optional YuE worker, or configure an "
             "authenticated real-audio fallback."
         )
