@@ -5,6 +5,7 @@ import pytest
 
 from aura_music_studio.aura_avatar_runtime import (
     AVATAR_STATES,
+    BROWSER_3D_RENDERER_IMPLEMENTED,
     AuraAvatarRuntimeMiddleware,
     _model_path,
     avatar_status,
@@ -29,20 +30,20 @@ def test_avatar_status_is_truthful_without_rig(tmp_path, monkeypatch):
     assert "tool_running" in AVATAR_STATES
 
 
-def test_model_asset_does_not_claim_full_3d_without_renderer(tmp_path, monkeypatch):
+def test_model_asset_and_env_flag_cannot_fake_missing_renderer(tmp_path, monkeypatch):
     root = tmp_path / "aura"
     root.mkdir()
     (root / "aura.glb").write_bytes(b"glTF-test-placeholder")
     monkeypatch.setenv("AURA_AVATAR_ASSET_DIR", str(root))
     monkeypatch.delenv("AURA_AVATAR_MODEL_PATH", raising=False)
-    monkeypatch.setenv("AURA_AVATAR_3D_RENDERER_READY", "false")
+    monkeypatch.setenv("AURA_AVATAR_3D_RENDERER_READY", "true")
     status = avatar_status()
     assert status["model_installed"] is True
+    assert status["renderer_requested"] is True
+    assert status["renderer_implemented"] is BROWSER_3D_RENDERER_IMPLEMENTED
+    assert status["renderer_connected"] is False
     assert status["production_3d_ready"] is False
     assert status["truthful_state"] == "model_asset_installed_renderer_pending"
-
-    monkeypatch.setenv("AURA_AVATAR_3D_RENDERER_READY", "true")
-    assert avatar_status()["production_3d_ready"] is True
 
 
 def test_avatar_model_cannot_escape_configured_asset_root(tmp_path, monkeypatch):
