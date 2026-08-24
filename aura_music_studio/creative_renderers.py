@@ -9,7 +9,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 RendererKind = Literal["image", "video"]
 _SAFE_WORKFLOW = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$")
@@ -60,6 +60,13 @@ class ComfyUIRenderer:
         env_name = f"AURA_COMFYUI_{kind.upper()}_WORKFLOW"
         self.workflow_name = (os.getenv(env_name) or "").strip()
         self.timeout_seconds = max(3.0, float(os.getenv("AURA_COMFYUI_TIMEOUT_SECONDS", "30")))
+        self.download_timeout_seconds = max(
+            30.0, float(os.getenv("AURA_COMFYUI_DOWNLOAD_TIMEOUT_SECONDS", "600"))
+        )
+        self.max_output_bytes = max(
+            16 * 1024 * 1024,
+            int(float(os.getenv("AURA_CREATIVE_MAX_OUTPUT_MB", "4096")) * 1024 * 1024),
+        )
 
     @property
     def configured(self) -> bool:
@@ -213,6 +220,38 @@ class ComfyUIRenderer:
                         )
                     )
         return rows
+
+    def download_output(self, output: RendererOutput, destination: Path) -> Path:
+        """Stream one server-reported ComfyUI output into a caller-owned safe path."""
+        if not self.base_url:
+            raise RuntimeError("ComfyUI base URL is not configured")
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(destination.name + ".part")
+        total = 0
+        try:
+            params = {
+                "filename": output.filename,
+                "subfolder": output.subfolder,
+                "type": output.type,
+            }
+            with httpx.Client(timeout=self.download_timeout_seconds) as client:
+                with client.stream("GET", f"{self.base_url}/view", params=params) as response:
+                    response.raise_for_status()
+                    length = response.headers.get("content-length")
+                    if length and int(length) > self.max_output_bytes:
+                        raise ValueError("ComfyUI output exceeds configured maximum size")
+                    with temporary.open("wb") as target:
+                        for chunk in response.iter_bytes(1024 * 1024):
+                            total += len(chunk)
+                            if total > self.max_output_bytes:
+                                raise ValueError("ComfyUI output exceeds configured maximum size")
+                            target.write(chunk)
+            temporary.replace(destination)
+            return destination
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
 
 
 def renderer_for(kind: RendererKind) -> ComfyUIRenderer:
