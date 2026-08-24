@@ -38,6 +38,8 @@ from aura_music_studio.esp_social_access_control import install_social_access_co
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
+from aura_music_studio.lyric_alignment_api import router as lyric_alignment_router
+from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
 from aura_music_studio.media_studios import router as media_studios_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
@@ -60,6 +62,7 @@ from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
+from aura_music_studio.song_dna_execution_guard import router as song_dna_execution_guard_router
 from aura_music_studio.song_dna_execution_overlay import router as song_dna_execution_overlay_router
 from aura_music_studio.song_dna_execution_portal import router as song_dna_execution_portal_router
 from aura_music_studio.song_dna_portal import router as song_dna_portal_router
@@ -136,14 +139,20 @@ app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
-# Song DNA v2: the existing editor remains the source/planning surface, while the overlay
-# exposes a real Generate → Audition → Reject/Commit path. Performance inputs accept a
-# user-owned rhythm, beatbox, hum, melody or instrument performance and convert it into
-# an editable timing/MIDI guide without ever treating symbolic MIDI as final audio.
+# Song DNA v2: the mature editor remains the source/planning surface. The execution
+# console adds Generate → Audition → Reject/Commit, while lyric alignment keeps estimated
+# timestamps separate from verified/forced-aligned timing. The guard is registered before
+# the base Song DNA API so public surgical vocal rendering cannot use unverified timing.
 app.include_router(song_dna_execution_portal_router)
+app.include_router(lyric_alignment_portal_router)
 app.include_router(song_dna_execution_overlay_router)
 app.include_router(song_dna_portal_router)
+app.include_router(song_dna_execution_guard_router)
 app.include_router(song_dna_router)
+app.include_router(lyric_alignment_router)
+# Performance inputs accept a user-owned rhythm, beatbox, hum, melody or instrument
+# performance and convert it into editable timing/MIDI guidance without treating MIDI as
+# final audio. The original real audio stays part of project DNA as the performance anchor.
 app.include_router(performance_input_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
