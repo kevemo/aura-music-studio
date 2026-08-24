@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aura-music-studio"
-version = "0.18.0"
-description = "ESP Live Sound Studio — real-audio-first autonomous AI music creation and professional production platform powered by Aura"
+version = "0.19.0"
+description = "ESP Live Sound Studio — real-audio-first autonomous AI music and music-video creation platform powered by Aura"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
