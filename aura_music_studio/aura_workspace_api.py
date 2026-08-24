@@ -112,7 +112,7 @@ def capabilities(request: Request):
             "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_configured")),
             "image_generation_ready": bool((renderers.get("image") or {}).get("configured")),
             "video_generation_ready": bool((renderers.get("video") or {}).get("configured")),
-            "production_3d_avatar_ready": bool(avatar.get("enabled") and avatar.get("model_configured")),
+            "production_3d_avatar_ready": bool(avatar.get("production_3d_ready")),
         },
         "tools": tools,
         "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
