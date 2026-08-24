@@ -5,6 +5,7 @@ Run locally:
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.brand_compat import router as brand_compat_router
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
 from aura_music_studio.daw_api import router as daw_router
@@ -37,6 +38,7 @@ from aura_music_studio.video_portal import router as video_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 
 app.include_router(brand_router)
+app.include_router(brand_compat_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(daw_router)
