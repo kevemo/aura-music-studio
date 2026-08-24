@@ -28,7 +28,9 @@ from aura_music_studio.engineering_job_api import router as engineering_job_rout
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
+from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
+from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
@@ -79,6 +81,10 @@ app.include_router(esp_niche_portal_router)
 app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
 app.include_router(esp_social_intelligence_router, include_in_schema=False)
+app.include_router(esp_social_insights_router)
+# The overlay is before the original Social Management page and only adds navigation to
+# the intelligence workspace; it reuses the existing mature Social Management renderer.
+app.include_router(esp_social_portal_overlay_router)
 app.include_router(social_management_portal_router)
 
 # Mary/Kev owner command centre and enhanced user directory are registered before the
