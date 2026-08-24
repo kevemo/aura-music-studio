@@ -57,7 +57,7 @@ loadSpaces();
     return HTMLResponse(
         html.replace("__ACCENT__", accent)
         .replace("__SECONDARY__", secondary)
-        .replaceAll("__NICHE_TITLE__", escape(niche_title))
+        .replace("__NICHE_TITLE__", escape(niche_title))
         .replace("__NICHE_ICON__", escape(niche_icon))
         .replace("__ROLE__", escape(str(role).title()))
         .replace("__TRAINING__", training_cards)
