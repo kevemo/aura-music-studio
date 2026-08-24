@@ -49,6 +49,7 @@ from aura_music_studio.owner_control_center import router as owner_control_cente
 from aura_music_studio.owner_identity import OwnerIdentityMiddleware
 from aura_music_studio.owner_user_directory import router as owner_user_directory_router
 from aura_music_studio.owner_users_portal import router as owner_users_legacy_router
+from aura_music_studio.performance_input_api import router as performance_input_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
@@ -59,6 +60,8 @@ from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
+from aura_music_studio.song_dna_execution_overlay import router as song_dna_execution_overlay_router
+from aura_music_studio.song_dna_execution_portal import router as song_dna_execution_portal_router
 from aura_music_studio.song_dna_portal import router as song_dna_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
 from aura_music_studio.system_api import router as system_router
@@ -133,10 +136,15 @@ app.include_router(daw_routing_router)
 app.include_router(daw_routing_ui_router)
 app.include_router(daw_mixer_ui_router)
 app.include_router(vocal_router)
-# The visual Song DNA editor and the structured API share the same tenant-scoped project
-# representation. Planning is explicit; renderer execution remains separate until audio exists.
+# Song DNA v2: the existing editor remains the source/planning surface, while the overlay
+# exposes a real Generate → Audition → Reject/Commit path. Performance inputs accept a
+# user-owned rhythm, beatbox, hum, melody or instrument performance and convert it into
+# an editable timing/MIDI guide without ever treating symbolic MIDI as final audio.
+app.include_router(song_dna_execution_portal_router)
+app.include_router(song_dna_execution_overlay_router)
 app.include_router(song_dna_portal_router)
 app.include_router(song_dna_router)
+app.include_router(performance_input_router)
 app.include_router(edit_router)
 app.include_router(engineering_job_router)
 app.include_router(esp_command_center_router)
