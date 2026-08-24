@@ -28,6 +28,7 @@ from aura_music_studio.engineering_job_api import router as engineering_job_rout
 from aura_music_studio.esp_command_center import router as esp_command_center_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
 from aura_music_studio.esp_progress_portal import router as esp_progress_portal_router
+from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
@@ -71,13 +72,13 @@ app.include_router(creative_project_router)
 app.include_router(creative_workspace_router)
 
 # ESP niche selection must be registered before the legacy Command Center route so
-# active ESP members enter the niche-personalised gateway first. Social-management
-# routes are nested under /command-center and enforce ESP/niche/affiliation access
-# independently at the API layer. Progress is private to ESP members and visible to
-# the protected owner console.
+# active ESP members enter the niche-personalised gateway first. All social-management,
+# analytics, approval and media-library routes live below /command-center and independently
+# enforce ESP role + niche + no-other-network affiliation at the API boundary.
 app.include_router(esp_niche_portal_router)
 app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
+app.include_router(esp_social_intelligence_router, include_in_schema=False)
 app.include_router(social_management_portal_router)
 
 # Mary/Kev owner command centre and enhanced user directory are registered before the
