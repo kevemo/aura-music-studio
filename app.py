@@ -12,6 +12,7 @@ from aura_music_studio import aura_avatar_theme_tools as _aura_avatar_theme_tool
 from aura_music_studio import aura_avatar_mobile_loader_tools as _aura_avatar_mobile_loader_tools  # KTX2/Meshopt decoders
 from aura_music_studio import aura_avatar_ai_tools as _aura_avatar_ai_tools  # installs safe embodied tool hooks
 from aura_music_studio import aura_workspace_theme_tools as _aura_workspace_theme_tools  # preview/confirm/revert workspace design
+from aura_music_studio import aura_image_edit_tools as _aura_image_edit_tools  # non-destructive conversational image revisions
 from aura_music_studio.aura_chat_api import router as aura_chat_router
 from aura_music_studio.aura_chat_portal import router as aura_chat_portal_router
 from aura_music_studio.aura_voice_api import router as aura_voice_router
