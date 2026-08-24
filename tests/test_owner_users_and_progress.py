@@ -7,9 +7,12 @@ from aura_music_studio.content_safety import enforce_creation_policy, evaluate_t
 from aura_music_studio.creation import CreateSongRequest, build_song_project
 from aura_music_studio.creative_project import CreativeDirective, CreativeProjectStore
 from aura_music_studio.esp_command_center import EspStore
+from aura_music_studio.esp_level_up import install_esp_access_subscription_separation
 from aura_music_studio.esp_niche import EspNicheStore
 from aura_music_studio.esp_progress import EspProgressStore
 from aura_music_studio.owner_user_control import OwnerUserControl
+
+install_esp_access_subscription_separation()
 
 
 def _active_user(tmp_path, email="creator@example.com", plan="free"):
@@ -31,8 +34,8 @@ def test_subscription_and_esp_role_are_separate_owner_controls(tmp_path):
     membership = esp.membership(user["id"])
     assert membership["status"] == "active"
     assert membership["roles"] == "creator"
-    assert accounts.get_user(user["id"])["plan_id"] == "base"
-    assert accounts.get_user(user["id"])["billing_status"] == "esp_comped"
+    assert accounts.get_user(user["id"])["plan_id"] == "free"
+    assert accounts.get_user(user["id"])["billing_status"] == "not_required"
 
     control.set_plan(user["id"], "pro", "Mary/Kev Test")
     assert accounts.get_user(user["id"])["plan_id"] == "pro"
@@ -55,6 +58,7 @@ def test_owner_can_approve_self_declared_esp_request_without_email_token(tmp_pat
 
     assert esp.membership(user["id"])["roles"] == "agent"
     assert esp.pending_for_user(user["id"]) is None
+    assert accounts.get_user(user["id"])["plan_id"] == "free"
 
 
 def test_owner_can_decline_pending_esp_request(tmp_path):
