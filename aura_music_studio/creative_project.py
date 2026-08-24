@@ -250,6 +250,30 @@ class CreativeProjectStore:
         manifest.directives.append(directive)
         return self.save(manifest)
 
+    def update_directive(
+        self,
+        directive_id: str,
+        *,
+        status: DirectiveStatus | None = None,
+        renderer_route: str | None = None,
+        capability_state: str | None = None,
+        metadata: dict | None = None,
+    ) -> CreativeManifest:
+        manifest = self.load()
+        directive = next((item for item in manifest.directives if item.id == directive_id), None)
+        if directive is None:
+            raise KeyError(directive_id)
+        if status is not None:
+            directive.status = status
+        if renderer_route is not None:
+            directive.renderer_route = renderer_route
+        if capability_state is not None:
+            directive.capability_state = capability_state
+        if metadata is not None:
+            directive.metadata = {**directive.metadata, **metadata}
+        directive.updated_at = utc_now()
+        return self.save(manifest)
+
 
 def public_capabilities() -> dict[str, dict[str, str]]:
     return {key: dict(value) for key, value in CREATIVE_CAPABILITIES.items()}
