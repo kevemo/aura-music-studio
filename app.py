@@ -55,18 +55,21 @@ from aura_music_studio.visual_fx_api import router as visual_fx_router
 from aura_music_studio.visual_portal import router as visual_portal_router
 from aura_music_studio.vocal_api import router as vocal_router
 from aura_music_studio.workspace_theme import WorkspaceThemeMiddleware, router as workspace_theme_router
+from aura_music_studio.workspace_theme_client import WorkspaceThemeClientMiddleware, router as workspace_theme_client_router
 
 # Modular creative routers share the core app's authentication, plan enforcement and tenant isolation.
 # ESP command-center/niche routes retain separate ESP role gates and are not ordinary customer features.
 # OwnerIdentityMiddleware never grants owner access: it adds signed Kev/Mary attribution inside the
 # independently authenticated owner session and records successful owner writes in the audit chain.
 # Workspace themes are token-based, per-user/per-owner, preview-first and reversible; arbitrary CSS/JS
-# is never persisted or executed by Aura.
+# is never persisted or executed by Aura. The small browser client applies only server-generated safe CSS.
 app.add_middleware(EspNicheDashboardMiddleware)
 app.add_middleware(EspCommandCenterViewMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(WorkspaceThemeMiddleware)
+app.add_middleware(WorkspaceThemeClientMiddleware)
 app.include_router(brand_router)
+app.include_router(workspace_theme_client_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(localization_router)
