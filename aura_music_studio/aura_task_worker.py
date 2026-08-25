@@ -7,6 +7,7 @@ import time
 from uuid import uuid4
 
 from .aura_agent_core import AuraModelClient
+from .aura_notifications import notification_store
 from .aura_productivity_tools import _source_wrap, source_markdown
 from .aura_tasks import task_store
 from .web_access import AuraWebGateway
@@ -73,6 +74,30 @@ def run_task(task: dict) -> str:
     raise ValueError(f"Unsupported Aura Task kind: {kind}")
 
 
+def _notify_success(task: dict, result: str, message_id: str | None) -> None:
+    notification_store.create(
+        task["user_id"],
+        thread_id=task["thread_id"],
+        kind="aura_task",
+        title=f"Aura Task complete · {task.get('title') or 'Scheduled task'}",
+        body=result[:1800],
+        resource_kind="aura_message",
+        resource_id=message_id,
+    )
+
+
+def _notify_final_failure(task: dict, error: str) -> None:
+    notification_store.create(
+        task["user_id"],
+        thread_id=task["thread_id"],
+        kind="aura_task_error",
+        title=f"Aura Task needs attention · {task.get('title') or 'Scheduled task'}",
+        body=("The scheduled task stopped after repeated failures. " + error)[:1800],
+        resource_kind="aura_task",
+        resource_id=task["id"],
+    )
+
+
 def run_worker() -> None:
     global _RUNNING
     _RUNNING = True
@@ -91,10 +116,18 @@ def run_worker() -> None:
             result = run_task(task)
             # Durable result delivery uses the originating private Aura thread. The worker
             # writes only assistant prose; it does not instantiate AuraToolRegistry.
-            task_store.chat_store.add_message(task["user_id"], task["thread_id"], "assistant", result[:100000])
+            message = task_store.chat_store.add_message(task["user_id"], task["thread_id"], "assistant", result[:100000])
+            _notify_success(task, result, str(message.get("id") or "") or None)
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
         task_store.finish(task, error=error)
+        if error:
+            state = task_store.get(task["user_id"], task["id"])
+            if state and state.get("status") == "failed":
+                try:
+                    _notify_final_failure(task, error)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
