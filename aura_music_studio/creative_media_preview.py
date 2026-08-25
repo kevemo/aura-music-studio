@@ -109,13 +109,14 @@ MEDIA_PREVIEW_SCRIPT = r"""
   function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
   function projectId(){const box=$('projectName');return box?box.value.trim():''}
   function rows(){try{return (manifest?.elements||[]).filter(e=>mediaKinds.has(e.kind)&&e.source_ref)}catch(_){return []}}
+  function allElements(){try{return manifest?.elements||[]}catch(_){return []}}
   function mediaURL(e,download=false){return `/creative/projects/${encodeURIComponent(projectId())}/elements/${encodeURIComponent(e.id)}/media${download?'?download=true':''}`}
   function ensureDrawer(){
     let d=$('creativeMediaDrawer');if(d)return d;
     d=document.createElement('aside');d.id='creativeMediaDrawer';d.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(620px,100%);z-index:90;transform:translateX(105%);transition:.2s;background:#080b16fb;border-left:1px solid #ffffff20;padding:18px;overflow:auto;box-shadow:-24px 0 70px #000a';
     d.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><div class="eyebrow">Creative DNA outputs</div><h2 style="margin:4px 0">Media Gallery</h2><div class="muted" style="font-size:.72rem">Preview only media registered as elements in this private project.</div></div><button class="btn small" id="creativeMediaClose">✕</button></div><div id="creativeMediaViewer" style="margin:14px 0"></div><div id="creativeMediaRows"></div>`;
     document.body.append(d);$('creativeMediaClose').onclick=()=>closeDrawer();
-    d.addEventListener('click',event=>{const b=event.target.closest('[data-creative-preview]');if(b)openElement(b.dataset.creativePreview)});
+    d.addEventListener('click',event=>{const b=event.target.closest('[data-creative-preview]');if(b)openElement(b.dataset.creativePreview);const revise=event.target.closest('[data-creative-revise]');if(revise)prepareRevision(revise.dataset.creativeRevise)});
     return d;
   }
   function closeDrawer(){const d=$('creativeMediaDrawer');if(d)d.style.transform='translateX(105%)'}
@@ -130,7 +131,19 @@ MEDIA_PREVIEW_SCRIPT = r"""
     if(e.kind==='image')body=`<img src="${url}" alt="${esc(e.label||'Creative image')}" style="display:block;max-width:100%;max-height:65vh;margin:auto;border-radius:14px;border:1px solid #ffffff20">`;
     else if(e.kind==='video')body=`<video src="${url}" controls playsinline preload="metadata" style="display:block;width:100%;max-height:65vh;border-radius:14px;background:#000"></video>`;
     else body=`<audio src="${url}" controls preload="metadata" style="width:100%"></audio>`;
-    viewer.innerHTML=`<div class="item"><div class="itemtop"><div><b>${esc(e.label||e.kind)}</b><div class="muted" style="font-size:.7rem">${esc(e.role||'')} · ${esc(e.kind)}</div></div><a class="btn small" href="${mediaURL(e,true)}">Download</a></div><div style="margin-top:10px">${body}</div><div class="muted" style="font-size:.65rem;margin-top:8px">Served by Creative Element ID from this member's project; arbitrary server paths are not accepted.</div></div>`;
+    viewer.innerHTML=`<div class="item"><div class="itemtop"><div><b>${esc(e.label||e.kind)}</b><div class="muted" style="font-size:.7rem">${esc(e.role||'')} · ${esc(e.kind)}</div></div><div style="display:flex;gap:5px;flex-wrap:wrap"><button class="btn small" data-creative-revise="${esc(e.id)}">✦ Revise with Aura</button><a class="btn small" href="${mediaURL(e,true)}">Download</a></div></div><div style="margin-top:10px">${body}</div><div class="muted" style="font-size:.65rem;margin-top:8px">Served by Creative Element ID from this member's project; arbitrary server paths are not accepted.</div></div>`;
+  }
+  function prepareRevision(id){
+    const e=allElements().find(row=>row.id===id);if(!e)return;
+    const target=$('targetIds'),preserve=$('preserveIds'),kind=$('targetKind'),operation=$('operation'),instruction=$('instruction');
+    if(!target||!preserve||!kind||!operation||!instruction)return;
+    target.value=e.id;
+    preserve.value=allElements().filter(row=>row.id!==e.id).map(row=>row.id).join(', ');
+    if(Array.from(kind.options).some(option=>option.value===e.kind))kind.value=e.kind;
+    operation.value='revise';
+    if(!instruction.value.trim())instruction.value=`Revise only “${e.label||e.kind}”. Keep every preserved Creative DNA element unchanged. `;
+    closeDrawer();instruction.scrollIntoView({behavior:'smooth',block:'center'});instruction.focus();
+    if(typeof notice==='function')notice(`Revision prepared for ${e.label||e.kind}. Review the instruction, then add the Aura directive when ready.`);
   }
   const bar=document.querySelector('.rendererbar');if(bar&&!$('creativeMediaButton')){const b=document.createElement('button');b.id='creativeMediaButton';b.className='btn small';b.textContent='▣ Media Gallery';b.onclick=()=>{if(!projectId())return typeof notice==='function'?notice('Load a Creative House project first.',true):null;renderRows()};bar.append(b)}
 })();

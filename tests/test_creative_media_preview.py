@@ -73,3 +73,13 @@ def test_media_preview_surface_uses_element_ids_and_discloses_path_boundary():
     assert "elements/${encodeURIComponent(e.id)}/media" in MEDIA_PREVIEW_SCRIPT
     assert "arbitrary server paths are not accepted" in MEDIA_PREVIEW_SCRIPT
     assert "download=true" in MEDIA_PREVIEW_SCRIPT
+
+
+def test_media_revision_handoff_targets_one_element_and_preserves_the_rest_without_auto_submit():
+    assert "Revise with Aura" in MEDIA_PREVIEW_SCRIPT
+    assert "target.value=e.id" in MEDIA_PREVIEW_SCRIPT
+    assert "row.id!==e.id" in MEDIA_PREVIEW_SCRIPT
+    assert "preserve.value=" in MEDIA_PREVIEW_SCRIPT
+    assert "operation.value='revise'" in MEDIA_PREVIEW_SCRIPT
+    assert "Review the instruction, then add the Aura directive when ready." in MEDIA_PREVIEW_SCRIPT
+    assert "addDirective(" not in MEDIA_PREVIEW_SCRIPT
