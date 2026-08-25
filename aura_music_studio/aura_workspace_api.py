@@ -10,6 +10,7 @@ from .aura_agent_core import AuraAgent
 from .aura_agent_tools import public_tool_specs
 from .aura_avatar_runtime import avatar_status
 from .aura_chat_store import AuraChatStore
+from .aura_connector_extensions import install_aura_connector_extensions
 from .aura_connectors import install_aura_connector_tools, router as aura_connectors_router, vault as connector_vault
 from .aura_multimodal import AuraVisionService
 from .aura_sandbox import sandbox
@@ -23,6 +24,7 @@ from .web_access import AuraWebGateway
 # workflow wrapper remains the final execution layer installed by app.py.
 install_aura_task_tools()
 install_aura_connector_tools()
+install_aura_connector_extensions()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
@@ -98,7 +100,7 @@ def capabilities(request: Request):
             "durable_aura_tasks": True,
             "scheduled_read_only_research": True,
             "encrypted_private_connectors": True,
-            "google_drive_read_connector": True,
+            "google_drive_search_and_document_read": True,
             "google_calendar_read_connector": True,
             "gmail_read_connector": True,
             "project_pinning": True,
