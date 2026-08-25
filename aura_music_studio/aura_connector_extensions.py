@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-from typing import Any
 from urllib.parse import quote
 
 import requests
@@ -11,6 +10,7 @@ from pypdf import PdfReader
 
 from . import aura_agent_core as core
 from . import aura_agent_tools as tools
+from .aura_connector_hardening import install_aura_connector_hardening
 from .aura_connectors import google
 
 _INSTALLED = False
@@ -76,14 +76,21 @@ def _xlsx_text(data: bytes) -> str:
     wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
     try:
         rows = []
+        chars = 0
         for ws in wb.worksheets[:12]:
-            rows.append(f"[Sheet: {ws.title}]")
+            heading = f"[Sheet: {ws.title}]"
+            rows.append(heading)
+            chars += len(heading)
             for row in ws.iter_rows(max_row=300, values_only=True):
                 values = ["" if value is None else str(value) for value in row[:40]]
                 if any(values):
-                    rows.append("\t".join(values))
-                if sum(len(x) for x in rows) > _MAX_TEXT * 2:
+                    line = "\t".join(values)
+                    rows.append(line)
+                    chars += len(line)
+                if chars > _MAX_TEXT * 2:
                     break
+            if chars > _MAX_TEXT * 2:
+                break
         return "\n".join(rows)
     finally:
         wb.close()
@@ -168,6 +175,7 @@ def install_aura_connector_extensions() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    install_aura_connector_hardening()
     if READ_SPEC.name not in {item.name for item in tools.TOOL_SPECS}:
         tools.TOOL_SPECS.append(READ_SPEC)
         tools._SPEC_BY_NAME[READ_SPEC.name] = READ_SPEC
