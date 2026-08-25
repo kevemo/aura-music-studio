@@ -1,3 +1,6 @@
+import json
+import struct
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.testclient import TestClient
@@ -14,6 +17,22 @@ from aura_music_studio.aura_avatar_runtime import (
 )
 
 
+def _write_minimal_glb(path):
+    document = {
+        "asset": {"version": "2.0"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"name": "AuraRoot", "mesh": 0, "skin": 0}],
+        "skins": [{"joints": [0]}],
+        "meshes": [{"name": "AuraFace", "extras": {"targetNames": ["viseme_aa", "blinkLeft"]}, "primitives": [{"attributes": {}, "targets": [{}, {}]}]}],
+        "animations": [{"name": "idle"}, {"name": "welcome"}, {"name": "listen"}, {"name": "think"}, {"name": "speak"}, {"name": "celebrate"}, {"name": "warn"}],
+    }
+    raw = json.dumps(document, separators=(",", ":")).encode("utf-8")
+    raw += b" " * ((4 - len(raw) % 4) % 4)
+    total = 12 + 8 + len(raw)
+    path.write_bytes(struct.pack("<III", 0x46546C67, 2, total) + struct.pack("<II", len(raw), 0x4E4F534A) + raw)
+
+
 def test_avatar_status_is_truthful_without_rig(tmp_path, monkeypatch):
     root = tmp_path / "aura"
     root.mkdir()
@@ -25,6 +44,7 @@ def test_avatar_status_is_truthful_without_rig(tmp_path, monkeypatch):
     assert status["software_runtime_connected"] is True
     assert status["state_bus_connected"] is True
     assert status["model_installed"] is False
+    assert status["model_valid"] is False
     assert status["renderer_implemented"] is True
     assert status["renderer_configured"] is True
     assert status["operator_validated"] is False
@@ -34,16 +54,32 @@ def test_avatar_status_is_truthful_without_rig(tmp_path, monkeypatch):
     assert "tool_running" in AVATAR_STATES
 
 
-def test_model_and_renderer_still_require_operator_validation(tmp_path, monkeypatch):
+def test_invalid_glb_cannot_become_production_ready(tmp_path, monkeypatch):
     root = tmp_path / "aura"
     root.mkdir()
-    (root / "aura.glb").write_bytes(b"glTF-test-placeholder")
+    (root / "aura.glb").write_bytes(b"not-a-real-glb")
+    monkeypatch.setenv("AURA_AVATAR_ASSET_DIR", str(root))
+    monkeypatch.setenv("AURA_AVATAR_3D_RENDERER_READY", "true")
+    status = avatar_status()
+    assert status["model_installed"] is True
+    assert status["model_valid"] is False
+    assert status["production_3d_ready"] is False
+    assert status["truthful_state"] == "model_asset_invalid"
+    assert status["model_url"] is None
+
+
+def test_valid_model_and_renderer_still_require_operator_validation(tmp_path, monkeypatch):
+    root = tmp_path / "aura"
+    root.mkdir()
+    _write_minimal_glb(root / "aura.glb")
     monkeypatch.setenv("AURA_AVATAR_ASSET_DIR", str(root))
     monkeypatch.delenv("AURA_AVATAR_MODEL_PATH", raising=False)
     monkeypatch.delenv("AURA_AVATAR_RENDERER_MODULE_URL", raising=False)
     monkeypatch.setenv("AURA_AVATAR_3D_RENDERER_READY", "false")
     status = avatar_status()
     assert status["model_installed"] is True
+    assert status["model_valid"] is True
+    assert status["model_validation"]["facial_rig_signal"] is True
     assert status["renderer_implemented"] is BROWSER_3D_RENDERER_IMPLEMENTED is True
     assert status["renderer_configured"] is True
     assert status["production_3d_ready"] is False
@@ -113,4 +149,5 @@ def test_avatar_script_exposes_real_glb_renderer_and_state_bus():
     assert "availableAnimations" in script.text
     assert "animationName" in script.text
     assert "3D renderer ready · Aura rig asset pending" in script.text
+    assert "structure validation failed" in script.text
     assert "deployment validation pending" in script.text
