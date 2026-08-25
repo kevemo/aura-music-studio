@@ -8,11 +8,13 @@ from starlette.responses import Response
 from .aura_connectors_ui import router as aura_connectors_ui_router
 from .aura_notifications_ui import router as aura_notifications_ui_router
 from .aura_tasks_ui import router as aura_tasks_ui_router
+from .aura_today_center import router as aura_today_router
 
 router = APIRouter(include_in_schema=False)
 router.include_router(aura_tasks_ui_router)
 router.include_router(aura_connectors_ui_router)
 router.include_router(aura_notifications_ui_router)
+router.include_router(aura_today_router)
 
 ARTIFACT_UI_SCRIPT = r"""
 (()=>{
@@ -74,6 +76,7 @@ class AuraArtifactsUIMiddleware(BaseHTTPMiddleware):
             "<script src='/aura-intelligence/tasks-ui.js'></script>",
             "<script src='/aura-intelligence/connectors-ui.js'></script>",
             "<script src='/aura-intelligence/notifications-ui.js'></script>",
+            "<script src='/aura-intelligence/today-ui.js'></script>",
         )
         for marker in markers:
             if marker not in text:
