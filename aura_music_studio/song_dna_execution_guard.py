@@ -5,8 +5,10 @@ from fastapi import APIRouter, HTTPException
 from .lyric_alignment import line_is_surgically_aligned
 from .song_dna_api import generate_song_edit_candidate as base_generate_song_edit_candidate
 from .song_dna_api import _directive_for
+from .song_dna_locks import router as song_dna_locks_router
 
 router = APIRouter()
+router.include_router(song_dna_locks_router)
 
 
 @router.post("/projects/{project_name}/song-dna/directives/{directive_id}/generate", include_in_schema=False)

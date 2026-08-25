@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -87,6 +89,26 @@ def rebrand_text(value: str) -> str:
     return value
 
 
+def inject_song_dna_lock_entry(value: str, path: str) -> str:
+    clean_path = (path or "").split("?", 1)[0].strip()
+    parts = [part for part in clean_path.strip("/").split("/") if part]
+    if len(parts) != 2 or parts[0] != "song-editor" or not parts[1]:
+        return value
+    if "id='songDnaLocksEntry'" in value or "id=\"songDnaLocksEntry\"" in value:
+        return value
+    project = quote(parts[1], safe="")
+    entry = (
+        f"<a id='songDnaLocksEntry' href='/song-editor/{project}/locks' "
+        "style='position:fixed;right:18px;bottom:18px;z-index:90;border:1px solid #edca7255;"
+        "border-radius:999px;padding:10px 14px;background:#0a0d18f2;color:#edca72;"
+        "font:800 .78rem Inter,system-ui,sans-serif;text-decoration:none;box-shadow:0 12px 36px #0008'>"
+        "🔒 Preserve Locks</a>"
+    )
+    if "</body>" not in value:
+        return value
+    return value.replace("</body>", entry + "</body>", 1)
+
+
 class BrandMigrationMiddleware(BaseHTTPMiddleware):
     """Rewrite legacy public-facing product copy to Pulsar-Frequency House.
 
@@ -115,7 +137,10 @@ class BrandMigrationMiddleware(BaseHTTPMiddleware):
                 background=response.background,
             )
 
-        branded = rebrand_text(text).encode("utf-8")
+        branded_text = rebrand_text(text)
+        if request.method.upper() == "GET":
+            branded_text = inject_song_dna_lock_entry(branded_text, request.url.path)
+        branded = branded_text.encode("utf-8")
         migrated = Response(
             content=branded,
             status_code=response.status_code,
