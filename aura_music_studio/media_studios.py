@@ -33,7 +33,7 @@ def _page(kind: str, request: Request) -> HTMLResponse:
         defaults = {"width": 1024, "height": 1024, "frames": 1, "fps": 1}
     operation_html = "".join(f"<option>{value}</option>" for value in operation_options)
     media_settings = (
-        f"""<div class='row4'><label>Width<input id='width' type='number' value='{defaults['width']}' min='64' max='4096'></label><label>Height<input id='height' type='number' value='{defaults['height']}' min='64' max='4096'></label><label>Frames<input id='frames' type='number' value='{defaults['frames']}' min='1' max='10000'></label><label>FPS<input id='fps' type='number' value='{defaults['fps']}' min='1' max='120' step='0.1'></label></div>"
+        f"""<div class='row4'><label>Width<input id='width' type='number' value='{defaults['width']}' min='64' max='4096'></label><label>Height<input id='height' type='number' value='{defaults['height']}' min='64' max='4096'></label><label>Frames<input id='frames' type='number' value='{defaults['frames']}' min='1' max='10000'></label><label>FPS<input id='fps' type='number' value='{defaults['fps']}' min='1' max='120' step='0.1'></label></div>"""
         if kind == "video"
         else f"""<div class='row'><label>Width<input id='width' type='number' value='{defaults['width']}' min='64' max='4096'></label><label>Height<input id='height' type='number' value='{defaults['height']}' min='64' max='4096'></label></div><input id='frames' type='hidden' value='1'><input id='fps' type='hidden' value='1'>"""
     )
