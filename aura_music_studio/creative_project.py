@@ -217,6 +217,89 @@ class CreativeProjectStore:
             manifest.active_element_ids.append(element_id)
         return self.save(manifest)
 
+    @staticmethod
+    def _lineage_root_id(manifest: CreativeManifest, element_id: str) -> str:
+        by_id = {item.id: item for item in manifest.elements}
+        current = by_id.get(element_id)
+        if current is None:
+            raise KeyError(element_id)
+        explicit = str(current.metadata.get("version_root_id") or "").strip()
+        if explicit and explicit in by_id:
+            return explicit
+        seen = {current.id}
+        while True:
+            same_kind_parents = [
+                by_id[parent_id]
+                for parent_id in current.parent_ids
+                if parent_id in by_id and by_id[parent_id].kind == current.kind
+            ]
+            if not same_kind_parents:
+                return current.id
+            parent = same_kind_parents[0]
+            if parent.id in seen:
+                return current.id
+            seen.add(parent.id)
+            explicit = str(parent.metadata.get("version_root_id") or "").strip()
+            if explicit and explicit in by_id:
+                return explicit
+            current = parent
+
+    def version_family(self, element_id: str) -> dict:
+        manifest = self.load()
+        target = next((item for item in manifest.elements if item.id == element_id), None)
+        if target is None:
+            raise KeyError(element_id)
+        root_id = self._lineage_root_id(manifest, element_id)
+        family = [
+            item
+            for item in manifest.elements
+            if item.kind == target.kind and self._lineage_root_id(manifest, item.id) == root_id
+        ]
+        active = set(manifest.active_element_ids)
+        current_ids = [item.id for item in family if item.id in active]
+        return {
+            "version_root_id": root_id,
+            "kind": target.kind,
+            "current_ids": current_ids,
+            "elements": [item.model_dump(mode="json") for item in family],
+        }
+
+    def activate_element_version(self, element_id: str) -> CreativeManifest:
+        """Promote one lineage-related Creative Element as the current version.
+
+        This is metadata-only and non-destructive: sibling/ancestor media files remain on
+        disk and in the manifest so members can switch back later. Unrelated active
+        elements are untouched.
+        """
+        manifest = self.load()
+        target = next((item for item in manifest.elements if item.id == element_id), None)
+        if target is None:
+            raise KeyError(element_id)
+        if target.status == "archived":
+            raise ValueError("Archived Creative Elements cannot be promoted as the current version")
+        root_id = self._lineage_root_id(manifest, element_id)
+        family = [
+            item
+            for item in manifest.elements
+            if item.kind == target.kind and self._lineage_root_id(manifest, item.id) == root_id
+        ]
+        family_ids = {item.id for item in family}
+        manifest.active_element_ids = [
+            value for value in manifest.active_element_ids if value not in family_ids
+        ]
+        manifest.active_element_ids.append(target.id)
+        now = utc_now()
+        for item in family:
+            item.metadata = {
+                **item.metadata,
+                "version_root_id": root_id,
+                "is_current_version": item.id == target.id,
+            }
+            if item.id == target.id:
+                item.metadata["version_promoted_at"] = now
+            item.updated_at = now
+        return self.save(manifest)
+
     def add_reference(self, reference: CreativeReference) -> CreativeManifest:
         enforce_creation_policy(reference.label, reference.usage, context="Creative reference")
         manifest = self.load()
