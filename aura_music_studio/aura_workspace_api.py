@@ -10,6 +10,7 @@ from .aura_agent_core import AuraAgent
 from .aura_agent_tools import public_tool_specs
 from .aura_avatar_runtime import avatar_status
 from .aura_chat_store import AuraChatStore
+from .aura_connectors import install_aura_connector_tools, router as aura_connectors_router, vault as connector_vault
 from .aura_multimodal import AuraVisionService
 from .aura_sandbox import sandbox
 from .aura_tasks import install_aura_task_tools, router as aura_tasks_router, task_store
@@ -17,13 +18,15 @@ from .creative_renderers import renderer_states
 from .speech import AuraSpeechService
 from .web_access import AuraWebGateway
 
-# Tasks are installed through this already-mounted workspace module so the production
-# entrypoint stays stable. Later tool wrappers still delegate to these task tools, while the
-# verified workflow wrapper remains the final execution layer installed by app.py.
+# These are installed through this already-mounted workspace module so the production
+# entrypoint stays stable. Later tool wrappers still delegate to them, while the verified
+# workflow wrapper remains the final execution layer installed by app.py.
 install_aura_task_tools()
+install_aura_connector_tools()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
+router.include_router(aura_connectors_router)
 store = AuraChatStore()
 agent = AuraAgent(store=store)
 
@@ -78,6 +81,8 @@ def capabilities(request: Request):
     avatar = avatar_status()
     sandbox_state = sandbox.diagnostics()
     task_runtime = task_store.worker_status()
+    connector_runtime = connector_vault.diagnostics()
+    connected_services = connector_vault.status(member.user_id)
     tools = public_tool_specs(web_enabled=True, tools_enabled=True)
     return {
         "member_plan": member.plan.id,
@@ -92,6 +97,10 @@ def capabilities(request: Request):
             "isolated_code_sandbox_adapter": True,
             "durable_aura_tasks": True,
             "scheduled_read_only_research": True,
+            "encrypted_private_connectors": True,
+            "google_drive_read_connector": True,
+            "google_calendar_read_connector": True,
+            "gmail_read_connector": True,
             "project_pinning": True,
             "project_knowledge_search": True,
             "file_upload_and_extraction": True,
@@ -124,6 +133,11 @@ def capabilities(request: Request):
             "avatar": avatar,
             "sandbox": sandbox_state,
             "tasks": task_runtime,
+            "connectors": {
+                "runtime": connector_runtime,
+                "connected": connected_services,
+                "tokens_exposed": False,
+            },
             "deep_research_ready": bool(web.get("enabled") and web.get("search_configured")),
             "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_configured")),
             "image_generation_ready": bool((renderers.get("image") or {}).get("configured")),
@@ -131,9 +145,10 @@ def capabilities(request: Request):
             "production_3d_avatar_ready": bool(avatar.get("production_3d_ready")),
             "isolated_code_execution_ready": bool(sandbox_state.get("configured")),
             "aura_task_worker_ready": bool(task_runtime.get("ready")),
+            "google_connector_ready": bool(connector_runtime.get("encrypted_vault_ready") and connector_runtime.get("google_oauth_configured")),
         },
         "tools": tools,
-        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service, isolated sandbox, task worker or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
+        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service, isolated sandbox, task worker, OAuth provider or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
     }
 
 
