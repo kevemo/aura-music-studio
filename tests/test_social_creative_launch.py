@@ -8,7 +8,7 @@ def test_creative_social_launch_route_is_private_workspace_surface():
     paths = {getattr(route, "path", None) for route in router.routes}
     assert "/command-center/social/creative-launch" in paths
     assert "const SOCIAL='/command-center/api/social'" in SCRIPT
-    assert "api('/spaces')" in SCRIPT
+    assert "req(SOCIAL+'/spaces')" in SCRIPT
     assert "CREATIVE='/creative'" in SCRIPT
     assert "active_element_ids" in SCRIPT
     assert "source_creative_project" in SCRIPT
