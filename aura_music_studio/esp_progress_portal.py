@@ -27,6 +27,28 @@ def _metric(name: str, value) -> str:
     return f"<div class='metric'><small class='muted'>{escape(name)}</small><b>{escape(str(value))}</b></div>"
 
 
+def _history_card(row: dict) -> str:
+    metrics_html = "".join(
+        _metric(key.replace("_", " ").title(), value)
+        for key, value in list((row.get("metrics") or {}).items())[:8]
+    )
+    notes_html = (
+        f"<p class='muted'>{escape(row.get('notes') or '')}</p>"
+        if row.get("notes")
+        else ""
+    )
+    created = escape((row.get("created_at") or "")[:16].replace("T", " "))
+    kind = escape(str(row.get("kind") or "update").upper())
+    period = escape(row.get("period_label") or "Progress update")
+    return (
+        "<div class='card'>"
+        f"<div class='row'><div><b>{kind}</b> · {period}</div>"
+        f"<small class='muted'>{created}</small></div>"
+        f"<div class='metrics' style='margin-top:10px'>{metrics_html}</div>"
+        f"{notes_html}</div>"
+    )
+
+
 @router.get("/command-center/progress", response_class=HTMLResponse, include_in_schema=False)
 def creator_progress(request: Request):
     member, membership = require_esp_hub_member(request)
@@ -38,10 +60,7 @@ def creator_progress(request: Request):
     latest = rows[0] if rows else None
     latest_metrics = "".join(_metric(k.replace("_", " ").title(), v) for k, v in (latest or {}).get("metrics", {}).items())
     latest_guidance = "".join(f"<li>{escape(item)}</li>" for item in (latest or {}).get("aura_guidance", []))
-    history = "".join(
-        f"<div class='card'><div class='row'><div><b>{escape(row['kind'].upper())}</b> · {escape(row.get('period_label') or 'Progress update')}</div><small class='muted'>{escape(row['created_at'][:16].replace('T',' '))}</small></div><div class='metrics' style='margin-top:10px'>{''.join(_metric(k.replace('_',' ').title(), v) for k,v in list(row.get('metrics',{}).items())[:8])}</div>{f"<p class='muted'>{escape(row.get('notes') or '')}</p>" if row.get('notes') else ''}</div>"
-        for row in rows
-    ) or "<div class='card'><p class='muted'>No LIVE or video analysis has been added yet.</p></div>"
+    history = "".join(_history_card(row) for row in rows) or "<div class='card'><p class='muted'>No LIVE or video analysis has been added yet.</p></div>"
 
     body = f"""<div class='top'><div><div class='gold'><b>ESP CREATOR PROGRESS</b></div><h1>{escape(definition['icon'])} {escape(definition['title'])}</h1><p class='muted'>Upload or enter TikTok LIVE/video analysis so Aura can track progress using your selected niche and ESP training context.</p></div><div><a class='btn secondary' href='/command-center'>ESP Hub</a> <a class='btn secondary' href='/command-center/niche'>Niche Select</a></div></div>
 <div class='card'><h2>Add performance analysis</h2><form method='post' action='/command-center/progress' enctype='multipart/form-data'><div class='grid'><div><label>Analysis type</label><select name='kind'><option value='live'>TikTok LIVE analysis</option><option value='video'>TikTok video analysis</option></select></div><div><label>Period / label</label><input name='period_label' placeholder='Example: 24 Aug evening LIVE'></div></div><div class='metrics' style='margin-top:8px'><div><label>Views</label><input type='number' step='1' min='0' name='views'></div><div><label>Duration minutes</label><input type='number' step='.1' min='0' name='duration_minutes'></div><div><label>Average watch seconds</label><input type='number' step='.1' min='0' name='avg_watch_seconds'></div><div><label>Completion rate %</label><input type='number' step='.1' min='0' max='100' name='completion_rate'></div><div><label>Peak viewers</label><input type='number' step='1' min='0' name='peak_viewers'></div><div><label>New followers</label><input type='number' step='1' min='0' name='new_followers'></div><div><label>Comments</label><input type='number' step='1' min='0' name='comments'></div><div><label>Shares</label><input type='number' step='1' min='0' name='shares'></div><div><label>Saves</label><input type='number' step='1' min='0' name='saves'></div><div><label>Diamonds</label><input type='number' step='1' min='0' name='diamonds'></div></div><label>Creator notes / what happened</label><textarea name='notes' placeholder='What worked? What felt weak? What did viewers respond to?'></textarea><label>Upload analytics export or screenshot (optional)</label><input type='file' name='analysis_file' accept='.csv,.json,.txt,.pdf,.png,.jpg,.jpeg,.webp'><p class='muted small'>Accepted: CSV, JSON, TXT, PDF or analytics screenshots up to 10 MB. Files remain inside the ESP member's private progress area.</p><button type='submit'>Save & get Aura guidance</button></form></div>
