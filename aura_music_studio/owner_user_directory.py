@@ -34,6 +34,21 @@ def _role(row: dict) -> str:
     return "Regular"
 
 
+def _request_card(row: dict) -> str:
+    note_html = f"<p>{escape(row.get('note') or '')}</p>" if row.get("note") else ""
+    requested_role = escape(str(row.get("requested_role") or "").replace("both", "Creator + Agent").title())
+    status = escape(str(row.get("status") or "").title())
+    handle = escape(row.get("tiktok_handle") or "")
+    region = escape(row.get("region") or "")
+    created = escape((row.get("created_at") or "")[:16].replace("T", " "))
+    return (
+        "<div class='card'>"
+        f"<div class='row'><b>{requested_role} request</b><span class='pill'>{status}</span></div>"
+        f"<p class='muted'>@{handle} · {region} · {created}</p>"
+        f"{note_html}</div>"
+    )
+
+
 @router.get("/owner/users", response_class=HTMLResponse, include_in_schema=False)
 def user_directory(request: Request, q: str = "", role: str = "all", plan: str = "all"):
     if not owner_session_authorized(request):
@@ -91,10 +106,7 @@ def user_detail(user_id: str, request: Request, message: str = ""):
         f"<div class='metric'><small>{escape(key.replace('-',' ').title())}</small><b>{int(value)}%</b></div>"
         for key, value in training.items()
     ) or "<div class='metric'><small>Training</small><b>0%</b></div>"
-    request_html = "".join(
-        f"<div class='card'><div class='row'><b>{escape(row['requested_role'].replace('both','Creator + Agent').title())} request</b><span class='pill'>{escape(row['status'].title())}</span></div><p class='muted'>@{escape(row.get('tiktok_handle') or '')} · {escape(row.get('region') or '')} · {escape((row.get('created_at') or '')[:16].replace('T',' '))}</p>{f"<p>{escape(row.get('note') or '')}</p>" if row.get('note') else ''}</div>"
-        for row in requests[:10]
-    ) or "<p class='muted'>No ESP access requests.</p>"
+    request_html = "".join(_request_card(row) for row in requests[:10]) or "<p class='muted'>No ESP access requests.</p>"
     audit_html = "".join(
         f"<div class='audit'><b>{escape(row['action'].replace('_',' ').title())}</b><br><small class='muted'>{escape(row['actor'])} · {escape(row['created_at'][:16].replace('T',' '))}</small></div>"
         for row in audit[:12]
