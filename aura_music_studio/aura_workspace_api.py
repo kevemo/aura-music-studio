@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from .aura_agent_core import AuraAgent
 from .aura_agent_tools import public_tool_specs
 from .aura_avatar_runtime import avatar_status
+from .aura_calendar_extensions import install_aura_calendar_extensions, router as aura_calendar_router
 from .aura_chat_store import AuraChatStore
 from .aura_connector_extensions import install_aura_connector_extensions
 from .aura_connectors import install_aura_connector_tools, router as aura_connectors_router, vault as connector_vault
@@ -30,12 +31,14 @@ install_aura_task_tools()
 install_aura_connector_tools()
 install_aura_connector_extensions()
 install_aura_gmail_extensions()
+install_aura_calendar_extensions()
 install_aura_workspace_briefing()
 install_aura_scheduled_briefing()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
 router.include_router(aura_connectors_router)
+router.include_router(aura_calendar_router)
 router.include_router(aura_notifications_router)
 store = AuraChatStore()
 agent = AuraAgent(store=store)
@@ -110,9 +113,11 @@ def capabilities(request: Request):
             "scheduled_read_only_research": True,
             "scheduled_connected_workspace_briefing": True,
             "private_notification_inbox": True,
+            "aura_today_center": True,
             "encrypted_private_connectors": True,
             "google_drive_search_and_document_read": True,
             "google_calendar_read_connector": True,
+            "google_calendar_event_detail": True,
             "gmail_search_connector": True,
             "gmail_full_message_read": True,
             "google_workspace_briefing": True,

@@ -34,7 +34,7 @@ def test_today_snapshot_combines_private_workspace_tasks_notifications_and_pinne
         seen["uid"] = uid
         seen.update(kwargs)
         return {
-            "calendar": {"available": True, "events": [{"summary": "Session"}]},
+            "calendar": {"available": True, "events": [{"id": "event-1", "summary": "Session"}]},
             "gmail": {"available": True, "messages": [{"id": "m1", "subject": "Studio"}]},
             "drive": {"available": True, "searched": True, "files": [{"name": "notes.txt"}]},
             "read_only": True,
@@ -122,6 +122,9 @@ def test_today_ui_is_mounted_and_keeps_read_only_disclosure():
     assert "does not open email bodies automatically" in TODAY_SCRIPT
     assert "bulk-scan Drive" in TODAY_SCRIPT
     assert "Do not send or modify anything" in TODAY_SCRIPT
+    assert "data-aura-event-detail" in TODAY_SCRIPT
+    assert "data-aura-event-prepare" in TODAY_SCRIPT
+    assert "Do not modify the calendar" in TODAY_SCRIPT
 
     app = FastAPI()
     app.include_router(workspace_ui_router)
