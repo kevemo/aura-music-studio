@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.aura_intelligence import AuraIntelligenceStore
+from aura_music_studio.aura_chat_store import AuraChatStore
 from aura_music_studio.esp_command_center import EspStore
 from aura_music_studio.owner_identity import decode_persona_cookie, encode_persona_cookie
 from aura_music_studio.owner_user_control import OwnerUserControl
@@ -52,7 +52,7 @@ def test_aura_intelligence_threads_are_isolated_per_member(tmp_path):
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
     first = _active(accounts, "one@example.com", "One")
     second = _active(accounts, "two@example.com", "Two")
-    chat = AuraIntelligenceStore(accounts)
+    chat = AuraChatStore(accounts)
 
     thread = chat.create_thread(first["id"], "Private project thinking")
     chat.add_message(first["id"], thread["id"], "user", "Help me plan a release.")
@@ -67,7 +67,7 @@ def test_deleting_a_chat_thread_removes_only_that_users_thread(tmp_path):
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
     first = _active(accounts, "one@example.com", "One")
     second = _active(accounts, "two@example.com", "Two")
-    chat = AuraIntelligenceStore(accounts)
+    chat = AuraChatStore(accounts)
     first_thread = chat.create_thread(first["id"], "First")
     second_thread = chat.create_thread(second["id"], "Second")
 
