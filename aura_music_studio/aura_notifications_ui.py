@@ -14,6 +14,14 @@ NOTIFICATIONS_SCRIPT = r"""
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
   function when(value){if(!value)return '';try{return new Date(value).toLocaleString()}catch(_){return String(value)}}
 
+  function ensureBriefButton(){
+    const foot=document.querySelector('.sideFoot');if(!foot||$('auraWorkspaceBriefButton'))return;
+    const button=document.createElement('button');button.id='auraWorkspaceBriefButton';button.className='btn';button.textContent='☀ Workspace brief';
+    button.title='Ask Aura for a read-only briefing from connected Calendar, Gmail and an optional pinned-project Drive search.';
+    button.onclick=async()=>{try{if(typeof current==='undefined'||!current){if(typeof newThread!=='function')throw new Error('Open an Aura conversation first.');await newThread()}if(typeof send!=='function')throw new Error('Aura chat is not ready.');await send('Aura, give me my daily briefing')}catch(e){toast(e.message,true)}};
+    foot.prepend(button);
+  }
+
   function ensureButton(){
     const foot=document.querySelector('.sideFoot');if(!foot)return null;
     let button=$('auraNotificationsButton');if(button)return button;
@@ -52,7 +60,7 @@ NOTIFICATIONS_SCRIPT = r"""
   async function refreshBadge(){try{const data=await request(`${api}/notifications?unread_only=true&limit=1`);setBadge(data.unread_count)}catch(_){}}
   async function loadNotifications(){try{const data=await request(`${api}/notifications?limit=100`);render(data.notifications||[]);setBadge(data.unread_count)}catch(e){toast(e.message,true)}}
 
-  ensureButton();refreshBadge();
+  ensureBriefButton();ensureButton();refreshBadge();
   window.setInterval(()=>{if(document.visibilityState==='visible')refreshBadge()},60000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')refreshBadge()});
 })();

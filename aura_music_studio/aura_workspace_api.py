@@ -17,6 +17,7 @@ from .aura_multimodal import AuraVisionService
 from .aura_notifications import notification_store, router as aura_notifications_router
 from .aura_sandbox import sandbox
 from .aura_tasks import install_aura_task_tools, router as aura_tasks_router, task_store
+from .aura_workspace_briefing import install_aura_workspace_briefing
 from .creative_renderers import renderer_states
 from .speech import AuraSpeechService
 from .web_access import AuraWebGateway
@@ -28,6 +29,7 @@ install_aura_task_tools()
 install_aura_connector_tools()
 install_aura_connector_extensions()
 install_aura_gmail_extensions()
+install_aura_workspace_briefing()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
@@ -110,6 +112,7 @@ def capabilities(request: Request):
             "google_calendar_read_connector": True,
             "gmail_search_connector": True,
             "gmail_full_message_read": True,
+            "google_workspace_briefing": True,
             "project_pinning": True,
             "project_knowledge_search": True,
             "file_upload_and_extraction": True,

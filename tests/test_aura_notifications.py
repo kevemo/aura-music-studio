@@ -58,11 +58,13 @@ def test_notification_thread_must_belong_to_recipient(tmp_path):
         inbox.create(user_a, kind="task", title="No", body="No", thread_id=thread_b["id"])
 
 
-def test_notifications_ui_links_back_to_originating_aura_thread_and_exposes_script_route():
+def test_notifications_ui_links_back_to_originating_aura_thread_and_exposes_briefing_shortcut():
     assert "/aura-intelligence/api" in NOTIFICATIONS_SCRIPT
     assert "auraNotificationsBadge" in NOTIFICATIONS_SCRIPT
     assert "openThread(thread)" in NOTIFICATIONS_SCRIPT
     assert "notifications/read-all" in NOTIFICATIONS_SCRIPT
     assert "data-notification-delete" in NOTIFICATIONS_SCRIPT
+    assert "auraWorkspaceBriefButton" in NOTIFICATIONS_SCRIPT
+    assert "give me my daily briefing" in NOTIFICATIONS_SCRIPT
     paths = {getattr(route, "path", None) for route in aura_notifications_ui_router.routes}
     assert "/aura-intelligence/notifications-ui.js" in paths
