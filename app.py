@@ -37,6 +37,7 @@ from aura_music_studio.aura_workspace_api import router as aura_workspace_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
 from aura_music_studio.creative_workspace import router as creative_workspace_router
@@ -144,6 +145,7 @@ app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(creative_project_router)
+app.include_router(creative_media_preview_router)
 app.include_router(creative_workspace_router)
 
 app.include_router(esp_level_up_gateway_router)
@@ -199,6 +201,7 @@ app.include_router(source_detection_router)
 app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
+app.add_middleware(CreativeMediaPreviewMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
