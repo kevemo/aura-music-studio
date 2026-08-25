@@ -3,10 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
+from .esp_social_approval_inbox import router as approval_router
 from .esp_social_creative_launch import router as creative_launch_router
 from .social_management_portal import social_house as base_social_house
 
 router = APIRouter()
+router.include_router(approval_router)
 router.include_router(creative_launch_router)
 
 PLATFORM_AWARE_UI = r"""
@@ -62,9 +64,12 @@ def social_house_with_intelligence(request: Request):
     extra = (
         "<a class='btn primary' href='/command-center/social-insights'>Analytics & Aura Insights</a>"
         "<a class='btn' href='/command-center/social/creative-launch'>Creative → Social Launch</a>"
+        "<a class='btn' href='/command-center/social/approvals'>Approval Inbox</a>"
     )
     if marker in html and "/command-center/social/creative-launch" not in html:
         html = html.replace(marker, marker + extra, 1)
+    elif marker in html and "/command-center/social/approvals" not in html:
+        html = html.replace(marker, marker + "<a class='btn' href='/command-center/social/approvals'>Approval Inbox</a>", 1)
     additions = ""
     if "id=\"espPlatformAwarePostEditor\"" not in html:
         additions += PLATFORM_AWARE_UI
