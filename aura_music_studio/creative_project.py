@@ -198,6 +198,7 @@ class CreativeProjectStore:
         element = next((item for item in manifest.elements if item.id == element_id), None)
         if element is None:
             raise KeyError(element_id)
+        was_archived = element.status == "archived"
         if label is not None:
             element.label = label
         if role is not None:
@@ -213,7 +214,10 @@ class CreativeProjectStore:
         element.updated_at = utc_now()
         if element.status == "archived":
             manifest.active_element_ids = [value for value in manifest.active_element_ids if value != element_id]
-        elif element_id not in manifest.active_element_ids:
+        elif status is not None and was_archived and element_id not in manifest.active_element_ids:
+            # An explicit archived -> active status transition restores the element.
+            # Ordinary label/role/prompt/metadata edits must never reactivate a retained
+            # historical version; version promotion is handled by activate_element_version.
             manifest.active_element_ids.append(element_id)
         return self.save(manifest)
 
