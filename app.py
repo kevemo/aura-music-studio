@@ -17,6 +17,7 @@ from aura_music_studio.aura_context_extensions import install_aura_context_exten
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
+from aura_music_studio.aura_notifications_ui import router as aura_notifications_ui_router
 from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
 from aura_music_studio.aura_profiles import install_aura_profiles, router as aura_profiles_router
 from aura_music_studio.aura_project_bridge import router as aura_project_bridge_router
@@ -132,6 +133,7 @@ app.include_router(aura_reasoning_modes_router)
 app.include_router(aura_profiles_router)
 app.include_router(aura_artifacts_router)
 app.include_router(aura_artifacts_ui_router)
+app.include_router(aura_notifications_ui_router)
 app.include_router(aura_sandbox_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_voice_conversation_router)
