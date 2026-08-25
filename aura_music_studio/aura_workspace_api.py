@@ -12,7 +12,9 @@ from .aura_avatar_runtime import avatar_status
 from .aura_chat_store import AuraChatStore
 from .aura_connector_extensions import install_aura_connector_extensions
 from .aura_connectors import install_aura_connector_tools, router as aura_connectors_router, vault as connector_vault
+from .aura_gmail_extensions import install_aura_gmail_extensions
 from .aura_multimodal import AuraVisionService
+from .aura_notifications import notification_store, router as aura_notifications_router
 from .aura_sandbox import sandbox
 from .aura_tasks import install_aura_task_tools, router as aura_tasks_router, task_store
 from .creative_renderers import renderer_states
@@ -25,10 +27,12 @@ from .web_access import AuraWebGateway
 install_aura_task_tools()
 install_aura_connector_tools()
 install_aura_connector_extensions()
+install_aura_gmail_extensions()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
 router.include_router(aura_connectors_router)
+router.include_router(aura_notifications_router)
 store = AuraChatStore()
 agent = AuraAgent(store=store)
 
@@ -85,6 +89,7 @@ def capabilities(request: Request):
     task_runtime = task_store.worker_status()
     connector_runtime = connector_vault.diagnostics()
     connected_services = connector_vault.status(member.user_id)
+    unread_notifications = notification_store.unread_count(member.user_id)
     tools = public_tool_specs(web_enabled=True, tools_enabled=True)
     return {
         "member_plan": member.plan.id,
@@ -99,10 +104,12 @@ def capabilities(request: Request):
             "isolated_code_sandbox_adapter": True,
             "durable_aura_tasks": True,
             "scheduled_read_only_research": True,
+            "private_notification_inbox": True,
             "encrypted_private_connectors": True,
             "google_drive_search_and_document_read": True,
             "google_calendar_read_connector": True,
-            "gmail_read_connector": True,
+            "gmail_search_connector": True,
+            "gmail_full_message_read": True,
             "project_pinning": True,
             "project_knowledge_search": True,
             "file_upload_and_extraction": True,
@@ -135,6 +142,7 @@ def capabilities(request: Request):
             "avatar": avatar,
             "sandbox": sandbox_state,
             "tasks": task_runtime,
+            "notifications": {"unread_count": unread_notifications},
             "connectors": {
                 "runtime": connector_runtime,
                 "connected": connected_services,
