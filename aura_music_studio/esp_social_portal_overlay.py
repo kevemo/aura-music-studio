@@ -21,6 +21,30 @@ PLATFORM_AWARE_UI = r"""
 </script>
 """
 
+MULTI_PLATFORM_UI = r"""
+<script id="espMultiPlatformComposer">
+(()=>{
+  const root='/command-center/api/social';let registry=null,drawer=null;
+  const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const pretty=v=>String(v||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  async function request(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});let b={};try{b=await r.json()}catch(_){}if(!r.ok)throw new Error(b.detail||`Request failed (${r.status})`);return b}
+  function toast(m,bad=false){try{notice(m,bad)}catch(_){console[bad?'error':'log'](m)}}
+  function activeHouse(){try{return typeof house!=='undefined'?house:null}catch(_){return null}}
+  async function caps(){if(registry)return registry;const d=await request(root+'/platforms');registry=d.capabilities||{};return registry}
+  function ensureButton(){const tabs=document.querySelector('.tabs');if(!tabs||document.getElementById('espMultiPlatformButton'))return;const b=document.createElement('button');b.id='espMultiPlatformButton';b.className='tab';b.textContent='＋ Multi-platform Post';b.onclick=open;tabs.append(b)}
+  function ensureDrawer(){if(drawer)return drawer;drawer=document.createElement('aside');drawer.id='espMultiPlatformDrawer';drawer.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(760px,100%);z-index:99;transform:translateX(105%);transition:.2s;background:#080b16fc;border-left:1px solid #ffffff20;padding:18px;overflow:auto;box-shadow:-24px 0 70px #000a';drawer.innerHTML=`<div style="display:flex;align-items:flex-start;gap:9px"><div style="flex:1"><div class="eyebrow">Cross-platform planning</div><h2 style="margin:4px 0">Multi-platform Post</h2><p class="muted" style="font-size:.78rem">One content item with a separate validated variant for every selected destination. Planning only until an official publishing adapter is authorised.</p></div><button class="btn small" id="espMultiClose">✕</button></div><div class="formbox" style="margin-top:10px"><div class="stack"><input id="espMultiTitle" class="field" maxlength="300" placeholder="Content title"><label class="muted"><input id="espMultiApproval" type="checkbox"> Require approval before publishing</label><div id="espMultiPlatforms"></div><button id="espMultiSave" class="btn primary">Add multi-platform content</button><div class="muted" style="font-size:.68rem">This composer always saves <code>auto_publish:false</code>. Connecting and authorising official platform publishing remains a separate step.</div></div></div>`;document.body.append(drawer);document.getElementById('espMultiClose').onclick=close;document.getElementById('espMultiSave').onclick=save;drawer.addEventListener('change',e=>{const cb=e.target.closest('[data-multi-enable]');if(cb)toggleRow(cb.dataset.multiEnable,cb.checked)});return drawer}
+  function close(){ensureDrawer().style.transform='translateX(105%)'}
+  function platformCard(name,spec){const types=Array.isArray(spec.content_types)?spec.content_types:[];const cap=spec.caption_limit==null?'no registry caption cap':`${spec.caption_limit} chars`;const media=spec.max_media==null?'no registry media cap':`max ${spec.max_media} media`;return `<div class="card" style="margin:8px 0"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-multi-enable="${esc(name)}"><b>${esc(pretty(name))}</b><span class="muted" style="font-size:.68rem">${esc(cap)} · ${esc(media)}</span></label><div id="multi_${esc(name)}" style="display:none;margin-top:9px" class="stack"><select class="field" data-multi-type="${esc(name)}">${types.map(t=>`<option value="${esc(t)}">${esc(pretty(t))}</option>`).join('')}</select><textarea class="field" data-multi-caption="${esc(name)}" maxlength="63206" placeholder="${esc(pretty(name))} caption"></textarea><input class="field" data-multi-tags="${esc(name)}" placeholder="Hashtags, separated by spaces or commas"><div class="row"><label class="muted" style="font-size:.72rem">Schedule (optional)<input class="field" type="datetime-local" data-multi-schedule="${esc(name)}"></label><label class="muted" style="font-size:.72rem">Timezone<input class="field" data-multi-zone="${esc(name)}" value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}"></label></div></div></div>`}
+  function toggleRow(name,on){const el=document.getElementById(`multi_${name}`);if(el)el.style.display=on?'grid':'none'}
+  async function open(){const h=activeHouse();if(!h?.id)return toast('Choose or create a Social House first.',true);try{await caps();ensureDrawer();document.getElementById('espMultiPlatforms').innerHTML=Object.entries(registry).filter(([,s])=>s.planning!==false).map(([n,s])=>platformCard(n,s)).join('');document.getElementById('espMultiTitle').value='';document.getElementById('espMultiApproval').checked=false;drawer.style.transform='translateX(0)'}catch(e){toast(e.message,true)}}
+  function hashtags(value){return String(value||'').split(/[\s,]+/).map(x=>x.trim().replace(/^#+/,'' )).filter(Boolean).slice(0,100)}
+  function scheduleValue(input){if(!input?.value)return null;const d=new Date(input.value);return Number.isNaN(d.getTime())?null:d.toISOString()}
+  async function save(){const h=activeHouse(),title=document.getElementById('espMultiTitle')?.value.trim();if(!h?.id)return toast('Choose a Social House first.',true);if(!title)return toast('Enter a content title.',true);const selected=[...document.querySelectorAll('[data-multi-enable]:checked')].map(x=>x.dataset.multiEnable);if(!selected.length)return toast('Select at least one platform.',true);const variants=selected.map(name=>({platform:name,content_type:document.querySelector(`[data-multi-type="${CSS.escape(name)}"]`).value,caption:document.querySelector(`[data-multi-caption="${CSS.escape(name)}"]`).value.trim(),hashtags:hashtags(document.querySelector(`[data-multi-tags="${CSS.escape(name)}"]`).value),scheduled_at:scheduleValue(document.querySelector(`[data-multi-schedule="${CSS.escape(name)}"]`)),timezone:document.querySelector(`[data-multi-zone="${CSS.escape(name)}"]`).value.trim()||null,media_refs:[],auto_publish:false}));const approval=document.getElementById('espMultiApproval').checked;const anyScheduled=variants.some(v=>v.scheduled_at);const status=approval?'pending_approval':(anyScheduled?'scheduled':'draft');try{const d=await request(`${root}/spaces/${encodeURIComponent(h.id)}/content`,{method:'POST',body:JSON.stringify({title,status,approval_required:approval,content_pillars:[],variants})});try{house=d.house;renderSpaces();renderTab()}catch(_){}close();toast(`${variants.length} platform variant${variants.length===1?'':'s'} added to one content item.`)}catch(e){toast(e.message,true)}}
+  const observer=new MutationObserver(ensureButton);observer.observe(document.documentElement,{subtree:true,childList:true});ensureButton();
+})();
+</script>
+"""
+
 
 @router.get("/command-center/social", response_class=HTMLResponse, include_in_schema=False)
 def social_house_with_intelligence(request: Request):
@@ -36,9 +60,14 @@ def social_house_with_intelligence(request: Request):
     extra = "<a class='btn primary' href='/command-center/social-insights'>Analytics & Aura Insights</a>"
     if marker in html and extra not in html:
         html = html.replace(marker, marker + extra, 1)
-    if "id=\"espPlatformAwarePostEditor\"" not in html and "</body>" in html:
-        html = html.replace("</body>", PLATFORM_AWARE_UI + "</body>", 1)
+    additions = ""
+    if "id=\"espPlatformAwarePostEditor\"" not in html:
+        additions += PLATFORM_AWARE_UI
+    if "id=\"espMultiPlatformComposer\"" not in html:
+        additions += MULTI_PLATFORM_UI
+    if additions and "</body>" in html:
+        html = html.replace("</body>", additions + "</body>", 1)
     return HTMLResponse(html, status_code=response.status_code)
 
 
-__all__ = ["router", "PLATFORM_AWARE_UI"]
+__all__ = ["router", "PLATFORM_AWARE_UI", "MULTI_PLATFORM_UI"]
