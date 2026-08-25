@@ -9,9 +9,13 @@ from pydantic import BaseModel, Field
 
 from .branding import ENDORSEMENT
 from .esp_niche import require_esp_social_member
+from .esp_social_public_review import router as public_review_router
+from .esp_social_review_links_ui import router as review_links_ui_router
 from .social_management import ActivityEvent, SocialHouseStore, utc_now
 
 router = APIRouter(tags=["ESP Social Approvals"])
+router.include_router(public_review_router)
+router.include_router(review_links_ui_router)
 ReviewDecision = Literal["approve", "request_changes", "reject"]
 
 
@@ -149,7 +153,7 @@ const API='/command-center/api/social';let rows=[];const $=id=>document.getEleme
 @router.get("/command-center/social/approvals", response_class=HTMLResponse, include_in_schema=False)
 def approval_inbox(request: Request):
     _member(request)
-    html = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>ESP Approval Inbox</title><style>{CSS}</style></head><body><nav class='nav'><div class='wrap navin'><a class='brand' href='/command-center/social'>Elevate Souls Productions<small>Social Approval Inbox</small></a><div><a class='btn' href='/command-center/social/creative-launch'>Creative → Social</a> <a class='btn' href='/command-center/social'>Social House</a></div></div></nav><main class='wrap'><section class='hero'><div class='eyebrow'>Internal review gate</div><h1>Approve before anything can <span style='color:var(--gold)'>move forward.</span></h1><p class='lead'>Review platform-specific variants together, request changes or archive a rejected concept. The reviewer identity is taken from the signed-in ESP account, not typed into the browser. Approval does not trigger external publishing.</p><div id='notice' class='notice'></div><p class='muted'><b id='count'>0</b> item(s) waiting.</p></section><section id='queue' class='queue'><div class='empty'>Loading approvals…</div></section></main><footer class='footer'><div class='wrap'>{ENDORSEMENT}</div></footer><script>{SCRIPT}</script></body></html>"""
+    html = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>ESP Approval Inbox</title><style>{CSS}</style></head><body><nav class='nav'><div class='wrap navin'><a class='brand' href='/command-center/social'>Elevate Souls Productions<small>Social Approval Inbox</small></a><div><a class='btn' href='/command-center/social/review-links'>Review Links</a> <a class='btn' href='/command-center/social/creative-launch'>Creative → Social</a> <a class='btn' href='/command-center/social'>Social House</a></div></div></nav><main class='wrap'><section class='hero'><div class='eyebrow'>Internal review gate</div><h1>Approve before anything can <span style='color:var(--gold)'>move forward.</span></h1><p class='lead'>Review platform-specific variants together, request changes or archive a rejected concept. The reviewer identity is taken from the signed-in ESP account, not typed into the browser. Approval does not trigger external publishing.</p><div id='notice' class='notice'></div><p class='muted'><b id='count'>0</b> item(s) waiting.</p></section><section id='queue' class='queue'><div class='empty'>Loading approvals…</div></section></main><footer class='footer'><div class='wrap'>{ENDORSEMENT}</div></footer><script>{SCRIPT}</script></body></html>"""
     return HTMLResponse(html)
 
 
