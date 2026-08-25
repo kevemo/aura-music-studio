@@ -3,10 +3,9 @@ from __future__ import annotations
 import pytest
 
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.aura_artifacts_ui import router as aura_workspace_ui_router
 from aura_music_studio.aura_chat_store import AuraChatStore
 from aura_music_studio.aura_notifications import NotificationStore
-from aura_music_studio.aura_notifications_ui import NOTIFICATIONS_SCRIPT
+from aura_music_studio.aura_notifications_ui import NOTIFICATIONS_SCRIPT, router as aura_notifications_ui_router
 
 
 def _user(accounts: AccountStore, email: str) -> str:
@@ -59,11 +58,11 @@ def test_notification_thread_must_belong_to_recipient(tmp_path):
         inbox.create(user_a, kind="task", title="No", body="No", thread_id=thread_b["id"])
 
 
-def test_notifications_ui_links_back_to_originating_aura_thread_and_is_mounted():
+def test_notifications_ui_links_back_to_originating_aura_thread_and_exposes_script_route():
     assert "/aura-intelligence/api" in NOTIFICATIONS_SCRIPT
     assert "auraNotificationsBadge" in NOTIFICATIONS_SCRIPT
     assert "openThread(thread)" in NOTIFICATIONS_SCRIPT
     assert "notifications/read-all" in NOTIFICATIONS_SCRIPT
     assert "data-notification-delete" in NOTIFICATIONS_SCRIPT
-    paths = {getattr(route, "path", None) for route in aura_workspace_ui_router.routes}
+    paths = {getattr(route, "path", None) for route in aura_notifications_ui_router.routes}
     assert "/aura-intelligence/notifications-ui.js" in paths
