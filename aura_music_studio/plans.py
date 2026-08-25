@@ -92,6 +92,8 @@ FREE_FEATURES = frozenset({
     BASIC_MASTERING,
 })
 
+# Keep the internal BASE_* identifier and the public plan id "base" for backwards
+# compatibility. Customer-facing copy calls this tier "Basic".
 BASE_FEATURES = FREE_FEATURES | frozenset({
     FULL_TRACK,
     BUILD_AROUND_UPLOAD,
@@ -149,7 +151,7 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Base."
+            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Basic."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -157,7 +159,7 @@ PLANS: dict[str, Plan] = {
     ),
     "base": Plan(
         id="base",
-        name="Base",
+        name="Basic",
         monthly_price_usd=Decimal("4.99"),
         description=(
             "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
@@ -173,11 +175,12 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Live Sound Studio: expanded instrument/performance types, editable "
-            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
-            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync and all enabled export formats."
+            "Unlimited full-track creation and the complete Pulsar-Frequency House music-production stack: expanded "
+            "instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
+            "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
+            "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
+            "covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, immersive "
+            "spatial audio, video/music sync and all enabled export formats."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
@@ -196,7 +199,7 @@ def get_plan(plan_id: str) -> Plan:
 def require_feature(plan_id: str, feature: str) -> None:
     plan = get_plan(plan_id)
     if not plan.has(feature):
-        raise PermissionError(f"{feature} requires a higher Live Sound Studio membership tier")
+        raise PermissionError(f"{feature} requires a higher Pulsar-Frequency House membership tier")
 
 
 def public_plans() -> list[dict]:
@@ -204,7 +207,7 @@ def public_plans() -> list[dict]:
 
 
 OWNERSHIP_NOTICE = (
-    "The Live Sound Studio and Elevate Souls Productions do not claim ownership of a member's original "
+    "Pulsar-Frequency House and Elevate Souls Productions do not claim ownership of a member's original "
     "inputs or eligible generated outputs. Rights in AI-assisted outputs remain subject to applicable law, "
     "the licences of underlying open models, and any third-party/source-material rights. Members must have "
     "the rights required for material they upload or ask the Studio to transform."

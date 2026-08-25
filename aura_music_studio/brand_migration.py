@@ -49,6 +49,8 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("Workspace architecture staged", "Creative DNA + renderer bridge connected"),
     ("Aura routes connected", "Aura Core 0.20 connected"),
     ("Unified project layer in build", "Creative DNA project layer connected"),
+    ("<h3>Base</h3>", "<h3>Basic</h3>"),
+    ("href='/signup?plan=base'>Choose Base", "href='/signup?plan=base'>Choose Basic"),
     (
         "The target project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable",
         "The Creative DNA project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable",

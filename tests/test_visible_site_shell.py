@@ -13,6 +13,7 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     <span>Workspace architecture staged</span>
     <span>Aura routes connected</span>
     <span>Unified project layer in build</span>
+    <h3>Base</h3><a href='/signup?plan=base'>Choose Base</a>
     <p>The target project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable</p>
     <p>The platform is being built around continuity:</p>
     <p>The current real-audio music engine, owner controls and ESP permission systems remain underneath the new master brand while the unified video, image and multimodal editing layers are expanded.</p>
@@ -23,6 +24,8 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     assert "Creative DNA + renderer bridge connected" in current
     assert "Aura Core 0.20 connected" in current
     assert "Creative DNA project layer connected" in current
+    assert "<h3>Basic</h3>" in current
+    assert "href='/signup?plan=base'>Choose Basic" in current
     assert "Creative DNA project model keeps" in current
     assert "built around Creative DNA continuity" in current
     assert "external generation backends remain deployment-configurable" in current
