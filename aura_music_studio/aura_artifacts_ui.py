@@ -5,10 +5,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .aura_connectors_ui import router as aura_connectors_ui_router
 from .aura_tasks_ui import router as aura_tasks_ui_router
 
 router = APIRouter(include_in_schema=False)
 router.include_router(aura_tasks_ui_router)
+router.include_router(aura_connectors_ui_router)
 
 ARTIFACT_UI_SCRIPT = r"""
 (()=>{
@@ -68,6 +70,7 @@ class AuraArtifactsUIMiddleware(BaseHTTPMiddleware):
         markers = (
             "<script src='/aura-intelligence/artifacts-ui.js'></script>",
             "<script src='/aura-intelligence/tasks-ui.js'></script>",
+            "<script src='/aura-intelligence/connectors-ui.js'></script>",
         )
         for marker in markers:
             if marker not in text:
