@@ -21,19 +21,19 @@ TASKS_SCRIPT = r"""
     if(q('auraTasksDrawer'))return q('auraTasksDrawer');
     const drawer=document.createElement('div');drawer.id='auraTasksDrawer';drawer.className='drawer';
     drawer.innerHTML=`
-      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Aura Tasks</b><div class="muted" style="font-size:.72rem">Durable reminders & read-only scheduled research</div></div><button class="btn" id="auraTasksClose">✕</button></div>
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Aura Tasks</b><div class="muted" style="font-size:.72rem">Durable reminders, research & connected briefings</div></div><button class="btn" id="auraTasksClose">✕</button></div>
       <div id="auraTasksWorker" style="margin:12px 0;padding:10px;border:1px solid #ffffff18;border-radius:12px"></div>
       <div style="display:grid;gap:8px;padding:10px;border:1px solid #ffffff18;border-radius:12px;background:#ffffff04">
         <input id="auraTaskTitle" class="search" style="margin:0" placeholder="Task title">
-        <select id="auraTaskKind" class="select"><option value="reminder">Reminder</option><option value="prompt">Aura follow-up</option><option value="research">Scheduled research</option></select>
-        <textarea id="auraTaskPrompt" class="search" style="margin:0;min-height:92px;resize:vertical" placeholder="What should Aura remind/research/follow up on?"></textarea>
+        <select id="auraTaskKind" class="select"><option value="reminder">Reminder</option><option value="prompt">Aura follow-up</option><option value="research">Scheduled web research</option><option value="workspace_briefing">Workspace briefing</option></select>
+        <textarea id="auraTaskPrompt" class="search" style="margin:0;min-height:92px;resize:vertical" placeholder="Instruction. For Workspace briefing enter ‘general’ or an optional Drive topic/project."></textarea>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div><label class="muted" style="font-size:.68rem">Run after</label><select id="auraTaskDelay" class="select"><option value="60">1 hour</option><option value="180">3 hours</option><option value="360">6 hours</option><option value="720">12 hours</option><option value="1440">1 day</option><option value="10080">1 week</option><option value="custom">Specific time</option></select></div>
           <div><label class="muted" style="font-size:.68rem">Repeat</label><select id="auraTaskRepeat" class="select"><option value="">One time</option><option value="60">Hourly</option><option value="360">Every 6 hours</option><option value="720">Every 12 hours</option><option value="1440">Daily</option><option value="10080">Weekly</option></select></div>
         </div>
         <input id="auraTaskRunAt" type="datetime-local" class="search" style="display:none;margin:0">
         <button id="auraTaskCreate" class="btn primary">＋ Create Aura Task</button>
-        <div class="muted" style="font-size:.65rem;line-height:1.45">Background tasks are read-only. They cannot edit projects, publish social posts, run code, clone voices or perform other high-impact actions.</div>
+        <div class="muted" style="font-size:.65rem;line-height:1.45">Background tasks are read-only. Workspace briefings can read only explicitly connected Google services. Tasks cannot edit projects, send email, create calendar events, publish social posts, run code, clone voices or perform other high-impact actions.</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px"><b>Scheduled</b><button id="auraTasksRefresh" class="mini">Refresh</button></div>
       <div id="auraTasksRows"></div>`;
@@ -41,6 +41,7 @@ TASKS_SCRIPT = r"""
     q('auraTasksClose').onclick=()=>drawer.classList.remove('open');
     q('auraTasksRefresh').onclick=loadTasks;
     q('auraTaskDelay').onchange=()=>{q('auraTaskRunAt').style.display=q('auraTaskDelay').value==='custom'?'block':'none'};
+    q('auraTaskKind').onchange=()=>{if(q('auraTaskKind').value==='workspace_briefing'&&!q('auraTaskPrompt').value.trim())q('auraTaskPrompt').value='general'};
     q('auraTaskCreate').onclick=createTask;
     return drawer;
   }
@@ -52,7 +53,7 @@ TASKS_SCRIPT = r"""
 
   function rowHTML(t){
     const state=t.status||'active';const enabled=!!t.enabled;
-    return `<div class="mem" data-task="${esc(t.id)}"><div style="display:flex;gap:8px;align-items:flex-start"><div style="flex:1"><b>${esc(t.title)}</b><div class="muted" style="font-size:.67rem;text-transform:capitalize">${esc(t.kind)} · ${esc(state)} · ${esc(intervalLabel(t.interval_minutes))}</div></div><span style="font-size:.68rem;color:${enabled?'#73e2aa':'#a9b2c8'}">${enabled?'ACTIVE':'PAUSED'}</span></div><p style="font-size:.76rem;line-height:1.45;white-space:pre-wrap">${esc(t.prompt)}</p><div class="muted" style="font-size:.67rem">Next: ${esc(when(t.next_run_at))}${t.last_run_at?` · Last: ${esc(when(t.last_run_at))}`:''}</div>${t.last_error?`<div style="color:#ff8fa6;font-size:.67rem;margin-top:5px">${esc(t.last_error)}</div>`:''}<div style="display:flex;gap:5px;margin-top:7px"><button class="mini" data-task-toggle="${esc(t.id)}" data-enabled="${enabled?'1':'0'}">${enabled?'Pause':'Resume'}</button><button class="mini" data-task-delete="${esc(t.id)}">Delete</button></div></div>`;
+    return `<div class="mem" data-task="${esc(t.id)}"><div style="display:flex;gap:8px;align-items:flex-start"><div style="flex:1"><b>${esc(t.title)}</b><div class="muted" style="font-size:.67rem;text-transform:capitalize">${esc(String(t.kind||'').replace('_',' '))} · ${esc(state)} · ${esc(intervalLabel(t.interval_minutes))}</div></div><span style="font-size:.68rem;color:${enabled?'#73e2aa':'#a9b2c8'}">${enabled?'ACTIVE':'PAUSED'}</span></div><p style="font-size:.76rem;line-height:1.45;white-space:pre-wrap">${esc(t.prompt)}</p><div class="muted" style="font-size:.67rem">Next: ${esc(when(t.next_run_at))}${t.last_run_at?` · Last: ${esc(when(t.last_run_at))}`:''}</div>${t.last_error?`<div style="color:#ff8fa6;font-size:.67rem;margin-top:5px">${esc(t.last_error)}</div>`:''}<div style="display:flex;gap:5px;margin-top:7px"><button class="mini" data-task-toggle="${esc(t.id)}" data-enabled="${enabled?'1':'0'}">${enabled?'Pause':'Resume'}</button><button class="mini" data-task-delete="${esc(t.id)}">Delete</button></div></div>`;
   }
 
   async function loadTasks(){

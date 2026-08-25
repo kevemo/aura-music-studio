@@ -9,10 +9,15 @@ from uuid import uuid4
 from .aura_agent_core import AuraModelClient
 from .aura_notifications import notification_store
 from .aura_productivity_tools import _source_wrap, source_markdown
+from .aura_scheduled_briefing import install_aura_scheduled_briefing, scheduled_workspace_briefing
 from .aura_tasks import task_store
 from .web_access import AuraWebGateway
 
 _RUNNING = True
+
+# The task worker imports the same scheduled-briefing extension as the web process so
+# validation/accepted task kinds remain consistent. This adds only read-only connector work.
+install_aura_scheduled_briefing()
 
 
 def _stop(*_args):
@@ -71,6 +76,8 @@ def run_task(task: dict) -> str:
         return "🔎 Scheduled Aura research\n\n" + _research(prompt)
     if kind == "prompt":
         return "✦ Scheduled Aura follow-up\n\n" + _prompt(prompt)
+    if kind == "workspace_briefing":
+        return scheduled_workspace_briefing(task)
     raise ValueError(f"Unsupported Aura Task kind: {kind}")
 
 
@@ -106,7 +113,15 @@ def run_worker() -> None:
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
     while _RUNNING:
-        task_store.heartbeat(worker_id, {"poll_seconds": poll, "background_project_writes_allowed": False})
+        task_store.heartbeat(
+            worker_id,
+            {
+                "poll_seconds": poll,
+                "background_project_writes_allowed": False,
+                "background_connector_reads_allowed": True,
+                "background_connector_writes_allowed": False,
+            },
+        )
         task = task_store.claim_due(worker_id)
         if task is None:
             time.sleep(poll)

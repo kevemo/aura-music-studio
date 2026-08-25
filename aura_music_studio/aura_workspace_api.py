@@ -16,6 +16,7 @@ from .aura_gmail_extensions import install_aura_gmail_extensions
 from .aura_multimodal import AuraVisionService
 from .aura_notifications import notification_store, router as aura_notifications_router
 from .aura_sandbox import sandbox
+from .aura_scheduled_briefing import install_aura_scheduled_briefing
 from .aura_tasks import install_aura_task_tools, router as aura_tasks_router, task_store
 from .aura_workspace_briefing import install_aura_workspace_briefing
 from .creative_renderers import renderer_states
@@ -30,6 +31,7 @@ install_aura_connector_tools()
 install_aura_connector_extensions()
 install_aura_gmail_extensions()
 install_aura_workspace_briefing()
+install_aura_scheduled_briefing()
 
 router = APIRouter(tags=["Aura Workspace"])
 router.include_router(aura_tasks_router)
@@ -106,6 +108,7 @@ def capabilities(request: Request):
             "isolated_code_sandbox_adapter": True,
             "durable_aura_tasks": True,
             "scheduled_read_only_research": True,
+            "scheduled_connected_workspace_briefing": True,
             "private_notification_inbox": True,
             "encrypted_private_connectors": True,
             "google_drive_search_and_document_read": True,

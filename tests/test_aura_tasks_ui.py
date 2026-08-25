@@ -44,3 +44,15 @@ def test_tasks_ui_shows_worker_truthfulness_and_read_only_boundary():
     assert 'Background tasks are read-only.' in script.text
     assert 'interval_minutes' in script.text
     assert 'datetime-local' in script.text
+
+
+def test_tasks_ui_exposes_connected_workspace_briefing_without_write_authority():
+    client = TestClient(_app())
+    script = client.get('/aura-intelligence/tasks-ui.js')
+    assert script.status_code == 200
+    assert 'workspace_briefing' in script.text
+    assert 'Workspace briefing' in script.text
+    assert 'explicitly connected Google services' in script.text
+    assert 'cannot edit projects' in script.text
+    assert 'send email' in script.text
+    assert 'create calendar events' in script.text
