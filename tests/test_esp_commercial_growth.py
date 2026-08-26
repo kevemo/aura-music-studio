@@ -6,6 +6,7 @@ from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_commercial_growth import (
     ApplicationUpdate,
     BrandLeadCreate,
+    BrandLeadUpdate,
     CommercialGrowthStore,
     CommercialProfileUpdate,
     OpportunityCreate,
@@ -118,7 +119,7 @@ def test_agent_cannot_attach_or_update_another_agents_brand_lead(tmp_path):
         store.update_brand_lead(
             lead["id"],
             second_agent["id"],
-            body=type("LeadUpdate", (), {"stage": "follow_up", "next_followup_at": "", "notes": ""})(),
+            BrandLeadUpdate(stage="follow_up"),
             owner=False,
         )
 
