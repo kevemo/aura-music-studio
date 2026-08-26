@@ -5,9 +5,11 @@ from fastapi import APIRouter, HTTPException, Request
 from .esp_niche import require_esp_social_member
 from .esp_social_provider_analytics import router as provider_analytics_router
 from .esp_social_publish_queue import SocialPublishQueue
+from .esp_social_tiktok_scope_upgrade import router as tiktok_scope_upgrade_router
 
 router = APIRouter(tags=["esp-social-publish-queue"])
 router.include_router(provider_analytics_router)
+router.include_router(tiktok_scope_upgrade_router)
 
 
 def _member(request: Request):
