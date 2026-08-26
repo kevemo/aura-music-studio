@@ -6,6 +6,7 @@ from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_agent_roster import AgentRosterStore, router
 from aura_music_studio.esp_command_center import EspStore
 from aura_music_studio.esp_level_up import EspAgentAssignmentStore
+from aura_music_studio.esp_niche import EspNicheStore
 
 
 def _active(accounts: AccountStore, esp: EspStore, email: str, role: str):
@@ -19,6 +20,9 @@ def _active(accounts: AccountStore, esp: EspStore, email: str, role: str):
 def test_agent_roster_shows_only_explicit_assignments(tmp_path):
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
     esp = EspStore(accounts)
+    # The production app initializes the niche subsystem during startup. Mirror that real
+    # dependency in this isolated database before exercising the assignment JOIN.
+    EspNicheStore(esp)
     agent = _active(accounts, esp, "agent@example.com", "agent")
     assigned = _active(accounts, esp, "assigned@example.com", "creator")
     unassigned = _active(accounts, esp, "unassigned@example.com", "creator")
