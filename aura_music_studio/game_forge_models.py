@@ -12,7 +12,8 @@ def _now() -> str:
 
 
 GameDimension = Literal["2d", "3d"]
-GameEngine = Literal["phaser4", "playcanvas", "babylon", "godot"]
+# Aura owns the primary runtime. External engines are compatibility/export targets only.
+GameEngine = Literal["aura2d", "aura3d", "phaser4", "playcanvas", "babylon", "godot"]
 GameStatus = Literal["draft", "building", "review_ready", "approved_test", "public_test", "archived"]
 ContentIntensity = Literal["none", "mild", "moderate", "strong", "graphic"]
 
@@ -77,7 +78,7 @@ class VerifiedOfficialRating(BaseModel):
 class GameBuild(BaseModel):
     build_id: str = Field(default_factory=lambda: f"build_{uuid4().hex}")
     content_hash: str
-    runtime: str = "pulsar_safe_canvas_v1"
+    runtime: str = "aura_game_runtime_v1"
     requested_engine: GameEngine
     created_at: str = Field(default_factory=_now)
     private_playtest_ready: bool = True
@@ -93,7 +94,7 @@ class GameDNA(BaseModel):
     genre: str = Field(default="adventure", max_length=120)
     niches: list[str] = Field(default_factory=list, max_length=30)
     dimension: GameDimension = "2d"
-    engine_target: GameEngine = "phaser4"
+    engine_target: GameEngine = "aura2d"
     target_platforms: list[str] = Field(default_factory=lambda: ["browser"], max_length=12)
     camera: str = Field(default="auto", max_length=80)
     synopsis: str = Field(default="", max_length=8000)
@@ -127,36 +128,58 @@ class GameDNA(BaseModel):
 
 
 ENGINE_REGISTRY: dict[str, dict] = {
+    "aura2d": {
+        "label": "Aura Game Engine 2D",
+        "dimension": "2d",
+        "license": "Pulsar native",
+        "role": "Primary Aura-owned browser 2D runtime, scene system, controls, physics abstraction and playtest target",
+        "commercially_usable": True,
+        "native": True,
+        "adapter_stage": "foundation",
+    },
+    "aura3d": {
+        "label": "Aura Game Engine 3D",
+        "dimension": "3d",
+        "license": "Pulsar native",
+        "role": "Primary Aura-owned WebGPU/WebGL 3D runtime and scene/material/animation abstraction",
+        "commercially_usable": True,
+        "native": True,
+        "adapter_stage": "foundation",
+    },
     "phaser4": {
-        "label": "Phaser 4",
+        "label": "Phaser 4 export adapter",
         "dimension": "2d",
         "license": "MIT",
-        "role": "Primary browser 2D engine",
+        "role": "Optional compatibility/export adapter; never the Aura Game Forge core",
         "commercially_usable": True,
-        "adapter_stage": "foundation",
+        "native": False,
+        "adapter_stage": "planned",
     },
     "playcanvas": {
-        "label": "PlayCanvas Engine",
+        "label": "PlayCanvas export adapter",
         "dimension": "3d",
         "license": "MIT",
-        "role": "Primary WebGL2/WebGPU browser 3D engine",
+        "role": "Optional WebGPU/WebGL compatibility/export adapter; never the Aura Game Forge core",
         "commercially_usable": True,
-        "adapter_stage": "foundation",
+        "native": False,
+        "adapter_stage": "planned",
     },
     "babylon": {
-        "label": "Babylon.js",
+        "label": "Babylon.js export adapter",
         "dimension": "3d",
         "license": "Apache-2.0",
-        "role": "Advanced WebGPU/WebXR browser 3D route",
+        "role": "Optional advanced WebGPU/WebXR compatibility/export adapter",
         "commercially_usable": True,
-        "adapter_stage": "foundation",
+        "native": False,
+        "adapter_stage": "planned",
     },
     "godot": {
-        "label": "Godot Engine",
+        "label": "Godot export adapter",
         "dimension": "2d/3d",
         "license": "MIT",
-        "role": "Native/desktop/mobile/export route",
+        "role": "Optional native desktop/mobile/console-oriented export route",
         "commercially_usable": True,
-        "adapter_stage": "foundation",
+        "native": False,
+        "adapter_stage": "planned",
     },
 }
