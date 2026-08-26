@@ -81,13 +81,16 @@ def pulsar_player_ui():
 
 
 class PulsarPlayerMiddleware(BaseHTTPMiddleware):
-    """Inject the persistent player only into authenticated member HTML responses."""
+    """Inject the persistent player into signed-in member HTML across the one-site app."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         if request.method.upper() != "GET":
             return response
-        if getattr(request.state, "member", None) is None:
+        # Most private routes receive request.state.member from MembershipAccessMiddleware.
+        # Dashboard/Studio are deliberate public-entry shells that perform their own auth,
+        # so an existing member session cookie is also sufficient to render the harmless UI.
+        if getattr(request.state, "member", None) is None and not request.cookies.get("lss_session"):
             return response
         content_type = (response.headers.get("content-type") or "").lower()
         if not content_type.startswith("text/html"):
