@@ -12,6 +12,7 @@ class Plan:
     description: str
     confirmed_songs_per_day: int | None
     regeneration_until_confirmed: bool
+    image_poster_creations_per_day: int | None
     features: frozenset[str]
     studio_claims_output_ownership: bool = False
 
@@ -22,6 +23,7 @@ class Plan:
         data = asdict(self)
         data["monthly_price_usd"] = str(self.monthly_price_usd)
         data["features"] = sorted(self.features)
+        data["image_poster_creations_unlimited"] = self.image_poster_creations_per_day is None
         return data
 
 
@@ -48,6 +50,9 @@ UNLIMITED_REGEN_UNTIL_CONFIRMED = "unlimited_regen_until_confirmed"
 MP3_DOWNLOAD = "mp3_download"
 WAV_DOWNLOAD = "wav_download"
 FLAC_DOWNLOAD = "flac_download"
+IMAGE_POSTER_CREATE = "image_poster_create"
+IMAGE_POSTER_DOWNLOAD = "image_poster_download"
+MUSIC_VIDEO_DOWNLOAD = "music_video_download"
 BASIC_MASTERING = "basic_mastering"
 ADVANCED_MASTERING = "advanced_mastering"
 REFERENCE_MASTERING = "reference_mastering"
@@ -90,6 +95,8 @@ FREE_FEATURES = frozenset({
     BASIC_FX,
     BASIC_AUTOTUNE,
     BASIC_MASTERING,
+    IMAGE_POSTER_CREATE,
+    IMAGE_POSTER_DOWNLOAD,
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
@@ -100,6 +107,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     UNLIMITED_REGEN_UNTIL_CONFIRMED,
     MP3_DOWNLOAD,
     WAV_DOWNLOAD,
+    MUSIC_VIDEO_DOWNLOAD,
     STANDARD_FX,
     STANDARD_AUTOTUNE,
     AUTOMIX,
@@ -150,11 +158,13 @@ PLANS: dict[str, Plan] = {
         name="Free",
         monthly_price_usd=Decimal("0.00"),
         description=(
-            "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Basic."
+            "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
+            "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Music/video "
+            "downloads unlock on Basic."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
+        image_poster_creations_per_day=5,
         features=FREE_FEATURES,
     ),
     "base": Plan(
@@ -162,12 +172,15 @@ PLANS: dict[str, Plan] = {
         name="Basic",
         monthly_price_usd=Decimal("4.99"),
         description=(
-            "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
-            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools, project revision history and basic waveform timeline editing."
+            "£4.99 tier: one confirmed full track every day with unlimited regenerations until confirmation, up to "
+            "10 generated images/posters per day, image/poster saving and downloads, plus music and video downloads. "
+            "Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, "
+            "useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project revision history "
+            "and basic waveform timeline editing."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
+        image_poster_creations_per_day=10,
         features=BASE_FEATURES,
     ),
     "pro": Plan(
@@ -175,7 +188,8 @@ PLANS: dict[str, Plan] = {
         name="Pro",
         monthly_price_usd=Decimal("9.99"),
         description=(
-            "Unlimited full-track creation and the complete Pulsar-Frequency House music-production stack: expanded "
+            "£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
+            "unlimited full-track creation, plus the complete enabled Pulsar-Frequency House production stack: expanded "
             "instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
             "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
             "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
@@ -184,6 +198,7 @@ PLANS: dict[str, Plan] = {
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
+        image_poster_creations_per_day=None,
         features=PRO_FEATURES,
     ),
 }
