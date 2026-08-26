@@ -4,10 +4,8 @@ from datetime import datetime, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .esp_niche import require_esp_social_member
 from .social_management import ActivityEvent, SocialContent, SocialHouse, SocialHouseStore, utc_now
 
 QueueState = Literal[
@@ -19,8 +17,6 @@ QueueState = Literal[
     "published",
     "failed",
 ]
-
-router = APIRouter(prefix="/command-center/api/social", tags=["esp-social-publish-queue"])
 
 
 class PublishQueueEntry(BaseModel):
@@ -89,14 +85,20 @@ def _split_entry_id(entry_id: str) -> tuple[str, int]:
     return content_id, index
 
 
+def _now_utc(value: datetime | None = None) -> datetime:
+    current = value or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("Queue evaluation time must include a timezone")
+    return current.astimezone(timezone.utc)
+
+
 class SocialPublishQueue:
     """Truthful production queue for ESP social variants.
 
     The queue deliberately stops before external publication. It can validate, plan,
     block, queue and retry a variant, but only ``confirm_published`` may record a
-    published state, and that method requires an explicitly active official adapter
-    plus an external provider post id. It is intended for a trusted adapter worker,
-    not a browser-facing endpoint.
+    published state. That method requires an explicitly active official adapter plus
+    an external provider post id and is intended for a trusted adapter worker.
     """
 
     def __init__(self, store: SocialHouseStore | None = None):
@@ -199,7 +201,7 @@ class SocialPublishQueue:
 
     def snapshot(self, space_id: str, *, now: datetime | None = None) -> PublishQueueSnapshot:
         house = self.store.load(space_id)
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        current = _now_utc(now)
         entries: list[PublishQueueEntry] = []
         for content in house.content:
             for index, variant in enumerate(content.variants):
@@ -218,7 +220,7 @@ class SocialPublishQueue:
 
     def refresh(self, space_id: str, *, actor: str = "Aura", now: datetime | None = None) -> PublishQueueSnapshot:
         house = self.store.load(space_id)
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        current = _now_utc(now)
         changed = False
         for content in house.content:
             for index, variant in enumerate(content.variants):
@@ -258,10 +260,11 @@ class SocialPublishQueue:
             raise KeyError(entry_id) from exc
         if not variant.auto_publish:
             raise ValueError("Planning-only variants cannot enter the publishing retry queue")
+
         variant.metadata["publish_retry_requests"] = int(variant.metadata.get("publish_retry_requests") or 0) + 1
         variant.publish_state = "not_requested"
         variant.failure_reason = None
-        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        current = _now_utc(now)
         entry = self._evaluate(house, content, index, now=current, preserve_runtime_state=False)
         variant.publish_state = entry.state if entry.state in {"planned", "blocked", "queued"} else "blocked"
         variant.failure_reason = "; ".join(entry.reasons) if variant.publish_state == "blocked" else None
@@ -275,7 +278,9 @@ class SocialPublishQueue:
             )
         )
         self.store.save(house)
-        return self._evaluate(self.store.load(space_id), content, index, now=current)
+        persisted = self.store.load(space_id)
+        persisted_content = next(item for item in persisted.content if item.id == content_id)
+        return self._evaluate(persisted, persisted_content, index, now=current)
 
     def confirm_published(
         self,
@@ -288,8 +293,8 @@ class SocialPublishQueue:
     ) -> PublishQueueEntry:
         """Record provider-confirmed publication from a trusted adapter worker.
 
-        No web route exposes this method. A provider id is mandatory so the product
-        cannot manufacture a successful publishing state locally.
+        No browser route exposes this method. A provider id is mandatory so the
+        product cannot manufacture a successful publishing state locally.
         """
         provider_id = (external_post_id or "").strip()
         adapter_name = (adapter_name or "").strip()
@@ -336,47 +341,3 @@ class SocialPublishQueue:
         persisted = self.store.load(space_id)
         persisted_content = next(item for item in persisted.content if item.id == content_id)
         return self._evaluate(persisted, persisted_content, index, now=current)
-
-
-def _member(request: Request):
-    member, _esp_membership, _profile = require_esp_social_member(request)
-    return member
-
-
-def _queue() -> SocialPublishQueue:
-    return SocialPublishQueue()
-
-
-@router.get("/spaces/{space_id}/publish-queue")
-def publish_queue(space_id: str, request: Request):
-    _member(request)
-    try:
-        return _queue().snapshot(space_id).model_dump(mode="json")
-    except FileNotFoundError as exc:
-        raise HTTPException(404, "ESP Social House not found") from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@router.post("/spaces/{space_id}/publish-queue/refresh")
-def refresh_publish_queue(space_id: str, request: Request):
-    member = _member(request)
-    try:
-        return _queue().refresh(space_id, actor=member.user_id).model_dump(mode="json")
-    except FileNotFoundError as exc:
-        raise HTTPException(404, "ESP Social House not found") from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-@router.post("/spaces/{space_id}/publish-queue/{entry_id}/retry")
-def retry_publish_queue_entry(space_id: str, entry_id: str, request: Request):
-    member = _member(request)
-    try:
-        return _queue().retry(space_id, entry_id, actor=member.user_id).model_dump(mode="json")
-    except FileNotFoundError as exc:
-        raise HTTPException(404, "ESP Social House not found") from exc
-    except KeyError as exc:
-        raise HTTPException(404, "Publish queue entry not found") from exc
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
