@@ -177,7 +177,7 @@ ENGINE_REGISTRY: dict[str, dict] = {
         "label": "Godot export adapter",
         "dimension": "2d/3d",
         "license": "MIT",
-        "role": "Optional native desktop/mobile/console-oriented export route",
+        "role": "Optional native desktop/mobile/console-oriented compatibility/export adapter",
         "commercially_usable": True,
         "native": False,
         "adapter_stage": "planned",
