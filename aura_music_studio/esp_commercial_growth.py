@@ -58,10 +58,13 @@ def _safe_url(value: str | None) -> str:
 
 def _clean_list(values: list[str] | None, *, limit: int = 20, item_limit: int = 100) -> list[str]:
     out: list[str] = []
+    seen: set[str] = set()
     for value in values or []:
         clean = " ".join(str(value).split())[:item_limit]
-        if clean and clean.lower() not in {item.lower() for item in out}:
+        folded = clean.casefold()
+        if clean and folded not in seen:
             out.append(clean)
+            seen.add(folded)
         if len(out) >= limit:
             break
     return out
@@ -119,13 +122,15 @@ class BrandLeadUpdate(BaseModel):
 
 
 class CommercialGrowthStore:
-    """Private ESP Shop and brand workflows.
+    """Private ESP Shop and brand workflows inside Pulsar-Frequency House.
 
     This is an internal CRM/tracking layer. It never claims that an external TikTok One,
     TikTok Shop or brand action occurred unless an ESP member records the verified outcome.
+    Creator opportunities are opt-in and disclosure-aware; Agent draft/lead ownership stays
+    isolated unless an ESP Owner is reviewing the whole network.
     """
 
-    SHOP_STATUSES = {"draft", "open", "paused", "closed"}
+    OPPORTUNITY_STATUSES = {"draft", "open", "paused", "closed"}
     APP_STATUSES = {"interested", "applied", "review", "accepted", "declined", "withdrawn", "completed"}
     SAMPLE_STATUSES = {"not_applicable", "requested", "approved", "shipped", "received", "content_submitted", "complete", "declined"}
     DELIVERABLE_STATUSES = {"not_started", "planning", "in_production", "submitted", "revision", "approved", "published", "complete"}
@@ -177,6 +182,8 @@ class CommercialGrowthStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_shop_opportunity_status
                     ON esp_shop_opportunities(status,deadline,created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_shop_opportunity_owner
+                    ON esp_shop_opportunities(created_by_user_id,status,created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS esp_shop_applications (
                     id TEXT PRIMARY KEY,
@@ -233,6 +240,8 @@ class CommercialGrowthStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_brand_opportunity_status
                     ON esp_brand_opportunities(status,deadline,created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_brand_opportunity_owner
+                    ON esp_brand_opportunities(created_by_user_id,status,created_at DESC);
 
                 CREATE TABLE IF NOT EXISTS esp_brand_applications (
                     id TEXT PRIMARY KEY,
@@ -272,12 +281,7 @@ class CommercialGrowthStore:
         )
 
     @staticmethod
-    def _dict(row) -> dict | None:
-        return dict(row) if row else None
-
-    def profile(self, user_id: str) -> dict:
-        with self._connect() as con:
-            row = con.execute("SELECT * FROM esp_commercial_profiles WHERE user_id=?", (user_id,)).fetchone()
+    def _decode_profile(row, user_id: str) -> dict:
         if not row:
             return {"user_id": user_id, "shop_opt_in": False, "brand_opt_in": False, "region": "", "niches": [], "media_kit_url": "", "rate_notes": "", "disclosure_acknowledged": False}
         item = dict(row)
@@ -288,6 +292,11 @@ class CommercialGrowthStore:
         for key in ("shop_opt_in", "brand_opt_in", "disclosure_acknowledged"):
             item[key] = bool(item[key])
         return item
+
+    def profile(self, user_id: str) -> dict:
+        with self._connect() as con:
+            row = con.execute("SELECT * FROM esp_commercial_profiles WHERE user_id=?", (user_id,)).fetchone()
+        return self._decode_profile(row, user_id)
 
     def save_profile(self, user_id: str, body: CommercialProfileUpdate) -> dict:
         media_kit = _safe_url(body.media_kit_url)
@@ -307,7 +316,7 @@ class CommercialGrowthStore:
         return self.profile(user_id)
 
     def _create_opportunity(self, table: str, actor: str, body: OpportunityCreate, *, brand_lead_id: str | None = None) -> dict:
-        if body.status not in self.SHOP_STATUSES:
+        if body.status not in self.OPPORTUNITY_STATUSES:
             raise ValueError("Unsupported opportunity status")
         url = _safe_url(body.official_url)
         item_id, now = uuid4().hex, _now()
@@ -335,22 +344,27 @@ class CommercialGrowthStore:
     def create_shop(self, actor: str, body: OpportunityCreate) -> dict:
         return self._create_opportunity("esp_shop_opportunities", actor, body)
 
-    def create_brand_opportunity(self, actor: str, body: OpportunityCreate, brand_lead_id: str | None = None) -> dict:
+    def create_brand_opportunity(self, actor: str, body: OpportunityCreate, brand_lead_id: str | None = None, *, owner: bool = False) -> dict:
         if brand_lead_id:
             with self._connect() as con:
-                if not con.execute("SELECT id FROM esp_brand_leads WHERE id=?", (brand_lead_id,)).fetchone():
-                    raise KeyError("Brand lead not found")
+                lead = con.execute("SELECT id,owner_user_id FROM esp_brand_leads WHERE id=?", (brand_lead_id,)).fetchone()
+            if not lead:
+                raise KeyError("Brand lead not found")
+            if not owner and lead["owner_user_id"] != actor:
+                raise PermissionError("Brand lead belongs to another ESP agent")
         return self._create_opportunity("esp_brand_opportunities", actor, body, brand_lead_id=brand_lead_id)
 
-    def list_opportunities(self, kind: str, *, member_user_id: str, management: bool) -> list[dict]:
+    def list_opportunities(self, kind: str, *, member_user_id: str, management: bool, owner: bool = False) -> list[dict]:
         table = "esp_brand_opportunities" if kind == "brand" else "esp_shop_opportunities"
+        app_table = "esp_brand_applications" if kind == "brand" else "esp_shop_applications"
         with self._connect() as con:
-            if management:
+            if owner:
                 rows = con.execute(f"SELECT * FROM {table} ORDER BY created_at DESC").fetchall()
+            elif management:
+                rows = con.execute(f"SELECT * FROM {table} WHERE created_by_user_id=? ORDER BY created_at DESC", (member_user_id,)).fetchall()
             else:
                 rows = con.execute(f"SELECT * FROM {table} WHERE status='open' ORDER BY deadline,created_at DESC").fetchall()
             result = [dict(row) for row in rows]
-            app_table = "esp_brand_applications" if kind == "brand" else "esp_shop_applications"
             mine = {row["opportunity_id"]: dict(row) for row in con.execute(f"SELECT * FROM {app_table} WHERE user_id=?", (member_user_id,)).fetchall()}
         for row in result:
             row["my_application"] = mine.get(row["id"])
@@ -359,6 +373,12 @@ class CommercialGrowthStore:
     def apply(self, kind: str, opportunity_id: str, user_id: str, note: str) -> dict:
         opp_table = "esp_brand_opportunities" if kind == "brand" else "esp_shop_opportunities"
         app_table = "esp_brand_applications" if kind == "brand" else "esp_shop_applications"
+        profile = self.profile(user_id)
+        required_opt_in = profile["brand_opt_in"] if kind == "brand" else profile["shop_opt_in"]
+        if not required_opt_in:
+            raise PermissionError(f"Enable {kind} opportunity opt-in in your commercial profile first")
+        if not profile["disclosure_acknowledged"]:
+            raise PermissionError("Commercial disclosure guidance must be acknowledged before applying")
         now, app_id = _now(), uuid4().hex
         with self._connect() as con:
             opp = con.execute(f"SELECT * FROM {opp_table} WHERE id=?", (opportunity_id,)).fetchone()
@@ -366,12 +386,6 @@ class CommercialGrowthStore:
                 raise KeyError("Opportunity not found")
             if opp["status"] != "open":
                 raise PermissionError("Opportunity is not open for applications")
-            profile = self.profile(user_id)
-            required_opt_in = profile["brand_opt_in"] if kind == "brand" else profile["shop_opt_in"]
-            if not required_opt_in:
-                raise PermissionError(f"Enable {kind} opportunity opt-in in your commercial profile first")
-            if not profile["disclosure_acknowledged"]:
-                raise PermissionError("Commercial disclosure guidance must be acknowledged before applying")
             if kind == "brand":
                 con.execute(
                     """INSERT INTO esp_brand_applications
@@ -500,7 +514,7 @@ def save_commercial_profile(body: CommercialProfileUpdate, request: Request):
 def shop_opportunities(request: Request):
     member, membership = _member(request)
     roles = _roles(membership)
-    return {"opportunities": growth.list_opportunities("shop", member_user_id=member.user_id, management=("agent" in roles or _is_owner(membership)))}
+    return {"opportunities": growth.list_opportunities("shop", member_user_id=member.user_id, management=("agent" in roles), owner=_is_owner(membership))}
 
 
 @router.post("/command-center/api/commerce/opportunities")
@@ -552,7 +566,7 @@ def update_shop_application(application_id: str, body: ApplicationUpdate, reques
 def brand_opportunities(request: Request):
     member, membership = _member(request)
     roles = _roles(membership)
-    return {"opportunities": growth.list_opportunities("brand", member_user_id=member.user_id, management=("agent" in roles or _is_owner(membership)))}
+    return {"opportunities": growth.list_opportunities("brand", member_user_id=member.user_id, management=("agent" in roles), owner=_is_owner(membership))}
 
 
 @router.post("/command-center/api/brands/opportunities")
@@ -560,9 +574,11 @@ def create_brand_opportunity(body: OpportunityCreate, request: Request, brand_le
     member, membership = _member(request)
     _require_agent(membership)
     try:
-        return {"opportunity": growth.create_brand_opportunity(member.user_id, body, brand_lead_id)}
+        return {"opportunity": growth.create_brand_opportunity(member.user_id, body, brand_lead_id, owner=_is_owner(membership))}
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -638,9 +654,10 @@ def _portal(kind: str, request: Request) -> HTMLResponse:
     roles = _roles(membership)
     creator = "creator" in roles or _is_owner(membership)
     manager = "agent" in roles or _is_owner(membership)
+    owner = _is_owner(membership)
     title = "Commerce & TikTok Shop Centre" if kind == "shop" else "Brands & Commercial Opportunities"
     path = "commerce" if kind == "shop" else "brands"
-    opportunities = growth.list_opportunities(kind, member_user_id=member.user_id, management=manager)
+    opportunities = growth.list_opportunities(kind, member_user_id=member.user_id, management=("agent" in roles), owner=owner)
     rows = "".join(
         "<article class='card'>"
         f"<div class='top'><span class='pill'>{escape(str(item['status']).upper())}</span><span>{escape(str(item.get('deadline') or 'No deadline recorded'))}</span></div>"
@@ -652,13 +669,15 @@ def _portal(kind: str, request: Request) -> HTMLResponse:
         for item in opportunities
     ) or "<article class='card'><p class='muted'>No opportunities are currently available in this view.</p></article>"
     profile = growth.profile(member.user_id) if creator else None
-    manager_note = "<article class='card guard'><b>Agent / Owner workspace</b><p>Use the private API to create verified opportunities, manage applications and track brand leads. This CRM never sends messages or creates provider campaigns automatically.</p></article>" if manager else ""
+    manager_note = "<article class='card guard'><b>Agent / Owner workspace</b><p>Use the private API to create opportunities you manage, review their applications and track your brand leads. Mary/Kev ownership can review the network-wide commercial pipeline. This CRM never sends messages or creates provider campaigns automatically.</p></article>" if manager else ""
     profile_note = ""
     if profile:
         profile_note = f"<article class='card'><b>Your commercial profile</b><p>Shop opt-in: <strong>{'Yes' if profile['shop_opt_in'] else 'No'}</strong> · Brand opt-in: <strong>{'Yes' if profile['brand_opt_in'] else 'No'}</strong> · Disclosure guidance acknowledged: <strong>{'Yes' if profile['disclosure_acknowledged'] else 'No'}</strong></p><p class='muted'>Applications are blocked until the relevant opt-in and disclosure acknowledgement are recorded.</p></article>"
+    other_path = "brands" if path == "commerce" else "commerce"
+    other_label = "Brands" if path == "commerce" else "Commerce"
     html = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>{escape(title)}</title><style>
     :root{{--line:#ffffff1e;--gold:#f2c86f;--violet:#9f70ff;--muted:#c6bfd0;--good:#79dfa6}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 8% 0,#47185e,transparent 30%),radial-gradient(circle at 92% 0,#123e58,transparent 28%),#06050b;color:#fff;font-family:Inter,system-ui,sans-serif}}a{{color:inherit;text-decoration:none}}.wrap{{width:min(1280px,calc(100% - 28px));margin:auto;padding:38px 0 70px}}.top{{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}}.eyebrow{{color:var(--gold);font-size:.7rem;text-transform:uppercase;letter-spacing:.15em;font-weight:950}}h1{{font-size:clamp(2.8rem,7vw,5.4rem);letter-spacing:-.06em;line-height:.94;margin:.13em 0}}p,.muted,small{{color:var(--muted);line-height:1.55}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}}.card{{border:1px solid var(--line);border-radius:17px;padding:14px;background:#13101ceb;margin:10px 0}}.btn,.pill{{display:inline-block;border:1px solid var(--line);border-radius:9px;padding:7px 9px;background:#ffffff08;font-weight:850}}.pill{{font-size:.66rem;border-radius:999px}}.guard{{border-left:4px solid var(--violet)}}.good{{color:var(--good)}}@media(max-width:850px){{.grid{{grid-template-columns:1fr 1fr}}}}@media(max-width:600px){{.grid{{grid-template-columns:1fr}}}}
-    </style></head><body><main class='wrap'><div class='top'><div><div class='eyebrow'>Elevate Souls Productions · Private Commercial Growth</div><h1>{escape(title)}</h1><p>One Pulsar-Frequency House account, role-gated ESP workflow. Provider/brand actions remain human-verified.</p></div><div><a class='btn' href='/command-center/member-hub'>ESP Member Hub</a> <a class='btn' href='/command-center/{'brands' if path == 'commerce' else 'commerce'}'>{'Brands' if path == 'commerce' else 'Commerce'}</a></div></div>{profile_note}{manager_note}<section><div class='eyebrow'>Opportunities</div><div class='grid'>{rows}</div></section></main></body></html>"""
+    </style></head><body><main class='wrap'><div class='top'><div><div class='eyebrow'>Elevate Souls Productions · Private Commercial Growth</div><h1>{escape(title)}</h1><p>One Pulsar-Frequency House account, role-gated ESP workflow. Provider and brand actions remain human-verified.</p></div><div><a class='btn' href='/command-center/member-hub'>ESP Member Hub</a> <a class='btn' href='/command-center/{other_path}'>{other_label}</a></div></div>{profile_note}{manager_note}<section><div class='eyebrow'>Opportunities</div><div class='grid'>{rows}</div></section></main></body></html>"""
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
