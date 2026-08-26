@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .accounts import AccountStore
 from .esp_niche import require_esp_social_member
 from .esp_social_intelligence import EspSocialIntelligenceStore
+from .esp_social_provider_adapters import ProviderAdapterError
 from .esp_social_secret_refs import resolve_social_token
 from .social_management import ActivityEvent, SocialConnection, SocialHouseStore, utc_now
 
@@ -82,11 +83,7 @@ def _scopes(connection: SocialConnection) -> set[str]:
 
 
 def _connected(house, platform: str) -> list[SocialConnection]:
-    return [
-        item
-        for item in house.connections
-        if item.platform == platform and item.state == "connected"
-    ]
+    return [item for item in house.connections if item.platform == platform and item.state == "connected"]
 
 
 def _best_connection(house, platform: str, required_scope: str | None = None) -> SocialConnection | None:
@@ -96,10 +93,7 @@ def _best_connection(house, platform: str, required_scope: str | None = None) ->
         if scoped:
             rows = scoped
     rows.sort(
-        key=lambda item: (
-            item.metadata.get("oauth_verified") is True,
-            bool(item.token_secret_ref),
-        ),
+        key=lambda item: (item.metadata.get("oauth_verified") is True, bool(item.token_secret_ref)),
         reverse=True,
     )
     return rows[0] if rows else None
@@ -144,15 +138,10 @@ def _get_json(url: str, *, token: str, params: dict, provider: str, action: str)
 
 
 class ProviderAnalyticsSnapshotStore:
-    """Upsert official provider snapshots into Aura's existing analytics store.
-
-    A stable provider source ref prevents repeated syncs from creating duplicate rows.
-    This store intentionally shares the existing ESP social analytics table rather than
-    creating a second analytics model that Aura would need to reconcile later.
-    """
+    """Upsert official provider data into Aura's canonical ESP analytics table."""
 
     def __init__(self):
-        EspSocialIntelligenceStore()  # ensure the canonical table exists
+        EspSocialIntelligenceStore()
         self.db_path = AccountStore().db_path
 
     def _connect(self):
@@ -386,13 +375,13 @@ class ProviderAnalyticsService:
         result: list[dict] = []
         for start in range(0, len(video_ids), 50):
             batch = video_ids[start : start + 50]
+            # videos.list does not accept maxResults when filtering with explicit IDs.
             data = _get_json(
                 f"{_YOUTUBE_API}/videos",
                 token=token,
                 params={
                     "part": "snippet,statistics,contentDetails,status",
                     "id": ",".join(batch),
-                    "maxResults": len(batch),
                 },
                 provider="YouTube",
                 action="video statistics",
@@ -412,11 +401,17 @@ class ProviderAnalyticsService:
         capability = self.capabilities(house)["youtube"]
         if not capability["ready"]:
             raise ProviderAnalyticsError(str(capability["reason"]))
-        connection = next(
-            item for item in house.connections if item.id == capability["connection_id"]
-        )
+        connection = next(item for item in house.connections if item.id == capability["connection_id"])
         try:
             token = resolve_social_token(connection.token_secret_ref)
+        except ProviderAdapterError as exc:
+            raise ProviderAnalyticsError(
+                "The YouTube OAuth credential could not be refreshed safely; retry later"
+                if exc.retryable
+                else "The YouTube OAuth credential is no longer usable; reconnect the account",
+                retryable=bool(exc.retryable),
+                reconnect=not bool(exc.retryable),
+            ) from exc
         except (LookupError, ValueError, PermissionError) as exc:
             raise ProviderAnalyticsError(
                 "The YouTube credential is unavailable; reconnect the account",
@@ -495,7 +490,10 @@ class ProviderAnalyticsService:
         }
 
 
-service = ProviderAnalyticsService()
+def _service() -> ProviderAnalyticsService:
+    # Resolve the configured database lazily so deployment/test environment settings are
+    # honored before constructing the canonical analytics store.
+    return ProviderAnalyticsService()
 
 
 def _load_house(space_id: str):
@@ -518,7 +516,7 @@ def _raise_provider(exc: ProviderAnalyticsError):
 @router.get("/spaces/{space_id}/provider-analytics/capabilities")
 def provider_analytics_capabilities(space_id: str, request: Request):
     require_esp_social_member(request)
-    return service.capabilities(_load_house(space_id))
+    return _service().capabilities(_load_house(space_id))
 
 
 @router.post("/spaces/{space_id}/provider-analytics/youtube/sync")
@@ -526,7 +524,7 @@ def sync_youtube_provider_analytics(space_id: str, request: Request):
     member, _membership, _profile = require_esp_social_member(request)
     house = _load_house(space_id)
     try:
-        return service.sync_youtube(user_id=member.user_id, house=house)
+        return _service().sync_youtube(user_id=member.user_id, house=house)
     except ProviderAnalyticsError as exc:
         _raise_provider(exc)
 
@@ -534,7 +532,7 @@ def sync_youtube_provider_analytics(space_id: str, request: Request):
 @router.post("/spaces/{space_id}/provider-analytics/tiktok/sync")
 def sync_tiktok_provider_analytics(space_id: str, request: Request):
     require_esp_social_member(request)
-    capability = service.capabilities(_load_house(space_id))["tiktok"]
+    capability = _service().capabilities(_load_house(space_id))["tiktok"]
     raise HTTPException(
         409,
         {
@@ -550,7 +548,7 @@ def sync_tiktok_provider_analytics(space_id: str, request: Request):
 @router.post("/spaces/{space_id}/provider-analytics/instagram/sync")
 def sync_instagram_provider_analytics(space_id: str, request: Request):
     require_esp_social_member(request)
-    capability = service.capabilities(_load_house(space_id))["instagram"]
+    capability = _service().capabilities(_load_house(space_id))["instagram"]
     raise HTTPException(
         409,
         {
