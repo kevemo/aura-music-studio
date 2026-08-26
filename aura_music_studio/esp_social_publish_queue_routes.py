@@ -5,8 +5,13 @@ from fastapi import APIRouter, HTTPException, Request
 from .esp_niche import require_esp_social_member
 from .esp_social_provider_analytics import router as provider_analytics_router
 from .esp_social_publish_queue import SocialPublishQueue
+from .esp_social_tiktok_analytics import router as tiktok_analytics_router
 
 router = APIRouter(tags=["esp-social-publish-queue"])
+# The TikTok extension is mounted first so its live capability/sync endpoints replace the
+# earlier truthful "adapter pending" placeholders without changing the validated YouTube
+# implementation. The extension itself still fails closed unless video.list is granted.
+router.include_router(tiktok_analytics_router)
 router.include_router(provider_analytics_router)
 
 
