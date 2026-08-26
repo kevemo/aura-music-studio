@@ -45,6 +45,7 @@ from aura_music_studio.creative_project_api import router as creative_project_ro
 from aura_music_studio.creative_version_autopromotion import router as creative_version_autopromotion_router
 from aura_music_studio.creative_workspace import router as creative_workspace_router
 from aura_music_studio.daw_api import router as daw_router
+from aura_music_studio.daw_midi import router as daw_midi_router
 from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
 from aura_music_studio.daw_portal import router as daw_portal_router
 from aura_music_studio.daw_recording_api import router as daw_recording_router
@@ -180,6 +181,7 @@ app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
 
 app.include_router(daw_router)
+app.include_router(daw_midi_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
 app.include_router(daw_recording_ui_router)
