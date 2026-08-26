@@ -50,6 +50,7 @@ def _member_tiktok_connection(house, connection_id: str | None = None) -> Social
         for item in house.connections
         if item.platform == "tiktok"
         and item.state == "connected"
+        and item.supports_auto_publish is True
         and item.metadata.get("oauth_verified") is True
         and item.metadata.get("oauth_provider") == "tiktok"
         and oauth_credential_id(item.token_secret_ref)
@@ -70,7 +71,7 @@ def _credential_for(user_id: str, connection: SocialConnection) -> tuple[str, di
         raise PermissionError("Stored OAuth credential provider does not match TikTok")
     connection_account = str(connection.account_external_id or "").strip()
     credential_account = str(record.get("account_external_id") or "").strip()
-    if connection_account and credential_account and connection_account != credential_account:
+    if not connection_account or not credential_account or connection_account != credential_account:
         raise PermissionError("TikTok OAuth credential does not match the selected connected account")
     return credential_id, record
 
@@ -127,7 +128,7 @@ def video_list_authorization_url(user_id: str, space_id: str, connection_id: str
     house = _house(space_id)
     connection = _member_tiktok_connection(house, connection_id)
     if not connection:
-        raise PermissionError("A connected member-authorised TikTok account is required")
+        raise PermissionError("A connected publishing-capable member-authorised TikTok account is required")
     credential_id, record = _credential_for(user_id, connection)
     scopes = _clean_scopes(record.get("scopes"))
     missing_existing = [scope for scope in _REQUIRED_EXISTING_SCOPES if scope not in scopes]
@@ -152,6 +153,11 @@ def video_list_authorization_url(user_id: str, space_id: str, connection_id: str
         con.execute(
             "DELETE FROM esp_social_oauth_state WHERE created_at<?",
             ((now - timedelta(minutes=30)).isoformat(),),
+        )
+        con.execute(
+            """DELETE FROM esp_social_oauth_state
+               WHERE user_id=? AND provider='tiktok' AND connection_id=?""",
+            (user_id, connection.id),
         )
         con.execute(
             """INSERT INTO esp_social_oauth_state
