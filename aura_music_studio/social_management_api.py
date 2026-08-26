@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
 from .esp_social_publish_queue_routes import router as publish_queue_router
+from .esp_social_secret_refs import valid_social_token_ref
 from .social_management import (
     BrandPersona,
     ContentStatus,
@@ -145,6 +146,46 @@ def _reject_client_publish_runtime_state(variants: list[PlatformVariant]) -> Non
             )
 
 
+_SENSITIVE_CONNECTION_METADATA_KEYS = {
+    "access_token",
+    "refresh_token",
+    "oauth_token",
+    "token",
+    "secret",
+    "client_secret",
+    "password",
+    "api_key",
+    "authorization",
+    "bearer",
+}
+
+
+def _metadata_contains_raw_secret(value) -> bool:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized = str(key).strip().lower().replace("-", "_")
+            if normalized in _SENSITIVE_CONNECTION_METADATA_KEYS:
+                return True
+            if _metadata_contains_raw_secret(item):
+                return True
+    elif isinstance(value, list):
+        return any(_metadata_contains_raw_secret(item) for item in value)
+    return False
+
+
+def _reject_connection_credentials(body: ConnectionRequest) -> None:
+    if body.token_secret_ref is not None and not valid_social_token_ref(body.token_secret_ref):
+        raise HTTPException(
+            400,
+            "Social provider credentials must use a social-token://<alias> reference; raw tokens and arbitrary secret references cannot be stored in Social House data.",
+        )
+    if _metadata_contains_raw_secret(body.metadata):
+        raise HTTPException(
+            400,
+            "Raw provider credentials cannot be stored in SocialConnection metadata. Use deployment-held social-token:// aliases instead.",
+        )
+
+
 @router.get("/platforms")
 def social_platforms(request: Request):
     _member(request)
@@ -152,7 +193,11 @@ def social_platforms(request: Request):
         "capabilities": platform_capabilities(),
         "scope": "private_esp_creator_agent_hub",
         "content_safety": public_policy_summary(),
-        "truthful_state": "Planning and the production queue are active. End-to-end publishing/analytics/inbox still require official platform adapters and authorised connections.",
+        "truthful_state": (
+            "Planning, the production queue, and provider-worker/adapter foundations are active. "
+            "Live end-to-end publishing still requires approved provider apps, official OAuth, "
+            "deployment-held credentials, and provider-specific production enablement."
+        ),
     }
 
 
@@ -190,7 +235,10 @@ def update_persona(space_id: str, body: PersonaRequest, request: Request):
         *body.content_pillars,
     )
     try:
-        house = _store().update_persona(space_id, BrandPersona.model_validate(body.model_dump()))
+        house = _store().update_persona(
+            space_id,
+            BrandPersona.model_validate(body.model_dump()),
+        )
     except FileNotFoundError as exc:
         raise HTTPException(404, "ESP Social House not found") from exc
     return house.model_dump(mode="json")
@@ -205,7 +253,10 @@ def create_project(space_id: str, body: CreateProjectRequest, request: Request):
         house = _store().add_project(space_id, project)
     except FileNotFoundError as exc:
         raise HTTPException(404, "ESP Social House not found") from exc
-    return {"project": project.model_dump(mode="json"), "house": house.model_dump(mode="json")}
+    return {
+        "project": project.model_dump(mode="json"),
+        "house": house.model_dump(mode="json"),
+    }
 
 
 @router.post("/spaces/{space_id}/tasks")
@@ -253,10 +304,20 @@ def create_content(space_id: str, body: CreateContentRequest, request: Request):
 
 
 @router.patch("/spaces/{space_id}/content/{content_id}/status")
-def update_status(space_id: str, content_id: str, body: UpdateStatusRequest, request: Request):
+def update_status(
+    space_id: str,
+    content_id: str,
+    body: UpdateStatusRequest,
+    request: Request,
+):
     member = _member(request)
     try:
-        house = _store().update_content_status(space_id, content_id, body.status, actor=member.user_id)
+        house = _store().update_content_status(
+            space_id,
+            content_id,
+            body.status,
+            actor=member.user_id,
+        )
     except FileNotFoundError as exc:
         raise HTTPException(404, "ESP Social House not found") from exc
     except KeyError as exc:
@@ -265,7 +326,12 @@ def update_status(space_id: str, content_id: str, body: UpdateStatusRequest, req
 
 
 @router.post("/spaces/{space_id}/content/{content_id}/approve")
-def approve_content(space_id: str, content_id: str, body: ApproveRequest, request: Request):
+def approve_content(
+    space_id: str,
+    content_id: str,
+    body: ApproveRequest,
+    request: Request,
+):
     _member(request)
     try:
         house = _store().approve_content(space_id, content_id, body.approver)
@@ -290,11 +356,16 @@ def publishing_readiness(space_id: str, content_id: str, request: Request):
 
 
 @router.post("/spaces/{space_id}/connections")
-def register_connection_state(space_id: str, body: ConnectionRequest, request: Request):
+def register_connection_state(
+    space_id: str,
+    body: ConnectionRequest,
+    request: Request,
+):
     _member(request)
     _enforce(body.account_label)
-    # This endpoint stores only connection/capability state. OAuth access tokens belong in
-    # deployment secret storage and must be referenced indirectly through token_secret_ref.
+    _reject_connection_credentials(body)
+    # This endpoint stores only connection/capability state. OAuth access/refresh tokens
+    # belong in deployment secret storage and are referenced only through social-token aliases.
     try:
         connection = SocialConnection.model_validate(body.model_dump())
         house = _store().connect_placeholder(space_id, connection)
@@ -302,7 +373,10 @@ def register_connection_state(space_id: str, body: ConnectionRequest, request: R
         raise HTTPException(404, "ESP Social House not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"connection": connection.model_dump(mode="json"), "house": house.model_dump(mode="json")}
+    return {
+        "connection": connection.model_dump(mode="json"),
+        "house": house.model_dump(mode="json"),
+    }
 
 
 # Queue routes inherit the private ESP social prefix and the same server-side member gates.
