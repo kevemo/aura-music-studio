@@ -40,6 +40,7 @@ from aura_music_studio.compute_node_api import router as compute_node_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
+from aura_music_studio.creative_version_autopromotion import router as creative_version_autopromotion_router
 from aura_music_studio.creative_workspace import router as creative_workspace_router
 from aura_music_studio.daw_api import router as daw_router
 from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
@@ -146,6 +147,7 @@ app.include_router(aura_workspace_router)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
+app.include_router(creative_version_autopromotion_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
 app.include_router(creative_workspace_router)
