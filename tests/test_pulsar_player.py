@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from aura_music_studio.creative_media_preview import MEDIA_PREVIEW_SCRIPT
 from aura_music_studio.pulsar_player import PULSAR_PLAYER_SCRIPT, PulsarPlayerMiddleware, router
 
 
@@ -35,3 +38,21 @@ def test_player_ui_route_is_private_creative_support_route():
 def test_player_middleware_is_available_for_authenticated_html_injection():
     assert PulsarPlayerMiddleware.__doc__
     assert "authenticated member" in PulsarPlayerMiddleware.__doc__.lower()
+
+
+def test_creative_media_gallery_can_send_audio_and_video_to_pulsar_player():
+    assert "data-creative-play" in MEDIA_PREVIEW_SCRIPT
+    assert "window.PulsarPlayer.play" in MEDIA_PREVIEW_SCRIPT
+    assert "▶ Pulsar Player" in MEDIA_PREVIEW_SCRIPT
+    assert "Download eligibility is enforced server-side by membership tier" in MEDIA_PREVIEW_SCRIPT
+
+
+def test_app_mounts_entitlement_handlers_before_base_creative_handlers():
+    source = Path("app.py").read_text(encoding="utf-8")
+    gate = source.index("app.include_router(commercial_entitlement_router)")
+    project = source.index("app.include_router(creative_project_router)")
+    media = source.index("app.include_router(creative_media_preview_router)")
+    assert gate < project
+    assert gate < media
+    assert "app.include_router(pulsar_player_router)" in source
+    assert "app.add_middleware(PulsarPlayerMiddleware)" in source
