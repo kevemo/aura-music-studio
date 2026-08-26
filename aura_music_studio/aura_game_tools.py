@@ -22,23 +22,23 @@ def _install_specs() -> None:
     specs = [
         tools.ToolSpec(
             "list_game_projects",
-            "List the signed-in member's private Pulsar Game Forge projects and current build/rating state.",
+            "List the signed-in member's private Aura Game Forge projects and current build/rating state.",
             {},
         ),
         tools.ToolSpec(
             "inspect_game_project",
-            "Read one private engine-independent Game DNA project, including mechanics, content disclosures, build and provisional rating state.",
+            "Read one private Aura-owned engine-independent Game DNA project, including mechanics, content disclosures, build and provisional rating state.",
             {"game_id": "Stable Game Forge id."},
         ),
         tools.ToolSpec(
             "create_game_project",
-            "Create a new private Game DNA workspace. Basic allows one active editable game at a time; Pro allows unlimited active projects.",
+            "Create a new private Aura Game DNA workspace. Aura Game Engine 2D/3D are the native defaults; external engines are optional export targets. Basic allows one active editable game at a time; Pro allows unlimited active projects.",
             {
                 "title": "Game title.",
                 "prompt": "Detailed game description.",
                 "genre": "Genre/niche.",
                 "dimension": "2d or 3d.",
-                "engine_target": "Optional phaser4, playcanvas, babylon or godot. Aura may omit to auto-route.",
+                "engine_target": "Optional aura2d or aura3d native target, or phaser4/playcanvas/babylon/godot export adapter. Omit to use Aura native automatically.",
                 "synopsis": "Optional story/synopsis.",
                 "art_direction": "Optional graphics direction.",
                 "audio_direction": "Optional music/voice/SFX direction.",
@@ -48,13 +48,13 @@ def _install_specs() -> None:
         ),
         tools.ToolSpec(
             "scan_game_project",
-            "Run the Pulsar provisional content/rating/privacy/monetisation preflight for the current Game DNA. This never issues an official ESRB/PEGI/IARC or authority rating.",
+            "Run Aura/Pulsar's provisional content/rating/privacy/monetisation preflight for the current Game DNA. This never issues an official ESRB/PEGI/IARC or authority rating.",
             {"game_id": "Stable Game Forge id."},
             write=True,
         ),
         tools.ToolSpec(
             "build_game_playtest",
-            "Build the current private Game DNA into the isolated no-network browser playtest runtime. Arbitrary generated server code is never executed in the API host.",
+            "Build the current private Game DNA into Aura's isolated no-network browser playtest runtime. Arbitrary generated server code is never executed in the API host.",
             {"game_id": "Stable Game Forge id."},
             write=True,
         ),
@@ -114,11 +114,12 @@ def install_aura_game_tools() -> None:
         if call.name == "inspect_game_project":
             return load_game(str(args.get("game_id") or "")).model_dump(mode="json")
         if call.name == "create_game_project":
+            dimension = str(args.get("dimension") or "2d")
             body = CreateGameRequest(
                 title=str(args.get("title") or "Untitled Game")[:160],
                 prompt=str(args.get("prompt") or "").strip(),
                 genre=str(args.get("genre") or "adventure")[:120],
-                dimension=str(args.get("dimension") or "2d"),
+                dimension=dimension,
                 engine_target=(str(args.get("engine_target")) if args.get("engine_target") else None),
                 synopsis=str(args.get("synopsis") or "")[:8000],
                 art_direction=str(args.get("art_direction") or "")[:4000],
@@ -127,7 +128,12 @@ def install_aura_game_tools() -> None:
                 rights_attestation=("Member explicitly confirmed source-material rights in the Aura request." if bool(args.get("rights_confirmed", False)) else ""),
             )
             game = create_game_for_member(self.member, body)
-            return {"game": _summary(game), "created": True, "public": False}
+            return {
+                "game": _summary(game),
+                "created": True,
+                "public": False,
+                "aura_native_engine": game.engine_target in {"aura2d", "aura3d"},
+            }
         game = load_game(str(args.get("game_id") or ""))
         if call.name == "scan_game_project":
             assessment = assess_game(game)
@@ -147,6 +153,7 @@ def install_aura_game_tools() -> None:
             return {
                 "game": _summary(game),
                 "private_playtest_url": f"/game-creation/play/{game.id}",
+                "runtime": "aura_game_runtime_v1",
                 "arbitrary_server_code_executed": False,
                 "network_access_enabled": False,
             }
