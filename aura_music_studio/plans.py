@@ -83,6 +83,9 @@ VIDEO_SYNC = "video_sync"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
+GAME_PLAYTEST = "game_playtest"
+GAME_CREATE = "game_create"
+GAME_CREATE_UNLIMITED = "game_create_unlimited"
 
 
 FREE_FEATURES = frozenset({
@@ -97,6 +100,7 @@ FREE_FEATURES = frozenset({
     BASIC_MASTERING,
     IMAGE_POSTER_CREATE,
     IMAGE_POSTER_DOWNLOAD,
+    GAME_PLAYTEST,
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
@@ -119,6 +123,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
     BASIC_TIMELINE,
+    GAME_CREATE,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -149,6 +154,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     VIDEO_SYNC,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
+    GAME_CREATE_UNLIMITED,
 })
 
 
@@ -159,8 +165,9 @@ PLANS: dict[str, Plan] = {
         monthly_price_usd=Decimal("0.00"),
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
-            "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Music/video "
-            "downloads unlock on Basic."
+            "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
+            "also play and test Game Forge builds that have passed Pulsar's public playtest safety/rating preflight. "
+            "Music/video downloads and game creation unlock on Basic."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -175,8 +182,8 @@ PLANS: dict[str, Plan] = {
             "£4.99 tier: one confirmed full track every day with unlimited regenerations until confirmation, up to "
             "10 generated images/posters per day, image/poster saving and downloads, plus music and video downloads. "
             "Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, "
-            "useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project revision history "
-            "and basic waveform timeline editing."
+            "useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project revision history, "
+            "basic waveform timeline editing, and Game Forge creation/editing for one active game workspace at a time."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -194,7 +201,8 @@ PLANS: dict[str, Plan] = {
             "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
             "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
             "covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, immersive "
-            "spatial audio, video/music sync and all enabled export formats."
+            "spatial audio, video/music sync, all enabled export formats, and unlimited active Game Forge project workspaces. "
+            "External model/GPU jobs remain subject to configured queues, provider availability and fair-use resource controls."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
