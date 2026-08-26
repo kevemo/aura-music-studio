@@ -48,6 +48,7 @@ jobs:
           cp .env.example .env
           docker compose config -q
           docker compose --profile public config -q
+          docker compose --profile social-publishing config -q
 
       - name: Self-hosted ACE-Step renderer topology validation
         run: |
