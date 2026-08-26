@@ -7,6 +7,7 @@ from .esp_broadcast_tech import router as broadcast_tech_router
 from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_level_up import level_up_portal as base_level_up_portal
+from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 
 router = APIRouter()
@@ -14,11 +15,12 @@ router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(broadcast_tech_router)
+router.include_router(social_media_library_router)
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
 def level_up_with_creator_plan(request: Request):
-    """Expose My Plan, milestone reviews, private support and Broadcast Tech from the ESP Level Up Hub."""
+    """Expose Creator OS, private support, broadcast tech and Social Media Library from the ESP Level Up Hub."""
     response = base_level_up_portal(request)
     if not isinstance(response, Response) or not getattr(response, "body", None):
         return response
@@ -32,8 +34,9 @@ def level_up_with_creator_plan(request: Request):
     reviews_link = "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>"
     support_link = "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>"
     broadcast_link = "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>"
+    media_link = "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>"
     if progress_link in html and "/command-center/my-plan" not in html:
-        html = html.replace(progress_link, my_plan_link + reviews_link + support_link + broadcast_link + progress_link, 1)
+        html = html.replace(progress_link, my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
     else:
         if progress_link in html and "/command-center/my-plan/reviews" not in html:
             html = html.replace(progress_link, reviews_link + progress_link, 1)
@@ -41,6 +44,8 @@ def level_up_with_creator_plan(request: Request):
             html = html.replace(progress_link, support_link + progress_link, 1)
         if progress_link in html and "/command-center/broadcast-tech" not in html:
             html = html.replace(progress_link, broadcast_link + progress_link, 1)
+        if progress_link in html and "/command-center/social/media-library" not in html:
+            html = html.replace(progress_link, media_link + progress_link, 1)
 
     designed = (
         "<div class='topline'><span>Creator OS</span><b class='planned'>Designed</b></div>"
