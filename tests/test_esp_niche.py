@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fastapi import FastAPI
+
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_command_center import EspStore
 from aura_music_studio.esp_niche import EspNicheStore, NICHE_CATALOG, social_access_reason
@@ -26,6 +28,13 @@ def _active_esp_creator(tmp_path):
     )
     approved = esp.decide(token, "approve", "creator", "ESP Test Owner")
     return accounts, esp, approved
+
+
+def _mounted_paths(router) -> list[str]:
+    """Inspect effective public paths instead of FastAPI's private router internals."""
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(router)
+    return [route.path for route in app.routes if hasattr(route, "path")]
 
 
 def test_niche_profile_persists_theme_training_and_creator_goals(tmp_path):
@@ -125,8 +134,8 @@ def test_all_niches_provide_distinct_training_context():
 
 
 def test_social_routes_exist_only_under_private_esp_command_center():
-    api_paths = [route.path for route in social_api_router.routes]
-    portal_paths = [route.path for route in social_portal_router.routes]
+    api_paths = _mounted_paths(social_api_router)
+    portal_paths = _mounted_paths(social_portal_router)
 
     assert api_paths
     assert all(path.startswith("/command-center/api/social") for path in api_paths)
