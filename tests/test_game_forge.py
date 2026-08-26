@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from aura_music_studio.game_forge_api import CreateGameRequest, create_game_for_member
+from aura_music_studio.game_forge_integrity import game_integrity_hash
 from aura_music_studio.game_forge_models import ENGINE_REGISTRY, GameContentDisclosure, GameDNA
 from aura_music_studio.game_forge_ratings import assess_game, rating_content_hash
 from aura_music_studio.game_forge_runtime import PLAYTEST_CSP, build_private_playtest, render_foundation_playtest
@@ -154,7 +155,9 @@ def test_foundation_playtest_is_curated_no_network_and_not_arbitrary_server_code
     assert game.latest_build.requested_engine == "aura2d"
     assert game.latest_build.arbitrary_server_code_executed is False
     assert game.latest_build.network_access_enabled is False
-    assert game.latest_build.content_hash == rating_content_hash(game)
+    # Builds are now bound to both high-level Game DNA and complete Aura World DNA.
+    assert game.latest_build.content_hash == game_integrity_hash(game)
+    assert game.latest_build.content_hash != rating_content_hash(game)
     assert "connect-src 'none'" in PLAYTEST_CSP
     assert "fetch(" not in html
     assert "XMLHttpRequest" not in html
@@ -162,8 +165,12 @@ def test_foundation_playtest_is_curated_no_network_and_not_arbitrary_server_code
     assert "WASD / arrows" in html
 
 
-def test_runtime_escapes_json_script_breakout_from_creator_text():
+def test_runtime_escapes_json_script_breakout_from_creator_text(monkeypatch, tmp_path):
+    root = tmp_path / "games"
+    root.mkdir()
+    monkeypatch.setattr(store, "games_root", lambda: root)
     game = GameDNA(title="</script><script>alert(1)</script>", prompt="Safe prototype")
+    store.create_game(_member("base"), game)
     html = render_foundation_playtest(game)
     assert "</script><script>alert(1)</script>" not in html
     assert "<\\/script>" in html
