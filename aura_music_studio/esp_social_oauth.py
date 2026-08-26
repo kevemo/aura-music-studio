@@ -6,6 +6,7 @@ import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from html import escape
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlencode
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .esp_niche import require_esp_social_member
+from .esp_social_provider_adapters import ProviderAdapterError
 from .request_context import current_user_id
 from .social_management import ActivityEvent, SocialConnection, SocialHouseStore, utc_now
 
@@ -51,6 +53,7 @@ _PROVIDER_ADAPTERS = {
     "youtube": "youtube_data_v3",
 }
 _OAUTH_REF = re.compile(r"^social-oauth://([A-Za-z0-9][A-Za-z0-9_-]{0,95})$")
+_RETRYABLE_HTTP = {408, 425, 429}
 
 
 def _now() -> datetime:
@@ -75,7 +78,11 @@ def _parse_iso(value: str | None) -> datetime | None:
 
 
 def _db_path() -> Path:
-    configured = (os.getenv("AURA_SOCIAL_OAUTH_DB_PATH") or os.getenv("LSS_DB_PATH") or "data/live_sound_studio.sqlite3").strip()
+    configured = (
+        os.getenv("AURA_SOCIAL_OAUTH_DB_PATH")
+        or os.getenv("LSS_DB_PATH")
+        or "data/live_sound_studio.sqlite3"
+    ).strip()
     path = Path(configured).resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
@@ -109,6 +116,25 @@ def _provider_config(provider: SocialOAuthProvider) -> dict[str, str]:
         "client_secret": (os.getenv("YOUTUBE_OAUTH_CLIENT_SECRET") or "").strip(),
         "redirect_uri": (os.getenv("YOUTUBE_OAUTH_REDIRECT_URI") or callback).strip(),
     }
+
+
+def _checked_response(response: requests.Response, provider: str, action: str) -> requests.Response:
+    if response.ok:
+        return response
+    status = int(response.status_code)
+    retryable = status >= 500 or status in _RETRYABLE_HTTP
+    # Do not include response bodies because OAuth providers may echo sensitive material.
+    raise ProviderAdapterError(
+        f"{provider} OAuth {action} failed with HTTP {status}",
+        retryable=retryable,
+    )
+
+
+def _request_error(provider: str, action: str, exc: requests.RequestException) -> ProviderAdapterError:
+    return ProviderAdapterError(
+        f"{provider} OAuth {action} could not reach the provider",
+        retryable=True,
+    )
 
 
 def oauth_credential_id(secret_ref: str | None) -> str | None:
@@ -200,8 +226,13 @@ class SocialOAuthVault:
             "tokens_exposed_to_browser": False,
         }
 
-    def create_state(self, user_id: str, space_id: str, provider: SocialOAuthProvider) -> tuple[str, str, str]:
-        self._fernet()  # fail before sending a member to a provider if secure storage is unavailable
+    def create_state(
+        self,
+        user_id: str,
+        space_id: str,
+        provider: SocialOAuthProvider,
+    ) -> tuple[str, str, str]:
+        self._fernet()
         state = secrets.token_urlsafe(48)
         connection_id = f"conn_{uuid4().hex}"
         credential_id = f"socialcred_{uuid4().hex}"
@@ -229,13 +260,16 @@ class SocialOAuthVault:
         return state, connection_id, credential_id
 
     def consume_state(self, user_id: str, provider: SocialOAuthProvider, state: str) -> dict:
+        clean_state = (state or "").strip()
+        if not clean_state or len(clean_state) > 512:
+            raise PermissionError("OAuth state is invalid or missing")
         with self._connect() as con:
             row = con.execute(
                 "SELECT * FROM esp_social_oauth_state WHERE state=? AND user_id=? AND provider=?",
-                (state, user_id, provider),
+                (clean_state, user_id, provider),
             ).fetchone()
             if row:
-                con.execute("DELETE FROM esp_social_oauth_state WHERE state=?", (state,))
+                con.execute("DELETE FROM esp_social_oauth_state WHERE state=?", (clean_state,))
         if not row:
             raise PermissionError("OAuth state is invalid, expired, or belongs to another member")
         created = _parse_iso(row["created_at"])
@@ -260,7 +294,9 @@ class SocialOAuthVault:
         account_label: str,
         metadata: dict | None = None,
     ) -> None:
-        encrypted = self._fernet().encrypt(json.dumps(token, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        encrypted = self._fernet().encrypt(
+            json.dumps(token, ensure_ascii=False).encode("utf-8")
+        ).decode("ascii")
         now = _iso(_now())
         with self._connect() as con:
             con.execute(
@@ -296,9 +332,15 @@ class SocialOAuthVault:
         if not row:
             return None
         try:
-            token = json.loads(self._fernet().decrypt(row["encrypted_token"].encode("ascii")).decode("utf-8"))
+            token = json.loads(
+                self._fernet()
+                .decrypt(row["encrypted_token"].encode("ascii"))
+                .decode("utf-8")
+            )
         except (InvalidToken, ValueError, json.JSONDecodeError) as exc:
-            raise RuntimeError("Social OAuth credential cannot be decrypted with this deployment key") from exc
+            raise RuntimeError(
+                "Social OAuth credential cannot be decrypted with this deployment key"
+            ) from exc
         return {
             "credential_id": row["credential_id"],
             "provider": row["provider"],
@@ -339,77 +381,106 @@ class SocialOAuthVault:
         provider = str(record["provider"])
         access = str(token.get("access_token") or "").strip()
         if not access:
-            raise PermissionError("Social OAuth credential has no access token; reconnect the account")
+            raise ProviderAdapterError(
+                "Social OAuth credential has no access token; reconnect the account",
+                retryable=False,
+            )
         expiry = _parse_iso(str(token.get("expires_at") or ""))
         if not expiry or expiry > _now() + timedelta(minutes=5):
             return access
         timeout = _http_timeout()
-        if provider == "tiktok":
-            refresh = str(token.get("refresh_token") or "").strip()
-            if not refresh:
-                raise PermissionError("TikTok access expired and has no refresh token; reconnect TikTok")
-            cfg = _provider_config("tiktok")
-            response = requests.post(
-                _TIKTOK_TOKEN,
-                data={
-                    "client_key": cfg["client_id"],
-                    "client_secret": cfg["client_secret"],
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh,
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            updated = response.json()
-            if not updated.get("access_token"):
-                raise PermissionError("TikTok token refresh did not return an access token")
-            token.update(updated)
-            token["refresh_token"] = str(updated.get("refresh_token") or refresh)
-            token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(updated.get("expires_in") or 86400))))
-            if updated.get("refresh_expires_in"):
-                token["refresh_expires_at"] = _iso(_now() + timedelta(seconds=int(updated["refresh_expires_in"])))
-        elif provider == "youtube":
-            refresh = str(token.get("refresh_token") or "").strip()
-            if not refresh:
-                raise PermissionError("YouTube access expired and has no refresh token; reconnect YouTube")
-            cfg = _provider_config("youtube")
-            response = requests.post(
-                _GOOGLE_TOKEN,
-                data={
-                    "client_id": cfg["client_id"],
-                    "client_secret": cfg["client_secret"],
-                    "refresh_token": refresh,
-                    "grant_type": "refresh_token",
-                },
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            updated = response.json()
-            if not updated.get("access_token"):
-                raise PermissionError("YouTube token refresh did not return an access token")
-            token.update(updated)
-            token["refresh_token"] = refresh
-            token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(updated.get("expires_in") or 3600))))
-        elif provider == "instagram":
-            issued = _parse_iso(str(token.get("issued_at") or ""))
-            if issued and issued > _now() - timedelta(hours=24):
-                # Meta requires a long-lived Instagram token to be at least 24 hours old before refresh.
-                return access
-            response = requests.get(
-                f"{_INSTAGRAM_GRAPH}/refresh_access_token",
-                params={"grant_type": "ig_refresh_token", "access_token": access},
-                timeout=timeout,
-            )
-            response.raise_for_status()
-            updated = response.json()
-            if not updated.get("access_token"):
-                raise PermissionError("Instagram token refresh did not return an access token")
-            token.update(updated)
-            token["issued_at"] = _iso(_now())
-            token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(updated.get("expires_in") or 5184000))))
-        else:
-            raise PermissionError("Unsupported Social OAuth provider")
+        try:
+            if provider == "tiktok":
+                refresh = str(token.get("refresh_token") or "").strip()
+                if not refresh:
+                    raise ProviderAdapterError(
+                        "TikTok access expired and has no refresh token; reconnect TikTok",
+                        retryable=False,
+                    )
+                cfg = _provider_config("tiktok")
+                response = requests.post(
+                    _TIKTOK_TOKEN,
+                    data={
+                        "client_key": cfg["client_id"],
+                        "client_secret": cfg["client_secret"],
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh,
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    timeout=timeout,
+                )
+                _checked_response(response, "TikTok", "refresh")
+                updated = response.json()
+                if not updated.get("access_token"):
+                    raise ProviderAdapterError(
+                        "TikTok token refresh did not return an access token",
+                        retryable=False,
+                    )
+                token.update(updated)
+                token["refresh_token"] = str(updated.get("refresh_token") or refresh)
+                token["expires_at"] = _iso(
+                    _now() + timedelta(seconds=max(60, int(updated.get("expires_in") or 86400)))
+                )
+                if updated.get("refresh_expires_in"):
+                    token["refresh_expires_at"] = _iso(
+                        _now() + timedelta(seconds=int(updated["refresh_expires_in"]))
+                    )
+            elif provider == "youtube":
+                refresh = str(token.get("refresh_token") or "").strip()
+                if not refresh:
+                    raise ProviderAdapterError(
+                        "YouTube access expired and has no refresh token; reconnect YouTube",
+                        retryable=False,
+                    )
+                cfg = _provider_config("youtube")
+                response = requests.post(
+                    _GOOGLE_TOKEN,
+                    data={
+                        "client_id": cfg["client_id"],
+                        "client_secret": cfg["client_secret"],
+                        "refresh_token": refresh,
+                        "grant_type": "refresh_token",
+                    },
+                    timeout=timeout,
+                )
+                _checked_response(response, "YouTube", "refresh")
+                updated = response.json()
+                if not updated.get("access_token"):
+                    raise ProviderAdapterError(
+                        "YouTube token refresh did not return an access token",
+                        retryable=False,
+                    )
+                token.update(updated)
+                token["refresh_token"] = refresh
+                token["expires_at"] = _iso(
+                    _now() + timedelta(seconds=max(60, int(updated.get("expires_in") or 3600)))
+                )
+            elif provider == "instagram":
+                issued = _parse_iso(str(token.get("issued_at") or ""))
+                if issued and issued > _now() - timedelta(hours=24):
+                    return access
+                response = requests.get(
+                    f"{_INSTAGRAM_GRAPH}/refresh_access_token",
+                    params={"grant_type": "ig_refresh_token", "access_token": access},
+                    timeout=timeout,
+                )
+                _checked_response(response, "Instagram", "refresh")
+                updated = response.json()
+                if not updated.get("access_token"):
+                    raise ProviderAdapterError(
+                        "Instagram token refresh did not return an access token",
+                        retryable=False,
+                    )
+                token.update(updated)
+                token["issued_at"] = _iso(_now())
+                token["expires_at"] = _iso(
+                    _now()
+                    + timedelta(seconds=max(60, int(updated.get("expires_in") or 5184000)))
+                )
+            else:
+                raise ProviderAdapterError("Unsupported Social OAuth provider", retryable=False)
+        except requests.RequestException as exc:
+            raise _request_error(provider.title(), "refresh", exc) from exc
         self._resave_token(user_id, record, token)
         return str(token.get("access_token") or "")
 
@@ -443,16 +514,25 @@ class SocialOAuthService:
     def _require_config(provider: SocialOAuthProvider) -> dict[str, str]:
         cfg = _provider_config(provider)
         if not cfg["client_id"] or not cfg["client_secret"]:
-            raise RuntimeError(f"{provider.title()} OAuth application credentials are not configured")
+            raise RuntimeError(
+                f"{provider.title()} OAuth application credentials are not configured"
+            )
         if provider == "tiktok" and not cfg["redirect_uri"].startswith("https://"):
             raise RuntimeError("TikTok Web OAuth redirect URI must use HTTPS")
         return cfg
 
-    def authorization_url(self, *, user_id: str, space_id: str, provider: SocialOAuthProvider) -> str:
+    def authorization_url(
+        self,
+        *,
+        user_id: str,
+        space_id: str,
+        provider: SocialOAuthProvider,
+    ) -> str:
         cfg = self._require_config(provider)
-        # Prove the Social House belongs to the active tenant before creating any OAuth state.
         SocialHouseStore().load(space_id)
-        state, _connection_id, _credential_id = self.vault.create_state(user_id, space_id, provider)
+        state, _connection_id, _credential_id = self.vault.create_state(
+            user_id, space_id, provider
+        )
         scopes = _PROVIDER_SCOPES[provider]
         if provider == "tiktok":
             return _TIKTOK_AUTHORIZE + "?" + urlencode(
@@ -499,28 +579,40 @@ class SocialOAuthService:
         result = [item for item in values if item]
         return list(dict.fromkeys(result)) or list(fallback)
 
-    def _exchange_tiktok(self, cfg: dict[str, str], code: str, requested: list[str]) -> tuple[dict, list[str], str, str, dict]:
-        response = requests.post(
-            _TIKTOK_TOKEN,
-            data={
-                "client_key": cfg["client_id"],
-                "client_secret": cfg["client_secret"],
-                "code": code,
-                "grant_type": "authorization_code",
-                "redirect_uri": cfg["redirect_uri"],
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
+    def _exchange_tiktok(
+        self,
+        cfg: dict[str, str],
+        code: str,
+        requested: list[str],
+    ) -> tuple[dict, list[str], str, str, dict]:
+        try:
+            response = requests.post(
+                _TIKTOK_TOKEN,
+                data={
+                    "client_key": cfg["client_id"],
+                    "client_secret": cfg["client_secret"],
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": cfg["redirect_uri"],
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=self.timeout,
+            )
+            _checked_response(response, "TikTok", "code exchange")
+        except requests.RequestException as exc:
+            raise _request_error("TikTok", "code exchange", exc) from exc
         token = response.json()
         access = str(token.get("access_token") or "").strip()
         open_id = str(token.get("open_id") or "").strip()
         if not access or not open_id:
             raise RuntimeError("TikTok OAuth response did not include access_token and open_id")
-        token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(token.get("expires_in") or 86400))))
+        token["expires_at"] = _iso(
+            _now() + timedelta(seconds=max(60, int(token.get("expires_in") or 86400)))
+        )
         if token.get("refresh_expires_in"):
-            token["refresh_expires_at"] = _iso(_now() + timedelta(seconds=int(token["refresh_expires_in"])))
+            token["refresh_expires_at"] = _iso(
+                _now() + timedelta(seconds=int(token["refresh_expires_in"]))
+            )
         scopes = self._scope_list(token.get("scope"), requested)
         label = f"TikTok {open_id[-8:]}"
         try:
@@ -537,32 +629,42 @@ class SocialOAuthService:
             pass
         return token, scopes, open_id, label, {"oauth_flow": "tiktok_login_kit"}
 
-    def _exchange_youtube(self, cfg: dict[str, str], code: str, requested: list[str]) -> tuple[dict, list[str], str, str, dict]:
-        response = requests.post(
-            _GOOGLE_TOKEN,
-            data={
-                "code": code,
-                "client_id": cfg["client_id"],
-                "client_secret": cfg["client_secret"],
-                "redirect_uri": cfg["redirect_uri"],
-                "grant_type": "authorization_code",
-            },
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        token = response.json()
-        access = str(token.get("access_token") or "").strip()
-        if not access:
-            raise RuntimeError("YouTube OAuth response did not include an access token")
-        token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(token.get("expires_in") or 3600))))
-        scopes = self._scope_list(token.get("scope"), requested)
-        channels = requests.get(
-            _YOUTUBE_CHANNELS,
-            params={"part": "snippet", "mine": "true", "maxResults": 1},
-            headers={"Authorization": f"Bearer {access}"},
-            timeout=self.timeout,
-        )
-        channels.raise_for_status()
+    def _exchange_youtube(
+        self,
+        cfg: dict[str, str],
+        code: str,
+        requested: list[str],
+    ) -> tuple[dict, list[str], str, str, dict]:
+        try:
+            response = requests.post(
+                _GOOGLE_TOKEN,
+                data={
+                    "code": code,
+                    "client_id": cfg["client_id"],
+                    "client_secret": cfg["client_secret"],
+                    "redirect_uri": cfg["redirect_uri"],
+                    "grant_type": "authorization_code",
+                },
+                timeout=self.timeout,
+            )
+            _checked_response(response, "YouTube", "code exchange")
+            token = response.json()
+            access = str(token.get("access_token") or "").strip()
+            if not access:
+                raise RuntimeError("YouTube OAuth response did not include an access token")
+            token["expires_at"] = _iso(
+                _now() + timedelta(seconds=max(60, int(token.get("expires_in") or 3600)))
+            )
+            scopes = self._scope_list(token.get("scope"), requested)
+            channels = requests.get(
+                _YOUTUBE_CHANNELS,
+                params={"part": "snippet", "mine": "true", "maxResults": 1},
+                headers={"Authorization": f"Bearer {access}"},
+                timeout=self.timeout,
+            )
+            _checked_response(channels, "YouTube", "channel verification")
+        except requests.RequestException as exc:
+            raise _request_error("YouTube", "connection", exc) from exc
         items = (channels.json() or {}).get("items") or []
         if not items:
             raise RuntimeError("The authorised Google account does not expose a YouTube channel")
@@ -573,45 +675,58 @@ class SocialOAuthService:
             raise RuntimeError("YouTube channel identity could not be verified")
         return token, scopes, channel_id, title, {"oauth_flow": "google_youtube"}
 
-    def _exchange_instagram(self, cfg: dict[str, str], code: str, requested: list[str]) -> tuple[dict, list[str], str, str, dict]:
-        short = requests.post(
-            _INSTAGRAM_TOKEN,
-            data={
-                "client_id": cfg["client_id"],
-                "client_secret": cfg["client_secret"],
-                "grant_type": "authorization_code",
-                "redirect_uri": cfg["redirect_uri"],
-                "code": code,
-            },
-            timeout=self.timeout,
-        )
-        short.raise_for_status()
-        short_token = short.json()
-        short_access = str(short_token.get("access_token") or "").strip()
-        if not short_access:
-            raise RuntimeError("Instagram OAuth response did not include an access token")
-        long_response = requests.get(
-            f"{_INSTAGRAM_GRAPH}/access_token",
-            params={
-                "grant_type": "ig_exchange_token",
-                "client_secret": cfg["client_secret"],
-                "access_token": short_access,
-            },
-            timeout=self.timeout,
-        )
-        long_response.raise_for_status()
-        token = long_response.json()
-        access = str(token.get("access_token") or "").strip()
-        if not access:
-            raise RuntimeError("Instagram long-lived token exchange did not return an access token")
-        token["issued_at"] = _iso(_now())
-        token["expires_at"] = _iso(_now() + timedelta(seconds=max(60, int(token.get("expires_in") or 5184000))))
-        profile = requests.get(
-            f"{_INSTAGRAM_GRAPH}/me",
-            params={"fields": "id,username,account_type", "access_token": access},
-            timeout=self.timeout,
-        )
-        profile.raise_for_status()
+    def _exchange_instagram(
+        self,
+        cfg: dict[str, str],
+        code: str,
+        requested: list[str],
+    ) -> tuple[dict, list[str], str, str, dict]:
+        try:
+            short = requests.post(
+                _INSTAGRAM_TOKEN,
+                data={
+                    "client_id": cfg["client_id"],
+                    "client_secret": cfg["client_secret"],
+                    "grant_type": "authorization_code",
+                    "redirect_uri": cfg["redirect_uri"],
+                    "code": code,
+                },
+                timeout=self.timeout,
+            )
+            _checked_response(short, "Instagram", "code exchange")
+            short_token = short.json()
+            short_access = str(short_token.get("access_token") or "").strip()
+            if not short_access:
+                raise RuntimeError("Instagram OAuth response did not include an access token")
+            long_response = requests.get(
+                f"{_INSTAGRAM_GRAPH}/access_token",
+                params={
+                    "grant_type": "ig_exchange_token",
+                    "client_secret": cfg["client_secret"],
+                    "access_token": short_access,
+                },
+                timeout=self.timeout,
+            )
+            _checked_response(long_response, "Instagram", "long-lived token exchange")
+            token = long_response.json()
+            access = str(token.get("access_token") or "").strip()
+            if not access:
+                raise RuntimeError(
+                    "Instagram long-lived token exchange did not return an access token"
+                )
+            token["issued_at"] = _iso(_now())
+            token["expires_at"] = _iso(
+                _now()
+                + timedelta(seconds=max(60, int(token.get("expires_in") or 5184000)))
+            )
+            profile = requests.get(
+                f"{_INSTAGRAM_GRAPH}/me",
+                params={"fields": "id,username,account_type", "access_token": access},
+                timeout=self.timeout,
+            )
+            _checked_response(profile, "Instagram", "profile verification")
+        except requests.RequestException as exc:
+            raise _request_error("Instagram", "connection", exc) from exc
         data = profile.json() or {}
         ig_id = str(data.get("id") or short_token.get("user_id") or "").strip()
         username = str(data.get("username") or ig_id).strip()[:200]
@@ -619,15 +734,23 @@ class SocialOAuthService:
         if not ig_id:
             raise RuntimeError("Instagram account identity could not be verified")
         if account_type and account_type not in {"BUSINESS", "MEDIA_CREATOR", "CREATOR"}:
-            raise PermissionError("Instagram publishing requires a Professional Business or Creator account")
-        scopes = list(requested)
-        return token, scopes, ig_id, username, {
+            raise PermissionError(
+                "Instagram publishing requires a Professional Business or Creator account"
+            )
+        return token, list(requested), ig_id, username, {
             "oauth_flow": "instagram_login",
             "instagram_account_type": account_type,
             "instagram_graph_host": "graph.instagram.com",
         }
 
-    def complete(self, *, user_id: str, provider: SocialOAuthProvider, state: str, code: str) -> SocialConnection:
+    def complete(
+        self,
+        *,
+        user_id: str,
+        provider: SocialOAuthProvider,
+        state: str,
+        code: str,
+    ) -> SocialConnection:
         pending = self.vault.consume_state(user_id, provider, state)
         cfg = self._require_config(provider)
         clean_code = (code or "").strip()
@@ -635,14 +758,22 @@ class SocialOAuthService:
             raise ValueError("OAuth authorization code is missing or invalid")
         requested = [str(value) for value in pending["scopes"]]
         if provider == "tiktok":
-            token, scopes, external_id, label, provider_meta = self._exchange_tiktok(cfg, clean_code, requested)
+            token, scopes, external_id, label, provider_meta = self._exchange_tiktok(
+                cfg, clean_code, requested
+            )
         elif provider == "instagram":
-            token, scopes, external_id, label, provider_meta = self._exchange_instagram(cfg, clean_code, requested)
+            token, scopes, external_id, label, provider_meta = self._exchange_instagram(
+                cfg, clean_code, requested
+            )
         else:
-            token, scopes, external_id, label, provider_meta = self._exchange_youtube(cfg, clean_code, requested)
+            token, scopes, external_id, label, provider_meta = self._exchange_youtube(
+                cfg, clean_code, requested
+            )
         missing = [scope for scope in requested if scope not in scopes]
         if missing:
-            raise PermissionError(f"Required publishing permission was not granted: {', '.join(missing)}")
+            raise PermissionError(
+                f"Required publishing permission was not granted: {', '.join(missing)}"
+            )
         credential_id = pending["credential_id"]
         self.vault.save(
             user_id=user_id,
@@ -687,16 +818,27 @@ class SocialOAuthService:
         store.save(house)
         return connection
 
-    def disconnect(self, *, user_id: str, space_id: str, connection_id: str) -> bool:
+    def disconnect(
+        self,
+        *,
+        user_id: str,
+        space_id: str,
+        connection_id: str,
+        expected_provider: SocialOAuthProvider | None = None,
+    ) -> bool:
         store = SocialHouseStore()
         house = store.load(space_id)
         connection = next((item for item in house.connections if item.id == connection_id), None)
         if connection is None:
             raise KeyError(connection_id)
+        if expected_provider is not None and connection.platform != expected_provider:
+            raise ValueError("OAuth provider does not match the selected social connection")
         credential_id = oauth_credential_id(connection.token_secret_ref)
         if not credential_id:
             raise ValueError("Connection is not backed by a member OAuth credential")
         record = self.vault.load(user_id, credential_id)
+        if record and str(record["provider"]) != connection.platform:
+            raise PermissionError("Stored OAuth credential provider does not match the connection")
         if record:
             access = str(record["token"].get("access_token") or "")
             try:
@@ -704,13 +846,16 @@ class SocialOAuthService:
                     cfg = _provider_config("tiktok")
                     requests.post(
                         _TIKTOK_REVOKE,
-                        data={"client_key": cfg["client_id"], "client_secret": cfg["client_secret"], "token": access},
+                        data={
+                            "client_key": cfg["client_id"],
+                            "client_secret": cfg["client_secret"],
+                            "token": access,
+                        },
                         timeout=self.timeout,
                     )
                 elif record["provider"] == "youtube" and access:
                     requests.post(_GOOGLE_REVOKE, params={"token": access}, timeout=self.timeout)
             except requests.RequestException:
-                # Local revocation remains authoritative; remote revoke is best effort.
                 pass
             self.vault.delete(user_id, credential_id)
         connection.state = "not_connected"
@@ -759,7 +904,11 @@ def oauth_start(provider: str, space_id: str, request: Request):
     if provider not in _PROVIDER_SCOPES:
         raise HTTPException(404, "Unsupported social OAuth provider")
     try:
-        url = _service().authorization_url(user_id=member.user_id, space_id=space_id, provider=provider)  # type: ignore[arg-type]
+        url = _service().authorization_url(
+            user_id=member.user_id,
+            space_id=space_id,
+            provider=provider,  # type: ignore[arg-type]
+        )
     except FileNotFoundError as exc:
         raise HTTPException(404, "ESP Social House not found") from exc
     except (RuntimeError, ValueError) as exc:
@@ -767,7 +916,11 @@ def oauth_start(provider: str, space_id: str, request: Request):
     return RedirectResponse(url, status_code=303)
 
 
-@router.get("/oauth/{provider}/callback", response_class=HTMLResponse, include_in_schema=False)
+@router.get(
+    "/oauth/{provider}/callback",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
 def oauth_callback(
     provider: str,
     request: Request,
@@ -780,9 +933,12 @@ def oauth_callback(
     if provider not in _PROVIDER_SCOPES:
         raise HTTPException(404, "Unsupported social OAuth provider")
     if error:
-        message = (error_description or error)[:500]
+        message = escape((error_description or error)[:500])
         return HTMLResponse(
-            f"<!doctype html><title>Connection not completed</title><h1>Connection not completed</h1><p>{message}</p><p><a href='/command-center/social'>Return to ESP Social Management</a></p>",
+            "<!doctype html><title>Connection not completed</title>"
+            "<h1>Connection not completed</h1>"
+            f"<p>{message}</p>"
+            "<p><a href='/command-center/social'>Return to ESP Social Management</a></p>",
             status_code=400,
         )
     try:
@@ -794,12 +950,15 @@ def oauth_callback(
         )
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
+    except ProviderAdapterError as exc:
+        status = 503 if exc.retryable else 400
+        raise HTTPException(status, str(exc)) from exc
     except (requests.RequestException, RuntimeError, ValueError) as exc:
         raise HTTPException(400, f"Social account connection failed: {exc}") from exc
     return HTMLResponse(
         "<!doctype html><title>Social account connected</title>"
-        f"<h1>{connection.platform.title()} connected</h1>"
-        f"<p>{connection.account_label} is authorised for ESP Social Management.</p>"
+        f"<h1>{escape(connection.platform.title())} connected</h1>"
+        f"<p>{escape(connection.account_label)} is authorised for ESP Social Management.</p>"
         "<p>No OAuth token was exposed to this browser page.</p>"
         "<p><a href='/command-center/social'>Return to ESP Social Management</a></p>"
     )
@@ -811,11 +970,18 @@ def oauth_disconnect(provider: str, space_id: str, connection_id: str, request: 
     if provider not in _PROVIDER_SCOPES:
         raise HTTPException(404, "Unsupported social OAuth provider")
     try:
-        _service().disconnect(user_id=member.user_id, space_id=space_id, connection_id=connection_id)
+        _service().disconnect(
+            user_id=member.user_id,
+            space_id=space_id,
+            connection_id=connection_id,
+            expected_provider=provider,  # type: ignore[arg-type]
+        )
     except FileNotFoundError as exc:
         raise HTTPException(404, "ESP Social House not found") from exc
     except KeyError as exc:
         raise HTTPException(404, "Social connection not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"disconnected": True, "connection_id": connection_id, "tokens_exposed": False}
