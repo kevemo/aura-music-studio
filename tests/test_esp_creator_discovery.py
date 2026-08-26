@@ -159,8 +159,8 @@ def test_agents_only_see_their_own_discovery_rows(tmp_path):
     agent_a = _user(accounts, "agent5@example.com")
     agent_b = _user(accounts, "agent6@example.com")
     store = CreatorDiscoveryStore(accounts.db_path)
-    lead_a = store.create(agent_a["id"], _lead("agent-a.creator"))
-    lead_b = store.create(agent_b["id"], _lead("agent-b.creator"))
+    lead_a = store.create(agent_a["id"], _lead("agenta.creator"))
+    lead_b = store.create(agent_b["id"], _lead("agentb.creator"))
 
     assert [row["id"] for row in store.list(agent_a["id"])] == [lead_a["id"]]
     assert [row["id"] for row in store.list(agent_b["id"])] == [lead_b["id"]]
