@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse, Response
 
 from .esp_broadcast_tech import router as broadcast_tech_router
 from .esp_collaborations import router as collaborations_router
+from .esp_commercial_growth import router as commercial_growth_router
 from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_incentives import router as incentives_router
@@ -20,6 +21,7 @@ router.include_router(member_hub_router)
 router.include_router(learning_library_router)
 router.include_router(incentives_router)
 router.include_router(collaborations_router)
+router.include_router(commercial_growth_router)
 router.include_router(owner_focus_router)
 router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
@@ -45,6 +47,8 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn' href='/command-center/library'>Academy &amp; Resources</a>",
         "<a class='btn' href='/command-center/incentives'>Incentives</a>",
         "<a class='btn' href='/command-center/collaborations'>Collaborations</a>",
+        "<a class='btn' href='/command-center/commerce'>Commerce &amp; Shop</a>",
+        "<a class='btn' href='/command-center/brands'>Brands</a>",
         "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>",
         "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>",
         "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>",
