@@ -1,5 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "development/full-site-build": false
+    }
+  },
   "functions": {
     "vercel_bootstrap.py": {
       "maxDuration": 60,
