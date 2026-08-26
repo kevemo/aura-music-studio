@@ -129,6 +129,22 @@ def _enforce(*texts: str | None) -> None:
         raise HTTPException(400, str(exc)) from exc
 
 
+def _reject_client_publish_runtime_state(variants: list[PlatformVariant]) -> None:
+    for variant in variants:
+        if (
+            variant.publish_state != "not_requested"
+            or variant.external_post_id is not None
+            or variant.external_post_url is not None
+            or variant.failure_reason is not None
+            or "published_via_adapter" in variant.metadata
+            or "published_confirmed_at" in variant.metadata
+        ):
+            raise HTTPException(
+                400,
+                "Publishing runtime state is provider-managed and cannot be supplied when creating content.",
+            )
+
+
 @router.get("/platforms")
 def social_platforms(request: Request):
     _member(request)
@@ -136,7 +152,7 @@ def social_platforms(request: Request):
         "capabilities": platform_capabilities(),
         "scope": "private_esp_creator_agent_hub",
         "content_safety": public_policy_summary(),
-        "truthful_state": "Planning is active. Publishing/analytics/inbox require official platform adapters and authorised connections.",
+        "truthful_state": "Planning and the production queue are active. End-to-end publishing/analytics/inbox still require official platform adapters and authorised connections.",
     }
 
 
@@ -221,6 +237,7 @@ def create_note(space_id: str, body: CreateNoteRequest, request: Request):
 @router.post("/spaces/{space_id}/content")
 def create_content(space_id: str, body: CreateContentRequest, request: Request):
     _member(request)
+    _reject_client_publish_runtime_state(body.variants)
     variant_texts: list[str] = []
     for variant in body.variants:
         variant_texts.extend([variant.caption, variant.first_comment, *variant.hashtags])
