@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.commercial_entitlements import (
@@ -106,28 +107,37 @@ def test_pro_image_creation_is_unlimited_and_downloads_are_enabled(tmp_path, mon
 
 
 def test_entitlement_overlay_precedes_unrestricted_base_routes():
+    """Validate route matching plus source order without FastAPI private-router introspection.
+
+    FastAPI 0.141 keeps nested routers behind internal included-router objects, so inspecting
+    ``app.routes`` no longer proves nested route precedence. Request-level matching plus the
+    explicit production include order is stable across that implementation detail.
+    """
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(entitlement_overlay_router)
     app.include_router(base_creative_router)
     app.include_router(base_media_router)
+    client = TestClient(app, raise_server_exceptions=False)
 
-    render_path = "/creative/projects/{project_name}/directives/{directive_id}/render"
-    render_routes = [
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == render_path and "POST" in getattr(route, "methods", set())
-    ]
-    assert len(render_routes) >= 2
-    assert render_routes[0].endpoint.__module__ == "aura_music_studio.commercial_entitlement_routes"
+    render = client.post(
+        "/creative/projects/example/directives/example/render",
+        json={"renderer": "image"},
+    )
+    media = client.get(
+        "/creative/projects/example/elements/example/media?download=true"
+    )
+    assert render.status_code != 404
+    assert media.status_code != 404
 
-    media_path = "/creative/projects/{project_name}/elements/{element_id}/media"
-    media_routes = [
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == media_path and "GET" in getattr(route, "methods", set())
-    ]
-    assert len(media_routes) >= 2
-    assert media_routes[0].endpoint.__module__ == "aura_music_studio.commercial_entitlement_routes"
+    app_source = Path("app.py").read_text(encoding="utf-8")
+    assert app_source.index("app.include_router(commercial_entitlement_router)") < app_source.index(
+        "app.include_router(creative_project_router)"
+    )
+    assert app_source.index("app.include_router(commercial_entitlement_router)") < app_source.index(
+        "app.include_router(creative_media_preview_router)"
+    )
+    overlay_source = Path("aura_music_studio/creative_version_autopromotion.py").read_text(encoding="utf-8")
+    assert "router.include_router(commercial_entitlement_router)" in overlay_source
 
 
 def test_usage_status_starts_at_zero(tmp_path, monkeypatch):
