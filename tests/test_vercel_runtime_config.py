@@ -18,7 +18,7 @@ def test_vercel_entrypoint_targets_real_fastapi_bootstrap():
 
 def test_vercel_function_excludes_non_runtime_payload():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-    fn = config["functions"]["app.py"]
+    fn = config["functions"]["vercel_bootstrap.py"]
     assert fn["maxDuration"] == 60
     excludes = fn["excludeFiles"]
     assert "tests/**" in excludes
