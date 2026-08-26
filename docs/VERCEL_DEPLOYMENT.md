@@ -22,3 +22,7 @@ The exact route set is owned by `app.py`; do not duplicate it in a separate stat
 `vercel_bootstrap.py` redirects test/runtime writes to `/tmp` only when `VERCEL` is present. This is deliberately ephemeral and suitable for interactive testing, not durable member data. Production persistence should use the project's approved durable database/object-storage architecture.
 
 Provider credentials, OAuth secrets, admin secrets and raw social access tokens must be configured only through deployment secrets and must never be committed.
+
+## Canonical Git deployment trigger
+
+The canonical `pulsar-frequency-house` Vercel project is expected to deploy automatically from the GitHub `main` branch. This marker exists only to force a fresh Git-backed deployment after the FastAPI Vercel runtime correction, so the production domain replaces the older manual/static `vercel deploy` build with the real application runtime.
