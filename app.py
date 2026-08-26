@@ -52,6 +52,7 @@ from aura_music_studio.discovery import router as discovery_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_command_center import router as esp_command_center_router
+from aura_music_studio.esp_creator_plan_overlay import router as esp_creator_plan_overlay_router
 from aura_music_studio.esp_level_up import install_esp_access_subscription_separation, router as esp_level_up_router
 from aura_music_studio.esp_level_up_gateway import router as esp_level_up_gateway_router
 from aura_music_studio.esp_niche_portal import router as esp_niche_portal_router
@@ -150,6 +151,7 @@ app.include_router(creative_workspace_router)
 
 app.include_router(esp_level_up_gateway_router)
 app.include_router(esp_niche_portal_router)
+app.include_router(esp_creator_plan_overlay_router)
 app.include_router(esp_level_up_router)
 app.include_router(esp_progress_portal_router)
 app.include_router(social_management_router, include_in_schema=False)
