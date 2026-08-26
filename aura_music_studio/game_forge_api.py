@@ -111,13 +111,17 @@ def _invalidate_after_edit(game: GameDNA) -> None:
     game.touch()
 
 
+def _validate_target(dimension: str, engine: GameEngine) -> None:
+    if dimension == "2d" and engine in {"aura3d", "playcanvas", "babylon"}:
+        raise ValueError("This is a 2D Game DNA project. Use Aura Game Engine 2D, Phaser export, or Godot export.")
+    if dimension == "3d" and engine in {"aura2d", "phaser4"}:
+        raise ValueError("This is a 3D Game DNA project. Use Aura Game Engine 3D, PlayCanvas/Babylon export, or Godot export.")
+
+
 def create_game_for_member(member, body: CreateGameRequest) -> GameDNA:
     enforce_creation_policy(body.title, body.prompt, body.synopsis, context="game creation")
-    engine: GameEngine = body.engine_target or ("phaser4" if body.dimension == "2d" else "playcanvas")
-    if body.dimension == "2d" and engine in {"playcanvas", "babylon"}:
-        raise ValueError("PlayCanvas and Babylon are reserved for the 3D browser route; choose Phaser 4 or Godot for this 2D game")
-    if body.dimension == "3d" and engine == "phaser4":
-        raise ValueError("Phaser 4 is the primary 2D route; choose PlayCanvas, Babylon or Godot for this 3D game")
+    engine: GameEngine = body.engine_target or ("aura2d" if body.dimension == "2d" else "aura3d")
+    _validate_target(body.dimension, engine)
     game = GameDNA(
         title=body.title.strip(),
         prompt=body.prompt.strip(),
@@ -134,7 +138,9 @@ def create_game_for_member(member, body: CreateGameRequest) -> GameDNA:
         metadata={
             "engine_independent_game_dna": True,
             "aura_orchestrated": True,
-            "foundation_runtime": "pulsar_safe_canvas_v1",
+            "aura_native_engine": engine in {"aura2d", "aura3d"},
+            "native_runtime": "aura_game_runtime_v1",
+            "external_engines_are_export_adapters": True,
         },
     )
     return create_game(member, game)
@@ -145,8 +151,10 @@ def game_engines(request: Request):
     _tester(request)
     return {
         "engines": ENGINE_REGISTRY,
-        "router": "engine-independent Game DNA",
-        "foundation_runtime": "pulsar_safe_canvas_v1",
+        "router": "Aura-owned engine-independent Game DNA",
+        "native_runtime": "aura_game_runtime_v1",
+        "native_defaults": {"2d": "aura2d", "3d": "aura3d"},
+        "external_engines_are_export_adapters": True,
         "generated_code_executes_on_api_host": False,
     }
 
@@ -193,6 +201,8 @@ def update_game(game_id: str, body: UpdateGameRequest, request: Request):
     if not game.actively_editable:
         raise HTTPException(409, "This finished/public game is locked. Reopen it before editing; reopening removes its public test snapshot.")
     updates = body.model_dump(exclude_unset=True)
+    next_engine = updates.get("engine_target", game.engine_target)
+    _validate_target(game.dimension, next_engine)
     for key, value in updates.items():
         setattr(game, key, value)
     enforce_creation_policy(game.title, game.prompt, game.synopsis, context="game edit")
@@ -214,6 +224,7 @@ def build_game(game_id: str, request: Request):
         "private_playtest_url": f"/game-creation/play/{game.id}",
         "runtime": game.latest_build.runtime if game.latest_build else None,
         "requested_engine": game.engine_target,
+        "aura_native_runtime": True,
         "arbitrary_server_code_executed": False,
     }
 
