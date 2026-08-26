@@ -1,6 +1,22 @@
 # ESP Member Hub — Source and Role Build Map
 
-This document converts the connected Elevate Souls Productions Drive system into product modules for the private ESP area of Pulsar-Frequency House. The Drive remains source material; public Creative Studio subscribers do not receive ESP access merely by paying for a plan.
+This document converts the connected Elevate Souls Productions Drive system into product modules inside the **same Pulsar-Frequency House website/application**. Pulsar-Frequency House is one product, one deployment, one account system and one Aura experience. The public Creative Studio, ESP Creator area, ESP Agent area and Mary/Kev Owner area are separate **permission-gated areas of the same site**, not separate websites or separate products.
+
+A Free/Basic/Pro subscription controls access to public creative capabilities. ESP membership is an additional permission dimension on the same user account. Paying for a creative plan never grants confidential ESP access automatically.
+
+## Single-site application architecture
+
+- **One website/application:** Pulsar-Frequency House.
+- **One account and sign-in:** users do not create a second account to enter ESP areas.
+- **One Aura companion:** Aura remains available across the site and changes context according to the area, role, project and permissions currently active.
+- **One Creative Library / project system:** authorised creations, media, campaigns and workspaces remain connected across the user's account.
+- **Public Creative Studio area:** AI music, DAW, video, image/poster, voice, Aura chat and other normal member tools.
+- **ESP Creator area:** private Creator Hub, Academy, incentives, progress, social management, collaborations, opportunities, support and creator-specific tools.
+- **ESP Agent area:** private Agent Hub, Academy, assigned creator operations, Creator Discovery/recruitment CRM, funnels, follow-ups and agent-specific tools.
+- **Creator + Agent accounts:** can switch between Creator and Agent views inside the same site without signing out or changing accounts.
+- **Owner area:** Mary/Kev administration, member permissions, assignments, focus/momentum, finance/subscription administration and system controls inside the same site.
+- **Server-side role enforcement:** hiding a menu item is not sufficient; every private API/route must independently verify permissions.
+- **No duplicate product silos:** shared services such as Aura, authentication, projects, media, notifications, audit, search and billing should be reused across areas rather than rebuilt as separate applications.
 
 ## Access model
 
@@ -8,7 +24,7 @@ This document converts the connected Elevate Souls Productions Drive system into
 - **Creator** — approved ESP Creator / Creator+Agent / Owner where creator view is selected.
 - **Agent** — approved ESP Agent / Creator+Agent / Owner where agent view is selected.
 - **Owner** — Mary/Kev owner context only.
-- **Public** — never exposes confidential ESP operational material.
+- **Public** — normal Pulsar-Frequency House creative area; never exposes confidential ESP operational material.
 
 ## Primary source families reviewed
 
