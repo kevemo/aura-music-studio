@@ -38,6 +38,7 @@ from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.commercial_entitlement_routes import router as commercial_entitlement_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.creative_library import router as creative_library_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
@@ -156,6 +157,7 @@ app.include_router(creative_version_autopromotion_router)
 app.include_router(commercial_entitlement_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
+app.include_router(creative_library_router)
 app.include_router(pulsar_player_router)
 app.include_router(creative_workspace_router)
 
