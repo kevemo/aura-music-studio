@@ -9,12 +9,14 @@ from .esp_creator_reviews import router as creator_reviews_router
 from .esp_learning_library import router as learning_library_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_member_hub import router as member_hub_router
+from .esp_owner_focus import router as owner_focus_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 
 router = APIRouter()
 router.include_router(member_hub_router)
 router.include_router(learning_library_router)
+router.include_router(owner_focus_router)
 router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
