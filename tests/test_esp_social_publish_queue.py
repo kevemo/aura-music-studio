@@ -19,7 +19,7 @@ def active_connection() -> SocialConnection:
         account_label="Creator IG",
         state="connected",
         supports_auto_publish=True,
-        token_secret_ref="secret://instagram/creator",
+        token_secret_ref="social-token://instagram_creator",
         metadata={
             "publishing_adapter": "instagram_graph",
             "publishing_adapter_active": True,
@@ -68,7 +68,7 @@ def test_queue_blocks_when_official_adapter_is_not_active(tmp_path: Path, monkey
         )
         entry = snapshot.entries[0]
         assert entry.state == "blocked"
-        assert "OAuth secret reference unavailable" in entry.reasons
+        assert "restricted social-token:// alias format" in entry.reasons[0]
         assert "official publishing adapter not active" in entry.reasons
         assert store.load(house.id).content[0].variants[0].publish_state == "blocked"
     finally:
@@ -203,5 +203,66 @@ def test_wrong_adapter_cannot_fake_provider_confirmation(tmp_path: Path, monkeyp
                 external_post_id="fake_1",
             )
         assert store.load(house.id).content[0].variants[0].publish_state == "queued"
+    finally:
+        reset_current_user_id(token)
+
+
+def test_worker_claim_provider_job_failure_and_retry_are_audited(tmp_path: Path, monkeypatch):
+    token = with_user(tmp_path, monkeypatch, "worker-lifecycle")
+    try:
+        store = SocialHouseStore()
+        house = store.create_space("Worker Lifecycle")
+        store.connect_placeholder(house.id, active_connection())
+        content = scheduled_content(scheduled_at="2026-08-26T01:00:00+01:00")
+        store.add_content(house.id, content)
+        queue = SocialPublishQueue(store)
+        entry = queue.refresh(house.id, now=datetime(2026, 8, 26, 2, 0, tzinfo=timezone.utc)).entries[0]
+
+        claimed = queue.claim(
+            house.id,
+            entry.id,
+            worker_id="worker-test",
+            now=datetime(2026, 8, 26, 2, 1, tzinfo=timezone.utc),
+        )
+        assert claimed.state == "publishing"
+        assert claimed.worker_id == "worker-test"
+
+        pending = queue.record_provider_pending(
+            house.id,
+            entry.id,
+            adapter_name="instagram_graph",
+            provider_job_id="container_123",
+            worker_id="worker-test",
+            provider_metadata={"stage": "container"},
+            now=datetime(2026, 8, 26, 2, 2, tzinfo=timezone.utc),
+        )
+        assert pending.state == "publishing"
+        assert pending.provider_job_id == "container_123"
+
+        failed = queue.fail_provider_job(
+            house.id,
+            entry.id,
+            adapter_name="instagram_graph",
+            reason="provider test failure",
+            worker_id="worker-test",
+            retryable=True,
+            now=datetime(2026, 8, 26, 2, 3, tzinfo=timezone.utc),
+        )
+        assert failed.state == "failed"
+        assert "provider test failure" in failed.reasons
+
+        retried = queue.retry(
+            house.id,
+            entry.id,
+            actor="creator",
+            now=datetime(2026, 8, 26, 2, 4, tzinfo=timezone.utc),
+        )
+        assert retried.state == "queued"
+        assert retried.provider_job_id is None
+        assert retried.retry_requests == 1
+        actions = [event.action for event in store.load(house.id).activity]
+        assert "provider_publish_claimed" in actions
+        assert "provider_publish_failed" in actions
+        assert "publish_retry_requested" in actions
     finally:
         reset_current_user_id(token)

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
+from .esp_social_secret_refs import valid_social_token_ref
 from .social_management import ActivityEvent, SocialContent, SocialHouse, SocialHouseStore, utc_now
 
 QueueState = Literal[
@@ -35,6 +36,8 @@ class PublishQueueEntry(BaseModel):
     adapter: str | None = None
     connection_id: str | None = None
     retry_requests: int = 0
+    provider_job_id: str | None = None
+    worker_id: str | None = None
     external_post_id: str | None = None
     external_post_url: str | None = None
 
@@ -95,10 +98,9 @@ def _now_utc(value: datetime | None = None) -> datetime:
 class SocialPublishQueue:
     """Truthful production queue for ESP social variants.
 
-    The queue deliberately stops before external publication. It can validate, plan,
-    block, queue and retry a variant, but only ``confirm_published`` may record a
-    published state. That method requires an explicitly active official adapter plus
-    an external provider post id and is intended for a trusted adapter worker.
+    Browser/API users can plan, approve, schedule and request retries. Only the separate
+    trusted provider worker may claim queued variants, record provider jobs, report
+    failures or confirm provider publication. Raw OAuth tokens never enter this store.
     """
 
     def __init__(self, store: SocialHouseStore | None = None):
@@ -121,11 +123,23 @@ class SocialPublishQueue:
             return None, ["official publishing connection unavailable"]
         reasons: list[str] = []
         adapter = str(connection.metadata.get("publishing_adapter") or "").strip() or None
-        if not connection.token_secret_ref:
-            reasons.append("OAuth secret reference unavailable")
+        if not valid_social_token_ref(connection.token_secret_ref):
+            reasons.append("OAuth token reference must use the restricted social-token:// alias format")
         if not adapter or connection.metadata.get("publishing_adapter_active") is not True:
             reasons.append("official publishing adapter not active")
         return adapter, reasons
+
+    @staticmethod
+    def _content_variant(house: SocialHouse, entry_id: str):
+        content_id, index = _split_entry_id(entry_id)
+        content = next((item for item in house.content if item.id == content_id), None)
+        if content is None:
+            raise KeyError(entry_id)
+        try:
+            variant = content.variants[index]
+        except IndexError as exc:
+            raise KeyError(entry_id) from exc
+        return content, variant, index
 
     def _evaluate(
         self,
@@ -195,6 +209,8 @@ class SocialPublishQueue:
             adapter=adapter,
             connection_id=connection.id if connection else None,
             retry_requests=int(metadata.get("publish_retry_requests") or 0),
+            provider_job_id=str(metadata.get("provider_job_id") or "").strip() or None,
+            worker_id=str(metadata.get("publish_worker_id") or "").strip() or None,
             external_post_id=variant.external_post_id,
             external_post_url=variant.external_post_url,
         )
@@ -248,26 +264,122 @@ class SocialPublishQueue:
             self.store.save(house)
         return self.snapshot(space_id, now=current)
 
-    def retry(self, space_id: str, entry_id: str, *, actor: str, now: datetime | None = None) -> PublishQueueEntry:
-        content_id, index = _split_entry_id(entry_id)
+    def claim(self, space_id: str, entry_id: str, *, worker_id: str, lease_seconds: int = 120, now: datetime | None = None) -> PublishQueueEntry:
+        worker = (worker_id or "").strip()
+        if not worker:
+            raise ValueError("worker_id is required")
         house = self.store.load(space_id)
-        content = next((item for item in house.content if item.id == content_id), None)
-        if content is None:
-            raise KeyError(entry_id)
-        try:
-            variant = content.variants[index]
-        except IndexError as exc:
-            raise KeyError(entry_id) from exc
+        content, variant, index = self._content_variant(house, entry_id)
+        current = _now_utc(now)
+        entry = self._evaluate(house, content, index, now=current, preserve_runtime_state=False)
+        if entry.state != "queued":
+            raise ValueError(f"Publish queue entry is not claimable: {entry.state}")
+        variant.publish_state = "publishing"
+        variant.failure_reason = None
+        variant.metadata["publish_worker_id"] = worker
+        variant.metadata["publish_claimed_at"] = current.isoformat()
+        variant.metadata["publish_lease_until"] = (current + timedelta(seconds=max(30, min(int(lease_seconds), 3600)))).isoformat()
+        content.status = "publishing"
+        content.updated_at = utc_now()
+        house.activity.append(ActivityEvent(actor=worker, action="provider_publish_claimed", entity_type="content", entity_id=content.id, detail=f"{variant.platform}:{index}"))
+        self.store.save(house)
+        persisted = self.store.load(space_id)
+        persisted_content = next(item for item in persisted.content if item.id == content.id)
+        return self._evaluate(persisted, persisted_content, index, now=current)
+
+    def record_provider_pending(
+        self,
+        space_id: str,
+        entry_id: str,
+        *,
+        adapter_name: str,
+        provider_job_id: str,
+        worker_id: str,
+        provider_metadata: dict | None = None,
+        lease_seconds: int = 120,
+        now: datetime | None = None,
+    ) -> PublishQueueEntry:
+        job_id = (provider_job_id or "").strip()
+        if not job_id:
+            raise ValueError("provider_job_id is required")
+        house = self.store.load(space_id)
+        content, variant, index = self._content_variant(house, entry_id)
+        connection = self._connection(house, variant.platform)
+        active_adapter, reasons = self._adapter_state(connection)
+        if reasons or active_adapter != (adapter_name or "").strip():
+            raise ValueError("Pending provider job does not match an active authorised publishing adapter")
+        if variant.publish_state != "publishing":
+            raise ValueError("Only publishing variants can receive provider job state")
+        current = _now_utc(now)
+        variant.metadata["provider_job_id"] = job_id
+        variant.metadata["provider_adapter"] = active_adapter
+        variant.metadata["provider_metadata"] = dict(provider_metadata or {})
+        variant.metadata["provider_last_checked_at"] = current.isoformat()
+        variant.metadata["publish_worker_id"] = (worker_id or "").strip()
+        variant.metadata["publish_lease_until"] = (current + timedelta(seconds=max(30, min(int(lease_seconds), 3600)))).isoformat()
+        content.updated_at = utc_now()
+        self.store.save(house)
+        persisted = self.store.load(space_id)
+        persisted_content = next(item for item in persisted.content if item.id == content.id)
+        return self._evaluate(persisted, persisted_content, index, now=current)
+
+    def fail_provider_job(
+        self,
+        space_id: str,
+        entry_id: str,
+        *,
+        adapter_name: str,
+        reason: str,
+        worker_id: str,
+        retryable: bool = False,
+        now: datetime | None = None,
+    ) -> PublishQueueEntry:
+        clean_reason = " ".join((reason or "provider publishing failed").split())[:2000]
+        house = self.store.load(space_id)
+        content, variant, index = self._content_variant(house, entry_id)
+        current = _now_utc(now)
+        variant.publish_state = "failed"
+        variant.failure_reason = clean_reason
+        variant.metadata["provider_adapter"] = (adapter_name or "").strip()
+        variant.metadata["provider_failure_at"] = current.isoformat()
+        variant.metadata["provider_failure_retryable"] = bool(retryable)
+        variant.metadata["publish_worker_id"] = (worker_id or "").strip()
+        variant.metadata.pop("publish_lease_until", None)
+        content.status = "failed"
+        content.updated_at = utc_now()
+        house.activity.append(ActivityEvent(actor=worker_id or "provider-worker", action="provider_publish_failed", entity_type="content", entity_id=content.id, detail=f"{variant.platform}:{clean_reason}"))
+        self.store.save(house)
+        persisted = self.store.load(space_id)
+        persisted_content = next(item for item in persisted.content if item.id == content.id)
+        return self._evaluate(persisted, persisted_content, index, now=current)
+
+    def retry(self, space_id: str, entry_id: str, *, actor: str, now: datetime | None = None) -> PublishQueueEntry:
+        house = self.store.load(space_id)
+        content, variant, index = self._content_variant(house, entry_id)
         if not variant.auto_publish:
             raise ValueError("Planning-only variants cannot enter the publishing retry queue")
 
         variant.metadata["publish_retry_requests"] = int(variant.metadata.get("publish_retry_requests") or 0) + 1
+        for key in (
+            "provider_job_id",
+            "provider_adapter",
+            "provider_metadata",
+            "provider_last_checked_at",
+            "provider_failure_at",
+            "provider_failure_retryable",
+            "publish_worker_id",
+            "publish_claimed_at",
+            "publish_lease_until",
+        ):
+            variant.metadata.pop(key, None)
         variant.publish_state = "not_requested"
         variant.failure_reason = None
         current = _now_utc(now)
         entry = self._evaluate(house, content, index, now=current, preserve_runtime_state=False)
         variant.publish_state = entry.state if entry.state in {"planned", "blocked", "queued"} else "blocked"
         variant.failure_reason = "; ".join(entry.reasons) if variant.publish_state == "blocked" else None
+        if content.status == "failed":
+            content.status = "scheduled" if variant.scheduled_at else "approved"
         house.activity.append(
             ActivityEvent(
                 actor=actor,
@@ -279,7 +391,7 @@ class SocialPublishQueue:
         )
         self.store.save(house)
         persisted = self.store.load(space_id)
-        persisted_content = next(item for item in persisted.content if item.id == content_id)
+        persisted_content = next(item for item in persisted.content if item.id == content.id)
         return self._evaluate(persisted, persisted_content, index, now=current)
 
     def confirm_published(
@@ -290,12 +402,10 @@ class SocialPublishQueue:
         adapter_name: str,
         external_post_id: str,
         external_post_url: str | None = None,
+        provider_job_id: str | None = None,
+        provider_metadata: dict | None = None,
     ) -> PublishQueueEntry:
-        """Record provider-confirmed publication from a trusted adapter worker.
-
-        No browser route exposes this method. A provider id is mandatory so the
-        product cannot manufacture a successful publishing state locally.
-        """
+        """Record provider-confirmed publication from a trusted adapter worker."""
         provider_id = (external_post_id or "").strip()
         adapter_name = (adapter_name or "").strip()
         if not provider_id:
@@ -303,15 +413,8 @@ class SocialPublishQueue:
         if not adapter_name:
             raise ValueError("adapter_name is required for provider-confirmed publication")
 
-        content_id, index = _split_entry_id(entry_id)
         house = self.store.load(space_id)
-        content = next((item for item in house.content if item.id == content_id), None)
-        if content is None:
-            raise KeyError(entry_id)
-        try:
-            variant = content.variants[index]
-        except IndexError as exc:
-            raise KeyError(entry_id) from exc
+        content, variant, index = self._content_variant(house, entry_id)
         connection = self._connection(house, variant.platform)
         active_adapter, reasons = self._adapter_state(connection)
         if reasons or active_adapter != adapter_name:
@@ -323,6 +426,11 @@ class SocialPublishQueue:
         variant.failure_reason = None
         variant.metadata["published_via_adapter"] = adapter_name
         variant.metadata["published_confirmed_at"] = utc_now()
+        if provider_job_id:
+            variant.metadata["provider_job_id"] = provider_job_id
+        if provider_metadata is not None:
+            variant.metadata["provider_metadata"] = dict(provider_metadata)
+        variant.metadata.pop("publish_lease_until", None)
         auto_variants = [item for item in content.variants if item.auto_publish]
         if auto_variants and all(item.publish_state == "published" for item in auto_variants):
             content.status = "published"
@@ -339,5 +447,5 @@ class SocialPublishQueue:
         self.store.save(house)
         current = datetime.now(timezone.utc)
         persisted = self.store.load(space_id)
-        persisted_content = next(item for item in persisted.content if item.id == content_id)
+        persisted_content = next(item for item in persisted.content if item.id == content.id)
         return self._evaluate(persisted, persisted_content, index, now=current)

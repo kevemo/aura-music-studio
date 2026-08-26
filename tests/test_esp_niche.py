@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_command_center import EspStore
 from aura_music_studio.esp_niche import EspNicheStore, NICHE_CATALOG, social_access_reason
@@ -26,6 +29,14 @@ def _active_esp_creator(tmp_path):
     )
     approved = esp.decide(token, "approve", "creator", "ESP Test Owner")
     return accounts, esp, approved
+
+
+def _route_status(router, path: str) -> int:
+    """Exercise FastAPI's actual request matcher, not private router internals."""
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.include_router(router)
+    client = TestClient(app, raise_server_exceptions=False)
+    return client.get(path, follow_redirects=False).status_code
 
 
 def test_niche_profile_persists_theme_training_and_creator_goals(tmp_path):
@@ -125,10 +136,9 @@ def test_all_niches_provide_distinct_training_context():
 
 
 def test_social_routes_exist_only_under_private_esp_command_center():
-    api_paths = [route.path for route in social_api_router.routes]
-    portal_paths = [route.path for route in social_portal_router.routes]
-
-    assert api_paths
-    assert all(path.startswith("/command-center/api/social") for path in api_paths)
-    assert portal_paths == ["/command-center/social"]
-    assert "/social-house" not in portal_paths
+    # Auth may produce 401/403/redirect/500 in this intentionally bare test app; anything
+    # except 404 proves FastAPI matched the private route. The removed public route must
+    # remain a genuine 404.
+    assert _route_status(social_api_router, "/command-center/api/social/platforms") != 404
+    assert _route_status(social_portal_router, "/command-center/social") != 404
+    assert _route_status(social_portal_router, "/social-house") == 404

@@ -134,7 +134,9 @@ Target flow:
 9. record provider confirmation/external post ID;
 10. ingest subsequent analytics where permitted.
 
-The production queue now supports timezone-aware planned/blocked/queued states, retries, approval checks and adapter-readiness checks. **Queued does not mean published.** The application records `published` only after a trusted provider adapter supplies a provider post ID.
+The production queue supports timezone-aware planned/blocked/queued/publishing/failed states, retries, approval checks and adapter-readiness checks. The trusted provider-worker foundation can claim due jobs, preserve provider job IDs, poll provider status and record provider-confirmed publication. **Queued or uploaded does not mean published.** The application records `published` only after a trusted provider adapter supplies provider confirmation.
+
+The first adapter framework covers TikTok video Direct Post, the Meta Instagram Graph publishing path for supported professional-account media, and YouTube Data API video upload/processing confirmation. These adapters remain operationally disabled until the deployment has approved provider applications, the required provider review/audit status, official member OAuth/consent and deployment-held token secrets.
 
 The application must never pretend a platform is connected or a post is published when an OAuth/API integration has not been authorised and confirmed.
 
@@ -165,6 +167,8 @@ Target capabilities:
 - links to relevant creative outputs when the same user has access to both systems.
 
 Linking an asset from the Creative Studio does **not** merge the products or expose ESP tools publicly. It is a controlled asset handoff available only to the authorised member.
+
+Provider publishing resolves media through the private ESP Social Media Library. Arbitrary variant paths and raw publish URLs are rejected; library assets must be approved and rights-confirmed before the worker may use them.
 
 #### Analytics and reporting
 
@@ -254,20 +258,34 @@ Implemented foundation:
 - rights/provenance-aware private social media library foundation;
 - production publish-queue foundation;
 - timezone-aware due-time evaluation;
-- planned/blocked/queued/failed retry state handling;
-- adapter/OAuth-secret readiness gates;
-- provider-confirmed publication guard requiring an external provider post ID;
-- client-side protection against injecting provider-managed published state.
+- planned/blocked/queued/publishing/failed retry state handling;
+- provider job IDs and queue activity audit state;
+- single-worker deployment lease and bounded tenant-isolated worker cycles;
+- duplicate-post protection for ambiguous crash recovery;
+- restricted `social-token://` OAuth-secret aliases mapped only to dedicated social-token deployment secrets;
+- approved/right-confirmed media resolution with private-path/private-host protection;
+- TikTok video Direct Post adapter foundation and provider status polling;
+- Instagram Graph professional-account publishing adapter foundation;
+- YouTube Data API upload and processing-status adapter foundation;
+- provider-confirmed publication guard requiring an external/provider confirmation ID;
+- client-side protection against injecting provider-managed published state;
+- opt-in `social-publishing` deployment profile, disabled by default;
+- CI validation of the social-publishing deployment topology.
 
-Still requires live provider integration before it can truthfully claim end-to-end publishing/analytics/inbox operation:
+Still requires live provider configuration or additional adapter work before the product can truthfully claim broad end-to-end publishing/analytics/inbox operation:
 
-- platform OAuth applications;
-- official publishing adapters;
-- trusted background scheduler/worker execution that consumes queued items;
-- platform webhook/event ingestion where available;
+- first-party OAuth start/callback portals for TikTok, Meta/Instagram and Google/YouTube;
+- provider application setup, review/audit and production approval for the intended use cases;
+- encrypted refresh-token lifecycle and access-token refresh where supported;
+- live deployment token provisioning for authorised member accounts;
+- provider webhook/event ingestion where available;
+- TikTok photo publishing;
+- Instagram carousel publishing and the separate Instagram Login/Business Login adapter path;
+- fully interruption-resumable YouTube upload-session recovery;
+- provider-accessible delivery for approved Creative Project media when URL-pull is required;
+- broader publishing adapters for Facebook, LinkedIn, Pinterest, Threads, X, Google Business Profile and other planned destinations;
 - analytics ingestion;
 - social inbox adapters;
-- media-upload adapters;
 - richer approval collaboration;
 - full Aura social-strategy execution layer.
 
