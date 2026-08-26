@@ -75,6 +75,24 @@ services:
       searxng:
         condition: service_started
 
+  esp-social-publish-worker:
+    build: .
+    container_name: pulsar-frequency-house-esp-social-publish-worker
+    restart: on-failure
+    profiles: ["social-publishing"]
+    command: ["python", "-m", "aura_music_studio.esp_social_publish_worker"]
+    env_file:
+      - .env
+    environment:
+      AURA_PROJECTS_ROOT: /app/projects
+      AURA_SOCIAL_ROOT: /app/data/social
+      AURA_SOCIAL_PUBLISH_WORKER_ENABLED: ${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}
+    volumes:
+      # The provider worker can read rights-approved Creative Project outputs but cannot
+      # mutate project storage. Social queue state remains in the durable data volume.
+      - live_sound_data:/app/data
+      - live_sound_projects:/app/projects:ro
+
   aura-backup-scheduler:
     build: .
     container_name: live-sound-studio-backup-scheduler
