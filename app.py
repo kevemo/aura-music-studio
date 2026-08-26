@@ -82,6 +82,7 @@ from aura_music_studio.performance_input_api import router as performance_input_
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
+from aura_music_studio.pulsar_player import PulsarPlayerMiddleware, router as pulsar_player_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
@@ -151,6 +152,7 @@ app.include_router(compute_node_router)
 app.include_router(creative_version_autopromotion_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
+app.include_router(pulsar_player_router)
 app.include_router(creative_workspace_router)
 
 app.include_router(esp_level_up_gateway_router)
@@ -210,6 +212,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
+app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
