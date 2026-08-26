@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from aura_music_studio.daw_midi import (
+    MIDI_DAW_NAV,
     MidiCC,
     MidiDocument,
     MidiNote,
@@ -134,6 +135,7 @@ def test_midi_clip_stays_project_relative_and_browser_payload_hides_source_path(
 def test_midi_routes_are_production_mounted_and_truthful():
     paths = {getattr(route, "path", None) for route in router.routes}
     assert "/midi-editor" in paths
+    assert "/daw/mixer-ui.js" in paths
     assert "/projects/{project_name}/daw/midi" in paths
     assert "/projects/{project_name}/daw/midi/{clip_id}" in paths
     assert "/projects/{project_name}/daw/midi/{clip_id}/transform" in paths
@@ -147,3 +149,17 @@ def test_midi_routes_are_production_mounted_and_truthful():
     assert '"symbolic_guide_only": True' in module_source
     assert '"audio_rendered": False' in module_source
     assert "connected real music renderer" in module_source
+
+
+def test_midi_editor_note_placement_is_scroll_safe_and_daw_has_pro_shortcut():
+    source = Path("aura_music_studio/daw_midi.py").read_text(encoding="utf-8")
+    # getBoundingClientRect already includes the scroller offset. Adding scrollLeft/scrollTop
+    # here would double-count the scroll and place notes in the wrong bar/pitch.
+    assert "x=e.clientX-r.left-44,y=e.clientY-r.top" in source
+    assert "parentElement.scrollLeft" not in source
+    assert "parentElement.scrollTop" not in source
+
+    assert "pulsarMidiNav" in MIDI_DAW_NAV
+    assert "🎹 MIDI Piano Roll" in MIDI_DAW_NAV
+    assert "FLAGS.multitrack" in MIDI_DAW_NAV
+    assert "currentProject" in MIDI_DAW_NAV
