@@ -88,10 +88,10 @@ def _connected(house, platform: str) -> list[SocialConnection]:
 
 def _best_connection(house, platform: str, required_scope: str | None = None) -> SocialConnection | None:
     rows = _connected(house, platform)
+    # Fail closed: a call that asks for a scope must never fall back to an otherwise
+    # connected account that did not actually grant that permission.
     if required_scope:
-        scoped = [item for item in rows if required_scope in _scopes(item)]
-        if scoped:
-            rows = scoped
+        rows = [item for item in rows if required_scope in _scopes(item)]
     rows.sort(
         key=lambda item: (item.metadata.get("oauth_verified") is True, bool(item.token_secret_ref)),
         reverse=True,
