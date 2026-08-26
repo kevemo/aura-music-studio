@@ -129,11 +129,14 @@ Target flow:
 4. pass required approval gates;
 5. schedule by timezone;
 6. validate against the destination platform;
-7. publish only through an authorised official integration;
-8. record confirmation/external post ID;
-9. ingest subsequent analytics where permitted.
+7. place due content into the private production queue;
+8. publish only through an authorised official integration;
+9. record provider confirmation/external post ID;
+10. ingest subsequent analytics where permitted.
 
-The application must never pretend a platform is connected when an OAuth/API integration has not been authorised.
+The production queue now supports timezone-aware planned/blocked/queued states, retries, approval checks and adapter-readiness checks. **Queued does not mean published.** The application records `published` only after a trusted provider adapter supplies a provider post ID.
+
+The application must never pretend a platform is connected or a post is published when an OAuth/API integration has not been authorised and confirmed.
 
 #### Approvals and collaboration
 
@@ -247,17 +250,24 @@ Implemented foundation:
 - approval state;
 - publishing-readiness foundation;
 - connection capability state;
-- per-member isolated social storage.
+- per-member isolated social storage;
+- rights/provenance-aware private social media library foundation;
+- production publish-queue foundation;
+- timezone-aware due-time evaluation;
+- planned/blocked/queued/failed retry state handling;
+- adapter/OAuth-secret readiness gates;
+- provider-confirmed publication guard requiring an external provider post ID;
+- client-side protection against injecting provider-managed published state.
 
 Still requires live provider integration before it can truthfully claim end-to-end publishing/analytics/inbox operation:
 
 - platform OAuth applications;
 - official publishing adapters;
+- trusted background scheduler/worker execution that consumes queued items;
 - platform webhook/event ingestion where available;
 - analytics ingestion;
 - social inbox adapters;
 - media-upload adapters;
-- production scheduler/queue;
 - richer approval collaboration;
 - full Aura social-strategy execution layer.
 
