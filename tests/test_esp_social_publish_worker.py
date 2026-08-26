@@ -3,7 +3,12 @@ from pathlib import Path
 from aura_music_studio.esp_social_provider_adapters import ProviderProgress
 from aura_music_studio.esp_social_publish_worker import WorkerLease, run_publish_cycle
 from aura_music_studio.request_context import reset_current_user_id, set_current_user_id
-from aura_music_studio.social_management import PlatformVariant, SocialConnection, SocialContent, SocialHouseStore
+from aura_music_studio.social_management import (
+    PlatformVariant,
+    SocialConnection,
+    SocialContent,
+    SocialHouseStore,
+)
 
 
 class FakeInstagramAdapter:
@@ -27,7 +32,10 @@ class FakeInstagramAdapter:
         raise AssertionError("Immediate fake publication should not be polled")
 
 
-def test_publish_cycle_uses_provider_confirmation_before_marking_published(tmp_path: Path, monkeypatch):
+def test_publish_cycle_uses_provider_confirmation_before_marking_published(
+    tmp_path: Path,
+    monkeypatch,
+):
     root = tmp_path / "social"
     monkeypatch.setenv("AURA_SOCIAL_ROOT", str(root))
     monkeypatch.setenv("AURA_SOCIAL_TOKEN_TEST_CREATOR", "test-token")
@@ -43,7 +51,10 @@ def test_publish_cycle_uses_provider_confirmation_before_marking_published(tmp_p
             state="connected",
             supports_auto_publish=True,
             token_secret_ref="social-token://test_creator",
-            metadata={"publishing_adapter": "instagram_graph", "publishing_adapter_active": True},
+            metadata={
+                "publishing_adapter": "instagram_graph",
+                "publishing_adapter_active": True,
+            },
         )
         store.connect_placeholder(house.id, connection)
         house = store.load(house.id)
@@ -104,9 +115,11 @@ def test_worker_lease_prevents_two_active_publishers(tmp_path: Path):
     root = tmp_path / "social"
     first = WorkerLease(root, "worker-one", 60)
     second = WorkerLease(root, "worker-two", 60)
+    same_id_second_process = WorkerLease(root, "worker-one", 60)
     assert first.acquire() is True
     try:
         assert second.acquire() is False
+        assert same_id_second_process.acquire() is False
         first.heartbeat()
     finally:
         first.release()
