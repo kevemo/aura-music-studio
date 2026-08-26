@@ -71,5 +71,11 @@ include = ["aura_music_studio*"]
 [tool.setuptools.package-data]
 aura_music_studio = ["static/*.webp", "static/*.svg"]
 
+# Vercel must serve the real FastAPI application, not the static working-model HTML.
+# The production app already mounts the Music Studio, Video Studio, Image Designer,
+# Aura, DAW, ESP and private Social Management routers in app.py.
+[tool.vercel]
+entrypoint = "app:app"
+
 [tool.ruff]
 line-length = 100
