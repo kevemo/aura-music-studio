@@ -8,6 +8,7 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      AURA_SOCIAL_OAUTH_DB_PATH: /app/data/live_sound_studio.sqlite3
       LSS_BACKUP_DIR: /app/backups
       LSS_BACKUP_STATUS: /app/data/backup_scheduler_status.json
       LSS_PUBLIC_ADDRESS_STATUS: /app/data/public_address_status.json
@@ -86,10 +87,13 @@ services:
     environment:
       AURA_PROJECTS_ROOT: /app/projects
       AURA_SOCIAL_ROOT: /app/data/social
+      LSS_DB_PATH: /app/data/live_sound_studio.sqlite3
+      AURA_SOCIAL_OAUTH_DB_PATH: /app/data/live_sound_studio.sqlite3
       AURA_SOCIAL_PUBLISH_WORKER_ENABLED: ${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}
     volumes:
       # The provider worker can read rights-approved Creative Project outputs but cannot
-      # mutate project storage. Social queue state remains in the durable data volume.
+      # mutate project storage. Social queue state and encrypted OAuth credentials remain
+      # in the durable data volume shared with the web application.
       - live_sound_data:/app/data
       - live_sound_projects:/app/projects:ro
 

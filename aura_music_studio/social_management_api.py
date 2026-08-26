@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
+from .esp_social_oauth import router as social_oauth_router
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
 from .social_management import (
@@ -177,12 +178,12 @@ def _reject_connection_credentials(body: ConnectionRequest) -> None:
     if body.token_secret_ref is not None and not valid_social_token_ref(body.token_secret_ref):
         raise HTTPException(
             400,
-            "Social provider credentials must use a social-token://<alias> reference; raw tokens and arbitrary secret references cannot be stored in Social House data.",
+            "Social provider credentials must use a social-token://<alias> or social-oauth://<credential-id> reference; raw tokens and arbitrary secret references cannot be stored in Social House data.",
         )
     if _metadata_contains_raw_secret(body.metadata):
         raise HTTPException(
             400,
-            "Raw provider credentials cannot be stored in SocialConnection metadata. Use deployment-held social-token:// aliases instead.",
+            "Raw provider credentials cannot be stored in SocialConnection metadata. Use the encrypted OAuth vault or a deployment-held social-token alias.",
         )
 
 
@@ -194,9 +195,8 @@ def social_platforms(request: Request):
         "scope": "private_esp_creator_agent_hub",
         "content_safety": public_policy_summary(),
         "truthful_state": (
-            "Planning, the production queue, and provider-worker/adapter foundations are active. "
-            "Live end-to-end publishing still requires approved provider apps, official OAuth, "
-            "deployment-held credentials, and provider-specific production enablement."
+            "Planning, approvals, the production queue, provider adapters, and the private OAuth connection layer are implemented. "
+            "Real publishing becomes active only for a provider app that is configured, approved where required, and explicitly authorised by the member."
         ),
     }
 
@@ -365,7 +365,7 @@ def register_connection_state(
     _enforce(body.account_label)
     _reject_connection_credentials(body)
     # This endpoint stores only connection/capability state. OAuth access/refresh tokens
-    # belong in deployment secret storage and are referenced only through social-token aliases.
+    # remain in the encrypted member vault or the deployment's dedicated social-token namespace.
     try:
         connection = SocialConnection.model_validate(body.model_dump())
         house = _store().connect_placeholder(space_id, connection)
@@ -379,5 +379,6 @@ def register_connection_state(
     }
 
 
-# Queue routes inherit the private ESP social prefix and the same server-side member gates.
+# Nested private routes inherit /command-center/api/social and the same server-side ESP gates.
 router.include_router(publish_queue_router)
+router.include_router(social_oauth_router)
