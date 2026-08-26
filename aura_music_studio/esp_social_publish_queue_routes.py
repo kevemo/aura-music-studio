@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from .esp_niche import require_esp_social_member
+from .esp_social_provider_analytics import router as provider_analytics_router
 from .esp_social_publish_queue import SocialPublishQueue
 
 router = APIRouter(tags=["esp-social-publish-queue"])
+router.include_router(provider_analytics_router)
 
 
 def _member(request: Request):
