@@ -70,6 +70,7 @@ from aura_music_studio.esp_social_intelligence_api import router as esp_social_i
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
 from aura_music_studio.game_forge_api import router as game_forge_router
 from aura_music_studio.game_forge_portal import router as game_forge_portal_router
+from aura_music_studio.game_forge_world_api import router as game_forge_world_router
 from aura_music_studio.lyric_alignment_api import router as lyric_alignment_router
 from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
 from aura_music_studio.media_studios import router as media_studios_router
@@ -141,6 +142,8 @@ app.include_router(creative_portal_router)
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
 app.include_router(game_forge_portal_router)
+# World-integrity scan/publish handlers intentionally precede the foundation Game Forge routes.
+app.include_router(game_forge_world_router)
 app.include_router(game_forge_router)
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
