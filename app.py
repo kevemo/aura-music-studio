@@ -15,6 +15,7 @@ from aura_music_studio.aura_avatar_runtime import AuraAvatarRuntimeMiddleware, r
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_context_extensions import install_aura_context_extensions
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
+from aura_music_studio.aura_game_tools import install_aura_game_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_notifications_ui import router as aura_notifications_ui_router
@@ -67,6 +68,9 @@ from aura_music_studio.esp_social_access_control import install_social_access_co
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
+from aura_music_studio.game_forge_api import router as game_forge_router
+from aura_music_studio.game_forge_portal import router as game_forge_portal_router
+from aura_music_studio.game_forge_world_api import router as game_forge_world_router
 from aura_music_studio.lyric_alignment_api import router as lyric_alignment_router
 from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
 from aura_music_studio.media_studios import router as media_studios_router
@@ -121,6 +125,9 @@ install_aura_artifacts()
 # Code execution is available only through a separately configured isolated sandbox service.
 # Member code is never executed in the FastAPI process or host shell.
 install_aura_sandbox_tools()
+# Game Forge tools register before workflow resolution so sequential $stepN/$previous values can
+# safely pass verified Game DNA/build results between explicit Aura game actions.
+install_aura_game_tools()
 # Install workflow resolution last among tool wrappers so every tool class can contribute a
 # verified result to $stepN/$previous references while preserving its own gates.
 install_aura_workflow_engine()
@@ -134,6 +141,10 @@ app.router.routes[:] = [route for route in app.router.routes if getattr(route, "
 app.include_router(creative_portal_router)
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
+app.include_router(game_forge_portal_router)
+# World-integrity scan/publish handlers intentionally precede the foundation Game Forge routes.
+app.include_router(game_forge_world_router)
+app.include_router(game_forge_router)
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
