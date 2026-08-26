@@ -47,6 +47,7 @@ def test_provider_analytics_portal_uses_private_sync_and_intelligence_endpoints(
     assert "/command-center/api/social-intelligence" in html
     assert "YouTube owned-channel video statistics are active" in html
     assert "TikTok and Instagram stay visibly blocked or pending" in html
+    assert "No OAuth token is returned to this page." in html
     assert "token_secret_ref" not in html
     assert "access_token" not in html
     assert "refresh_token" not in html
