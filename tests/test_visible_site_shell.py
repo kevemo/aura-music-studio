@@ -66,19 +66,20 @@ def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(mo
     assert "Connected Workspace" in text
     assert "Verified Workflows" in text
     assert "Open Aura Intelligence" in text
-    assert "social-management systems, niche training and creator/agent operations live only inside the separately owner-approved ESP Hub" in text
-    assert "ESP access is owner-approved only" in text
-    assert "does not recruit creators from other networks" in text
+    assert "Pulsar-Frequency House is one integrated creation platform" in text
+    assert "ESP areas use the same account and site" in text
+    assert "access is owner-approved" in text
+    assert "cannot be obtained merely by purchasing a creative subscription" in text
     assert "href='/social-house'" not in text
     assert "Enter ESP Hub" not in text
 
 
-def test_approved_esp_member_gets_private_hub_entry_without_moving_it_into_regular_tools(monkeypatch):
+def test_approved_esp_member_gets_private_hub_entry_inside_same_site(monkeypatch):
     response = _client(monkeypatch, {"status": "active", "roles": "creator"}).get("/dashboard")
     assert response.status_code == 200
     text = response.text
-    assert "Private Elevate Souls Productions Hub" in text
-    assert "private social-management tools" in text
-    assert "not part of the normal Creative Studio membership" in text
+    assert "Private Elevate Souls Productions Area" in text
+    assert "additional areas inside this same Pulsar-Frequency House account" in text
+    assert "These areas remain hidden from ordinary public members" in text
     assert "Enter ESP Hub" in text
     assert "href='/social-house'" not in text
