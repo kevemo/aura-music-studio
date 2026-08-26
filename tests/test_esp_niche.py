@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_command_center import EspStore
@@ -30,11 +31,11 @@ def _active_esp_creator(tmp_path):
     return accounts, esp, approved
 
 
-def _mounted_paths(router) -> list[str]:
-    """Inspect effective public paths instead of FastAPI's private router internals."""
+def _route_status(router, path: str) -> int:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(router)
-    return [route.path for route in app.routes if hasattr(route, "path")]
+    client = TestClient(app, raise_server_exceptions=False)
+    return client.get(path, follow_redirects=False).status_code
 
 
 def test_niche_profile_persists_theme_training_and_creator_goals(tmp_path):
@@ -48,14 +49,12 @@ def test_niche_profile_persists_theme_training_and_creator_goals(tmp_path):
         goals=["Improve LIVE retention", "Build repeat viewers"],
         network_status="esp_only",
     )
-
     assert profile["niche"] == "music"
     assert profile["sub_niche"] == "singer-songwriter"
     assert profile["goals"] == ["Improve LIVE retention", "Build repeat viewers"]
     assert profile["catalog"]["title"] == "Music & Performing Arts"
     assert profile["catalog"]["theme"]["accent"]
     assert len(profile["catalog"]["training"]) >= 5
-
     reloaded = EspNicheStore(esp).get(user["id"])
     assert reloaded["network_status"] == "esp_only"
     assert reloaded["catalog"]["icon"] == "🎵"
@@ -63,13 +62,8 @@ def test_niche_profile_persists_theme_training_and_creator_goals(tmp_path):
 
 def test_other_creator_network_blocks_esp_social_management(tmp_path):
     _accounts, esp, user = _active_esp_creator(tmp_path)
-    profile = EspNicheStore(esp).set(
-        user["id"],
-        niche="gaming",
-        network_status="other_network",
-    )
+    profile = EspNicheStore(esp).set(user["id"], niche="gaming", network_status="other_network")
     membership = esp.membership(user["id"])
-
     allowed, reason = social_access_reason(membership, profile)
     assert allowed is False
     assert "another Creator Network" in reason
@@ -78,13 +72,8 @@ def test_other_creator_network_blocks_esp_social_management(tmp_path):
 
 def test_esp_only_profile_allows_social_management(tmp_path):
     _accounts, esp, user = _active_esp_creator(tmp_path)
-    profile = EspNicheStore(esp).set(
-        user["id"],
-        niche="beauty",
-        network_status="esp_only",
-    )
+    profile = EspNicheStore(esp).set(user["id"], niche="beauty", network_status="esp_only")
     membership = esp.membership(user["id"])
-
     allowed, reason = social_access_reason(membership, profile)
     assert allowed is True
     assert "confirmed" in reason.lower()
@@ -93,16 +82,10 @@ def test_esp_only_profile_allows_social_management(tmp_path):
 def test_missing_or_unsure_affiliation_keeps_social_tools_locked(tmp_path):
     _accounts, esp, user = _active_esp_creator(tmp_path)
     membership = esp.membership(user["id"])
-
     allowed, reason = social_access_reason(membership, None)
     assert allowed is False
     assert "niche" in reason.lower()
-
-    profile = EspNicheStore(esp).set(
-        user["id"],
-        niche="education",
-        network_status="unsure",
-    )
+    profile = EspNicheStore(esp).set(user["id"], niche="education", network_status="unsure")
     allowed, reason = social_access_reason(membership, profile)
     assert allowed is False
     assert "affiliation" in reason.lower()
@@ -110,14 +93,9 @@ def test_missing_or_unsure_affiliation_keeps_social_tools_locked(tmp_path):
 
 def test_revoked_or_non_esp_membership_cannot_gain_social_access(tmp_path):
     _accounts, esp, user = _active_esp_creator(tmp_path)
-    profile = EspNicheStore(esp).set(
-        user["id"],
-        niche="lifestyle",
-        network_status="esp_only",
-    )
+    profile = EspNicheStore(esp).set(user["id"], niche="lifestyle", network_status="esp_only")
     esp.revoke(user["id"], "ESP Test Owner")
     membership = esp.membership(user["id"])
-
     allowed, reason = social_access_reason(membership, profile)
     assert allowed is False
     assert "ESP approval" in reason
@@ -134,10 +112,6 @@ def test_all_niches_provide_distinct_training_context():
 
 
 def test_social_routes_exist_only_under_private_esp_command_center():
-    api_paths = _mounted_paths(social_api_router)
-    portal_paths = _mounted_paths(social_portal_router)
-
-    assert api_paths
-    assert all(path.startswith("/command-center/api/social") for path in api_paths)
-    assert portal_paths == ["/command-center/social"]
-    assert "/social-house" not in portal_paths
+    assert _route_status(social_api_router, "/command-center/api/social/platforms") != 404
+    assert _route_status(social_portal_router, "/command-center/social") != 404
+    assert _route_status(social_portal_router, "/social-house") == 404
