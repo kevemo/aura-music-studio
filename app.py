@@ -74,6 +74,7 @@ from aura_music_studio.owner_compute_portal import router as owner_compute_route
 from aura_music_studio.owner_control_center import router as owner_control_center_router
 from aura_music_studio.owner_identity import OwnerIdentityMiddleware
 from aura_music_studio.owner_user_directory import router as owner_user_directory_router
+from aura_music_studio.owner_user_intelligence import router as owner_user_intelligence_router
 from aura_music_studio.owner_users_portal import router as owner_users_legacy_router
 from aura_music_studio.performance_input_api import router as performance_input_router
 from aura_music_studio.privacy_api import router as privacy_router
@@ -162,6 +163,7 @@ app.include_router(social_management_portal_router)
 app.include_router(owner_auth_router)
 app.include_router(esp_owner_access_router)
 app.include_router(owner_control_center_router)
+app.include_router(owner_user_intelligence_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
 
