@@ -227,22 +227,23 @@ def test_tiktok_application_scope_error_requires_reauthorisation(monkeypatch):
 
 
 def test_live_tiktok_routes_precede_old_placeholder_and_remain_private():
+    """Use request matching and source order; FastAPI 0.141 hides nested route objects."""
+    source = Path("aura_music_studio/esp_social_publish_queue_routes.py").read_text(encoding="utf-8")
+    assert source.index("router.include_router(tiktok_analytics_router)") < source.index(
+        "router.include_router(provider_analytics_router)"
+    )
+
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(social_api_router)
-    target = "/command-center/api/social/spaces/{space_id}/provider-analytics/tiktok/sync"
-    matching = [
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == target and "POST" in getattr(route, "methods", set())
-    ]
-    assert len(matching) >= 2
-    assert matching[0].endpoint.__module__ == "aura_music_studio.esp_social_tiktok_analytics"
-
-    capabilities = "/command-center/api/social/spaces/{space_id}/provider-analytics/capabilities"
-    cap_routes = [route for route in app.routes if getattr(route, "path", None) == capabilities]
-    assert len(cap_routes) >= 2
-    assert cap_routes[0].endpoint.__module__ == "aura_music_studio.esp_social_tiktok_analytics"
-
     client = TestClient(app, raise_server_exceptions=False)
+
+    private_sync = client.post(
+        "/command-center/api/social/spaces/example/provider-analytics/tiktok/sync"
+    )
+    private_caps = client.get(
+        "/command-center/api/social/spaces/example/provider-analytics/capabilities"
+    )
+    assert private_sync.status_code != 404
+    assert private_caps.status_code != 404
     assert client.post("/spaces/example/provider-analytics/tiktok/sync").status_code == 404
     assert client.post("/social/spaces/example/provider-analytics/tiktok/sync").status_code == 404
