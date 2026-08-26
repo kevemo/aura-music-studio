@@ -91,14 +91,19 @@ class InstagramGraphAdapter:
         self.timeout = timeout
 
     @staticmethod
-    def _base() -> str:
-        version = os.getenv("AURA_META_GRAPH_VERSION", "").strip()
+    def _base(connection: SocialConnection) -> str:
+        version = (
+            os.getenv("AURA_INSTAGRAM_GRAPH_VERSION", "").strip()
+            or os.getenv("AURA_META_GRAPH_VERSION", "").strip()
+        )
         if not version:
             raise ProviderAdapterError(
-                "AURA_META_GRAPH_VERSION must be configured before Instagram publishing is enabled"
+                "AURA_INSTAGRAM_GRAPH_VERSION (or AURA_META_GRAPH_VERSION) must be configured before Instagram publishing is enabled"
             )
         if not version.startswith("v") or not version[1:].replace(".", "").isdigit():
-            raise ProviderAdapterError("AURA_META_GRAPH_VERSION is invalid")
+            raise ProviderAdapterError("Configured Instagram Graph API version is invalid")
+        if connection.metadata.get("oauth_flow") == "instagram_login":
+            return f"https://graph.instagram.com/{version}"
         return f"https://graph.facebook.com/{version}"
 
     @staticmethod
@@ -141,7 +146,10 @@ class InstagramGraphAdapter:
             )
         try:
             with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(f"{self._base()}/{ig_user_id}/media", data=fields)
+                response = client.post(
+                    f"{self._base(connection)}/{ig_user_id}/media",
+                    data=fields,
+                )
         except httpx.RequestError as exc:
             raise _network_error("Instagram", exc) from exc
         payload = _json_or_error(response, "Instagram")
@@ -169,7 +177,7 @@ class InstagramGraphAdapter:
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 response = client.get(
-                    f"{self._base()}/{provider_job_id}",
+                    f"{self._base(connection)}/{provider_job_id}",
                     params={"fields": "status_code,status", "access_token": token},
                 )
                 payload = _json_or_error(response, "Instagram")
@@ -189,7 +197,7 @@ class InstagramGraphAdapter:
                         metadata={"stage": "container"},
                     )
                 publish = client.post(
-                    f"{self._base()}/{ig_user_id}/media_publish",
+                    f"{self._base(connection)}/{ig_user_id}/media_publish",
                     data={"creation_id": provider_job_id, "access_token": token},
                 )
         except httpx.RequestError as exc:
