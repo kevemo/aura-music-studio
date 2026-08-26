@@ -35,9 +35,9 @@ def test_player_ui_route_is_private_creative_support_route():
     assert "/pulsar-player-ui.js" not in paths
 
 
-def test_player_middleware_is_available_for_authenticated_html_injection():
+def test_player_middleware_is_available_for_signed_in_member_html():
     assert PulsarPlayerMiddleware.__doc__
-    assert "authenticated member" in PulsarPlayerMiddleware.__doc__.lower()
+    assert "signed-in member html" in PulsarPlayerMiddleware.__doc__.lower()
 
 
 def test_creative_media_gallery_can_send_audio_and_video_to_pulsar_player():
@@ -54,5 +54,6 @@ def test_app_mounts_entitlement_handlers_before_base_creative_handlers():
     media = source.index("app.include_router(creative_media_preview_router)")
     assert gate < project
     assert gate < media
+    assert "app.include_router(creative_library_router)" in source
     assert "app.include_router(pulsar_player_router)" in source
     assert "app.add_middleware(PulsarPlayerMiddleware)" in source
