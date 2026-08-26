@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
+from .esp_social_publish_queue_routes import router as publish_queue_router
 from .social_management import (
     BrandPersona,
     ContentStatus,
@@ -285,3 +286,7 @@ def register_connection_state(space_id: str, body: ConnectionRequest, request: R
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"connection": connection.model_dump(mode="json"), "house": house.model_dump(mode="json")}
+
+
+# Queue routes inherit the private ESP social prefix and the same server-side member gates.
+router.include_router(publish_queue_router)
