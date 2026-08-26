@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import math
 import shutil
 from html import escape
 from pathlib import Path
@@ -10,11 +8,12 @@ from uuid import uuid4
 
 import mido
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from .branding import PRODUCT_FULL_NAME
 from .daw import find_clip, load_session, save_session
+from .daw_mixer_ui import JAVASCRIPT as BASE_DAW_MIXER_UI
 from .performance_inputs import get_input
 from .plans import AUDIO_TO_MIDI_CONTROL, DEEP_REVISION_HISTORY
 from .revisions import create_revision
@@ -159,11 +158,10 @@ def read_midi_document(path: Path) -> MidiDocument:
                 start, velocity = stack.pop(0)
                 if not stack:
                     active.pop(key, None)
-                duration = max(1, absolute - start)
                 notes.append(MidiNote(
                     pitch=key[1],
                     start_beat=_beat(start, tpb),
-                    duration_beats=_beat(duration, tpb),
+                    duration_beats=_beat(max(1, absolute - start), tpb),
                     velocity=velocity,
                     channel=key[0],
                 ))
@@ -237,7 +235,10 @@ def transform_midi_document(document: MidiDocument, body: MidiTransformRequest) 
             note.start_beat = max(0.0, round(note.start_beat + (target - note.start_beat) * strength, 6))
             if body.quantize_duration:
                 duration_target = max(grid, round(note.duration_beats / grid) * grid)
-                note.duration_beats = max(0.001, round(note.duration_beats + (duration_target - note.duration_beats) * strength, 6))
+                note.duration_beats = max(
+                    0.001,
+                    round(note.duration_beats + (duration_target - note.duration_beats) * strength, 6),
+                )
     transformed.notes.sort(key=lambda row: (row.start_beat, row.pitch, row.channel))
     return transformed
 
@@ -279,7 +280,14 @@ def _public_clip(project_name: str, track: Track, clip: Clip, document: MidiDocu
     }
 
 
-def _create_clip(project: Path, session: StudioSession, *, name: str, track_id: str | None, source: Path) -> tuple[Track, Clip]:
+def _create_clip(
+    project: Path,
+    session: StudioSession,
+    *,
+    name: str,
+    track_id: str | None,
+    source: Path,
+) -> tuple[Track, Clip]:
     if track_id:
         try:
             track = session.find_track(track_id)
@@ -444,7 +452,7 @@ def transform_midi(project_name: str, clip_id: str, body: MidiTransformRequest, 
 
 @router.post("/projects/{project_name}/daw/midi/{clip_id}/use-as-guide")
 def use_midi_as_generation_guide(project_name: str, clip_id: str, body: MidiGuideRequest, request: Request):
-    _member(request)
+    member = _member(request)
     project = _project(project_name)
     session = _session(project)
     track, clip = _clip(session, clip_id)
@@ -453,6 +461,7 @@ def use_midi_as_generation_guide(project_name: str, clip_id: str, body: MidiGuid
         document = read_midi_document(source)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(409, "MIDI file is unavailable") from exc
+    _snapshot(project, member, f"Before applying MIDI guide · {clip.name}")
     summary = _summary(document)
     context = (
         f"Use MIDI guide {clip.name!r} as an editable musical control layer. Preserve its note contour, rhythm, note lengths, "
@@ -492,6 +501,46 @@ def use_midi_as_generation_guide(project_name: str, clip_id: str, body: MidiGuid
     }
 
 
+MIDI_DAW_NAV = r"""
+(() => {
+  function href() {
+    const project = typeof currentProject !== 'undefined' && currentProject ? currentProject : '';
+    return '/midi-editor' + (project ? '?project=' + encodeURIComponent(project) : '');
+  }
+  function sync() {
+    const button = document.getElementById('pulsarMidiNav');
+    if (button) button.href = href();
+  }
+  function install() {
+    if (!(typeof FLAGS !== 'undefined' && FLAGS.multitrack)) return;
+    if (document.getElementById('pulsarMidiNav')) return sync();
+    const toolbar = document.querySelector('.toolbar');
+    if (!toolbar) return;
+    const link = document.createElement('a');
+    link.id = 'pulsarMidiNav';
+    link.className = 'btn';
+    link.textContent = '🎹 MIDI Piano Roll';
+    link.href = href();
+    link.title = 'Edit real MIDI notes, velocity, timing, controller data and Aura generation guides';
+    toolbar.appendChild(link);
+    document.getElementById('projectSelect')?.addEventListener('change', () => setTimeout(sync, 0));
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, {once:true});
+  else install();
+})();
+"""
+
+
+@router.get("/daw/mixer-ui.js", include_in_schema=False)
+def daw_mixer_with_midi_navigation():
+    """Extend the existing DAW UI script without replacing mixer/automation behavior."""
+    return Response(
+        content=BASE_DAW_MIXER_UI + "\n" + MIDI_DAW_NAV,
+        media_type="application/javascript",
+        headers={"Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/midi-editor", response_class=HTMLResponse, include_in_schema=False)
 def midi_editor(request: Request):
     member = getattr(request.state, "member", None)
@@ -500,9 +549,9 @@ def midi_editor(request: Request):
     if not member.plan.has(AUDIO_TO_MIDI_CONTROL):
         return RedirectResponse("/pricing", status_code=303)
     html = r"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>MIDI Piano Roll — __BRAND__</title><style>
-:root{--bg:#05040a;--panel:#100b18;--line:#ffffff20;--gold:#efc86c;--violet:#9b6cff;--cyan:#59dff8;--green:#76dfa6;--muted:#bcb4c7;--red:#ff8fa4}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 8% 0,#42175d66,transparent 29%),#05040a;color:#fff;font-family:Inter,system-ui,sans-serif}button,input,select,textarea{font:inherit}.wrap{width:min(1500px,calc(100% - 20px));margin:auto;padding:18px 0 80px}.top,.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.top{justify-content:space-between}.brand{font-weight:950}.brand small{display:block;color:var(--gold);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase}.btn,button{border:1px solid var(--line);background:#ffffff08;color:#fff;border-radius:10px;padding:8px 10px;font-weight:850;cursor:pointer}.primary{border:0;background:linear-gradient(115deg,var(--gold),var(--violet));color:#160c1c}.good{border-color:#76dfa655;color:var(--green)}.danger{border-color:#ff8fa455;color:#ffd7de}select,input,textarea{border:1px solid var(--line);background:#08060d;color:#fff;border-radius:9px;padding:8px}.panel{border:1px solid var(--line);background:#0c0913eb;border-radius:16px;padding:12px;margin-top:10px}.toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted);font-size:.78rem;line-height:1.5}.editor{display:grid;grid-template-columns:1fr 310px;gap:10px}.roll-shell{overflow:auto;height:620px;border:1px solid var(--line);border-radius:12px;background:#06050a}.roll{position:relative;width:2000px;height:1536px;background-image:linear-gradient(to right,#ffffff12 1px,transparent 1px),linear-gradient(to bottom,#ffffff0d 1px,transparent 1px);background-size:50px 24px}.roll:after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to right,transparent 0,transparent 199px,#efc86c22 200px)}.note{position:absolute;height:20px;border:1px solid #e9c96c99;border-radius:5px;background:linear-gradient(90deg,#9b6cff,#59dff8);overflow:hidden;cursor:pointer;min-width:5px}.note.sel{outline:2px solid #fff}.pitch-labels{font-size:.7rem}.inspector{display:grid;gap:8px}.field label{display:block;color:var(--muted);font-size:.7rem;margin-bottom:3px}.field input,.field textarea{width:100%}.status{white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;padding:9px;color:var(--muted);margin-top:8px}.pill{border:1px solid var(--line);border-radius:999px;padding:5px 8px;font-size:.7rem;color:var(--gold)}@media(max-width:900px){.editor{grid-template-columns:1fr}.roll-shell{height:500px}}
-</style></head><body><main class='wrap'><div class='top'><a class='brand' href='/daw'>__BRAND__<small>Pro MIDI Piano Roll</small></a><div><a class='btn' href='/daw'>Visual DAW</a> <a class='btn' href='/dashboard'>Dashboard</a></div></div><section class='panel'><div class='toolbar'><select id='project'></select><button onclick='loadProject()'>Open Project</button><select id='clip'></select><button onclick='loadClip()'>Open MIDI</button><button onclick='createClip()'>+ New MIDI Clip</button><button class='good' onclick='useGuide()'>Use as Aura Guide</button><span id='summary' class='pill'>No MIDI loaded</span></div><p class='muted'>Click the piano roll to add notes. Select a note to edit pitch, timing, length and velocity. MIDI is a symbolic control layer; it becomes final audio only when a connected real music renderer performs it.</p></section><section class='panel toolbar'><label>Grid <select id='grid'><option value='1'>1/4</option><option value='.5'>1/8</option><option value='.25' selected>1/16</option><option value='.125'>1/32</option></select></label><button onclick='quantize()'>Quantize</button><button onclick='transpose(-12)'>-12</button><button onclick='transpose(-1)'>-1</button><button onclick='transpose(1)'>+1</button><button onclick='transpose(12)'>+12</button><button class='primary' onclick='save()'>Save MIDI</button></section><section class='editor'><div class='roll-shell'><div id='roll' class='roll'></div></div><aside class='panel inspector'><h3>Selected Note</h3><div id='noNote' class='muted'>Select or add a note.</div><div id='noteFields' style='display:none'><div class='field'><label>Pitch (0–127)</label><input id='pitch' type='number' min='0' max='127'></div><div class='field'><label>Start beat</label><input id='start' type='number' min='0' step='.125'></div><div class='field'><label>Duration beats</label><input id='duration' type='number' min='.01' step='.125'></div><div class='field'><label>Velocity</label><input id='velocity' type='number' min='1' max='127'></div><button onclick='applyNote()'>Apply Note</button> <button class='danger' onclick='deleteNote()'>Delete</button></div><h3>Controller / Pitch Bend</h3><div class='muted'>Advanced controller lanes are stored in the actual MIDI file. Edit JSON arrays here while the graphical CC lane is developed.</div><div class='field'><label>CC points</label><textarea id='cc' rows='5'>[]</textarea></div><div class='field'><label>Pitch bend</label><textarea id='bend' rows='5'>[]</textarea></div><div class='field'><label>Aura generation intent</label><textarea id='intent' rows='4' placeholder='Example: use this chord rhythm as the piano guide but make the performance more human and expressive.'></textarea></div><div id='status' class='status'>MIDI editor ready.</div></aside></section></main><script>
-let projects=[],doc={notes:[],cc:[],pitch_bend:[],name:'Pulsar MIDI'},selected=-1,currentProject='',currentClip='';const $=id=>document.getElementById(id),PX=50,ROW=24,MAXP=95,MINP=32;async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});let b={};try{b=await r.json()}catch{}if(!r.ok)throw new Error(b.detail||`Request failed (${r.status})`);return b}function status(v,bad=false){$('status').textContent=v;$('status').style.color=bad?'var(--red)':'var(--muted)'}function enc(v){return encodeURIComponent(v)}function snap(v){const g=Number($('grid').value)||.25;return Math.max(0,Math.round(v/g)*g)}async function boot(){try{projects=await api('/projects');$('project').innerHTML=projects.map(p=>`<option>${p.name}</option>`).join('');const q=new URLSearchParams(location.search);if(q.get('project'))$('project').value=q.get('project');await loadProject();if(q.get('clip')){$('clip').value=q.get('clip');await loadClip()}}catch(e){status(e.message,true)}}async function loadProject(){currentProject=$('project').value;if(!currentProject)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi`);$('clip').innerHTML=(d.clips||[]).map(c=>`<option value="${c.clip_id}">${c.name} · ${c.summary.note_count} notes</option>`).join('');if(d.clips?.length){currentClip=$('clip').value;await loadClip()}else{doc={notes:[],cc:[],pitch_bend:[],name:'Pulsar MIDI'};currentClip='';render()}}catch(e){status(e.message,true)}}async function createClip(){if(!currentProject)return;const name=prompt('MIDI clip name','Pulsar MIDI')||'Pulsar MIDI';try{const d=await api(`/projects/${enc(currentProject)}/daw/midi`,{method:'POST',body:JSON.stringify({name})});await loadProject();$('clip').value=d.clip.clip_id;await loadClip();status('MIDI clip created.')}catch(e){status(e.message,true)}}async function loadClip(){currentClip=$('clip').value;if(!currentClip)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}`);doc=d.document;selected=-1;$('cc').value=JSON.stringify(doc.cc||[],null,2);$('bend').value=JSON.stringify(doc.pitch_bend||[],null,2);render();status(`Loaded ${doc.notes.length} notes at ${d.bpm} BPM.`)}catch(e){status(e.message,true)}}function render(){const roll=$('roll');roll.innerHTML='';for(let p=MAXP;p>=MINP;p--){const l=document.createElement('div');l.style.cssText=`position:absolute;left:0;top:${(MAXP-p)*ROW}px;width:42px;height:${ROW}px;border-right:1px solid #ffffff22;color:${p%12===0?'var(--gold)':'#aaa'};font-size:10px;padding:5px`;l.textContent=p;roll.appendChild(l)}(doc.notes||[]).forEach((n,i)=>{if(n.pitch<MINP||n.pitch>MAXP)return;const b=document.createElement('div');b.className='note'+(selected===i?' sel':'');b.style.left=(44+n.start_beat*PX)+'px';b.style.width=Math.max(6,n.duration_beats*PX)+'px';b.style.top=((MAXP-n.pitch)*ROW+2)+'px';b.title=`Pitch ${n.pitch} · beat ${n.start_beat} · vel ${n.velocity}`;b.onclick=e=>{e.stopPropagation();selectNote(i)};roll.appendChild(b)});$('summary').textContent=`${doc.notes?.length||0} notes · ${doc.cc?.length||0} CC · ${doc.pitch_bend?.length||0} bend`;refreshInspector()}$('roll').addEventListener('click',e=>{const r=$('roll').getBoundingClientRect(),x=e.clientX-r.left+$('roll').parentElement.scrollLeft-44,y=e.clientY-r.top+$('roll').parentElement.scrollTop;const beat=snap(Math.max(0,x/PX)),pitch=Math.max(MINP,Math.min(MAXP,MAXP-Math.floor(y/ROW)));doc.notes.push({pitch,start_beat:beat,duration_beats:Number($('grid').value)||.25,velocity:96,channel:0});doc.notes.sort((a,b)=>a.start_beat-b.start_beat||a.pitch-b.pitch);selected=doc.notes.findIndex(n=>n.pitch===pitch&&n.start_beat===beat);render()});function selectNote(i){selected=i;render()}function refreshInspector(){const n=doc.notes?.[selected];$('noNote').style.display=n?'none':'block';$('noteFields').style.display=n?'block':'none';if(!n)return;$('pitch').value=n.pitch;$('start').value=n.start_beat;$('duration').value=n.duration_beats;$('velocity').value=n.velocity}function applyNote(){const n=doc.notes[selected];if(!n)return;n.pitch=Math.max(0,Math.min(127,Number($('pitch').value)));n.start_beat=Math.max(0,Number($('start').value));n.duration_beats=Math.max(.01,Number($('duration').value));n.velocity=Math.max(1,Math.min(127,Number($('velocity').value)));render()}function deleteNote(){if(selected<0)return;doc.notes.splice(selected,1);selected=-1;render()}async function save(){if(!currentClip)return status('Create or open a MIDI clip first.',true);try{doc.cc=JSON.parse($('cc').value||'[]');doc.pitch_bend=JSON.parse($('bend').value||'[]');const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}`,{method:'PUT',body:JSON.stringify(doc)});doc=d.document;render();status('MIDI saved with revision history.')}catch(e){status(e.message,true)}}async function transform(body){if(!currentClip)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}/transform`,{method:'POST',body:JSON.stringify(body)});doc=d.document;$('cc').value=JSON.stringify(doc.cc||[],null,2);$('bend').value=JSON.stringify(doc.pitch_bend||[],null,2);render();status('MIDI transformed.')}catch(e){status(e.message,true)}}function quantize(){transform({quantize_grid_beats:Number($('grid').value),quantize_strength:1,quantize_duration:false})}function transpose(n){transform({transpose_semitones:n})}async function useGuide(){if(!currentClip)return status('Open a MIDI clip first.',true);try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}/use-as-guide`,{method:'POST',body:JSON.stringify({intent:$('intent').value})});status(`Aura guide active · ${d.summary.note_count} notes · symbolic until rendered by a real music engine.`)}catch(e){status(e.message,true)}}boot();
+:root{--bg:#05040a;--panel:#100b18;--line:#ffffff20;--gold:#efc86c;--violet:#9b6cff;--cyan:#59dff8;--green:#76dfa6;--muted:#bcb4c7;--red:#ff8fa4}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 8% 0,#42175d66,transparent 29%),#05040a;color:#fff;font-family:Inter,system-ui,sans-serif}button,input,select,textarea{font:inherit}.wrap{width:min(1500px,calc(100% - 20px));margin:auto;padding:18px 0 80px}.top,.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.top{justify-content:space-between}.brand{font-weight:950}.brand small{display:block;color:var(--gold);font-size:.66rem;letter-spacing:.1em;text-transform:uppercase}.btn,button{border:1px solid var(--line);background:#ffffff08;color:#fff;border-radius:10px;padding:8px 10px;font-weight:850;cursor:pointer;text-decoration:none}.primary{border:0;background:linear-gradient(115deg,var(--gold),var(--violet));color:#160c1c}.good{border-color:#76dfa655;color:var(--green)}.danger{border-color:#ff8fa455;color:#ffd7de}select,input,textarea{border:1px solid var(--line);background:#08060d;color:#fff;border-radius:9px;padding:8px}.panel{border:1px solid var(--line);background:#0c0913eb;border-radius:16px;padding:12px;margin-top:10px}.toolbar{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted);font-size:.78rem;line-height:1.5}.editor{display:grid;grid-template-columns:1fr 310px;gap:10px}.roll-shell{overflow:auto;height:620px;border:1px solid var(--line);border-radius:12px;background:#06050a}.roll{position:relative;width:4000px;height:1536px;background-image:linear-gradient(to right,#ffffff12 1px,transparent 1px),linear-gradient(to bottom,#ffffff0d 1px,transparent 1px);background-size:50px 24px}.roll:after{content:'';position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(to right,transparent 0,transparent 199px,#efc86c22 200px)}.note{position:absolute;height:20px;border:1px solid #e9c96c99;border-radius:5px;background:linear-gradient(90deg,#9b6cff,#59dff8);overflow:hidden;cursor:pointer;min-width:5px}.note.sel{outline:2px solid #fff}.inspector{display:grid;gap:8px}.field label{display:block;color:var(--muted);font-size:.7rem;margin-bottom:3px}.field input,.field textarea{width:100%}.status{white-space:pre-wrap;border:1px solid var(--line);border-radius:10px;padding:9px;color:var(--muted);margin-top:8px}.pill{border:1px solid var(--line);border-radius:999px;padding:5px 8px;font-size:.7rem;color:var(--gold)}@media(max-width:900px){.editor{grid-template-columns:1fr}.roll-shell{height:500px}}
+</style></head><body><main class='wrap'><div class='top'><a class='brand' href='/daw'>__BRAND__<small>Pro MIDI Piano Roll</small></a><div><a class='btn' href='/daw'>Visual DAW</a> <a class='btn' href='/dashboard'>Dashboard</a></div></div><section class='panel'><div class='toolbar'><select id='project'></select><button onclick='loadProject()'>Open Project</button><select id='clip'></select><button onclick='loadClip()'>Open MIDI</button><button onclick='createClip()'>+ New MIDI Clip</button><button class='good' onclick='useGuide()'>Use as Aura Guide</button><span id='summary' class='pill'>No MIDI loaded</span></div><p class='muted'>Click the piano roll to add notes. Select a note to edit pitch, timing, length and velocity. MIDI is a symbolic control layer; it becomes final audio only when a connected real music renderer performs it.</p></section><section class='panel toolbar'><label>Grid <select id='grid'><option value='1'>1/4</option><option value='.5'>1/8</option><option value='.25' selected>1/16</option><option value='.125'>1/32</option></select></label><button onclick='quantize()'>Quantize</button><button onclick='transpose(-12)'>-12</button><button onclick='transpose(-1)'>-1</button><button onclick='transpose(1)'>+1</button><button onclick='transpose(12)'>+12</button><button class='primary' onclick='save()'>Save MIDI</button></section><section class='editor'><div class='roll-shell'><div id='roll' class='roll'></div></div><aside class='panel inspector'><h3>Selected Note</h3><div id='noNote' class='muted'>Select or add a note.</div><div id='noteFields' style='display:none'><div class='field'><label>Pitch (0–127)</label><input id='pitch' type='number' min='0' max='127'></div><div class='field'><label>Start beat</label><input id='start' type='number' min='0' step='.125'></div><div class='field'><label>Duration beats</label><input id='duration' type='number' min='.01' step='.125'></div><div class='field'><label>Velocity</label><input id='velocity' type='number' min='1' max='127'></div><button onclick='applyNote()'>Apply Note</button> <button class='danger' onclick='deleteNote()'>Delete</button></div><h3>Controller / Pitch Bend</h3><div class='muted'>Controller and pitch-bend events are stored in the actual MIDI file. The current editor exposes validated JSON points while graphical controller lanes are built next.</div><div class='field'><label>CC points</label><textarea id='cc' rows='5'>[]</textarea></div><div class='field'><label>Pitch bend</label><textarea id='bend' rows='5'>[]</textarea></div><div class='field'><label>Aura generation intent</label><textarea id='intent' rows='4' placeholder='Example: use this chord rhythm as the piano guide but make the performance more human and expressive.'></textarea></div><div id='status' class='status'>MIDI editor ready.</div></aside></section></main><script>
+let projects=[],doc={notes:[],cc:[],pitch_bend:[],name:'Pulsar MIDI'},selected=-1,currentProject='',currentClip='';const $=id=>document.getElementById(id),PX=50,ROW=24,MAXP=95,MINP=32;async function api(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});let b={};try{b=await r.json()}catch{}if(!r.ok)throw new Error(b.detail||`Request failed (${r.status})`);return b}function status(v,bad=false){$('status').textContent=v;$('status').style.color=bad?'var(--red)':'var(--muted)'}function enc(v){return encodeURIComponent(v)}function snap(v){const g=Number($('grid').value)||.25;return Math.max(0,Math.round(v/g)*g)}async function boot(){try{projects=await api('/projects');$('project').innerHTML=projects.map(p=>`<option>${p.name}</option>`).join('');const q=new URLSearchParams(location.search);if(q.get('project'))$('project').value=q.get('project');await loadProject();if(q.get('clip')){$('clip').value=q.get('clip');await loadClip()}}catch(e){status(e.message,true)}}async function loadProject(){currentProject=$('project').value;if(!currentProject)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi`);$('clip').innerHTML=(d.clips||[]).map(c=>`<option value="${c.clip_id}">${c.name} · ${c.summary.note_count} notes</option>`).join('');if(d.clips?.length){currentClip=$('clip').value;await loadClip()}else{doc={notes:[],cc:[],pitch_bend:[],name:'Pulsar MIDI'};currentClip='';render()}}catch(e){status(e.message,true)}}async function createClip(){if(!currentProject)return;const name=prompt('MIDI clip name','Pulsar MIDI')||'Pulsar MIDI';try{const d=await api(`/projects/${enc(currentProject)}/daw/midi`,{method:'POST',body:JSON.stringify({name})});await loadProject();$('clip').value=d.clip.clip_id;await loadClip();status('MIDI clip created.')}catch(e){status(e.message,true)}}async function loadClip(){currentClip=$('clip').value;if(!currentClip)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}`);doc=d.document;selected=-1;$('cc').value=JSON.stringify(doc.cc||[],null,2);$('bend').value=JSON.stringify(doc.pitch_bend||[],null,2);render();status(`Loaded ${doc.notes.length} notes at ${d.bpm} BPM.`)}catch(e){status(e.message,true)}}function render(){const roll=$('roll');roll.innerHTML='';for(let p=MAXP;p>=MINP;p--){const l=document.createElement('div');l.style.cssText=`position:absolute;left:0;top:${(MAXP-p)*ROW}px;width:42px;height:${ROW}px;border-right:1px solid #ffffff22;color:${p%12===0?'var(--gold)':'#aaa'};font-size:10px;padding:5px`;l.textContent=p;roll.appendChild(l)}(doc.notes||[]).forEach((n,i)=>{if(n.pitch<MINP||n.pitch>MAXP)return;const b=document.createElement('div');b.className='note'+(selected===i?' sel':'');b.style.left=(44+n.start_beat*PX)+'px';b.style.width=Math.max(6,n.duration_beats*PX)+'px';b.style.top=((MAXP-n.pitch)*ROW+2)+'px';b.title=`Pitch ${n.pitch} · beat ${n.start_beat} · vel ${n.velocity}`;b.onclick=e=>{e.stopPropagation();selectNote(i)};roll.appendChild(b)});$('summary').textContent=`${doc.notes?.length||0} notes · ${doc.cc?.length||0} CC · ${doc.pitch_bend?.length||0} bend`;refreshInspector()}$('roll').addEventListener('click',e=>{const r=$('roll').getBoundingClientRect(),x=e.clientX-r.left-44,y=e.clientY-r.top;const beat=snap(Math.max(0,x/PX)),pitch=Math.max(MINP,Math.min(MAXP,MAXP-Math.floor(y/ROW)));doc.notes.push({pitch,start_beat:beat,duration_beats:Number($('grid').value)||.25,velocity:96,channel:0});doc.notes.sort((a,b)=>a.start_beat-b.start_beat||a.pitch-b.pitch);selected=doc.notes.findIndex(n=>n.pitch===pitch&&n.start_beat===beat);render()});function selectNote(i){selected=i;render()}function refreshInspector(){const n=doc.notes?.[selected];$('noNote').style.display=n?'none':'block';$('noteFields').style.display=n?'block':'none';if(!n)return;$('pitch').value=n.pitch;$('start').value=n.start_beat;$('duration').value=n.duration_beats;$('velocity').value=n.velocity}function applyNote(){const n=doc.notes[selected];if(!n)return;n.pitch=Math.max(0,Math.min(127,Number($('pitch').value)));n.start_beat=Math.max(0,Number($('start').value));n.duration_beats=Math.max(.01,Number($('duration').value));n.velocity=Math.max(1,Math.min(127,Number($('velocity').value)));render()}function deleteNote(){if(selected<0)return;doc.notes.splice(selected,1);selected=-1;render()}async function save(){if(!currentClip)return status('Create or open a MIDI clip first.',true);try{doc.cc=JSON.parse($('cc').value||'[]');doc.pitch_bend=JSON.parse($('bend').value||'[]');const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}`,{method:'PUT',body:JSON.stringify(doc)});doc=d.document;render();status('MIDI saved with revision history.')}catch(e){status(e.message,true)}}async function transform(body){if(!currentClip)return;try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}/transform`,{method:'POST',body:JSON.stringify(body)});doc=d.document;$('cc').value=JSON.stringify(doc.cc||[],null,2);$('bend').value=JSON.stringify(doc.pitch_bend||[],null,2);render();status('MIDI transformed.')}catch(e){status(e.message,true)}}function quantize(){transform({quantize_grid_beats:Number($('grid').value),quantize_strength:1,quantize_duration:false})}function transpose(n){transform({transpose_semitones:n})}async function useGuide(){if(!currentClip)return status('Open a MIDI clip first.',true);try{const d=await api(`/projects/${enc(currentProject)}/daw/midi/${enc(currentClip)}/use-as-guide`,{method:'POST',body:JSON.stringify({intent:$('intent').value})});status(`Aura guide active · ${d.summary.note_count} notes · symbolic until rendered by a real music engine.`)}catch(e){status(e.message,true)}}boot();
 </script></body></html>"""
     return HTMLResponse(html.replace("__BRAND__", escape(PRODUCT_FULL_NAME)))
 
@@ -513,7 +562,9 @@ __all__ = [
     "MidiNote",
     "MidiCC",
     "MidiPitchBend",
+    "MidiTransformRequest",
     "read_midi_document",
     "write_midi_document",
     "transform_midi_document",
+    "MIDI_DAW_NAV",
 ]
