@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from aura_music_studio.game_forge_models import GameContentDisclosure, GameDNA
+from aura_music_studio.game_forge_api import CreateGameRequest, create_game_for_member
+from aura_music_studio.game_forge_models import ENGINE_REGISTRY, GameContentDisclosure, GameDNA
 from aura_music_studio.game_forge_ratings import assess_game, rating_content_hash
 from aura_music_studio.game_forge_runtime import PLAYTEST_CSP, build_private_playtest, render_foundation_playtest
 from aura_music_studio import game_forge_store as store
@@ -25,6 +26,30 @@ def test_game_forge_plan_contract_free_basic_pro():
     assert basic.has(GAME_PLAYTEST) and basic.has(GAME_CREATE)
     assert not basic.has(GAME_CREATE_UNLIMITED)
     assert pro.has(GAME_CREATE) and pro.has(GAME_CREATE_UNLIMITED)
+
+
+def test_aura_native_engines_are_primary_and_external_engines_are_adapters(monkeypatch, tmp_path):
+    assert ENGINE_REGISTRY["aura2d"]["native"] is True
+    assert ENGINE_REGISTRY["aura3d"]["native"] is True
+    for key in ("phaser4", "playcanvas", "babylon", "godot"):
+        assert ENGINE_REGISTRY[key]["native"] is False
+        assert "adapter" in ENGINE_REGISTRY[key]["role"].lower()
+
+    root = tmp_path / "games"
+    root.mkdir()
+    monkeypatch.setattr(store, "games_root", lambda: root)
+    game2d = create_game_for_member(
+        _member("pro"),
+        CreateGameRequest(title="Aura Two", prompt="A 2D platform adventure", dimension="2d", rights_confirmed=True),
+    )
+    game3d = create_game_for_member(
+        _member("pro"),
+        CreateGameRequest(title="Aura Three", prompt="A 3D exploration adventure", dimension="3d", rights_confirmed=True),
+    )
+    assert game2d.engine_target == "aura2d"
+    assert game3d.engine_target == "aura3d"
+    assert game2d.metadata["aura_native_engine"] is True
+    assert game3d.metadata["external_engines_are_export_adapters"] is True
 
 
 def test_basic_allows_one_active_game_pro_allows_unlimited(monkeypatch, tmp_path):
@@ -125,6 +150,8 @@ def test_foundation_playtest_is_curated_no_network_and_not_arbitrary_server_code
     store.create_game(_member("base"), game)
     game, html = build_private_playtest(game)
     assert game.latest_build is not None
+    assert game.latest_build.runtime == "aura_game_runtime_v1"
+    assert game.latest_build.requested_engine == "aura2d"
     assert game.latest_build.arbitrary_server_code_executed is False
     assert game.latest_build.network_access_enabled is False
     assert game.latest_build.content_hash == rating_content_hash(game)
