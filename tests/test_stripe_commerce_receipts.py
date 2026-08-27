@@ -86,18 +86,12 @@ def test_verified_credit_receipt_is_amount_bearing_and_idempotent(monkeypatch, t
 
 
 def test_receipt_overlay_owns_effective_webhook_route_before_base_handlers():
-    # FastAPI 0.137+ keeps nested router composition in a live route tree. Mirror the existing
-    # Stripe routability regression by including the overlay into an effective app before
-    # checking endpoint precedence.
+    # FastAPI 0.137+ preserves nested router composition in a live route tree. OpenAPI is the
+    # stable effective-route view already used by the Stripe routability regression, and its
+    # operationId identifies which same-path POST handler wins precedence.
     from aura_music_studio.creative_version_autopromotion import router as overlay_router
 
     effective_app = FastAPI()
     effective_app.include_router(overlay_router)
-    matching = [
-        route
-        for route in effective_app.routes
-        if getattr(route, "path", None) == "/billing/stripe/webhook"
-        and "POST" in (getattr(route, "methods", None) or set())
-    ]
-    assert matching
-    assert matching[0].endpoint.__name__ == "stripe_webhook_with_commerce_receipt"
+    operation = effective_app.openapi()["paths"]["/billing/stripe/webhook"]["post"]
+    assert "stripe_webhook_with_commerce_receipt" in operation["operationId"]
