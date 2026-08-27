@@ -56,10 +56,13 @@ def daw_mixer_ui_with_deep_automation():
     base = base_daw_mixer_ui()
     text = base.body.decode("utf-8")
     enhanced = enhance_daw_mixer_javascript(text)
+    # Starlette's MutableHeaders is case-insensitive, but converting it to a plain dict and then
+    # adding differently-cased Cache-Control can preserve two logical copies. Drop the base cache
+    # policy explicitly so the enhanced script has one authoritative no-store directive.
     headers = {
         key: value
         for key, value in base.headers.items()
-        if key.lower() not in {"content-length", "content-type"}
+        if key.lower() not in {"content-length", "content-type", "cache-control"}
     }
     headers["Cache-Control"] = "private, no-store"
     return Response(enhanced, media_type="application/javascript", headers=headers)
@@ -100,7 +103,7 @@ def auto_promote_single_target_revision(
         result["reason"] = "imported_element_missing_id"
         return result
     manifest = store.load()
-    element = next((item for item in manifest.elements if item.id == element_id), None)
+    element = next((item for item in manifest.elements if item.id == element_id, None))
     if element is None:
         result["reason"] = "imported_element_not_found"
         return result
