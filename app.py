@@ -1,4 +1,6 @@
-"""Production entrypoint for Pulsar-Frequency House.
+"""Production entrypoint for Elevate Souls Productions Content Creation Command Center.
+
+Powered by Aura AI.
 
 Run locally:
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -8,6 +10,7 @@ identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.auth_security import CrossSiteRequestGuardMiddleware
 from aura_music_studio.aura_artifacts import install_aura_artifacts, router as aura_artifacts_router
 from aura_music_studio.aura_artifacts_ui import AuraArtifactsUIMiddleware, router as aura_artifacts_ui_router
 from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
@@ -15,6 +18,7 @@ from aura_music_studio.aura_avatar_runtime import AuraAvatarRuntimeMiddleware, r
 from aura_music_studio.aura_chat_hardening import install_aura_chat_hardening
 from aura_music_studio.aura_context_extensions import install_aura_context_extensions
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
+from aura_music_studio.aura_game_tools import install_aura_game_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_notifications_ui import router as aura_notifications_ui_router
@@ -39,13 +43,17 @@ from aura_music_studio.aura_workflow_engine import install_aura_workflow_engine
 from aura_music_studio.aura_workspace_api import router as aura_workspace_router
 from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
+from aura_music_studio.commercial_entitlement_routes import router as commercial_entitlement_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.credit_wallet import router as credit_wallet_router
+from aura_music_studio.creative_library import router as creative_library_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
 from aura_music_studio.creative_version_autopromotion import router as creative_version_autopromotion_router
 from aura_music_studio.creative_workspace import router as creative_workspace_router
 from aura_music_studio.daw_api import router as daw_router
+from aura_music_studio.daw_midi import router as daw_midi_router
 from aura_music_studio.daw_mixer_ui import router as daw_mixer_ui_router
 from aura_music_studio.daw_portal import router as daw_portal_router
 from aura_music_studio.daw_recording_api import router as daw_recording_router
@@ -67,13 +75,16 @@ from aura_music_studio.esp_social_access_control import install_social_access_co
 from aura_music_studio.esp_social_insights_portal import router as esp_social_insights_router
 from aura_music_studio.esp_social_intelligence_api import router as esp_social_intelligence_router
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
+from aura_music_studio.game_forge_api import router as game_forge_router
+from aura_music_studio.game_forge_portal import router as game_forge_portal_router
+from aura_music_studio.game_forge_world_api import router as game_forge_world_router
 from aura_music_studio.lyric_alignment_api import router as lyric_alignment_router
 from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
 from aura_music_studio.media_studios import router as media_studios_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
-from aura_music_studio.owner_auth import OwnerLegacyCompatibilityMiddleware
 from aura_music_studio.owner_auth_portal import router as owner_auth_router
+from aura_music_studio.owner_authorization_migration import install_owner_authorization_migration
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.owner_control_center import router as owner_control_center_router
@@ -85,6 +96,8 @@ from aura_music_studio.performance_input_api import router as performance_input_
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
+from aura_music_studio.professional_editor_api import router as professional_editor_router
+from aura_music_studio.pulsar_player import PulsarPlayerMiddleware, router as pulsar_player_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
@@ -120,12 +133,16 @@ install_aura_artifacts()
 # Code execution is available only through a separately configured isolated sandbox service.
 # Member code is never executed in the FastAPI process or host shell.
 install_aura_sandbox_tools()
+# Game Forge tools register before workflow resolution so sequential $stepN/$previous values can
+# safely pass verified Game DNA/build results between explicit Aura game actions.
+install_aura_game_tools()
 # Install workflow resolution last among tool wrappers so every tool class can contribute a
 # verified result to $stepN/$previous references while preserving its own gates.
 install_aura_workflow_engine()
 install_aura_chat_hardening()
 install_aura_context_extensions()
 install_aura_profiles()
+install_owner_authorization_migration()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
 app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
@@ -134,6 +151,10 @@ app.include_router(creative_portal_router)
 app.include_router(media_studios_router)
 app.include_router(member_dashboard_router)
 app.include_router(aura_sec_router)
+app.include_router(game_forge_portal_router)
+# World-integrity scan/publish handlers intentionally precede the foundation Game Forge routes.
+app.include_router(game_forge_world_router)
+app.include_router(game_forge_router)
 app.include_router(aura_realtime_portal_router)
 app.include_router(aura_intelligence_router)
 app.include_router(aura_streaming_router)
@@ -152,9 +173,18 @@ app.include_router(aura_workspace_router)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
+app.include_router(credit_wallet_router)
 app.include_router(creative_version_autopromotion_router)
+# Nested compatibility routers are not flattened by the current overlay adapter. Mount the
+# professional editor directly so its authenticated/gated endpoints are present in production.
+app.include_router(professional_editor_router)
+# Commercial entitlement routes intentionally precede their underlying Creative handlers.
+# This makes image/poster daily limits and media-download gates authoritative server-side.
+app.include_router(commercial_entitlement_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
+app.include_router(creative_library_router)
+app.include_router(pulsar_player_router)
 app.include_router(creative_workspace_router)
 
 app.include_router(esp_level_up_gateway_router)
@@ -176,6 +206,7 @@ app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
 
 app.include_router(daw_router)
+app.include_router(daw_midi_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
 app.include_router(daw_recording_ui_router)
@@ -214,6 +245,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
+app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
@@ -222,7 +254,8 @@ app.add_middleware(AuraSecApprovalWriteGuardMiddleware)
 app.add_middleware(AuraSecPasskeyVisibilityMiddleware)
 app.add_middleware(AuraSecDashboardMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
-app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
+# Added last so this guard wraps all route surfaces at the browser request boundary.
+app.add_middleware(CrossSiteRequestGuardMiddleware)
 
 __all__ = ["app"]

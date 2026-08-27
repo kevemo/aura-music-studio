@@ -110,14 +110,20 @@ def install_aura_context_extensions() -> None:
     original_build_generation = aura_streaming._build_generation
 
     def build_generation(*, member, thread_id: str, text: str, attachment_ids: list[str]):
-        user_message, messages, tool_results, memory_saved = original_build_generation(
+        result = original_build_generation(
             member=member,
             thread_id=thread_id,
             text=text,
             attachment_ids=attachment_ids,
         )
-        messages = _inject_messages(messages, member.user_id, thread_id)
-        return user_message, messages, tool_results, memory_saved
+        # Streaming gained reasoning configuration as a fifth return value. Preserve the whole
+        # contract instead of destructuring a fixed tuple, so future metadata additions do not
+        # silently break the context-extension layer again.
+        if not isinstance(result, tuple) or len(result) < 4:
+            return result
+        values = list(result)
+        values[1] = _inject_messages(values[1], member.user_id, thread_id)
+        return tuple(values)
 
     aura_streaming._build_generation = build_generation
     _INSTALLED = True

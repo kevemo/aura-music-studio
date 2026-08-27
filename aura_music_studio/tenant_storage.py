@@ -10,6 +10,7 @@ ROOT = Path(os.getenv("AURA_PROJECTS_ROOT", "projects")).resolve()
 ROOT.mkdir(parents=True, exist_ok=True)
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+_SYSTEM_PROJECT_DIRS = {"members", "_games", "_public_games"}
 
 
 def safe_project_name(name: str) -> str:
@@ -48,6 +49,6 @@ def project_path(name: str, *, must_exist: bool = True) -> Path:
 def list_project_dirs() -> list[Path]:
     root = projects_root()
     return sorted(
-        [p for p in root.iterdir() if p.is_dir() and p.name != "members"],
+        [p for p in root.iterdir() if p.is_dir() and p.name not in _SYSTEM_PROJECT_DIRS],
         key=lambda p: p.name.lower(),
     )

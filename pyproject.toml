@@ -18,6 +18,7 @@ dependencies = [
   "PyYAML>=6.0",
   "requests>=2.31",
   "cryptography>=42.0",
+  "argon2-cffi>=23.1",
   "webauthn>=3.0,<4",
   "gradio>=5.0",
   "gradio-client>=1.7",

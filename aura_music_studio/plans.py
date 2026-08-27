@@ -8,20 +8,57 @@ from decimal import Decimal
 class Plan:
     id: str
     name: str
-    monthly_price_usd: Decimal
+    monthly_price: Decimal
+    currency: str
     description: str
     confirmed_songs_per_day: int | None
     regeneration_until_confirmed: bool
+    image_poster_creations_per_day: int | None
     features: frozenset[str]
     studio_claims_output_ownership: bool = False
 
     def has(self, feature: str) -> bool:
         return feature in self.features
 
+    @property
+    def monthly_price_usd(self) -> Decimal:
+        """Deprecated compatibility alias.
+
+        Historic code named the price field USD even though the authoritative public prices
+        are £4.99 / £9.99. Keep the attribute temporarily so parallel feature branches and
+        persisted integrations do not break while new code uses monthly_price + currency.
+        """
+        return self.monthly_price
+
+    @property
+    def monthly_price_gbp(self) -> Decimal:
+        if self.currency != "GBP":
+            raise ValueError("This plan is not priced in GBP")
+        return self.monthly_price
+
+    @property
+    def monthly_price_minor(self) -> int:
+        return int((self.monthly_price * Decimal("100")).to_integral_value())
+
+    @property
+    def currency_symbol(self) -> str:
+        return {"GBP": "£", "USD": "$", "EUR": "€"}.get(self.currency, self.currency + " ")
+
+    @property
+    def display_price(self) -> str:
+        if self.monthly_price == 0:
+            return "Free"
+        return f"{self.currency_symbol}{self.monthly_price}"
+
     def public_dict(self) -> dict:
         data = asdict(self)
-        data["monthly_price_usd"] = str(self.monthly_price_usd)
+        data["monthly_price"] = str(self.monthly_price)
+        data["monthly_price_minor"] = self.monthly_price_minor
+        data["display_price"] = self.display_price
+        # Deprecated output alias for clients built before the GBP schema correction.
+        data["monthly_price_usd"] = str(self.monthly_price)
         data["features"] = sorted(self.features)
+        data["image_poster_creations_unlimited"] = self.image_poster_creations_per_day is None
         return data
 
 
@@ -48,6 +85,9 @@ UNLIMITED_REGEN_UNTIL_CONFIRMED = "unlimited_regen_until_confirmed"
 MP3_DOWNLOAD = "mp3_download"
 WAV_DOWNLOAD = "wav_download"
 FLAC_DOWNLOAD = "flac_download"
+IMAGE_POSTER_CREATE = "image_poster_create"
+IMAGE_POSTER_DOWNLOAD = "image_poster_download"
+MUSIC_VIDEO_DOWNLOAD = "music_video_download"
 BASIC_MASTERING = "basic_mastering"
 ADVANCED_MASTERING = "advanced_mastering"
 REFERENCE_MASTERING = "reference_mastering"
@@ -78,6 +118,9 @@ VIDEO_SYNC = "video_sync"
 BANDLAB_EXPORT = "bandlab_export"
 PRIORITY_QUEUE = "priority_queue"
 UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
+GAME_PLAYTEST = "game_playtest"
+GAME_CREATE = "game_create"
+GAME_CREATE_UNLIMITED = "game_create_unlimited"
 
 
 FREE_FEATURES = frozenset({
@@ -90,6 +133,9 @@ FREE_FEATURES = frozenset({
     BASIC_FX,
     BASIC_AUTOTUNE,
     BASIC_MASTERING,
+    IMAGE_POSTER_CREATE,
+    IMAGE_POSTER_DOWNLOAD,
+    GAME_PLAYTEST,
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
@@ -100,6 +146,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     UNLIMITED_REGEN_UNTIL_CONFIRMED,
     MP3_DOWNLOAD,
     WAV_DOWNLOAD,
+    MUSIC_VIDEO_DOWNLOAD,
     STANDARD_FX,
     STANDARD_AUTOTUNE,
     AUTOMIX,
@@ -111,6 +158,7 @@ BASE_FEATURES = FREE_FEATURES | frozenset({
     HARMONY_ARCHITECT,
     REVISION_HISTORY,
     BASIC_TIMELINE,
+    GAME_CREATE,
 })
 
 PRO_FEATURES = BASE_FEATURES | frozenset({
@@ -141,6 +189,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     VIDEO_SYNC,
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
+    GAME_CREATE_UNLIMITED,
 })
 
 
@@ -148,42 +197,54 @@ PLANS: dict[str, Plan] = {
     "free": Plan(
         id="free",
         name="Free",
-        monthly_price_usd=Decimal("0.00"),
+        monthly_price=Decimal("0.00"),
+        currency="GBP",
         description=(
-            "Explore Aura songwriting/producer help, spoken control, basic previews, the core instrument selector, "
-            "starter FX, basic Aura Tune and basic mastering. Finished full-song production and timeline editing unlock on Basic."
+            "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
+            "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
+            "also play and test Game Forge builds that have passed Pulsar's public playtest safety/rating preflight. "
+            "Music/video downloads and game creation unlock on Basic."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
+        image_poster_creations_per_day=5,
         features=FREE_FEATURES,
     ),
     "base": Plan(
         id="base",
         name="Basic",
-        monthly_price_usd=Decimal("4.99"),
+        monthly_price=Decimal("4.99"),
+        currency="GBP",
         description=(
-            "One confirmed full track every day with unlimited regenerations until confirmation. Includes upload-to-song "
-            "production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, useful stem splitting, mastering, "
-            "cleanup, backing-track creation, harmony tools, project revision history and basic waveform timeline editing."
+            "£4.99 tier: one confirmed full track every day with unlimited regenerations until confirmation, up to "
+            "10 generated images/posters per day, image/poster saving and downloads, plus music and video downloads. "
+            "Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, "
+            "useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project revision history, "
+            "basic waveform timeline editing, and Game Forge creation/editing for one active game workspace at a time."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
+        image_poster_creations_per_day=10,
         features=BASE_FEATURES,
     ),
     "pro": Plan(
         id="pro",
         name="Pro",
-        monthly_price_usd=Decimal("9.99"),
+        monthly_price=Decimal("9.99"),
+        currency="GBP",
         description=(
-            "Unlimited full-track creation and the complete Pulsar-Frequency House music-production stack: expanded "
+            "£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
+            "unlimited full-track creation, plus the complete enabled Pulsar-Frequency House production stack: expanded "
             "instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
             "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
             "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
             "covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, immersive "
-            "spatial audio, video/music sync and all enabled export formats."
+            "spatial audio, video/music sync, all enabled export formats, and unlimited active Game Forge project workspaces. "
+            "External model/GPU jobs remain subject to configured queues, provider availability and fair-use resource controls."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
+        image_poster_creations_per_day=None,
         features=PRO_FEATURES,
     ),
 }

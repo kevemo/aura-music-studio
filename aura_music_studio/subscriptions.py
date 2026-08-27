@@ -22,6 +22,34 @@ def _parse(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
+def _columns(con: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _ensure_payment_currency_columns(con: sqlite3.Connection) -> None:
+    """Upgrade pre-GBP ledgers in place without deleting the legacy amount_usd column."""
+    columns = _columns(con, "subscription_payments")
+    if "amount" not in columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount TEXT")
+    if "amount_minor" not in columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount_minor INTEGER")
+    if "currency" not in columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'")
+
+    # Historical 4.99/9.99 values were the intended public GBP prices despite the old
+    # amount_usd column name. Preserve that column as a compatibility mirror and backfill
+    # the canonical currency-aware columns.
+    con.execute(
+        "UPDATE subscription_payments SET amount=COALESCE(NULLIF(amount,''),amount_usd) WHERE amount IS NULL OR amount=''"
+    )
+    con.execute(
+        """UPDATE subscription_payments
+           SET amount_minor=CAST(ROUND(CAST(COALESCE(NULLIF(amount,''),amount_usd,'0') AS REAL)*100) AS INTEGER)
+           WHERE amount_minor IS NULL"""
+    )
+    con.execute("UPDATE subscription_payments SET currency='GBP' WHERE currency IS NULL OR currency=''")
+
+
 class SubscriptionLedger:
     """Tracks paid Pulsar-Frequency House periods independently of ESP access.
 
@@ -67,6 +95,9 @@ class SubscriptionLedger:
                     plan_id TEXT NOT NULL,
                     payment_reference TEXT NOT NULL UNIQUE,
                     amount_usd TEXT NOT NULL,
+                    amount TEXT,
+                    amount_minor INTEGER,
+                    currency TEXT NOT NULL DEFAULT 'GBP',
                     period_start TEXT NOT NULL,
                     period_end TEXT NOT NULL,
                     verified_at TEXT NOT NULL,
@@ -74,6 +105,7 @@ class SubscriptionLedger:
                 );
                 """
             )
+            _ensure_payment_currency_columns(con)
 
     def get(self, user_id: str) -> dict | None:
         with self._connect() as con:
@@ -99,6 +131,7 @@ class SubscriptionLedger:
         existing_end = _parse(existing.get("period_end")) if existing else None
         start = existing_end if existing_end and existing_end > now else now
         end = start + timedelta(days=period_days)
+        amount = str(plan.monthly_price)
 
         with self._connect() as con:
             duplicate = con.execute(
@@ -109,9 +142,21 @@ class SubscriptionLedger:
 
             con.execute(
                 """INSERT INTO subscription_payments
-                   (id,user_id,plan_id,payment_reference,amount_usd,period_start,period_end,verified_at)
-                   VALUES (?,?,?,?,?,?,?,?)""",
-                (uuid4().hex, user_id, plan.id, reference, str(plan.monthly_price_usd), _iso(start), _iso(end), _iso(now)),
+                   (id,user_id,plan_id,payment_reference,amount_usd,amount,amount_minor,currency,period_start,period_end,verified_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    uuid4().hex,
+                    user_id,
+                    plan.id,
+                    reference,
+                    amount,  # deprecated compatibility mirror
+                    amount,
+                    plan.monthly_price_minor,
+                    plan.currency,
+                    _iso(start),
+                    _iso(end),
+                    _iso(now),
+                ),
             )
             con.execute(
                 """INSERT INTO subscription_state
