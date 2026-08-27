@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from .accounts import AccountStore
 from .aura_sec_catalog import AuraSecCatalog
 from .aura_sec_health import summarize_security_health
+from .aura_sec_read_model import AuraSecReadModel
 from .aura_sec_store import AuraSecStore
 from .aura_sec_vulnerability import VulnerabilityFinding, prioritize_vulnerability
 from .aura_sec_vulnerability_store import AuraSecVulnerabilityStore
@@ -12,6 +13,7 @@ from .aura_sec_vulnerability_store import AuraSecVulnerabilityStore
 router = APIRouter(prefix="/api/aura-sec/member", tags=["Aura Sec Member State"])
 accounts = AccountStore()
 security = AuraSecStore(accounts)
+read_model = AuraSecReadModel(accounts)
 vulnerabilities = AuraSecVulnerabilityStore(accounts, security)
 MEMBER_COOKIE = "lss_session"
 
@@ -67,6 +69,28 @@ def member_security_devices(request: Request):
     return summarize_security_health(devices)
 
 
+@router.get("/enrolment-readiness")
+def member_security_enrolment_readiness(request: Request):
+    user = _session_user(request)
+    licence = security.licence(user["id"])
+    devices = [item for item in security.list_devices(user["id"]) if item.get("status") != "revoked"]
+    limit = int(licence.get("device_limit") or 0)
+    remaining = max(0, limit - len(devices))
+    return {
+        "licence_status": licence.get("status") or "not_purchased",
+        "device_limit": limit,
+        "active_device_count": len(devices),
+        "remaining_device_slots": remaining,
+        "can_request_native_enrolment": licence.get("status") == "active" and remaining > 0,
+        "browser_can_complete_device_attestation": False,
+        "signed_native_client_released": False,
+        "truth": (
+            "The browser can display enrolment readiness but cannot attest a device. "
+            "Completion requires the signed native client and verified device proof."
+        ),
+    }
+
+
 @router.get("/overview")
 def member_security_overview(request: Request):
     user = _session_user(request)
@@ -89,6 +113,44 @@ def member_security_overview(request: Request):
     }
 
 
+@router.get("/incidents")
+def member_verified_incidents(request: Request):
+    user = _session_user(request)
+    incidents = read_model.incidents(user["id"], limit=250)
+    counts = read_model.counts(user["id"])
+    return {
+        "incidents": incidents,
+        "count": len(incidents),
+        "open": counts["incidents"]["open"],
+        "urgent": counts["incidents"]["urgent"],
+        "truth": "Only persisted member-owned incident evidence appears here; loading the API cannot create a detection.",
+    }
+
+
+@router.get("/incidents/{incident_id}")
+def member_verified_incident_detail(incident_id: str, request: Request):
+    user = _session_user(request)
+    incident = read_model.incident(user["id"], incident_id)
+    if not incident:
+        raise HTTPException(404, "Aura Sec incident not found")
+    actions = read_model.actions_for_incident(user["id"], incident_id, limit=250)
+    return {
+        "incident": incident,
+        "actions": actions,
+        "response_summary": {
+            "linked_actions": len(actions),
+            "proposed": sum(1 for item in actions if item.get("status") == "proposed"),
+            "approved": sum(1 for item in actions if item.get("status") == "approved"),
+            "executed": sum(1 for item in actions if item.get("status") == "executed"),
+            "verified": sum(1 for item in actions if item.get("status") == "verified"),
+        },
+        "truth": (
+            "Incident evidence, Aura explanation, proposed actions, execution and verification are separate states. "
+            "This read-only endpoint cannot execute remediation."
+        ),
+    }
+
+
 @router.get("/vulnerabilities")
 def member_verified_vulnerabilities(request: Request):
     user = _session_user(request)
@@ -102,6 +164,23 @@ def member_verified_vulnerabilities(request: Request):
         "known_exploited": sum(1 for item in findings if item.get("cisa_kev")),
         "truth": (
             "Only device-applicable findings backed by verified native inventory and threat-intelligence evidence appear here."
+        ),
+    }
+
+
+@router.get("/vulnerabilities/{finding_id}")
+def member_verified_vulnerability_detail(finding_id: str, request: Request):
+    user = _session_user(request)
+    try:
+        finding = vulnerabilities.get(user["id"], finding_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Aura Sec vulnerability finding not found") from exc
+    return {
+        "finding": finding,
+        "automatic_patch_permission": False,
+        "resolution_requires_verified_fixed_version": True,
+        "truth": (
+            "Priority is advisory. A finding cannot become resolved until signed native evidence verifies the installed version is fixed."
         ),
     }
 
