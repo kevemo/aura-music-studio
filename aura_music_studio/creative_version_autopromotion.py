@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 
 from .commercial_entitlement_routes import router as commercial_entitlement_router
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
+from .daw_mixer_ui import daw_mixer_ui as base_daw_mixer_ui
 from .deep_daw_automation_api import router as deep_daw_automation_router
+from .deep_daw_automation_ui import enhance_daw_mixer_javascript
 from .owner_finance import router as owner_finance_router
 from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
@@ -39,6 +42,27 @@ router.include_router(professional_editor_render_router)
 # mounted separately so there is only one /creative/editor-workspace route.
 router.include_router(professional_editor_workspace_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
+
+
+@router.get("/daw/mixer-ui.js", include_in_schema=False)
+def daw_mixer_ui_with_deep_automation():
+    """Serve the existing mixer UI plus the Pro deep-automation extension.
+
+    This route lives on the early integration overlay, so it wins before the legacy mixer-script
+    route without changing app.py or the mature DAW page. The base mixer remains the source of
+    truth for channel controls; the appended extension targets only the validated v2 automation
+    API and stays Pro-gated by the page's existing FLAGS.automation entitlement.
+    """
+    base = base_daw_mixer_ui()
+    text = base.body.decode("utf-8")
+    enhanced = enhance_daw_mixer_javascript(text)
+    headers = {
+        key: value
+        for key, value in base.headers.items()
+        if key.lower() not in {"content-length", "content-type"}
+    }
+    headers["Cache-Control"] = "private, no-store"
+    return Response(enhanced, media_type="application/javascript", headers=headers)
 
 
 def auto_promote_single_target_revision(
@@ -128,4 +152,4 @@ def sync_outputs_with_safe_version_promotion(project_name: str, directive_id: st
     return response
 
 
-__all__ = ["router", "auto_promote_single_target_revision"]
+__all__ = ["router", "auto_promote_single_target_revision", "daw_mixer_ui_with_deep_automation"]
