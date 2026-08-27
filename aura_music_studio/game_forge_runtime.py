@@ -80,7 +80,7 @@ def build_private_playtest(game: GameDNA) -> tuple[GameDNA, str]:
     ensure_world(game)
     content_hash = game_integrity_hash(game)
     html = render_foundation_playtest(game)
-    runtime_name = "aura_game_runtime_3d_webgl2_v3" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura_game_runtime_2d_canvas_v1"
+    runtime_name = "aura_game_runtime_3d_webgl2_v4" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura_game_runtime_2d_canvas_v1"
     build = GameBuild(content_hash=content_hash, requested_engine=game.engine_target, runtime=runtime_name)
     folder = game_dir(game.id)
     build_dir = folder / "builds" / build.build_id
