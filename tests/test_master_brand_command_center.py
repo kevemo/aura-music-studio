@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
+from aura_music_studio.aura_context_extensions import _inject_messages
 from aura_music_studio.brand_migration import BrandMigrationMiddleware, rebrand_text
 from aura_music_studio.branding import (
     AI_SYSTEM_NAME,
@@ -46,6 +47,25 @@ def test_legacy_public_copy_rebrands_without_changing_internal_route_slugs():
     assert "Pulsar-Frequency House" not in branded
     assert "Aura AI Systems" not in branded
     assert "href='/command-center'" in branded
+
+
+def test_aura_core_system_context_is_rebranded_before_model_inference():
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are Aura, the general AI co-creator and operating intelligence inside "
+                "Pulsar-Frequency House, powered by Elevate Souls Productions & Aura AI Systems."
+            ),
+        },
+        {"role": "user", "content": "Hello Aura"},
+    ]
+    rewritten = _inject_messages(messages, "member-1", "thread-1")
+    assert EXPECTED_NAME in rewritten[0]["content"]
+    assert "Powered by Aura AI" in rewritten[0]["content"]
+    assert "Pulsar-Frequency House" not in rewritten[0]["content"]
+    assert "Aura AI Systems" not in rewritten[0]["content"]
+    assert messages[0]["content"].startswith("You are Aura")  # input is not mutated
 
 
 def _brand_test_app() -> FastAPI:
