@@ -8,6 +8,7 @@ identifier for existing installs, project data and deployment configuration.
 """
 
 from aura_music_studio.api import app
+from aura_music_studio.auth_security import CrossSiteRequestGuardMiddleware
 from aura_music_studio.aura_artifacts import install_aura_artifacts, router as aura_artifacts_router
 from aura_music_studio.aura_artifacts_ui import AuraArtifactsUIMiddleware, router as aura_artifacts_ui_router
 from aura_music_studio.aura_attachment_tools import install_aura_attachment_tools
@@ -241,5 +242,7 @@ app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
+# Added last so this guard wraps all route surfaces at the browser request boundary.
+app.add_middleware(CrossSiteRequestGuardMiddleware)
 
 __all__ = ["app"]
