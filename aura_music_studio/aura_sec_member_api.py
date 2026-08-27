@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import AccountStore
 from .aura_sec_approval import AuraSecApprovalGateway
+from .aura_sec_approval_portal import router as approval_portal_router
 from .aura_sec_catalog import AuraSecCatalog
 from .aura_sec_health import evaluate_device_health, summarize_security_health
 from .aura_sec_read_model import AuraSecReadModel
@@ -318,6 +319,7 @@ def vulnerability_priority(payload: VulnerabilityFinding, request: Request):
 
 router.include_router(api_router)
 router.include_router(workflow_portal_router)
+router.include_router(approval_portal_router)
 
 
 __all__ = ["router"]
