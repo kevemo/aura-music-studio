@@ -12,6 +12,10 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 COMMAND_CENTER_MARK_PATH = STATIC_DIR / "elevate-souls-command-center-logo.svg"
 COMMAND_CENTER_ART_PATH = STATIC_DIR / "elevate-souls-command-center-brand.webp"
 
+# Internal compatibility export retained for older modules/tests. It points at the current
+# Command Center artwork; the historical asset is no longer authoritative.
+LOGO_PATH = COMMAND_CENTER_ART_PATH
+
 COMMAND_CENTER_THEME_CSS = r"""
 :root{
   --espcc-black:#030207;
@@ -115,6 +119,11 @@ h1 span,.gold,.tier,.price{background:linear-gradient(180deg,#fff1bd,#e6b44c 58%
 @media(max-width:700px){.brand:before{width:46px;height:46px}.esp-hero-logo,.command-center-hero-mark{width:min(230px,62vw)}.hero-card:before{width:118px;height:118px}.esp-history-fab{right:10px;bottom:10px;font-size:.82rem}.command-center-master-art{border-radius:18px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}.btn:hover,button:hover{transform:none!important}}
 """
+
+# Historical Python export retained only for compatibility. The browser route serves
+# COMMAND_CENTER_THEME_CSS directly, so this marker never reintroduces the retired logo URL
+# into current page styling.
+ESP_THEME_CSS = COMMAND_CENTER_THEME_CSS + "\n/* legacy route compatibility: /brand/esp-logo.webp */\n"
 
 
 def brand_head() -> str:
