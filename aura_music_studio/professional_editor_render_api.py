@@ -14,6 +14,7 @@ from .professional_editor_renderer import (
     ProfessionalEditorRenderer,
 )
 from .professional_image_compositor import AdvancedImageCompositor
+from .professional_video_compositor import AdvancedVideoCompositor
 from .tenant_storage import project_path
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rendering"])
@@ -86,7 +87,8 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            result = renderer.render_video(sequence_id)
+            video_renderer = AdvancedVideoCompositor(_project(project_name))
+            result = video_renderer.render_video_advanced(sequence_id)
         else:
             image_renderer = AdvancedImageCompositor(_project(project_name))
             result = image_renderer.render_image_advanced(
