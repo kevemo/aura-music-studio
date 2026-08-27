@@ -12,7 +12,9 @@
       "feature/production-security-gates-v2": false,
       "feature/pro-creative-editors-v2": false,
       "feature/pro-editor-workspace": false,
-      "feature/pro-editor-compositor": false
+      "feature/pro-editor-compositor": false,
+      "feature/owner-finance-dashboard": false,
+      "feature/owner-finance-dashboard-v2": false
     }
   },
   "functions": {
