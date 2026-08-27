@@ -7,7 +7,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 
-_PORTAL_PREFIX = "/aura-sec/approval/"
+_BROWSER_WRITE_PREFIXES = ("/aura-sec/approval/", "/aura-sec/passkeys/")
 _API_PREFIX = "/api/aura-sec/member/actions/"
 _API_WRITE_SUFFIXES = ("/approval-challenge", "/approve")
 
@@ -65,14 +65,14 @@ def _same_origin_browser_write(request: Request) -> bool:
 
 
 class AuraSecApprovalWriteGuardMiddleware(BaseHTTPMiddleware):
-    """Protect Aura Sec approval writes from ambient-cookie cross-site requests.
+    """Protect Aura Sec approval and passkey writes from ambient-cookie cross-site requests.
 
-    Browser form approval uses the HttpOnly member cookie and therefore must prove an
-    exact same-origin navigation, including scheme, host and effective port. JSON/API
-    approval writes require an explicit Bearer credential, which browsers do not attach
-    ambiently to cross-site forms. This guard is additive to the one-time session/action-
-    bound approval challenge and fixed action-risk policy; it never approves or executes
-    an action itself.
+    Browser approval/passkey ceremonies use the HttpOnly member cookie and therefore must
+    prove an exact same-origin navigation, including scheme, host and effective port.
+    JSON approval API writes require an explicit Bearer credential, which browsers do not
+    attach ambiently to cross-site forms. This guard is additive to WebAuthn verification,
+    one-time session/action-bound approval challenges and fixed action-risk policy; it never
+    approves or executes an action itself.
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -92,11 +92,11 @@ class AuraSecApprovalWriteGuardMiddleware(BaseHTTPMiddleware):
                 )
             return await call_next(request)
 
-        if path.startswith(_PORTAL_PREFIX):
+        if path.startswith(_BROWSER_WRITE_PREFIXES):
             if not _same_origin_browser_write(request):
                 return JSONResponse(
                     {
-                        "detail": "Aura Sec approval browser write rejected by same-origin policy.",
+                        "detail": "Aura Sec security browser write rejected by same-origin policy.",
                         "command_issued": False,
                     },
                     status_code=403,
