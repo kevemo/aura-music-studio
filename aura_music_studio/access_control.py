@@ -44,6 +44,10 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    # Stripe checkout must also work for owner-approved accounts that are not active yet,
+    # and Stripe webhooks have no member session. Every state-changing Stripe route therefore
+    # performs its own session or cryptographic webhook verification before mutating state.
+    "/billing/stripe/",
 )
 
 

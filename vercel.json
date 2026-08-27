@@ -7,7 +7,12 @@
       "feature/core-email-verification": false,
       "feature/esp-command-centers": false,
       "feature/creative-studios-game-forge": false,
-      "feature/hourly-auto-build": false
+      "feature/hourly-auto-build": false,
+      "feature/stripe-billing": false,
+      "feature/production-security-gates-v2": false,
+      "feature/pro-creative-editors-v2": false,
+      "feature/pro-editor-workspace": false,
+      "feature/pro-editor-compositor": false
     }
   },
   "functions": {

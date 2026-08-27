@@ -10,7 +10,6 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 OWNER_COOKIE = "lss_admin_session"
@@ -38,9 +37,9 @@ def _db_path() -> Path:
 class OwnerSessionStore:
     """Server-side owner sessions with only a random bearer token in the browser.
 
-    The deployment owner key is used only to bootstrap a login. The browser never needs
-    to retain that deployment secret after authentication; only the SHA-256 hash of the
-    random session token is stored in SQLite.
+    The deployment owner key is used only to bootstrap a login. The browser never retains
+    that deployment secret after authentication; only the SHA-256 hash of the random
+    session token is stored in SQLite.
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -77,7 +76,13 @@ class OwnerSessionStore:
         with self._connect() as con:
             con.execute(
                 "INSERT INTO owner_sessions(id,token_hash,created_at,expires_at,last_seen_at) VALUES (?,?,?,?,?)",
-                (uuid4().hex, _hash(token), _iso(now), _iso(now + timedelta(hours=OWNER_SESSION_HOURS)), _iso(now)),
+                (
+                    uuid4().hex,
+                    _hash(token),
+                    _iso(now),
+                    _iso(now + timedelta(hours=OWNER_SESSION_HOURS)),
+                    _iso(now),
+                ),
             )
             con.execute(
                 "DELETE FROM owner_sessions WHERE expires_at<? OR (revoked_at IS NOT NULL AND revoked_at<?)",
@@ -123,17 +128,16 @@ def sessions() -> OwnerSessionStore:
 
 
 def owner_key_matches(candidate: str) -> bool:
+    """Verify the deployment bootstrap credential without turning it into a session."""
+
     configured = (os.getenv("LSS_ADMIN_KEY") or "").strip()
     return bool(configured and candidate and hmac.compare_digest(configured, candidate))
 
 
 def owner_authorized(request: Request) -> bool:
-    token = request.cookies.get(OWNER_COOKIE) or ""
-    if sessions().valid(token):
-        return True
-    # Temporary compatibility for an already-open pre-migration browser session.
-    # New logins never write the deployment admin key into a cookie.
-    return owner_key_matches(token)
+    """Authorize only a live random opaque owner session."""
+
+    return sessions().valid(request.cookies.get(OWNER_COOKIE))
 
 
 def start_owner_session(response: Response) -> str:
@@ -153,28 +157,3 @@ def end_owner_session(request: Request, response: Response) -> None:
     token = request.cookies.get(OWNER_COOKIE)
     sessions().revoke(token)
     response.delete_cookie(OWNER_COOKIE)
-
-
-class OwnerLegacyCompatibilityMiddleware(BaseHTTPMiddleware):
-    """Temporary server-only compatibility for older owner route modules.
-
-    A few mature backup/compute/payment route functions still compare the owner cookie
-    with LSS_ADMIN_KEY directly. When the browser presents a valid opaque owner session,
-    this middleware changes only the in-process Request cookie cache seen by those legacy
-    handlers. It never sends the admin key to the client. New/refactored owner routes use
-    `owner_authorized()` directly. Remove this bridge after the remaining legacy modules
-    have migrated.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-        if not request.url.path.startswith("/owner"):
-            return await call_next(request)
-        token = request.cookies.get(OWNER_COOKIE) or ""
-        if sessions().valid(token):
-            configured = (os.getenv("LSS_ADMIN_KEY") or "").strip()
-            if configured:
-                # `request.cookies` is a parsed, in-process per-request cache. This does
-                # not alter the HTTP Cookie header and is never written to the response.
-                request.cookies[OWNER_COOKIE] = configured
-                request.state.owner_opaque_session = token
-        return await call_next(request)

@@ -5,13 +5,28 @@ from fastapi import APIRouter, Request
 from .commercial_entitlement_routes import router as commercial_entitlement_router
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
+from .deep_daw_automation_api import router as deep_daw_automation_router
+from .professional_editor_api import router as professional_editor_router
+from .professional_editor_render_api import router as professional_editor_render_router
+from .professional_editor_workspace import router as professional_editor_workspace_router
+from .stripe_billing import router as stripe_billing_router
+from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
-# Commercial entitlement routes are nested here deliberately because this overlay router is
-# mounted before the base Creative Project and Creative Media routers in app.py. That makes
-# quota/download enforcement authoritative without duplicating the entire underlying API.
+# Commercial entitlements, Stripe billing and the professional non-destructive editor are nested
+# here deliberately because this overlay router is already mounted by app.py before the underlying
+# Creative handlers. This avoids another high-conflict application-entrypoint edit while each
+# subsystem keeps its own membership/role/security checks.
 router.include_router(commercial_entitlement_router)
+# The renewal preflight must precede the base Stripe webhook route so recurring access cannot
+# extend until exact paid amount, customer and subscription bindings are validated.
+router.include_router(stripe_billing_hardening_router)
+router.include_router(stripe_billing_router)
+router.include_router(deep_daw_automation_router)
+router.include_router(professional_editor_router)
+router.include_router(professional_editor_render_router)
+router.include_router(professional_editor_workspace_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
 
