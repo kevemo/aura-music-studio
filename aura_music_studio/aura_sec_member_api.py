@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field
 
 from .accounts import AccountStore
+from .aura_sec_approval import AuraSecApprovalGateway
 from .aura_sec_catalog import AuraSecCatalog
 from .aura_sec_health import evaluate_device_health, summarize_security_health
 from .aura_sec_read_model import AuraSecReadModel
@@ -19,18 +21,30 @@ security = AuraSecStore(accounts)
 read_model = AuraSecReadModel(accounts)
 recovery = AuraSecRecoveryStore(accounts, security)
 vulnerabilities = AuraSecVulnerabilityStore(accounts, security)
+approvals = AuraSecApprovalGateway(accounts, security)
 MEMBER_COOKIE = "lss_session"
 
 
-def _session_user(request: Request) -> dict:
+class ApprovalConfirmRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    approval_token: str = Field(min_length=16, max_length=256)
+    password: str | None = Field(default=None, min_length=1, max_length=1024)
+
+
+def _session_context(request: Request) -> tuple[dict, str]:
     token = request.cookies.get(MEMBER_COOKIE)
     auth = request.headers.get("Authorization", "")
     if auth.lower().startswith("bearer "):
         token = auth[7:].strip()
     user = accounts.resolve_session(token)
-    if not user:
+    if not user or not token:
         raise HTTPException(401, "Sign in required")
-    return user
+    return user, token
+
+
+def _session_user(request: Request) -> dict:
+    return _session_context(request)[0]
 
 
 @api_router.get("/licence")
@@ -220,6 +234,46 @@ def member_actions_awaiting_approval(request: Request):
             "path; loading this list cannot approve or execute anything."
         ),
     }
+
+
+@api_router.post("/actions/{action_id}/approval-challenge")
+def member_action_approval_challenge(action_id: str, request: Request):
+    user, session_token = _session_context(request)
+    try:
+        challenge = approvals.create_challenge(
+            user["id"],
+            action_id,
+            session_token=session_token,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    return {
+        **challenge,
+        "generic_command_execution_available": False,
+        "truth": (
+            "This one-time challenge authorizes review of one bounded action only. "
+            "It cannot issue or execute a native command."
+        ),
+    }
+
+
+@api_router.post("/actions/{action_id}/approve")
+def member_action_approve(action_id: str, payload: ApprovalConfirmRequest, request: Request):
+    user, session_token = _session_context(request)
+    try:
+        return approvals.approve(
+            user["id"],
+            action_id,
+            session_token=session_token,
+            approval_token=payload.approval_token,
+            password=payload.password,
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
 
 
 @api_router.get("/vulnerabilities")
