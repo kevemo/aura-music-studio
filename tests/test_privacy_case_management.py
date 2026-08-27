@@ -144,12 +144,15 @@ def test_owner_routes_use_existing_owner_authorization_and_do_not_execute_data_a
     assert context.json()["automatic_data_action_taken"] is False
 
 
-def test_integration_overlay_mounts_owner_privacy_routes():
+def test_integration_overlay_mounts_hidden_owner_privacy_routes_via_dispatch():
     from aura_music_studio.creative_version_autopromotion import router as integration_router
 
     app = FastAPI()
     app.include_router(integration_router)
-    paths = app.openapi()["paths"]
-    assert "/owner/privacy/cases" in paths
-    assert "/owner/privacy/cases/{request_id}" in paths
-    assert "/owner/privacy/cases/{request_id}/transition" in paths
+    client = TestClient(app)
+
+    # Owner privacy endpoints are intentionally excluded from the public OpenAPI document.
+    # Prove they are mounted through actual ASGI dispatch: the owner gate must answer 403.
+    assert "/owner/privacy/cases" not in app.openapi()["paths"]
+    assert client.get("/owner/privacy/cases").status_code == 403
+    assert client.get("/owner/privacy/cases/nonexistent").status_code == 403
