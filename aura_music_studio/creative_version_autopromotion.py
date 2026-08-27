@@ -103,7 +103,7 @@ def auto_promote_single_target_revision(
         result["reason"] = "imported_element_missing_id"
         return result
     manifest = store.load()
-    element = next((item for item in manifest.elements if item.id == element_id, None))
+    element = next((item for item in manifest.elements if item.id == element_id), None)
     if element is None:
         result["reason"] = "imported_element_not_found"
         return result
