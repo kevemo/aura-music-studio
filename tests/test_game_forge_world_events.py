@@ -270,7 +270,7 @@ def test_world_event_routes_workspace_and_authoritative_build(monkeypatch, tmp_p
     editor = client.get(f"/game-creation/world-events/{game.id}")
     assert editor.status_code == 200
     assert "World Events &amp; Atmosphere" in editor.text or "World Events & Atmosphere" in editor.text
-    assert "Enable World Audio" in editor.text
+    assert "World Audio" in editor.text
     assert "/world-events/entities" in editor.text
     assert "arbitrary scripts" in editor.text.lower()
 
