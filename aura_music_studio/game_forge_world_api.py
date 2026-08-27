@@ -5,9 +5,10 @@ from fastapi.responses import FileResponse
 
 from .aura_adventure_tools import install_aura_adventure_tools
 from .aura_gameplay_tools import install_aura_gameplay_tools
+from .aura_world_logic_tools import install_aura_world_logic_tools
 from .game_forge_adventure import router as game_adventure_router
 from .game_forge_adventure_portal import router as game_adventure_portal_router
-from .game_forge_adventure_runtime import build_adventure_playtest, private_play_html
+from .game_forge_adventure_runtime import private_play_html
 from .game_forge_asset_bindings import router as game_asset_bindings_router
 from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
@@ -27,18 +28,22 @@ from .game_forge_world import (
     world_stream_index,
     world_summary,
 )
+from .game_forge_world_logic import router as game_world_logic_router
+from .game_forge_world_logic_portal import router as game_world_logic_portal_router
+from .game_forge_world_logic_runtime import build_world_logic_playtest
 from .plans import GAME_CREATE, GAME_PLAYTEST
 from .production_readiness import router as production_readiness_router
 
 # This module is imported before the central install_aura_game_tools() call in app.py. These
 # dedicated wrappers become lower layers in AuraToolRegistry's chain; existing game/media tools
-# remain authoritative for their own names and delegate gameplay/Adventure names safely.
+# remain authoritative for their own names and delegate gameplay/Adventure/World Logic names safely.
 install_aura_gameplay_tools()
 install_aura_adventure_tools()
+install_aura_world_logic_tools()
 
 router = APIRouter(tags=["Aura Game World"])
-# Binding/cinematic/gameplay/Adventure routes and global operations readiness are composed inside
-# this already-mounted router so parallel build chats do not need to edit the central app.py list.
+# Binding/cinematic/gameplay/Adventure/World Logic routes and global operations readiness are
+# composed inside this already-mounted router so parallel build chats do not need to edit app.py.
 router.include_router(production_readiness_router)
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
@@ -48,6 +53,8 @@ router.include_router(game_gameplay_router)
 router.include_router(game_gameplay_portal_router)
 router.include_router(game_adventure_router)
 router.include_router(game_adventure_portal_router)
+router.include_router(game_world_logic_router)
+router.include_router(game_world_logic_portal_router)
 
 
 def _member(request: Request):
@@ -92,6 +99,7 @@ def _editor_urls(game_id: str) -> dict[str, str]:
     return {
         "gameplay_editor_url": f"/game-creation/gameplay/{game_id}",
         "adventure_editor_url": f"/game-creation/adventure/{game_id}",
+        "world_logic_editor_url": f"/game-creation/world-logic/{game_id}",
     }
 
 
@@ -155,16 +163,16 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
 
 
 # This route deliberately precedes the foundation API equivalent in app.py. The normal portal/API
-# Build action therefore produces the cumulative Adventure runtime without editing shared app.py.
+# Build action therefore produces the cumulative World Logic runtime without editing shared app.py.
 @router.post("/api/game-forge/games/{game_id}/build")
-def build_world_adventure(game_id: str, request: Request):
+def build_world_logic(game_id: str, request: Request):
     _creator(request)
     game = _game(game_id)
     ensure_world(game)
     try:
-        game, _html = build_adventure_playtest(game)
+        game, _html = build_world_logic_playtest(game)
     except (OSError, ValueError) as exc:
-        raise HTTPException(409, f"Aura Adventure build failed: {exc}") from exc
+        raise HTTPException(409, f"Aura World Logic build failed: {exc}") from exc
     return {
         "game": {
             "id": game.id,
@@ -180,6 +188,7 @@ def build_world_adventure(game_id: str, request: Request):
         "aura_native_runtime": True,
         "declarative_gameplay_runtime": True,
         "adventure_state_runtime": True,
+        "advanced_world_logic_runtime": True,
         "browser_local_save": True,
         "server_save_sync": False,
         "world_dna_physics": True,
@@ -190,7 +199,7 @@ def build_world_adventure(game_id: str, request: Request):
 
 # These routes deliberately precede foundation API equivalents in app.py. They bind approval and
 # publishing to Game DNA + World DNA + verified media/models + cinematic/VFX + gameplay + Adventure
-# State, not just the high-level game questionnaire.
+# State + Advanced World Logic, not just the high-level game questionnaire.
 @router.post("/api/game-forge/games/{game_id}/scan")
 def scan_world_integrity(game_id: str, request: Request):
     _creator(request)
@@ -243,6 +252,7 @@ def publish_world_integrity(game_id: str, request: Request):
         "integrity_bound_to_cinematics": True,
         "integrity_bound_to_gameplay": True,
         "integrity_bound_to_adventure_state": True,
+        "integrity_bound_to_advanced_world_logic": True,
         "player_save_storage": "browser_local_only",
         "verified_media_snapshot_count": len(public_assets),
         "external_media_urls_included": False,
