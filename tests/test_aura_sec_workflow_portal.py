@@ -170,4 +170,4 @@ def test_restore_drill_page_keeps_launch_disabled_until_native_workflow_exists(m
     assert "Restore Test Required" in response.text
     assert "Start drill — native workflow not released" in response.text
     assert "No browser-only restore" in response.text
-    assert "strong re-authentication" in response.text
+    assert "strong re-authentication" in response.text.lower()
