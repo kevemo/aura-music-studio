@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -108,11 +111,7 @@ def test_locked_tracks_fail_closed_and_invalid_crop_is_rejected(tmp_path: Path):
 
 
 def test_professional_editor_routes_are_mounted_in_production_app():
-    from app import app as production_app
-
     editor_paths = {route.path for route in professional_editor_router.routes if hasattr(route, "path")}
-    production_paths = {route.path for route in production_app.routes if hasattr(route, "path")}
-
     expected = {
         "/creative/projects/{project_name}/editor/initialize",
         "/creative/projects/{project_name}/editor",
@@ -120,4 +119,24 @@ def test_professional_editor_routes_are_mounted_in_production_app():
         "/creative/projects/{project_name}/editor/redo",
     }
     assert expected <= editor_paths
+
+    # Import the production entrypoint in a clean process. Other tests legitimately start the
+    # shared base FastAPI instance, after which Starlette refuses additional middleware. Uvicorn
+    # and Vercel import app.py in a fresh process, so this verifies the actual deployment startup
+    # boundary without depending on pytest collection/execution order.
+    probe = (
+        "import json; from app import app; "
+        "print('EDITOR_ROUTES=' + json.dumps(sorted({getattr(r, 'path', '') for r in app.routes})))"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    marker = next(
+        line for line in completed.stdout.splitlines() if line.startswith("EDITOR_ROUTES=")
+    )
+    production_paths = set(json.loads(marker.split("=", 1)[1]))
     assert expected <= production_paths
