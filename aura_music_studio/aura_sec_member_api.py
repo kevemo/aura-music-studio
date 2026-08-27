@@ -6,10 +6,12 @@ from .accounts import AccountStore
 from .aura_sec_health import summarize_security_health
 from .aura_sec_store import AuraSecStore
 from .aura_sec_vulnerability import VulnerabilityFinding, prioritize_vulnerability
+from .aura_sec_vulnerability_store import AuraSecVulnerabilityStore
 
 router = APIRouter(prefix="/api/aura-sec/member", tags=["Aura Sec Member State"])
 accounts = AccountStore()
 security = AuraSecStore(accounts)
+vulnerabilities = AuraSecVulnerabilityStore(accounts, security)
 MEMBER_COOKIE = "lss_session"
 
 
@@ -64,6 +66,23 @@ def member_security_overview(request: Request):
         ),
         "truth": (
             "Protection status is derived from separate licence state plus fresh verified native-client heartbeat evidence."
+        ),
+    }
+
+
+@router.get("/vulnerabilities")
+def member_verified_vulnerabilities(request: Request):
+    user = _session_user(request)
+    findings = vulnerabilities.list(user["id"], status="open", limit=250)
+    return {
+        "findings": findings,
+        "count": len(findings),
+        "critical_or_emergency": sum(
+            1 for item in findings if item.get("priority") in {"critical", "emergency", "incident"}
+        ),
+        "known_exploited": sum(1 for item in findings if item.get("cisa_kev")),
+        "truth": (
+            "Only device-applicable findings backed by verified native inventory and threat-intelligence evidence appear here."
         ),
     }
 
