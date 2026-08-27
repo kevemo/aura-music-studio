@@ -9,10 +9,15 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from .esp_level_up import EspAgentAssignmentStore
 from .esp_social_access_control import EspSocialAccessControlStore
 from .owner_auth import owner_authorized
+from .owner_dashboard_preferences_portal import router as owner_dashboard_preferences_router
 from .owner_identity import owner_actor, owner_theme, request_owner_persona
 from .owner_user_control import OwnerUserControl
 
 router = APIRouter()
+# This composite router is mounted before the legacy owner-control router in app.py,
+# so the personalized dashboard can safely overlay /owner/dashboard without changing
+# authentication/session code or the high-conflict application router.
+router.include_router(owner_dashboard_preferences_router)
 control = OwnerUserControl()
 assignments = EspAgentAssignmentStore(control.esp)
 social_controls = EspSocialAccessControlStore(control.esp)
