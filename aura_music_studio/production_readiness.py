@@ -109,6 +109,7 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
         payment_messages.append("Production payment mode must require verified PayPal webhook evidence.")
     payment_ok = (
         provider == "paypal"
+        and (not verified_mode or paypal_creds_ok)
         and (not production or (paypal_environment == "live" and paypal_creds_ok and verified_mode))
         and (not staging or paypal_environment == "sandbox")
     )
