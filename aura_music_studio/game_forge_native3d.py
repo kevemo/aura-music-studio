@@ -7,6 +7,7 @@ closed declarative cinematics and built-in bounded particle VFX. The public impo
 and this boundary continues to enforce the aggregate expanded-vertex model budget before rendering.
 """
 
+import json
 import os
 
 from .game_forge_accessibility import harden_game_runtime_html
@@ -38,11 +39,30 @@ def _runtime_payload(game, world) -> dict:
     return payload
 
 
+def _serialize_runtime_payload(html: str, payload: dict) -> str:
+    """Replace the compatibility renderer's cfg with the exact validated v4 contract.
+
+    Aura3D v4 intentionally layers its reviewed rendering hooks over v3. The v3 renderer therefore
+    creates the HTML shell first, but the browser must receive the v4 payload rather than stale v3
+    capability metadata. Fail closed if that stable serialization boundary ever changes.
+    """
+    prefix = "const cfg="
+    suffix = ";\nconst canvas="
+    start = html.find(prefix)
+    end = html.find(suffix, start + len(prefix)) if start >= 0 else -1
+    if start < 0 or end < 0:
+        raise ValueError("Aura3D compatibility payload contract changed; v4 serialization requires review")
+    serialized = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    return html[: start + len(prefix)] + serialized + html[end:]
+
+
 def render_aura3d_playtest(game, world, *, csp: str) -> str:
-    # Validate the exact model and cinematic set before the renderer serializes closed runtime data.
+    # Validate the exact model/cinematic set and serialize that same closed payload into the page.
     # Raw models and creator-authored executable code are never loaded or run by the browser.
-    _runtime_payload(game, world)
-    return harden_game_runtime_html(_render_v4(game, world, csp=csp))
+    payload = _runtime_payload(game, world)
+    html = _render_v4(game, world, csp=csp)
+    html = _serialize_runtime_payload(html, payload)
+    return harden_game_runtime_html(html)
 
 
 __all__ = ["render_aura3d_playtest", "_runtime_payload"]
