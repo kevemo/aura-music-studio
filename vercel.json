@@ -5,8 +5,11 @@
       "development/full-site-build": false,
       "feature/aura-platform-core": false,
       "feature/esp-command-centers": false,
+      "feature/esp-backstage-evidence": false,
       "feature/creative-studios-game-forge": false,
-      "feature/hourly-auto-build": false
+      "feature/credit-wallet-foundation": false,
+      "feature/hourly-auto-build": false,
+      "integration/control-room": false
     }
   },
   "functions": {
