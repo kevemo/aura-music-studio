@@ -6,7 +6,7 @@ import shutil
 import subprocess
 
 import pytest
-from PIL import Image, ImageStat
+from PIL import Image
 
 from aura_music_studio.professional_editor import EditorMask, ProfessionalEditorStore
 from aura_music_studio.professional_editor_renderer import EditorRenderUnsupported
@@ -78,8 +78,11 @@ def test_keyframed_text_layer_moves_in_real_mp4_and_metadata_is_truthful(tmp_pat
     assert metadata["supports_speed_correct_audio"] is True
     assert metadata["source_media_mutated"] is False
 
+    # Sample comfortably inside the encoded timeline. Seeking to the exact last frame boundary
+    # (for example 0.9s on a 1.0s/10fps stream) can legitimately yield no decoded frame depending
+    # on muxer timestamp rounding, which tests seeking rather than the editor motion itself.
     frames = []
-    for stamp in (0.1, 0.9):
+    for stamp in (0.15, 0.75):
         frame = tmp_path / f"frame_{stamp}.png"
         subprocess.run(
             [
@@ -88,6 +91,7 @@ def test_keyframed_text_layer_moves_in_real_mp4_and_metadata_is_truthful(tmp_pat
             ],
             check=True,
         )
+        assert frame.is_file() and frame.stat().st_size > 0
         frames.append(frame)
 
     def bright_centroid(path):
