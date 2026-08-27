@@ -15,6 +15,14 @@ router = APIRouter(tags=["Stripe Commerce Receipts"])
 
 def _credit_transaction_exists(user_id: str, reference: str, credits: int) -> bool:
     with sqlite3.connect(accounts.db_path) as con:
+        table = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='credit_transactions'"
+        ).fetchone()
+        if not table:
+            # A missing credit ledger means there cannot be verified local purchase evidence.
+            # Treat this as a clean negative result so receipt creation fails closed with the
+            # domain-specific validation error rather than leaking a SQLite migration error.
+            return False
         row = con.execute(
             """SELECT id FROM credit_transactions
                WHERE user_id=? AND reference=? AND kind='purchase' AND amount=?""",
