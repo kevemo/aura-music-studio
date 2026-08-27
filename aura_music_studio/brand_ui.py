@@ -5,9 +5,11 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response
 
+from .branding import BRAND_ASSET_FILENAME, PRODUCT_FULL_NAME
+
 router = APIRouter(tags=["ESP Brand"])
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-LOGO_PATH = STATIC_DIR / "esp-logo.webp"
+LOGO_PATH = STATIC_DIR / BRAND_ASSET_FILENAME
 
 ESP_THEME_CSS = r"""
 :root{
@@ -115,7 +117,7 @@ def brand_head() -> str:
 
 
 def hero_logo() -> str:
-    return "<img class='esp-hero-logo' src='/brand/esp-logo.webp' alt='Elevate Souls Productions logo'>"
+    return f"<img class='esp-hero-logo' src='/brand/esp-logo.webp' alt='{PRODUCT_FULL_NAME}'>"
 
 
 @router.get('/brand/theme.css', include_in_schema=False)
@@ -125,7 +127,7 @@ def theme_css() -> Response:
 
 @router.get('/brand/esp-logo.webp', include_in_schema=False)
 def brand_logo() -> FileResponse:
-    return FileResponse(LOGO_PATH, media_type='image/webp', filename='ESP-Logo.webp', headers={'Cache-Control':'public, max-age=86400'})
+    return FileResponse(LOGO_PATH, media_type='image/webp', filename='ESP-Content-Creation-Command-Center.webp', headers={'Cache-Control':'public, max-age=86400'})
 
 
 @router.get('/favicon.webp', include_in_schema=False)
