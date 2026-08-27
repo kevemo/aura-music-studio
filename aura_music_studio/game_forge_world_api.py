@@ -3,14 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from .aura_gameplay_tools import install_aura_gameplay_tools
 from .game_forge_asset_bindings import router as game_asset_bindings_router
 from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
 from .game_forge_aura_commands import router as game_aura_commands_router
 from .game_forge_cinematics import router as game_cinematics_router
+from .game_forge_gameplay import router as game_gameplay_router
+from .game_forge_gameplay_runtime import build_gameplay_playtest, private_play_html
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
-from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
 from .game_forge_world import (
     GameWorldDNA,
@@ -24,14 +26,20 @@ from .game_forge_world import (
 from .plans import GAME_CREATE, GAME_PLAYTEST
 from .production_readiness import router as production_readiness_router
 
+# This module is imported before the central install_aura_game_tools() call in app.py. The gameplay
+# wrapper therefore becomes the lower layer in AuraToolRegistry's chain; the existing game tools
+# remain authoritative for their own names and delegate the new gameplay-specific names safely.
+install_aura_gameplay_tools()
+
 router = APIRouter(tags=["Aura Game World"])
-# Binding/cinematic routes and the global operations readiness plane are composed inside this
-# already-mounted router so parallel build chats do not need to edit the central app.py router list.
+# Binding/cinematic/gameplay routes and the global operations readiness plane are composed inside
+# this already-mounted router so parallel build chats do not need to edit the central app.py list.
 router.include_router(production_readiness_router)
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
 router.include_router(game_aura_commands_router)
 router.include_router(game_cinematics_router)
+router.include_router(game_gameplay_router)
 
 
 def _member(request: Request):
@@ -128,9 +136,39 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
     }
 
 
-# These two routes deliberately precede the foundation API equivalents in app.py. They bind
+# This route deliberately precedes the foundation API equivalent in app.py. The normal portal/API
+# Build action therefore produces the gameplay-aware runtime without editing the shared app router.
+@router.post("/api/game-forge/games/{game_id}/build")
+def build_world_gameplay(game_id: str, request: Request):
+    _creator(request)
+    game = _game(game_id)
+    ensure_world(game)
+    try:
+        game, _html = build_gameplay_playtest(game)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, f"Aura gameplay build failed: {exc}") from exc
+    return {
+        "game": {
+            "id": game.id,
+            "title": game.title,
+            "status": game.status,
+            "version": game.version,
+            "latest_build": game.latest_build.model_dump(mode="json") if game.latest_build else None,
+        },
+        "private_playtest_url": f"/game-creation/play/{game.id}",
+        "runtime": game.latest_build.runtime if game.latest_build else None,
+        "requested_engine": game.engine_target,
+        "aura_native_runtime": True,
+        "declarative_gameplay_runtime": True,
+        "world_dna_physics": True,
+        "arbitrary_server_code_executed": False,
+        "runtime_network_access": False,
+    }
+
+
+# These routes deliberately precede the foundation API equivalents in app.py. They bind
 # approval/publishing to Game DNA + Aura World DNA + imported Game Forge asset/model snapshots +
-# cinematic/VFX DNA, not just the high-level game questionnaire.
+# cinematic/VFX + declarative gameplay DNA, not just the high-level game questionnaire.
 @router.post("/api/game-forge/games/{game_id}/scan")
 def scan_world_integrity(game_id: str, request: Request):
     _creator(request)
@@ -181,6 +219,7 @@ def publish_world_integrity(game_id: str, request: Request):
         "integrity_bound_to_world": True,
         "integrity_bound_to_assets": True,
         "integrity_bound_to_cinematics": True,
+        "integrity_bound_to_gameplay": True,
         "verified_media_snapshot_count": len(public_assets),
         "external_media_urls_included": False,
     }
