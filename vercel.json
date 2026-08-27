@@ -4,6 +4,7 @@
     "deploymentEnabled": {
       "development/full-site-build": false,
       "feature/aura-platform-core": false,
+      "feature/core-email-verification": false,
       "feature/esp-command-centers": false,
       "feature/creative-studios-game-forge": false,
       "feature/hourly-auto-build": false
