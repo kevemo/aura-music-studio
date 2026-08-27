@@ -27,6 +27,7 @@ def _client(
     incidents=None,
     actions=None,
 ):
+    devices = list(devices or [])
     findings = list(findings or [])
     incidents = list(incidents or [])
     actions = list(actions or [])
@@ -43,12 +44,21 @@ def _client(
             "period_end": NOW if licence_status == "active" else None,
         },
     )
-    monkeypatch.setattr(member_api.security, "list_devices", lambda _user_id: list(devices or []))
-    monkeypatch.setattr(
-        member_api.vulnerabilities,
-        "list",
-        lambda _user_id, status="open", limit=250: list(findings)[:limit],
-    )
+    monkeypatch.setattr(member_api.security, "list_devices", lambda _user_id: list(devices))
+
+    def get_device(_user_id, device_id):
+        for item in devices:
+            if item.get("id") == device_id:
+                return dict(item)
+        raise ValueError("Aura Sec device not found")
+
+    monkeypatch.setattr(member_api.security, "get_device", get_device)
+
+    def list_findings(_user_id, device_id=None, status="open", limit=250):
+        output = [item for item in findings if not device_id or item.get("device_id") == device_id]
+        return output[:limit]
+
+    monkeypatch.setattr(member_api.vulnerabilities, "list", list_findings)
 
     def get_finding(_user_id, finding_id):
         for item in findings:
@@ -58,6 +68,7 @@ def _client(
 
     monkeypatch.setattr(member_api.vulnerabilities, "get", get_finding)
     monkeypatch.setattr(member_api.read_model, "incidents", lambda _user_id, limit=250: list(incidents)[:limit])
+    monkeypatch.setattr(member_api.read_model, "actions", lambda _user_id, limit=250: list(actions)[:limit])
     monkeypatch.setattr(
         member_api.read_model,
         "incident",
@@ -83,8 +94,22 @@ def _client(
                     if item.get("status") == "open" and item.get("severity") in {"high", "critical"}
                 ),
             },
-            "actions": {"total": len(actions), "awaiting_approval": 0, "verified": 0},
+            "actions": {
+                "total": len(actions),
+                "awaiting_approval": sum(1 for item in actions if item.get("status") == "proposed"),
+                "verified": sum(1 for item in actions if item.get("status") == "verified"),
+            },
             "recovery": {"targets": 0, "encrypted_targets": 0, "isolated_targets": 0},
+        },
+    )
+    monkeypatch.setattr(
+        member_api.recovery,
+        "readiness",
+        lambda _user_id, _device_id: {
+            "state": "restore_test_required",
+            "active_targets": 1,
+            "restore_proven": False,
+            "truth": "Test recovery projection.",
         },
     )
     app = FastAPI()
@@ -147,6 +172,61 @@ def test_enrolment_readiness_never_claims_browser_can_attest_device(monkeypatch)
     assert data["signed_native_client_released"] is False
 
 
+def test_per_device_projection_aggregates_only_verified_read_state(monkeypatch):
+    device = {
+        "id": "device_1234567890abcdef",
+        "display_name": "Windows PC",
+        "platform": "windows",
+        "architecture": "x64",
+        "agent_version": "0.1.0",
+        "status": "enrolled",
+        "protection_state": "healthy",
+        "enrolled_at": NOW,
+        "last_seen_at": NOW,
+        "last_policy_version": "policy-1",
+        "revoked_at": None,
+    }
+    finding = {
+        "id": "finding-1",
+        "device_id": device["id"],
+        "priority": "emergency",
+        "priority_score": 100,
+        "cisa_kev": True,
+    }
+    incident = {
+        "id": "incident-1",
+        "device_id": device["id"],
+        "severity": "critical",
+        "status": "open",
+    }
+    action = {
+        "id": "action-1",
+        "device_id": device["id"],
+        "incident_id": "incident-1",
+        "status": "proposed",
+        "action_type": "isolate_network",
+    }
+    client = _client(
+        monkeypatch,
+        licence_status="active",
+        devices=[device],
+        findings=[finding],
+        incidents=[incident],
+        actions=[action],
+    )
+    response = client.get(f"/api/aura-sec/member/devices/{device['id']}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["health"]["health"] == "healthy"
+    assert data["vulnerabilities"]["count"] == 1
+    assert data["vulnerabilities"]["urgent"] == 1
+    assert data["incidents"]["open"] == 1
+    assert data["actions"]["awaiting_approval"] == 1
+    assert data["recovery"]["state"] == "restore_test_required"
+    assert "does not change the endpoint" in data["truth"]
+    assert client.get("/api/aura-sec/member/devices/not-owned").status_code == 404
+
+
 def test_verified_incident_detail_is_read_only_and_member_scoped(monkeypatch):
     incidents = [
         {
@@ -180,6 +260,32 @@ def test_verified_incident_detail_is_read_only_and_member_scoped(monkeypatch):
     assert data["response_summary"]["verified"] == 1
     assert "read-only" in data["truth"]
     assert client.get("/api/aura-sec/member/incidents/not-owned").status_code == 404
+
+
+def test_awaiting_approval_projection_cannot_approve_or_execute(monkeypatch):
+    actions = [
+        {
+            "id": "action-1",
+            "incident_id": "incident-1",
+            "status": "proposed",
+            "risk_class": "confirmation_required",
+        },
+        {
+            "id": "action-2",
+            "incident_id": "incident-2",
+            "status": "verified",
+            "risk_class": "low_risk",
+        },
+    ]
+    response = _client(monkeypatch, actions=actions).get(
+        "/api/aura-sec/member/actions/awaiting-approval"
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 1
+    assert data["actions"][0]["id"] == "action-1"
+    assert data["approval_endpoint_exposed_here"] is False
+    assert data["generic_command_execution_available"] is False
 
 
 def test_verified_vulnerability_list_reports_only_persisted_native_findings(monkeypatch):
