@@ -11,6 +11,7 @@ from .game_forge_assets import snapshot_public_assets
 from .game_forge_aura_commands import router as game_aura_commands_router
 from .game_forge_cinematics import router as game_cinematics_router
 from .game_forge_gameplay import router as game_gameplay_router
+from .game_forge_gameplay_portal import router as game_gameplay_portal_router
 from .game_forge_gameplay_runtime import build_gameplay_playtest, private_play_html
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -40,6 +41,7 @@ router.include_router(game_assets_router)
 router.include_router(game_aura_commands_router)
 router.include_router(game_cinematics_router)
 router.include_router(game_gameplay_router)
+router.include_router(game_gameplay_portal_router)
 
 
 def _member(request: Request):
@@ -91,6 +93,7 @@ def get_world(game_id: str, request: Request):
         "stream_index": world_stream_index(world),
         "native_engine": True,
         "arbitrary_script_source_allowed": False,
+        "gameplay_editor_url": f"/game-creation/gameplay/{game.id}",
     }
 
 
@@ -104,6 +107,7 @@ def regenerate_world(game_id: str, request: Request):
         "world": world.model_dump(mode="json"),
         "summary": world_summary(world),
         "invalidated_previous_build_and_rating": True,
+        "gameplay_editor_url": f"/game-creation/gameplay/{game.id}",
     }
 
 
@@ -133,6 +137,7 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
         "world": body.model_dump(mode="json"),
         "summary": world_summary(body),
         "invalidated_previous_build_and_rating": True,
+        "gameplay_editor_url": f"/game-creation/gameplay/{game.id}",
     }
 
 
@@ -156,6 +161,7 @@ def build_world_gameplay(game_id: str, request: Request):
             "latest_build": game.latest_build.model_dump(mode="json") if game.latest_build else None,
         },
         "private_playtest_url": f"/game-creation/play/{game.id}",
+        "gameplay_editor_url": f"/game-creation/gameplay/{game.id}",
         "runtime": game.latest_build.runtime if game.latest_build else None,
         "requested_engine": game.engine_target,
         "aura_native_runtime": True,
