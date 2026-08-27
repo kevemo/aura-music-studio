@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from .accounts import AccountStore
+from .aura_sec_catalog import AuraSecCatalog
 from .aura_sec_health import summarize_security_health
 from .aura_sec_store import AuraSecStore
 from .aura_sec_vulnerability import VulnerabilityFinding, prioritize_vulnerability
@@ -39,6 +40,24 @@ def member_security_licence(request: Request):
             else "Aura Sec licence is active; device protection still depends on enrolled clients with fresh verified heartbeats."
         ),
     }
+
+
+@router.get("/catalog")
+def member_security_catalog(request: Request):
+    _session_user(request)
+    try:
+        return AuraSecCatalog.from_environment().public_state()
+    except ValueError as exc:
+        # Invalid commercial configuration fails closed instead of exposing a partially
+        # configured product or falling back to creative-plan pricing.
+        return {
+            "sale_configured": False,
+            "skus": [],
+            "creative_plan_ids_accepted_as_security_sku": False,
+            "checkout_enabled": False,
+            "configuration_error": True,
+            "truth": f"Aura Sec sale configuration is invalid and checkout remains disabled: {exc}",
+        }
 
 
 @router.get("/devices")
