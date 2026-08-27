@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 from urllib.parse import urlparse
 
@@ -19,6 +19,7 @@ class ReleaseManifestError(ValueError):
 @dataclass(frozen=True)
 class AuraSecReleaseManifest:
     schema_version: int
+    release_sequence: int
     product: str
     channel: str
     platform: str
@@ -41,6 +42,7 @@ class AuraSecReleaseManifest:
             raise ReleaseManifestError("Release manifest must be an object")
         required = {
             "schema_version",
+            "release_sequence",
             "product",
             "channel",
             "platform",
@@ -66,6 +68,7 @@ class AuraSecReleaseManifest:
         try:
             return cls(
                 schema_version=int(payload["schema_version"]),
+                release_sequence=int(payload["release_sequence"]),
                 product=str(payload["product"]),
                 channel=str(payload["channel"]),
                 platform=str(payload["platform"]),
@@ -88,11 +91,14 @@ class AuraSecReleaseManifest:
     def signed_payload(self) -> bytes:
         """Canonical security-relevant payload supplied to an external signature verifier.
 
-        The signature field itself is excluded. The production signing service and client must
-        use the same versioned canonical encoding; changing this encoding requires a schema bump.
+        Schema v2 signs a monotonic release sequence so a client can reject a valid older
+        signed manifest without trying to infer ordering from human-readable version strings.
+        The signature field itself is excluded. Changing this encoding requires another schema
+        bump and migration of the native trust state.
         """
         parts = (
             str(self.schema_version),
+            str(self.release_sequence),
             self.product,
             self.channel,
             self.platform,
@@ -110,7 +116,7 @@ class AuraSecReleaseManifest:
         )
         if any("\n" in part or "\r" in part for part in parts):
             raise ReleaseManifestError("Manifest canonical fields must not contain newlines")
-        return ("AURA-SEC-RELEASE-V1\n" + "\n".join(parts) + "\n").encode("utf-8")
+        return ("AURA-SEC-RELEASE-V2\n" + "\n".join(parts) + "\n").encode("utf-8")
 
 
 def _parse_time(value: str, field: str) -> datetime:
@@ -137,15 +143,31 @@ def validate_release_manifest(
     trusted_key_ids: set[str],
     signature_verifier: Callable[[str, bytes, bytes], bool] | None,
     now: datetime | None = None,
+    minimum_release_sequence: int = 0,
+    trusted_sequence_sha256: str | None = None,
 ) -> dict:
-    """Validate metadata and require a real external signature verification result.
+    """Validate signed release metadata and enforce rollback/equivocation protection.
+
+    `minimum_release_sequence` is the highest sequence already trusted by the native client for
+    this product/channel/platform/architecture. A lower sequence is a rollback. Reusing the same
+    sequence is allowed only when the caller supplies the previously trusted SHA-256 and it
+    exactly matches, which permits safe re-download while rejecting same-sequence equivocation.
 
     This module deliberately does not implement signature cryptography itself. Production code
     must bind this contract to an audited signing implementation / hardware-backed trust root.
     `signature_verifier=None` always fails closed.
     """
-    if manifest.schema_version != 1:
-        raise ReleaseManifestError("Unsupported Aura Sec release manifest schema")
+    if manifest.schema_version != 2:
+        raise ReleaseManifestError("Unsupported Aura Sec release manifest schema; signed sequence metadata is required")
+    if not 1 <= int(manifest.release_sequence) <= 2**63 - 1:
+        raise ReleaseManifestError("Release sequence must be a positive 63-bit integer")
+    if not 0 <= int(minimum_release_sequence) <= 2**63 - 1:
+        raise ReleaseManifestError("Minimum trusted release sequence is invalid")
+    if trusted_sequence_sha256 is not None:
+        trusted_sequence_sha256 = trusted_sequence_sha256.strip().lower()
+        if not _SHA256_RE.fullmatch(trusted_sequence_sha256):
+            raise ReleaseManifestError("Trusted sequence artifact SHA-256 is invalid")
+
     if manifest.product != "aura-sec":
         raise ReleaseManifestError("Release manifest product mismatch")
     if manifest.channel not in {"stable", "beta", "canary"}:
@@ -183,7 +205,7 @@ def validate_release_manifest(
         raise ReleaseManifestError("Release manifest is not valid yet")
     if current >= expires:
         raise ReleaseManifestError("Release manifest has expired")
-    if expires - issued > __import__("datetime").timedelta(days=31):
+    if expires - issued > timedelta(days=31):
         raise ReleaseManifestError("Release manifest validity window is too long")
 
     try:
@@ -202,6 +224,19 @@ def validate_release_manifest(
     if not verified:
         raise ReleaseManifestError("Release signature is invalid")
 
+    minimum = int(minimum_release_sequence)
+    if manifest.release_sequence < minimum:
+        raise ReleaseManifestError("Release rollback rejected: signed sequence is older than trusted client state")
+    if minimum > 0 and manifest.release_sequence == minimum:
+        if trusted_sequence_sha256 is None:
+            raise ReleaseManifestError(
+                "Same-sequence release requires the previously trusted artifact SHA-256"
+            )
+        if not secrets_compare_digest(manifest.artifact_sha256, trusted_sequence_sha256):
+            raise ReleaseManifestError(
+                "Release equivocation rejected: the trusted sequence points to a different artifact"
+            )
+
     return {
         "verified": True,
         "downloadable": True,
@@ -210,6 +245,7 @@ def validate_release_manifest(
         "platform": manifest.platform,
         "architecture": manifest.architecture,
         "version": manifest.version,
+        "release_sequence": manifest.release_sequence,
         "artifact_url": manifest.artifact_url,
         "artifact_sha256": manifest.artifact_sha256,
         "artifact_size_bytes": manifest.artifact_size_bytes,
@@ -218,6 +254,13 @@ def validate_release_manifest(
         "sbom_url": manifest.sbom_url,
         "provenance_url": manifest.provenance_url,
     }
+
+
+def secrets_compare_digest(left: str, right: str) -> bool:
+    # Kept local to avoid exposing timing-sensitive comparisons through caller code.
+    import secrets
+
+    return secrets.compare_digest(left, right)
 
 
 __all__ = ["AuraSecReleaseManifest", "ReleaseManifestError", "validate_release_manifest"]
