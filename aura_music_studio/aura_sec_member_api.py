@@ -4,8 +4,9 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .accounts import AccountStore
 from .aura_sec_catalog import AuraSecCatalog
-from .aura_sec_health import summarize_security_health
+from .aura_sec_health import evaluate_device_health, summarize_security_health
 from .aura_sec_read_model import AuraSecReadModel
+from .aura_sec_recovery import AuraSecRecoveryStore
 from .aura_sec_store import AuraSecStore
 from .aura_sec_vulnerability import VulnerabilityFinding, prioritize_vulnerability
 from .aura_sec_vulnerability_store import AuraSecVulnerabilityStore
@@ -14,6 +15,7 @@ router = APIRouter(prefix="/api/aura-sec/member", tags=["Aura Sec Member State"]
 accounts = AccountStore()
 security = AuraSecStore(accounts)
 read_model = AuraSecReadModel(accounts)
+recovery = AuraSecRecoveryStore(accounts, security)
 vulnerabilities = AuraSecVulnerabilityStore(accounts, security)
 MEMBER_COOKIE = "lss_session"
 
@@ -50,8 +52,6 @@ def member_security_catalog(request: Request):
     try:
         return AuraSecCatalog.from_environment().public_state()
     except ValueError as exc:
-        # Invalid commercial configuration fails closed instead of exposing a partially
-        # configured product or falling back to creative-plan pricing.
         return {
             "sale_configured": False,
             "skus": [],
@@ -67,6 +67,57 @@ def member_security_devices(request: Request):
     user = _session_user(request)
     devices = security.list_devices(user["id"])
     return summarize_security_health(devices)
+
+
+@router.get("/devices/{device_id}")
+def member_security_device_detail(device_id: str, request: Request):
+    user = _session_user(request)
+    try:
+        device = security.get_device(user["id"], device_id)
+    except ValueError as exc:
+        raise HTTPException(404, "Aura Sec device not found") from exc
+    health = evaluate_device_health(device).__dict__.copy()
+    findings = vulnerabilities.list(user["id"], device_id=device_id, status="open", limit=250)
+    incidents = [
+        item for item in read_model.incidents(user["id"], limit=500) if item.get("device_id") == device_id
+    ]
+    actions = [
+        item for item in read_model.actions(user["id"], limit=500) if item.get("device_id") == device_id
+    ]
+    readiness = (
+        {
+            "state": "not_managed",
+            "truth": "Recovery readiness is not evaluated for a revoked device.",
+        }
+        if device.get("status") == "revoked"
+        else recovery.readiness(user["id"], device_id)
+    )
+    return {
+        "device": device,
+        "health": health,
+        "vulnerabilities": {
+            "count": len(findings),
+            "urgent": sum(
+                1 for item in findings if item.get("priority") in {"critical", "emergency", "incident"}
+            ),
+            "findings": findings,
+        },
+        "incidents": {
+            "count": len(incidents),
+            "open": sum(1 for item in incidents if item.get("status") == "open"),
+            "items": incidents[:100],
+        },
+        "actions": {
+            "count": len(actions),
+            "awaiting_approval": sum(1 for item in actions if item.get("status") == "proposed"),
+            "items": actions[:100],
+        },
+        "recovery": readiness,
+        "truth": (
+            "This device view aggregates member-owned verified state. It does not change the endpoint, approve an action, "
+            "or infer health from the browser session."
+        ),
+    }
 
 
 @router.get("/enrolment-readiness")
@@ -147,6 +198,24 @@ def member_verified_incident_detail(incident_id: str, request: Request):
         "truth": (
             "Incident evidence, Aura explanation, proposed actions, execution and verification are separate states. "
             "This read-only endpoint cannot execute remediation."
+        ),
+    }
+
+
+@router.get("/actions/awaiting-approval")
+def member_actions_awaiting_approval(request: Request):
+    user = _session_user(request)
+    actions = [
+        item for item in read_model.actions(user["id"], limit=500) if item.get("status") == "proposed"
+    ]
+    return {
+        "actions": actions,
+        "count": len(actions),
+        "approval_endpoint_exposed_here": False,
+        "generic_command_execution_available": False,
+        "truth": (
+            "This endpoint only projects proposed bounded actions. Approval must pass the dedicated policy and authentication "
+            "path; loading this list cannot approve or execute anything."
         ),
     }
 
