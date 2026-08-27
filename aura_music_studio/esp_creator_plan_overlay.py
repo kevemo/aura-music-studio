@@ -13,6 +13,7 @@ from .esp_learning_library import router as learning_library_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_member_hub import router as member_hub_router
 from .esp_owner_focus import router as owner_focus_router
+from .esp_owner_operations_intelligence import router as owner_operations_intelligence_router
 from .esp_role_dashboard_switch import router as role_dashboard_router
 from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
@@ -26,6 +27,7 @@ router.include_router(collaborations_router)
 router.include_router(commercial_growth_router)
 router.include_router(shop_automation_router)
 router.include_router(role_dashboard_router)
+router.include_router(owner_operations_intelligence_router)
 router.include_router(owner_focus_router)
 router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
