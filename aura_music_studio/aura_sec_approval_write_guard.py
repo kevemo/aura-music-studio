@@ -12,16 +12,30 @@ _API_PREFIX = "/api/aura-sec/member/actions/"
 _API_WRITE_SUFFIXES = ("/approval-challenge", "/approve")
 
 
-def _normalized_host(value: str | None) -> str:
-    text = (value or "").strip().lower()
-    if not text:
-        return ""
-    if "://" in text:
-        try:
-            return (urlsplit(text).netloc or "").lower()
-        except ValueError:
-            return ""
-    return text
+def _origin_tuple(value: str | None) -> tuple[str, str, int] | None:
+    text = (value or "").strip()
+    if not text or "://" not in text:
+        return None
+    try:
+        parsed = urlsplit(text)
+        scheme = (parsed.scheme or "").lower()
+        hostname = (parsed.hostname or "").lower()
+        if scheme not in {"http", "https"} or not hostname:
+            return None
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, hostname, int(port)
+
+
+def _request_origin(request: Request) -> tuple[str, str, int] | None:
+    host = (request.headers.get("host") or "").strip()
+    scheme = (request.url.scheme or "").strip().lower()
+    if not host or scheme not in {"http", "https"}:
+        return None
+    return _origin_tuple(f"{scheme}://{host}")
 
 
 def _is_approval_api_write(path: str) -> bool:
@@ -29,8 +43,8 @@ def _is_approval_api_write(path: str) -> bool:
 
 
 def _same_origin_browser_write(request: Request) -> bool:
-    host = _normalized_host(request.headers.get("host"))
-    if not host:
+    expected = _request_origin(request)
+    if expected is None:
         return False
 
     fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
@@ -39,11 +53,11 @@ def _same_origin_browser_write(request: Request) -> bool:
 
     origin = request.headers.get("origin")
     if origin:
-        return _normalized_host(origin) == host
+        return _origin_tuple(origin) == expected
 
     referer = request.headers.get("referer")
     if referer:
-        return _normalized_host(referer) == host
+        return _origin_tuple(referer) == expected
 
     # Sensitive cookie-authenticated writes must provide browser origin evidence. Modern
     # browsers send Origin on POST; Referer is accepted as a compatibility fallback.
@@ -54,10 +68,11 @@ class AuraSecApprovalWriteGuardMiddleware(BaseHTTPMiddleware):
     """Protect Aura Sec approval writes from ambient-cookie cross-site requests.
 
     Browser form approval uses the HttpOnly member cookie and therefore must prove an
-    exact same-origin navigation. JSON/API approval writes require an explicit Bearer
-    credential, which browsers do not attach ambiently to cross-site forms. This guard is
-    additive to the one-time session/action-bound approval challenge and fixed action-risk
-    policy; it never approves or executes an action itself.
+    exact same-origin navigation, including scheme, host and effective port. JSON/API
+    approval writes require an explicit Bearer credential, which browsers do not attach
+    ambiently to cross-site forms. This guard is additive to the one-time session/action-
+    bound approval challenge and fixed action-risk policy; it never approves or executes
+    an action itself.
     """
 
     async def dispatch(self, request: Request, call_next):
