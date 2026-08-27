@@ -10,8 +10,10 @@ from .aura_sec_recovery import AuraSecRecoveryStore
 from .aura_sec_store import AuraSecStore
 from .aura_sec_vulnerability import VulnerabilityFinding, prioritize_vulnerability
 from .aura_sec_vulnerability_store import AuraSecVulnerabilityStore
+from .aura_sec_workflow_portal import router as workflow_portal_router
 
-router = APIRouter(prefix="/api/aura-sec/member", tags=["Aura Sec Member State"])
+router = APIRouter(tags=["Aura Sec Member"])
+api_router = APIRouter(prefix="/api/aura-sec/member", tags=["Aura Sec Member State"])
 accounts = AccountStore()
 security = AuraSecStore(accounts)
 read_model = AuraSecReadModel(accounts)
@@ -31,7 +33,7 @@ def _session_user(request: Request) -> dict:
     return user
 
 
-@router.get("/licence")
+@api_router.get("/licence")
 def member_security_licence(request: Request):
     user = _session_user(request)
     licence = security.licence(user["id"])
@@ -46,7 +48,7 @@ def member_security_licence(request: Request):
     }
 
 
-@router.get("/catalog")
+@api_router.get("/catalog")
 def member_security_catalog(request: Request):
     _session_user(request)
     try:
@@ -62,14 +64,14 @@ def member_security_catalog(request: Request):
         }
 
 
-@router.get("/devices")
+@api_router.get("/devices")
 def member_security_devices(request: Request):
     user = _session_user(request)
     devices = security.list_devices(user["id"])
     return summarize_security_health(devices)
 
 
-@router.get("/devices/{device_id}")
+@api_router.get("/devices/{device_id}")
 def member_security_device_detail(device_id: str, request: Request):
     user = _session_user(request)
     try:
@@ -120,7 +122,7 @@ def member_security_device_detail(device_id: str, request: Request):
     }
 
 
-@router.get("/enrolment-readiness")
+@api_router.get("/enrolment-readiness")
 def member_security_enrolment_readiness(request: Request):
     user = _session_user(request)
     licence = security.licence(user["id"])
@@ -142,7 +144,7 @@ def member_security_enrolment_readiness(request: Request):
     }
 
 
-@router.get("/overview")
+@api_router.get("/overview")
 def member_security_overview(request: Request):
     user = _session_user(request)
     licence = security.licence(user["id"])
@@ -164,7 +166,7 @@ def member_security_overview(request: Request):
     }
 
 
-@router.get("/incidents")
+@api_router.get("/incidents")
 def member_verified_incidents(request: Request):
     user = _session_user(request)
     incidents = read_model.incidents(user["id"], limit=250)
@@ -178,7 +180,7 @@ def member_verified_incidents(request: Request):
     }
 
 
-@router.get("/incidents/{incident_id}")
+@api_router.get("/incidents/{incident_id}")
 def member_verified_incident_detail(incident_id: str, request: Request):
     user = _session_user(request)
     incident = read_model.incident(user["id"], incident_id)
@@ -202,7 +204,7 @@ def member_verified_incident_detail(incident_id: str, request: Request):
     }
 
 
-@router.get("/actions/awaiting-approval")
+@api_router.get("/actions/awaiting-approval")
 def member_actions_awaiting_approval(request: Request):
     user = _session_user(request)
     actions = [
@@ -220,7 +222,7 @@ def member_actions_awaiting_approval(request: Request):
     }
 
 
-@router.get("/vulnerabilities")
+@api_router.get("/vulnerabilities")
 def member_verified_vulnerabilities(request: Request):
     user = _session_user(request)
     findings = vulnerabilities.list(user["id"], status="open", limit=250)
@@ -237,7 +239,7 @@ def member_verified_vulnerabilities(request: Request):
     }
 
 
-@router.get("/vulnerabilities/{finding_id}")
+@api_router.get("/vulnerabilities/{finding_id}")
 def member_verified_vulnerability_detail(finding_id: str, request: Request):
     user = _session_user(request)
     try:
@@ -254,10 +256,14 @@ def member_verified_vulnerability_detail(finding_id: str, request: Request):
     }
 
 
-@router.post("/vulnerability-priority")
+@api_router.post("/vulnerability-priority")
 def vulnerability_priority(payload: VulnerabilityFinding, request: Request):
     _session_user(request)
     return prioritize_vulnerability(payload).model_dump()
+
+
+router.include_router(api_router)
+router.include_router(workflow_portal_router)
 
 
 __all__ = ["router"]
