@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 from pydantic import BaseModel
 
 from .professional_editor import ProfessionalEditorStore
 
 ExportFormat = Literal["png", "webp", "jpeg", "mp4"]
 _SAFE_EXPORT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_SAFE_HEX_COLOR = re.compile(r"^#?([0-9A-Fa-f]{6})(?:[0-9A-Fa-f]{2})?$")
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 _VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"}
 _AUDIO_SUFFIXES = {".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"}
@@ -153,6 +154,14 @@ class ProfessionalEditorRenderer:
             return (0, 0, 0, 255)
 
     @staticmethod
+    def _ffmpeg_color(value: str) -> str:
+        match = _SAFE_HEX_COLOR.fullmatch(str(value or "").strip())
+        if not match:
+            raise EditorRenderError("Video background must be a hexadecimal RGB/RGBA colour")
+        # FFmpeg receives only a six-digit hexadecimal literal, never an arbitrary filter token.
+        return "0x" + match.group(1).lower()
+
+    @staticmethod
     def _apply_crop(image: Image.Image, crop: dict[str, Any]) -> Image.Image:
         width, height = image.size
         left = int(width * float(crop.get("left", 0.0)))
@@ -216,11 +225,10 @@ class ProfessionalEditorRenderer:
         content = str(text.get("content") or item.get("name") or "Text")[:10000]
         size = max(8, min(512, int(text.get("size") or 64)))
         fill = self._hex_rgba(str(text.get("color") or "#ffffffff"))
-        # Pillow's built-in scalable fallback is intentionally deterministic and requires no
-        # server font path. A future font registry can add licensed typefaces safely.
+        font = ImageFont.load_default(size=size)
         canvas = Image.new("RGBA", (max(1, len(content) * size), size * 3), (0, 0, 0, 0))
         draw = ImageDraw.Draw(canvas)
-        draw.text((0, 0), content, fill=fill, stroke_width=max(0, int(text.get("stroke_width") or 0)))
+        draw.text((0, 0), content, fill=fill, font=font, stroke_width=max(0, int(text.get("stroke_width") or 0)))
         bbox = canvas.getbbox()
         return canvas.crop(bbox) if bbox else Image.new("RGBA", (1, 1), (0, 0, 0, 0))
 
@@ -322,7 +330,7 @@ class ProfessionalEditorRenderer:
 
         width, height = int(sequence["width"]), int(sequence["height"])
         fps, duration = float(sequence["fps"]), float(sequence["duration"])
-        background = str(sequence.get("background") or "#000000")
+        background = self._ffmpeg_color(str(sequence.get("background") or "#000000"))
         visual: list[tuple[dict, dict, Path]] = []
         audio: list[tuple[dict, Path]] = []
         source_refs: list[str] = []
@@ -345,7 +353,12 @@ class ProfessionalEditorRenderer:
                         raise EditorRenderUnsupported("Timeline visual item has an unsupported source type")
                     visual.append((track, item, source))
                     source_refs.append(str(source.relative_to(self.project_dir)))
-                    if item["kind"] == "video_clip" and not bool((item.get("audio") or {}).get("muted", False)) and self._has_audio(source):
+                    if (
+                        item["kind"] == "video_clip"
+                        and not track.get("muted", False)
+                        and not bool((item.get("audio") or {}).get("muted", False))
+                        and self._has_audio(source)
+                    ):
                         audio.append((item, source))
                 elif item["kind"] == "audio_clip" and not track.get("muted", False) and not bool((item.get("audio") or {}).get("muted", False)):
                     source = self._source(item.get("source_ref"))
