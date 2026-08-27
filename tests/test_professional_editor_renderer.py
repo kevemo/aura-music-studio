@@ -68,23 +68,42 @@ def test_image_compositor_creates_real_export_without_mutating_source(tmp_path: 
     assert evidence["source_refs"] == ["input/layer.png"]
 
 
-def test_renderer_rejects_path_escape_and_advanced_state_is_never_silently_dropped(tmp_path: Path):
-    project, source, store, sequence, _track, item = _image_project(tmp_path)
+def test_renderer_rejects_path_escape_without_rewriting_existing_source(tmp_path: Path):
+    project, source, store, sequence, track, _item = _image_project(tmp_path)
     renderer = ProfessionalEditorRenderer(project)
+    before = _sha(source)
 
     with pytest.raises(EditorRenderError):
         renderer.resolve_export("../outside.png")
 
-    store.patch_item(item.id, {"source_ref": "../outside.png"})
-    with pytest.raises(EditorRenderError):
+    # Source references are immutable after item creation. Exercise the renderer boundary by
+    # constructing a second item with an invalid project-relative source instead of weakening
+    # the editor's patch allow-list just for this test.
+    store.create_item(
+        track.id,
+        kind="image_layer",
+        name="Escaped source",
+        source_ref="../outside.png",
+        duration=1,
+    )
+    with pytest.raises(EditorRenderError, match="outside the project"):
         renderer.render_image(sequence.id)
-    assert source.is_file()
 
-    store.patch_item(item.id, {"source_ref": "input/layer.png"})
+    assert source.is_file()
+    assert _sha(source) == before
+
+
+def test_advanced_state_is_never_silently_dropped(tmp_path: Path):
+    project, source, store, sequence, _track, item = _image_project(tmp_path)
+    before = _sha(source)
+    renderer = ProfessionalEditorRenderer(project)
+
     store.add_mask(item.id, EditorMask(name="Subject mask", shape="ellipse"))
     assert renderer.advanced_state(store.public_state(), sequence.id)["advanced"] is True
     with pytest.raises(EditorRenderUnsupported, match="Masks, effects and keyframes"):
         renderer.render_image(sequence.id)
+
+    assert _sha(source) == before
 
 
 def test_image_export_formats_are_real_files(tmp_path: Path):
