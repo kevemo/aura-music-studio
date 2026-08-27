@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import aura_music_studio.aura_sec_approval_portal as portal
+from aura_music_studio.aura_sec_approval_write_guard import AuraSecApprovalWriteGuardMiddleware
 
 
 USER = {
@@ -12,6 +13,11 @@ USER = {
     "display_name": "Approval Portal User",
     "status": "active",
     "plan_id": "free",
+}
+
+SAME_ORIGIN_HEADERS = {
+    "Origin": "http://testserver",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 
@@ -87,6 +93,7 @@ def _client(monkeypatch, *, signed_in=True):
     monkeypatch.setattr(portal, "approvals", approvals)
     app = FastAPI()
     app.include_router(portal.router)
+    app.add_middleware(AuraSecApprovalWriteGuardMiddleware)
     client = TestClient(app)
     client.cookies.set(portal.MEMBER_COOKIE, "portal-session-token")
     return client, approvals
@@ -104,7 +111,10 @@ def test_opening_review_page_is_read_only_and_creates_no_challenge(monkeypatch):
 
 def test_starting_normal_approval_creates_one_time_challenge_without_password_field(monkeypatch):
     client, approvals = _client(monkeypatch)
-    response = client.post("/aura-sec/approval/normal-action/start")
+    response = client.post(
+        "/aura-sec/approval/normal-action/start",
+        headers=SAME_ORIGIN_HEADERS,
+    )
     assert response.status_code == 200
     assert approvals.challenge_calls == [
         (USER["id"], "normal-action", "portal-session-token")
@@ -116,7 +126,10 @@ def test_starting_normal_approval_creates_one_time_challenge_without_password_fi
 
 def test_high_risk_approval_start_requires_password_field(monkeypatch):
     client, _approvals = _client(monkeypatch)
-    response = client.post("/aura-sec/approval/wipe-action/start")
+    response = client.post(
+        "/aura-sec/approval/wipe-action/start",
+        headers=SAME_ORIGIN_HEADERS,
+    )
     assert response.status_code == 200
     assert "Strong Reauth Required" in response.text
     assert "Re-enter your account password" in response.text
@@ -127,6 +140,7 @@ def test_confirm_approval_records_only_approval_not_execution(monkeypatch):
     client, approvals = _client(monkeypatch)
     response = client.post(
         "/aura-sec/approval/wipe-action/confirm",
+        headers=SAME_ORIGIN_HEADERS,
         data={
             "approval_token": "approval-token-wipe-action-123456",
             "password": "member-password-value",
@@ -144,6 +158,17 @@ def test_confirm_approval_records_only_approval_not_execution(monkeypatch):
     ]
     assert "Action Approved" in response.text
     assert "No command was issued by this form" in response.text
+
+
+def test_cross_origin_portal_post_cannot_mint_approval_challenge(monkeypatch):
+    client, approvals = _client(monkeypatch)
+    response = client.post(
+        "/aura-sec/approval/normal-action/start",
+        headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"},
+    )
+    assert response.status_code == 403
+    assert response.json()["command_issued"] is False
+    assert approvals.challenge_calls == []
 
 
 def test_approval_pages_require_login(monkeypatch):
