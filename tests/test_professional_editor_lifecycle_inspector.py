@@ -21,6 +21,30 @@ def test_lifecycle_script_targets_reversible_graph_routes_and_escapes_names():
     assert "document.body.dataset.pro==='true'" in script
 
 
+def test_lifecycle_script_exposes_reversible_professional_blend_modes():
+    script = PRO_EDITOR_LIFECYCLE_JS
+
+    assert "id=\"proBlendMode\"" in script
+    assert "id=\"proApplyBlend\"" in script
+    assert "changes:{blend_mode}" in script
+    assert "/items/${encodeURIComponent(item.id)}" in script
+    assert "Professional blend modes require Pro." in script
+    assert "stored in the reversible edit graph" in script
+    assert "Blend mode saved" in script
+    for mode in (
+        "normal",
+        "multiply",
+        "screen",
+        "overlay",
+        "soft_light",
+        "hard_light",
+        "darken",
+        "lighten",
+        "difference",
+    ):
+        assert f'value="{mode}"' in script
+
+
 def test_lifecycle_router_exposes_secondary_script_once():
     paths = [getattr(route, "path", None) for route in router.routes]
     assert paths.count("/creative/editor-pro-lifecycle-controls.js") == 1
