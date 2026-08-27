@@ -3,9 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 
-from aura_music_studio.creative_version_autopromotion import router as creative_overlay_router
 from aura_music_studio.professional_editor import ProfessionalEditorStore
 from aura_music_studio.professional_editor_api import router as professional_editor_router
 
@@ -109,16 +107,11 @@ def test_locked_tracks_fail_closed_and_invalid_crop_is_rejected(tmp_path: Path):
         store.patch_item(item.id, {"crop": {"left": 0.6, "right": 0.4}})
 
 
-def test_professional_editor_routes_are_mounted_through_existing_overlay():
-    editor_paths = {route.path for route in professional_editor_router.routes if hasattr(route, "path")}
+def test_professional_editor_routes_are_mounted_in_production_app():
+    from app import app as production_app
 
-    # Validate the overlay at the same boundary FastAPI uses in production. The Command Center's
-    # compatibility router can retain nested _IncludedRouter objects internally, so inspecting
-    # creative_overlay_router.routes directly is an implementation-detail assertion rather than a
-    # proof that the endpoints are actually mounted and callable.
-    app = FastAPI()
-    app.include_router(creative_overlay_router)
-    overlay_paths = {route.path for route in app.routes if hasattr(route, "path")}
+    editor_paths = {route.path for route in professional_editor_router.routes if hasattr(route, "path")}
+    production_paths = {route.path for route in production_app.routes if hasattr(route, "path")}
 
     expected = {
         "/creative/projects/{project_name}/editor/initialize",
@@ -127,4 +120,4 @@ def test_professional_editor_routes_are_mounted_through_existing_overlay():
         "/creative/projects/{project_name}/editor/redo",
     }
     assert expected <= editor_paths
-    assert expected <= overlay_paths
+    assert expected <= production_paths
