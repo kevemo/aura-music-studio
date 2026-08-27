@@ -59,6 +59,21 @@ def test_shell_injects_theme_identity_and_share_metadata_once():
     assert again == current
 
 
+def test_shell_appends_command_center_class_to_existing_body_classes_once():
+    html = '<!doctype html><html><head></head><body class="workspace compact"><main>Hi</main></body></html>'
+    current = apply_visual_shell(html, _request("/workspace"))
+    assert 'class="workspace compact esp-command-center-shell"' in current
+    assert current.count("esp-command-center-shell") == 2  # head marker + body class
+    assert apply_visual_shell(current, _request("/workspace")) == current
+
+
+def test_shell_handles_body_attributes_without_existing_class():
+    html = "<!doctype html><html><head></head><body data-view='creator'><main>Hi</main></body></html>"
+    current = apply_visual_shell(html, _request("/creator"))
+    assert "<body class='esp-command-center-shell' data-view='creator'>" in current
+    assert apply_visual_shell(current, _request("/creator")) == current
+
+
 def test_specific_legacy_presents_phrase_rewrites_cleanly():
     old = "Elevate Souls Productions Presents: The Live Sound Studio"
     current = rebrand_text(old)
