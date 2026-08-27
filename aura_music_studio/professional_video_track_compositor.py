@@ -40,14 +40,23 @@ def _append_full_frame_blend(
     out: str,
     suffix: str,
 ) -> None:
-    """Blend one already-positioned full-frame RGBA layer onto another using top alpha."""
+    """Blend one positioned full-frame RGBA layer onto another without corrupting transparency.
+
+    A blend mode is meaningful only where both the backdrop and the top layer have coverage. The
+    overlap mask therefore multiplies base alpha by top alpha. Transparent backdrop pixels keep
+    the normal composite, matching professional image-editor semantics for the bottommost layer.
+    """
     blend_mode = _ffmpeg_blend_mode(mode)
     if blend_mode == "normal":
         filters.append(f"[{base}][{top}]overlay=0:0:eof_action=pass,format=rgba[{out}]")
         return
 
-    filters.append(f"[{base}]split=2[{suffix}basenormal][{suffix}baseblend]")
-    filters.append(f"[{top}]split=3[{suffix}topnormal][{suffix}topblend][{suffix}topmasksrc]")
+    filters.append(
+        f"[{base}]split=3[{suffix}basenormal][{suffix}baseblend][{suffix}basealphasrc]"
+    )
+    filters.append(
+        f"[{top}]split=3[{suffix}topnormal][{suffix}topblend][{suffix}topalphasrc]"
+    )
     filters.append(
         f"[{suffix}basenormal][{suffix}topnormal]overlay=0:0:eof_action=pass,format=gbrp[{suffix}normal]"
     )
@@ -56,7 +65,11 @@ def _append_full_frame_blend(
     filters.append(
         f"[{suffix}blendbase][{suffix}blendtop]blend=all_mode={blend_mode}[{suffix}blended]"
     )
-    filters.append(f"[{suffix}topmasksrc]alphaextract[{suffix}blendmask]")
+    filters.append(f"[{suffix}basealphasrc]alphaextract[{suffix}basealpha]")
+    filters.append(f"[{suffix}topalphasrc]alphaextract[{suffix}topalpha]")
+    filters.append(
+        f"[{suffix}basealpha][{suffix}topalpha]blend=all_mode=multiply[{suffix}blendmask]"
+    )
     filters.append(
         f"[{suffix}normal][{suffix}blended][{suffix}blendmask]maskedmerge,format=rgba[{out}]"
     )
@@ -122,7 +135,6 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
         work_dir = self.project_dir / "work" / "editor_video_tracks" / uuid4().hex
         work_dir.mkdir(parents=True, exist_ok=True)
 
-        # Preserve authored sequence track order and each track's item order.
         visual_tracks: list[tuple[dict, list[tuple[dict, Path, str]]]] = []
         audio: list[tuple[dict, Path]] = []
         source_refs: list[str] = []
@@ -198,7 +210,6 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                 for item, _source, kind in entries:
                     layer_index += 1
                     input_index = input_indexes[item["id"]]
-                    transform = item.get("transform") or {}
                     crop = item.get("crop") or {}
                     colour = item.get("color") or {}
                     left, top = _finite(crop.get("left"), 0.0), _finite(crop.get("top"), 0.0)
@@ -245,7 +256,6 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                             "ow='hypot(iw,ih)':oh='hypot(iw,ih)',"
                         )
 
-                    # Track opacity belongs to the completed group, not every overlapping item.
                     item_opacity = max(0.0, min(1.0, _finite(item.get("opacity"), 1.0)))
                     chain += f"colorchannelmixer=aa={self._ff(item_opacity)}[layer{layer_index}]"
                     filters.append(chain)
