@@ -120,3 +120,6 @@ def sync_outputs_with_safe_version_promotion(project_name: str, directive_id: st
         else "Outputs imported. CURRENT was not changed automatically because manual selection is safer for this result set."
     )
     return response
+
+
+__all__ = ["router", "auto_promote_single_target_revision"]
