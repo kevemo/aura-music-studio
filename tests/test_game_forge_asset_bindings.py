@@ -87,10 +87,7 @@ def test_explicit_bindings_live_in_world_dna_and_change_integrity(monkeypatch, t
             material_slot="base_color",
         ),
     )
-    bind_game_asset(
-        game,
-        BindGameAssetRequest(asset_id=soundtrack.id, target="soundtrack"),
-    )
+    bind_game_asset(game, BindGameAssetRequest(asset_id=soundtrack.id, target="soundtrack"))
 
     world = load_world(game.id)
     ground = next(row for row in world.entities if row.id == "ground")
@@ -114,19 +111,9 @@ def test_binding_type_safety_rejects_audio_as_texture_and_image_as_cutscene(monk
     image = _asset(game, kind="image", suffix=".webp", role="texture", payload=b"image")
 
     with pytest.raises(ValueError, match="requires an image"):
-        bind_game_asset(
-            game,
-            BindGameAssetRequest(
-                asset_id=audio.id,
-                target="entity_texture",
-                entity_id="ground",
-            ),
-        )
+        bind_game_asset(game, BindGameAssetRequest(asset_id=audio.id, target="entity_texture", entity_id="ground"))
     with pytest.raises(ValueError, match="requires a video"):
-        bind_game_asset(
-            game,
-            BindGameAssetRequest(asset_id=image.id, target="cutscene"),
-        )
+        bind_game_asset(game, BindGameAssetRequest(asset_id=image.id, target="cutscene"))
 
 
 def test_aura2d_prefers_explicit_background_soundtrack_cutscene_and_player_visual(monkeypatch, tmp_path):
@@ -164,21 +151,15 @@ def test_aura3d_uses_explicit_per_entity_texture_bindings(monkeypatch, tmp_path)
     ground = _asset(game, kind="image", suffix=".png", role="generic", payload=b"ground")
     player = _asset(game, kind="image", suffix=".webp", role="generic", payload=b"player")
 
-    bind_game_asset(
-        game,
-        BindGameAssetRequest(asset_id=ground.id, target="entity_texture", entity_id="ground", material_slot="base_color"),
-    )
-    bind_game_asset(
-        game,
-        BindGameAssetRequest(asset_id=player.id, target="entity_visual", entity_id="player"),
-    )
+    bind_game_asset(game, BindGameAssetRequest(asset_id=ground.id, target="entity_texture", entity_id="ground", material_slot="base_color"))
+    bind_game_asset(game, BindGameAssetRequest(asset_id=player.id, target="entity_visual", entity_id="player"))
     world = load_world(game.id)
     html = render_aura3d_playtest(game, world, csp=PLAYTEST_CSP)
 
     assert f"media/{ground.imported_filename}" in html
     assert f"media/{player.imported_filename}" in html
-    assert "explicitAssetForEntity" in html
-    assert "binding.textures?.base_color||binding.visual" in html
+    assert "materialAsset(e,slot)" in html
+    assert "b.textures?.base_color||b.visual" in html
     assert "textureStates=new Map()" in html
     assert '"explicit_world_dna_bindings": true' in html
     assert "gl.enable(gl.DEPTH_TEST)" in html
