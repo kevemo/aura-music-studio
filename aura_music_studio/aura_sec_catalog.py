@@ -8,7 +8,7 @@ from decimal import Decimal
 
 _SKU_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
-_RESERVED_CREATIVE_PLAN_IDS = {"free", "basic", "pro", "ultimate", "ultimate-pro", "ultimate_pro"}
+_RESERVED_CREATIVE_PLAN_IDS = {"free", "base", "basic", "pro", "ultimate", "ultimate-pro", "ultimate_pro"}
 
 
 @dataclass(frozen=True)
