@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_protocol import ActionRisk, ActionType, EXPECTED_RISK, ProtectionState
 
 
 def _now() -> datetime:
@@ -36,10 +37,9 @@ class SecurityLicence:
 class AuraSecStore:
     """Persistent control-plane state for the separate Aura Sec product.
 
-    This store intentionally does not infer a security entitlement from a Creative
-    Free/Basic/Pro plan. Purchase verification, native device attestation and signed
-    heartbeat verification happen in trusted services before their verified result is
-    written here.
+    Creative Free/Basic/Pro membership never implies Aura Sec entitlement. Billing
+    verification, device attestation and cryptographic heartbeat verification happen
+    in trusted protocol/service layers before their verified result is persisted here.
     """
 
     def __init__(self, accounts: AccountStore | None = None):
@@ -138,10 +138,8 @@ class AuraSecStore:
 
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_devices_user_status
                 ON aura_sec_devices(user_id, status);
-
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_incidents_user_status
                 ON aura_sec_incidents(user_id, status, created_at);
-
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_actions_device_status
                 ON aura_sec_actions(device_id, status, requested_at);
                 """
@@ -186,11 +184,11 @@ class AuraSecStore:
         period_days: int,
         verified_by: str,
     ) -> dict:
-        """Record a purchase only after a trusted billing/owner service verified it.
+        """Persist a purchase only after a trusted billing service verified it.
 
-        This function is intentionally not exposed as a member web route. The caller must
-        validate the configured SKU, amount/currency and payment-provider evidence before
-        calling it. Aura Sec has no commercial SKU configured in the foundation release.
+        This is intentionally not a member-facing route. The caller must validate the
+        configured SKU, amount/currency and provider evidence first. No production Aura
+        Sec SKU or price exists in this foundation release.
         """
         if not self.accounts.get_user(user_id):
             raise ValueError("User not found")
@@ -258,7 +256,7 @@ class AuraSecStore:
         architecture: str,
         public_key_fingerprint: str,
     ) -> dict:
-        """Persist an enrolment after the enrolment service verifies device key/attestation."""
+        """Persist an enrolment after device key/attestation verification."""
         licence = self.licence(user_id)
         if licence.get("status") != "active":
             raise PermissionError("Active Aura Sec licence required")
@@ -311,15 +309,18 @@ class AuraSecStore:
         report_digest: str,
         protection_state: str,
     ) -> dict:
-        """Accept heartbeat state only after device-signature verification by the protocol layer."""
+        """Persist heartbeat state only after the protocol layer verifies its signature."""
         if not signature_verified:
             raise PermissionError("Unverified Aura Sec heartbeat rejected")
-        allowed_states = {"healthy", "degraded", "attention_required", "isolated", "updating"}
-        if protection_state not in allowed_states:
-            raise ValueError("Invalid protection state")
+        try:
+            state = ProtectionState(protection_state)
+        except ValueError as exc:
+            raise ValueError("Invalid protection state") from exc
         if len((report_digest or "").strip()) < 32:
             raise ValueError("Signed report digest is required")
-        self.get_device(user_id, device_id)
+        device = self.get_device(user_id, device_id)
+        if device.get("status") == "revoked" or device.get("revoked_at"):
+            raise PermissionError("Revoked Aura Sec device cannot report protection state")
         with self._connect() as con:
             con.execute(
                 """UPDATE aura_sec_devices SET agent_version=?,last_policy_version=?,last_report_digest=?,
@@ -329,7 +330,7 @@ class AuraSecStore:
                     (agent_version or "").strip()[:80],
                     (policy_version or "").strip()[:80],
                     report_digest.strip().lower()[:256],
-                    protection_state,
+                    state.value,
                     _iso(),
                     user_id,
                     device_id,
@@ -414,15 +415,26 @@ class AuraSecStore:
         incident_id: str | None = None,
         details: dict | None = None,
     ) -> dict:
-        self.get_device(user_id, device_id)
+        device = self.get_device(user_id, device_id)
+        if device.get("status") == "revoked":
+            raise PermissionError("Cannot propose actions for a revoked Aura Sec device")
         if incident_id:
             self.get_incident(user_id, incident_id)
-        risk = (risk_class or "").strip().lower()
-        if risk not in {"read_only", "low_risk", "confirmation_required", "strong_reauth_required"}:
-            raise ValueError("Invalid Aura Sec action risk class")
-        action = (action_type or "").strip()[:120]
-        if not action:
-            raise ValueError("Action type is required")
+
+        try:
+            action = ActionType((action_type or "").strip())
+        except ValueError as exc:
+            raise ValueError("Unsupported Aura Sec action type") from exc
+        try:
+            supplied_risk = ActionRisk((risk_class or "").strip().lower())
+        except ValueError as exc:
+            raise ValueError("Invalid Aura Sec action risk class") from exc
+        expected_risk = EXPECTED_RISK[action]
+        if supplied_risk is not expected_risk:
+            raise ValueError(
+                f"{action.value} requires risk class {expected_risk.value}; caller supplied {supplied_risk.value}"
+            )
+
         action_id = uuid4().hex
         with self._connect() as con:
             con.execute(
@@ -434,8 +446,8 @@ class AuraSecStore:
                     incident_id,
                     user_id,
                     device_id,
-                    action,
-                    risk,
+                    action.value,
+                    expected_risk.value,
                     json.dumps(details or {}, separators=(",", ":"), ensure_ascii=False),
                     _iso(),
                 ),
@@ -446,7 +458,7 @@ class AuraSecStore:
         action = self.get_action(user_id, action_id)
         if action["status"] != "proposed":
             raise ValueError("Only proposed actions can be approved")
-        if action["risk_class"] == "strong_reauth_required" and not strong_reauth_verified:
+        if action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value and not strong_reauth_verified:
             raise PermissionError("Strong re-authentication is required for this action")
         with self._connect() as con:
             con.execute(
