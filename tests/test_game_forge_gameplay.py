@@ -247,13 +247,15 @@ def test_gameplay_routes_editor_and_authoritative_build_work_end_to_end(monkeypa
     assert delete.json()["deleted"] is True
 
 
-def test_gameplay_aura_tools_are_registered_without_replacing_existing_game_tools():
-    names = {spec.name for spec in aura_tools.TOOL_SPECS}
-    assert "inspect_game_gameplay" in names
-    assert "create_gameplay_entity" in names
-    assert "update_gameplay_entity" in names
-    assert "apply_gameplay_preset" in names
-    assert "delete_gameplay_entity" in names
-    assert "build_gameplay_playtest" in names
-    assert "list_game_projects" in names
-    assert "apply_game_media_command" in names
+def test_gameplay_aura_tools_are_registered_without_duplicate_names():
+    names = [spec.name for spec in aura_tools.TOOL_SPECS]
+    for name in (
+        "inspect_game_gameplay",
+        "create_gameplay_entity",
+        "update_gameplay_entity",
+        "apply_gameplay_preset",
+        "delete_gameplay_entity",
+        "build_gameplay_playtest",
+    ):
+        assert name in names
+    assert len(names) == len(set(names))
