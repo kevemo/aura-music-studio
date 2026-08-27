@@ -9,6 +9,7 @@ from .creative_project_api import sync_creative_outputs as base_sync_creative_ou
 from .daw_mixer_ui import daw_mixer_ui as base_daw_mixer_ui
 from .deep_daw_automation_api import router as deep_daw_automation_router
 from .deep_daw_automation_ui import enhance_daw_mixer_javascript
+from .esp_live_compliance import member_router as esp_live_compliance_router, owner_router as owner_esp_live_compliance_router
 from .global_compliance import router as global_compliance_router
 from .ip_rights import member_router as member_ip_rights_router, owner_router as owner_ip_rights_router
 from .owner_finance import router as owner_finance_router
@@ -34,6 +35,8 @@ router = APIRouter(tags=["Creative Version Promotion"])
 # application-entrypoint edit.
 router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
+router.include_router(esp_live_compliance_router)
+router.include_router(owner_esp_live_compliance_router)
 router.include_router(privacy_rights_router)
 router.include_router(privacy_case_management_router)
 router.include_router(privacy_consent_router)

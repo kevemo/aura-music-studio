@@ -22,7 +22,9 @@
       "feature/privacy-case-management": false,
       "feature/privacy-consent-controls": false,
       "feature/safety-reports-appeals": false,
-      "feature/ip-rights-notice-review": false
+      "feature/ip-rights-notice-review": false,
+      "feature/esp-live-compliance-training": false,
+      "feature/esp-live-compliance-training-v2": false
     }
   },
   "functions": {
