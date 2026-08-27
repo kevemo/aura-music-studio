@@ -81,7 +81,8 @@ def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
     assert response["frame_time"] is None
 
 
-def test_render_api_no_longer_instantiates_legacy_unified_video_compositor():
+def test_render_api_no_longer_imports_legacy_unified_video_compositor():
     source = Path(api.__file__).read_text(encoding="utf-8")
     assert "GroupedUnifiedAdvancedVideoCompositor(_project(project_name))" in source
-    assert "UnifiedAdvancedVideoCompositor(_project(project_name))" not in source
+    assert "from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor" not in source
+    assert not hasattr(api, "UnifiedAdvancedVideoCompositor")
