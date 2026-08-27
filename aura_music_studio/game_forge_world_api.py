@@ -8,6 +8,7 @@ from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
 from .game_forge_aura_commands import router as game_aura_commands_router
+from .game_forge_cinematics import router as game_cinematics_router
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -23,11 +24,13 @@ from .game_forge_world import (
 from .plans import GAME_CREATE, GAME_PLAYTEST
 
 router = APIRouter(tags=["Aura Game World"])
-# Binding routes are deliberately composed first so binding-aware asset deletion wins over the
-# lower-level snapshot deletion route and clears every World DNA reference atomically.
+# Binding and cinematic routes are composed inside the existing Game Forge world router so no
+# application-level route surgery is needed. Binding-aware deletion still precedes the lower-level
+# snapshot route and clears World DNA references atomically.
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
 router.include_router(game_aura_commands_router)
+router.include_router(game_cinematics_router)
 
 
 def _member(request: Request):
@@ -125,8 +128,8 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
 
 
 # These two routes deliberately precede the foundation API equivalents in app.py. They bind
-# approval/publishing to Game DNA + Aura World DNA + imported Game Forge asset snapshots,
-# not just the high-level game questionnaire.
+# approval/publishing to Game DNA + Aura World DNA + imported Game Forge asset/model snapshots +
+# cinematic/VFX DNA, not just the high-level game questionnaire.
 @router.post("/api/game-forge/games/{game_id}/scan")
 def scan_world_integrity(game_id: str, request: Request):
     _creator(request)
@@ -176,6 +179,7 @@ def publish_world_integrity(game_id: str, request: Request):
         "rating_note": game.rating_assessment.note,
         "integrity_bound_to_world": True,
         "integrity_bound_to_assets": True,
+        "integrity_bound_to_cinematics": True,
         "verified_media_snapshot_count": len(public_assets),
         "external_media_urls_included": False,
     }
