@@ -39,6 +39,15 @@ def test_browser_approval_post_allows_exact_same_origin():
     assert response.status_code == 200
 
 
+def test_default_port_serialization_is_normalized():
+    client = _client()
+    response = client.post(
+        "/aura-sec/approval/action-1/start",
+        headers={"Origin": "http://testserver:80", "Sec-Fetch-Site": "same-origin"},
+    )
+    assert response.status_code == 200
+
+
 def test_browser_approval_post_rejects_cross_origin_and_same_site_subdomain():
     client = _client()
     assert client.post(
@@ -49,6 +58,16 @@ def test_browser_approval_post_rejects_cross_origin_and_same_site_subdomain():
         "/aura-sec/approval/action-1/start",
         headers={"Origin": "http://other.testserver", "Sec-Fetch-Site": "same-site"},
     ).status_code == 403
+
+
+def test_same_host_cross_scheme_is_not_same_origin():
+    client = _client()
+    response = client.post(
+        "/aura-sec/approval/action-1/start",
+        headers={"Origin": "https://testserver", "Sec-Fetch-Site": "same-origin"},
+    )
+    assert response.status_code == 403
+    assert response.json()["command_issued"] is False
 
 
 def test_referer_is_accepted_as_compatibility_fallback():
