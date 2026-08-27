@@ -18,7 +18,7 @@ USER = {
 }
 
 
-def _client(monkeypatch, *, licence_status="not_purchased", devices=None):
+def _client(monkeypatch, *, licence_status="not_purchased", devices=None, findings=None):
     monkeypatch.setattr(member_api.accounts, "resolve_session", lambda _token: USER)
     monkeypatch.setattr(
         member_api.security,
@@ -33,6 +33,11 @@ def _client(monkeypatch, *, licence_status="not_purchased", devices=None):
         },
     )
     monkeypatch.setattr(member_api.security, "list_devices", lambda _user_id: list(devices or []))
+    monkeypatch.setattr(
+        member_api.vulnerabilities,
+        "list",
+        lambda _user_id, status="open", limit=250: list(findings or []),
+    )
     app = FastAPI()
     app.include_router(member_api.router)
     return TestClient(app)
@@ -78,6 +83,34 @@ def test_active_licence_plus_recent_healthy_device_reports_verified_health(monke
     assert data["health"]["overall"] == "healthy"
     assert data["at_least_one_device_currently_verified_healthy"] is True
     assert data["all_managed_devices_currently_verified_healthy"] is True
+
+
+def test_verified_vulnerability_list_reports_only_persisted_native_findings(monkeypatch):
+    findings = [
+        {
+            "id": "finding-1",
+            "priority": "emergency",
+            "priority_score": 100,
+            "cisa_kev": True,
+            "product": "Example Service",
+            "installed_version": "1.0",
+        },
+        {
+            "id": "finding-2",
+            "priority": "high",
+            "priority_score": 70,
+            "cisa_kev": False,
+            "product": "Example Browser",
+            "installed_version": "2.0",
+        },
+    ]
+    response = _client(monkeypatch, findings=findings).get("/api/aura-sec/member/vulnerabilities")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 2
+    assert data["critical_or_emergency"] == 1
+    assert data["known_exploited"] == 1
+    assert "verified native inventory" in data["truth"]
 
 
 def test_vulnerability_priority_endpoint_is_advisory_not_auto_patch(monkeypatch):
