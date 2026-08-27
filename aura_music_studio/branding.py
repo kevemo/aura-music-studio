@@ -14,7 +14,8 @@ PLATFORM_DESCRIPTOR = "Music, Video, Image, Games, Social & Creator Intelligence
 AI_PRODUCER_NAME = "Aura"
 AI_SYSTEM_NAME = "Aura AI"
 COMPANY_NAME = "Elevate Souls Productions"
-BRAND_ASSET_PATH = "/static/esp-content-creation-command-center-brand.webp"
+BRAND_ASSET_PATH = "/brand/esp-logo.webp"
+BRAND_ASSET_FILENAME = "esp-content-creation-command-center-brand.webp"
 LEGACY_PRODUCT_NAMES = (
     "Pulsar-Frequency House",
     "Pulsar-Frequency",
