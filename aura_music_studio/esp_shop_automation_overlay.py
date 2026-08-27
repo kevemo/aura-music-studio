@@ -23,7 +23,7 @@ def _store(request: Request):
 base._store = _store
 
 # Connection status is provider-verified state. The base module keeps the store method for a
-# future OAuth callback/worker adapter, but the member-facing router must not let a creator
+# provider callback/worker adapter, but the member-facing router must not let a creator
 # self-assert that an external provider is connected.
 _PROVIDER_STATUS_PATH = "/command-center/api/shop-automation/connections/{connection_id}"
 base.router.routes[:] = [
@@ -34,6 +34,12 @@ base.router.routes[:] = [
     )
 ]
 
+# Import only after the canonical ESP store and member-facing route boundary are installed.
+# The provider runtime reuses the exact same Shop state, approval queue and safety policy.
+from . import esp_shop_provider_runtime as runtime
+
+runtime.configure_runtime_db(esp.db_path)
+base.router.include_router(runtime.router)
 router = base.router
 
 
