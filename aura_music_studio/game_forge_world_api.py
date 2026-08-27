@@ -7,6 +7,7 @@ from .game_forge_asset_bindings import router as game_asset_bindings_router
 from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
+from .game_forge_aura_commands import router as game_aura_commands_router
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -26,6 +27,7 @@ router = APIRouter(tags=["Aura Game World"])
 # lower-level snapshot deletion route and clears every World DNA reference atomically.
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
+router.include_router(game_aura_commands_router)
 
 
 def _member(request: Request):
