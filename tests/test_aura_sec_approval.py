@@ -117,7 +117,7 @@ def test_expired_challenge_fails_closed(tmp_path):
         )
 
 
-def test_remote_wipe_requires_password_reauthentication(tmp_path):
+def test_remote_wipe_requires_password_reauthentication_before_passkey_enrolment(tmp_path):
     _accounts, security, gateway, user_id, session, action = _setup(
         tmp_path,
         action_type=ActionType.REMOTE_WIPE,
@@ -125,6 +125,8 @@ def test_remote_wipe_requires_password_reauthentication(tmp_path):
     )
     challenge = gateway.create_challenge(user_id, action["id"], session_token=session)
     assert challenge["strong_reauthentication_required"] is True
+    assert challenge["passkey_enrolled"] is False
+    assert challenge["passkey_required"] is False
 
     with pytest.raises(PermissionError, match="Password re-authentication"):
         gateway.approve(
@@ -150,7 +152,70 @@ def test_remote_wipe_requires_password_reauthentication(tmp_path):
         password=PASSWORD,
     )
     assert result["strong_reauthentication_verified"] is True
+    assert result["strong_reauthentication_method"] == "password_bootstrap"
     assert result["command_issued"] is False
+    assert security.get_action(user_id, action["id"])["status"] == "approved"
+
+
+def test_enrolled_passkey_blocks_password_downgrade_for_high_risk_action(tmp_path):
+    _accounts, security, gateway, user_id, session, action = _setup(
+        tmp_path,
+        action_type=ActionType.REMOTE_WIPE,
+        risk=ActionRisk.STRONG_REAUTH_REQUIRED,
+    )
+
+    class FakePasskeys:
+        def __init__(self):
+            self.consumed = []
+
+        def has_active_credential(self, _user_id):
+            return True
+
+        def consume_action_evidence(
+            self,
+            evidence_user_id,
+            evidence_action_id,
+            *,
+            session_token,
+            evidence_id,
+            now=None,
+        ):
+            self.consumed.append(
+                (evidence_user_id, evidence_action_id, session_token, evidence_id, now)
+            )
+            return {"verified": True, "method": "webauthn"}
+
+    fake = FakePasskeys()
+    gateway.passkeys = fake
+    challenge = gateway.create_challenge(user_id, action["id"], session_token=session)
+    assert challenge["passkey_enrolled"] is True
+    assert challenge["passkey_required"] is True
+
+    with pytest.raises(PermissionError, match="password downgrade is not allowed"):
+        gateway.approve(
+            user_id,
+            action["id"],
+            session_token=session,
+            approval_token=challenge["approval_token"],
+            password=PASSWORD,
+        )
+
+    result = gateway.approve(
+        user_id,
+        action["id"],
+        session_token=session,
+        approval_token=challenge["approval_token"],
+        strong_reauth_evidence_id="verified-passkey-evidence",
+    )
+    assert result["approved"] is True
+    assert result["strong_reauthentication_method"] == "webauthn"
+    assert result["command_issued"] is False
+    assert fake.consumed[0][0:4] == (
+        user_id,
+        action["id"],
+        session,
+        "verified-passkey-evidence",
+    )
     assert security.get_action(user_id, action["id"])["status"] == "approved"
 
 
