@@ -234,7 +234,12 @@ class OwnerMFAService:
             raise ValueError("Owner MFA challenge is missing or expired")
         token_hash = _hash(token)
         timestamp = _now() if now is None else datetime.fromtimestamp(now, tz=timezone.utc)
+        error: str | None = None
+        verified_persona: str | None = None
 
+        # Do not raise application-level verification errors inside this context manager.
+        # sqlite3.Connection.__exit__ rolls back when an exception escapes; failed-attempt,
+        # expiry and replay state must commit before the caller receives the failure.
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
@@ -242,60 +247,71 @@ class OwnerMFAService:
                 (token_hash,),
             ).fetchone()
             if not row or row["consumed_at"]:
-                raise ValueError("Owner MFA challenge is missing or expired")
-            try:
-                expires = datetime.fromisoformat(row["expires_at"])
-            except (TypeError, ValueError) as exc:
-                raise ValueError("Owner MFA challenge is missing or expired") from exc
-            if expires <= timestamp:
-                con.execute(
-                    "UPDATE owner_mfa_challenges SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
-                    (_iso(timestamp), row["id"]),
-                )
-                raise ValueError("Owner MFA challenge is missing or expired")
-            if int(row["attempts"]) >= OWNER_MFA_MAX_ATTEMPTS:
-                raise ValueError("Owner MFA challenge is exhausted")
-            persona = str(row["persona"])
-            purpose = str(row["purpose"])
-            if purpose != expected_purpose or (expected_persona and persona != expected_persona):
-                raise ValueError("Owner MFA challenge does not match this action")
+                error = "Owner MFA challenge is missing or expired"
+            else:
+                try:
+                    expires = datetime.fromisoformat(row["expires_at"])
+                except (TypeError, ValueError):
+                    expires = None
+                    error = "Owner MFA challenge is missing or expired"
 
-            accepted_counter = self._matching_counter(persona, (code or "").strip(), now=now)
-            if accepted_counter is None:
-                attempts = int(row["attempts"]) + 1
-                consumed = _iso(timestamp) if attempts >= OWNER_MFA_MAX_ATTEMPTS else None
-                con.execute(
-                    "UPDATE owner_mfa_challenges SET attempts=?,consumed_at=? WHERE id=?",
-                    (attempts, consumed, row["id"]),
-                )
-                raise ValueError("Incorrect owner verification code")
+                if error is None and (expires is None or expires <= timestamp):
+                    con.execute(
+                        "UPDATE owner_mfa_challenges SET consumed_at=? WHERE id=? AND consumed_at IS NULL",
+                        (_iso(timestamp), row["id"]),
+                    )
+                    error = "Owner MFA challenge is missing or expired"
+                elif error is None and int(row["attempts"]) >= OWNER_MFA_MAX_ATTEMPTS:
+                    error = "Owner MFA challenge is exhausted"
 
-            replay = con.execute(
-                "SELECT last_counter FROM owner_mfa_totp_replay WHERE persona=?",
-                (persona,),
-            ).fetchone()
-            if replay and accepted_counter <= int(replay["last_counter"]):
-                attempts = int(row["attempts"]) + 1
-                consumed = _iso(timestamp) if attempts >= OWNER_MFA_MAX_ATTEMPTS else None
-                con.execute(
-                    "UPDATE owner_mfa_challenges SET attempts=?,consumed_at=? WHERE id=?",
-                    (attempts, consumed, row["id"]),
-                )
-                raise ValueError("Owner verification code has already been used")
+                if error is None:
+                    persona = str(row["persona"])
+                    purpose = str(row["purpose"])
+                    if purpose != expected_purpose or (expected_persona and persona != expected_persona):
+                        error = "Owner MFA challenge does not match this action"
+                    else:
+                        accepted_counter = self._matching_counter(persona, (code or "").strip(), now=now)
+                        if accepted_counter is None:
+                            attempts = int(row["attempts"]) + 1
+                            consumed = _iso(timestamp) if attempts >= OWNER_MFA_MAX_ATTEMPTS else None
+                            con.execute(
+                                "UPDATE owner_mfa_challenges SET attempts=?,consumed_at=? WHERE id=?",
+                                (attempts, consumed, row["id"]),
+                            )
+                            error = "Incorrect owner verification code"
+                        else:
+                            replay = con.execute(
+                                "SELECT last_counter FROM owner_mfa_totp_replay WHERE persona=?",
+                                (persona,),
+                            ).fetchone()
+                            if replay and accepted_counter <= int(replay["last_counter"]):
+                                attempts = int(row["attempts"]) + 1
+                                consumed = _iso(timestamp) if attempts >= OWNER_MFA_MAX_ATTEMPTS else None
+                                con.execute(
+                                    "UPDATE owner_mfa_challenges SET attempts=?,consumed_at=? WHERE id=?",
+                                    (attempts, consumed, row["id"]),
+                                )
+                                error = "Owner verification code has already been used"
+                            else:
+                                con.execute(
+                                    """INSERT INTO owner_mfa_totp_replay(persona,last_counter,updated_at)
+                                       VALUES (?,?,?)
+                                       ON CONFLICT(persona) DO UPDATE SET
+                                         last_counter=excluded.last_counter,
+                                         updated_at=excluded.updated_at""",
+                                    (persona, accepted_counter, _iso(timestamp)),
+                                )
+                                con.execute(
+                                    "UPDATE owner_mfa_challenges SET consumed_at=? WHERE id=?",
+                                    (_iso(timestamp), row["id"]),
+                                )
+                                verified_persona = persona
 
-            con.execute(
-                """INSERT INTO owner_mfa_totp_replay(persona,last_counter,updated_at)
-                   VALUES (?,?,?)
-                   ON CONFLICT(persona) DO UPDATE SET
-                     last_counter=excluded.last_counter,
-                     updated_at=excluded.updated_at""",
-                (persona, accepted_counter, _iso(timestamp)),
-            )
-            con.execute(
-                "UPDATE owner_mfa_challenges SET consumed_at=? WHERE id=?",
-                (_iso(timestamp), row["id"]),
-            )
-        return persona
+        if error is not None:
+            raise ValueError(error)
+        if verified_persona is None:
+            raise ValueError("Owner MFA challenge is missing or expired")
+        return verified_persona
 
 
 _service: OwnerMFAService | None = None
