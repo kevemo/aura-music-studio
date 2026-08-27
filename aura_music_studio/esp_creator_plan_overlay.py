@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, Response
 from .esp_broadcast_tech import router as broadcast_tech_router
 from .esp_collaborations import router as collaborations_router
 from .esp_commercial_growth import router as commercial_growth_router
+from .esp_creator_live_show_planner import router as live_show_planner_router
 from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_incentives import router as incentives_router
@@ -13,6 +14,8 @@ from .esp_learning_library import router as learning_library_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_member_hub import router as member_hub_router
 from .esp_owner_focus import router as owner_focus_router
+from .esp_owner_operations_intelligence import router as owner_operations_intelligence_router
+from .esp_role_dashboard_switch import router as role_dashboard_router
 from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
@@ -24,8 +27,11 @@ router.include_router(incentives_router)
 router.include_router(collaborations_router)
 router.include_router(commercial_growth_router)
 router.include_router(shop_automation_router)
+router.include_router(role_dashboard_router)
+router.include_router(owner_operations_intelligence_router)
 router.include_router(owner_focus_router)
 router.include_router(creator_plan_router)
+router.include_router(live_show_planner_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(broadcast_tech_router)
@@ -45,6 +51,7 @@ def level_up_with_creator_plan(request: Request):
 
     progress_link = "<a class='btn' href='/command-center/progress'>Progress</a>"
     links = [
+        "<a class='btn primary' href='/command-center/dashboard'>Creator / Agent Dashboard</a>",
         "<a class='btn primary' href='/command-center/member-hub'>ESP Member Hub</a>",
         "<a class='btn' href='/command-center/library'>Academy &amp; Resources</a>",
         "<a class='btn' href='/command-center/incentives'>Incentives</a>",
@@ -53,6 +60,7 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn primary' href='/command-center/shop-automation'>Shop Automation</a>",
         "<a class='btn' href='/command-center/brands'>Brands</a>",
         "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>",
+        "<a class='btn primary' href='/command-center/show-planner'>LIVE Show Planner</a>",
         "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>",
         "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>",
         "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>",
