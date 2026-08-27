@@ -18,7 +18,8 @@
       "feature/owner-finance-dashboard-v2": false,
       "feature/global-compliance-i18n": false,
       "feature/privacy-rights-consent-v2": false,
-      "feature/privacy-rights-consent-v3": false
+      "feature/privacy-rights-consent-v3": false,
+      "feature/privacy-case-management": false
     }
   },
   "functions": {

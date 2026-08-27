@@ -11,6 +11,7 @@ from .deep_daw_automation_api import router as deep_daw_automation_router
 from .deep_daw_automation_ui import enhance_daw_mixer_javascript
 from .global_compliance import router as global_compliance_router
 from .owner_finance import router as owner_finance_router
+from .privacy_case_management import router as privacy_case_management_router
 from .privacy_rights import router as privacy_rights_router
 from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
@@ -22,7 +23,7 @@ from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
-# Commercial entitlements, compliance, privacy rights, Stripe billing, protected owner finance
+# Commercial entitlements, compliance/privacy workflows, Stripe billing, protected owner finance
 # reporting and the professional non-destructive editor are nested here deliberately because this
 # overlay router is already mounted by app.py before the underlying Creative handlers. Each
 # subsystem keeps its own membership/owner/role/security checks without another high-conflict
@@ -30,6 +31,7 @@ router = APIRouter(tags=["Creative Version Promotion"])
 router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
 router.include_router(privacy_rights_router)
+router.include_router(privacy_case_management_router)
 # Commerce receipt persistence owns the public webhook path and delegates first to the hardened
 # renewal preflight, which in turn delegates to the base idempotent Stripe processor. Starlette
 # dispatches the first matching route, so this ordering keeps access/credit mutation authoritative
