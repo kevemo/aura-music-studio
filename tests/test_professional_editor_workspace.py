@@ -37,7 +37,8 @@ def test_basic_workspace_is_real_editor_but_pro_controls_fail_closed():
     assert 'data-pro="false"' in html
     assert "Source media is never overwritten" in html
     assert "Final compositor/export rendering is not labelled complete here" in html
-    assert "/editor/undo" in html
+    assert "mutate('/undo')" in html
+    assert "/editor${s}" in html
     assert "/ripple-delete" in html
     assert "/split" in html
     assert "A/B editor branching requires Pro" in html
