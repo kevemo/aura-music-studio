@@ -14,7 +14,8 @@ PLATFORM_DESCRIPTOR = "Music, Video, Image, Voice, Creator Intelligence, Commerc
 AI_PRODUCER_NAME = "Aura"
 AI_SYSTEM_NAME = "Aura AI"
 COMPANY_NAME = "Elevate Souls Productions"
-BRAND_LOGO_PATH = "/static/elevate-souls-command-center-logo.svg"
+BRAND_LOGO_PATH = "/brand/esp-logo.webp"
+BRAND_LOGO_FILENAME = "esp-content-creation-command-center-brand.webp"
 
 # Historical public names remain valid only as compatibility aliases. They must not be
 # presented as the current product identity in new UI or documentation.
