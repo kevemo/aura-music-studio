@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
+from .branding import PRODUCT_FULL_NAME
+
 
 @dataclass(frozen=True)
 class Plan:
@@ -202,7 +204,7 @@ PLANS: dict[str, Plan] = {
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
             "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
-            "also play and test Game Forge builds that have passed Pulsar's public playtest safety/rating preflight. "
+            "also play and test Game Forge builds that have passed the platform's public playtest safety/rating preflight. "
             "Music/video downloads and game creation unlock on Basic."
         ),
         confirmed_songs_per_day=0,
@@ -233,8 +235,8 @@ PLANS: dict[str, Plan] = {
         monthly_price=Decimal("9.99"),
         currency="GBP",
         description=(
-            "£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
-            "unlimited full-track creation, plus the complete enabled Pulsar-Frequency House production stack: expanded "
+            f"£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
+            f"unlimited full-track creation, plus the complete enabled {PRODUCT_FULL_NAME} production stack: expanded "
             "instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
             "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
             "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
@@ -260,7 +262,7 @@ def get_plan(plan_id: str) -> Plan:
 def require_feature(plan_id: str, feature: str) -> None:
     plan = get_plan(plan_id)
     if not plan.has(feature):
-        raise PermissionError(f"{feature} requires a higher Pulsar-Frequency House membership tier")
+        raise PermissionError(f"{feature} requires a higher {PRODUCT_FULL_NAME} membership tier")
 
 
 def public_plans() -> list[dict]:
@@ -268,7 +270,7 @@ def public_plans() -> list[dict]:
 
 
 OWNERSHIP_NOTICE = (
-    "Pulsar-Frequency House and Elevate Souls Productions do not claim ownership of a member's original "
+    f"{PRODUCT_FULL_NAME} and Elevate Souls Productions do not claim ownership of a member's original "
     "inputs or eligible generated outputs. Rights in AI-assisted outputs remain subject to applicable law, "
     "the licences of underlying open models, and any third-party/source-material rights. Members must have "
     "the rights required for material they upload or ask the Studio to transform."
