@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from .game_forge_assets import router as game_assets_router
+from .game_forge_assets import snapshot_public_assets
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -137,8 +138,13 @@ def publish_world_integrity(game_id: str, request: Request):
     try:
         html = private_play_html(game)
         game.public_id = publish_snapshot(game, html)
+        public_assets = snapshot_public_assets(game.id, game.public_id)
     except FileNotFoundError as exc:
         raise HTTPException(409, "Private playtest build is unavailable") from exc
+    except (OSError, ValueError) as exc:
+        remove_public_snapshot(game)
+        game.public_id = None
+        raise HTTPException(409, f"Public media snapshot failed: {exc}") from exc
     game.status = "public_test"
     save_game(game)
     return {
@@ -150,4 +156,6 @@ def publish_world_integrity(game_id: str, request: Request):
         "rating_note": game.rating_assessment.note,
         "integrity_bound_to_world": True,
         "integrity_bound_to_assets": True,
+        "verified_media_snapshot_count": len(public_assets),
+        "external_media_urls_included": False,
     }
