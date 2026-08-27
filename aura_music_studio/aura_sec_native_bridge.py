@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import re
 import secrets
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -12,6 +15,10 @@ from .accounts import AccountStore
 from .aura_sec_action_parameters import validated_command_parameters
 from .aura_sec_command_store import AuraSecCommandStore
 from .aura_sec_store import AuraSecStore
+
+
+_HEX_256 = re.compile(r"^[0-9a-f]{64}$")
+_ALLOWED_KEY_ALGORITHMS = {"ed25519", "p256", "rsa-pss-sha256"}
 
 
 def _now() -> datetime:
@@ -27,7 +34,7 @@ def _hash_nonce(value: str) -> str:
 
 
 class NativeCommandPoll(BaseModel):
-    """Short-lived signed request from an enrolled Aura Sec native client."""
+    """Short-lived request whose canonical payload must be signed by the enrolled device."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -55,15 +62,43 @@ class NativeCommandPoll(BaseModel):
             raise ValueError("native poll validity window cannot exceed two minutes")
         return self
 
+    def signed_payload(self) -> bytes:
+        parts = (
+            str(self.schema_version),
+            self.device_id,
+            str(self.sequence),
+            self.issued_at.astimezone(timezone.utc).isoformat(),
+            self.expires_at.astimezone(timezone.utc).isoformat(),
+            self.agent_version,
+            self.policy_version,
+            self.session_nonce,
+        )
+        if any("\n" in part or "\r" in part for part in parts):
+            raise ValueError("Native poll canonical fields must not contain newlines")
+        return ("AURA-SEC-NATIVE-POLL-V1\n" + "\n".join(parts) + "\n").encode("utf-8")
+
+
+@dataclass(frozen=True)
+class VerifiedNativePollSignature:
+    """Evidence returned only by a trusted native-device signature verifier."""
+
+    public_key_fingerprint: str
+    verifier_id: str
+    key_algorithm: str
+    evidence_digest: str
+
+
+NativePollSignatureVerifier = Callable[[str, bytes, bytes], VerifiedNativePollSignature | None]
+
 
 class AuraSecNativeBridge:
-    """Trusted gateway between verified native sessions and the bounded command store.
+    """Trusted gateway between signed native sessions and the bounded command store.
 
-    This class is not mounted as a member/browser API. A transport/authentication layer
-    must verify the enrolled device signature before setting `signature_verified=True`.
-    Signed request sequence numbers are persisted so a captured old poll cannot be replayed
-    to obtain a second command. The bridge issues at most one previously-approved action per
-    verified poll and runs its parameters through the native parameter firewall first.
+    This class is not mounted as a member/browser API. It has no boolean signature bypass.
+    A trusted verifier adapter must validate the canonical poll payload against the enrolled
+    device identity. Replay state advances only after that proof succeeds. The bridge issues
+    at most one previously-approved action per verified poll and applies the strict parameter
+    firewall before a native command is created.
     """
 
     def __init__(
@@ -102,19 +137,92 @@ class AuraSecNativeBridge:
                 """
             )
 
+    def _device_key_fingerprint(self, user_id: str, device_id: str) -> str:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT public_key_fingerprint FROM aura_sec_devices WHERE user_id=? AND id=?",
+                (user_id, device_id),
+            ).fetchone()
+        if not row or not row["public_key_fingerprint"]:
+            raise PermissionError("Aura Sec enrolled device key identity is unavailable")
+        fingerprint = str(row["public_key_fingerprint"]).strip().lower()
+        if not _HEX_256.fullmatch(fingerprint):
+            raise PermissionError("Aura Sec enrolled device key fingerprint is invalid")
+        return fingerprint
+
+    def _validate_poll_context(
+        self,
+        user_id: str,
+        poll: NativeCommandPoll,
+        *,
+        now: datetime | None = None,
+    ) -> datetime:
+        current = (now or _now()).astimezone(timezone.utc)
+        if current < poll.issued_at or current >= poll.expires_at:
+            raise PermissionError("Aura Sec native poll is outside its validity window")
+        if self.security.licence(user_id).get("status") != "active":
+            raise PermissionError("Active Aura Sec licence required")
+        device = self.security.get_device(user_id, poll.device_id)
+        if device.get("status") == "revoked" or device.get("revoked_at"):
+            raise PermissionError("Revoked Aura Sec device cannot poll for commands")
+        return current
+
+    def _verify_poll_signature(
+        self,
+        user_id: str,
+        poll: NativeCommandPoll,
+        *,
+        signature_b64: str,
+        signature_verifier: NativePollSignatureVerifier | None,
+    ) -> VerifiedNativePollSignature:
+        if signature_verifier is None:
+            raise PermissionError("A trusted Aura Sec native poll signature verifier is required")
+        try:
+            signature = base64.b64decode((signature_b64 or "").strip(), validate=True)
+        except Exception as exc:
+            raise PermissionError("Aura Sec native poll signature is not valid base64") from exc
+        if not 32 <= len(signature) <= 1024:
+            raise PermissionError("Aura Sec native poll signature length is invalid")
+
+        fingerprint = self._device_key_fingerprint(user_id, poll.device_id)
+        payload = poll.signed_payload()
+        try:
+            verified = signature_verifier(fingerprint, payload, signature)
+        except Exception as exc:
+            raise PermissionError("Aura Sec native poll signature verification failed closed") from exc
+        if not isinstance(verified, VerifiedNativePollSignature):
+            raise PermissionError("Aura Sec native poll signature was not verified")
+
+        proof_fingerprint = (verified.public_key_fingerprint or "").strip().lower()
+        evidence_digest = (verified.evidence_digest or "").strip().lower()
+        verifier_id = (verified.verifier_id or "").strip()
+        key_algorithm = (verified.key_algorithm or "").strip().lower()
+        if not secrets.compare_digest(proof_fingerprint, fingerprint):
+            raise PermissionError("Verified native poll key does not match the enrolled device identity")
+        expected_digest = hashlib.sha256(payload).hexdigest()
+        if not _HEX_256.fullmatch(evidence_digest) or not secrets.compare_digest(evidence_digest, expected_digest):
+            raise PermissionError("Verified native poll evidence digest does not match the signed payload")
+        if not verifier_id or len(verifier_id) > 160:
+            raise PermissionError("Trusted native poll verifier identity is required")
+        if key_algorithm not in _ALLOWED_KEY_ALGORITHMS:
+            raise PermissionError("Unsupported Aura Sec native poll key algorithm")
+
+        return VerifiedNativePollSignature(
+            public_key_fingerprint=proof_fingerprint,
+            verifier_id=verifier_id,
+            key_algorithm=key_algorithm,
+            evidence_digest=evidence_digest,
+        )
+
     def _accept_verified_poll_sequence(
         self,
         user_id: str,
         poll: NativeCommandPoll,
         *,
-        signature_verified: bool,
-        now: datetime | None = None,
+        verified_at: datetime,
     ) -> None:
-        if not signature_verified:
-            raise PermissionError("Unverified Aura Sec native poll rejected")
-        current = (now or _now()).astimezone(timezone.utc)
-        if current < poll.issued_at or current >= poll.expires_at:
-            raise PermissionError("Aura Sec native poll is outside its validity window")
+        # Re-check authority immediately before mutating replay state to narrow races with
+        # licence expiry or device revocation that may occur during external verification.
         if self.security.licence(user_id).get("status") != "active":
             raise PermissionError("Active Aura Sec licence required")
         device = self.security.get_device(user_id, poll.device_id)
@@ -136,7 +244,7 @@ class AuraSecNativeBridge:
                     """UPDATE aura_sec_native_poll_state
                        SET last_sequence=?,last_nonce_hash=?,last_verified_at=?
                        WHERE user_id=? AND device_id=? AND last_sequence<?""",
-                    (poll.sequence, nonce_hash, _iso(current), user_id, poll.device_id, poll.sequence),
+                    (poll.sequence, nonce_hash, _iso(verified_at), user_id, poll.device_id, poll.sequence),
                 )
                 if updated.rowcount != 1:
                     raise PermissionError("Aura Sec native poll lost a sequence race")
@@ -146,7 +254,7 @@ class AuraSecNativeBridge:
                         """INSERT INTO aura_sec_native_poll_state
                            (device_id,user_id,last_sequence,last_nonce_hash,last_verified_at)
                            VALUES (?,?,?,?,?)""",
-                        (poll.device_id, user_id, poll.sequence, nonce_hash, _iso(current)),
+                        (poll.device_id, user_id, poll.sequence, nonce_hash, _iso(verified_at)),
                     )
                 except sqlite3.IntegrityError as exc:
                     raise PermissionError("Aura Sec native poll state changed concurrently") from exc
@@ -169,21 +277,30 @@ class AuraSecNativeBridge:
         user_id: str,
         poll: NativeCommandPoll,
         *,
-        signature_verified: bool,
+        signature_b64: str,
+        signature_verifier: NativePollSignatureVerifier | None,
         now: datetime | None = None,
     ) -> dict:
         """Return at most one freshly-issued bounded command to a verified native client."""
-        self._accept_verified_poll_sequence(
+        verified_at = self._validate_poll_context(user_id, poll, now=now)
+        verification = self._verify_poll_signature(
             user_id,
             poll,
-            signature_verified=signature_verified,
-            now=now,
+            signature_b64=signature_b64,
+            signature_verifier=signature_verifier,
         )
+        self._accept_verified_poll_sequence(user_id, poll, verified_at=verified_at)
+
         action_id = self._next_approved_action_id(user_id, poll.device_id)
         if not action_id:
             return {
                 "command": None,
                 "poll_sequence": poll.sequence,
+                "verification": {
+                    "verifier_id": verification.verifier_id,
+                    "key_algorithm": verification.key_algorithm,
+                    "evidence_digest": verification.evidence_digest,
+                },
                 "member_browser_route_exposed": False,
                 "truth": "No previously-approved bounded action is waiting for this verified device session.",
             }
@@ -201,12 +318,22 @@ class AuraSecNativeBridge:
         return {
             "command": command.model_dump(mode="json"),
             "poll_sequence": poll.sequence,
+            "verification": {
+                "verifier_id": verification.verifier_id,
+                "key_algorithm": verification.key_algorithm,
+                "evidence_digest": verification.evidence_digest,
+            },
             "member_browser_route_exposed": False,
             "truth": (
-                "The command was issued only after verified device-session proof, replay protection, prior action approval "
-                "and strict per-action parameter validation."
+                "The command was issued only after verifier-backed enrolled-device signature proof, replay protection, "
+                "prior action approval and strict per-action parameter validation."
             ),
         }
 
 
-__all__ = ["AuraSecNativeBridge", "NativeCommandPoll"]
+__all__ = [
+    "AuraSecNativeBridge",
+    "NativeCommandPoll",
+    "NativePollSignatureVerifier",
+    "VerifiedNativePollSignature",
+]
