@@ -52,6 +52,24 @@ class AuraSecReadModel:
             output.append(item)
         return output
 
+    def incident(self, user_id: str, incident_id: str) -> dict | None:
+        """Return one member-owned incident without exposing another user's record."""
+        with self._connect() as con:
+            row = con.execute(
+                """SELECT i.id,i.device_id,i.severity,i.status,i.title,i.detection_id,i.confidence,
+                          i.summary_json,i.created_at,i.updated_at,d.display_name,d.platform,d.architecture,
+                          d.agent_version,d.protection_state,d.last_seen_at
+                   FROM aura_sec_incidents i
+                   JOIN aura_sec_devices d ON d.id=i.device_id AND d.user_id=i.user_id
+                   WHERE i.user_id=? AND i.id=?""",
+                (user_id, incident_id),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["summary"] = self._json(item.pop("summary_json", None))
+        return item
+
     def actions(self, user_id: str, *, limit: int = 100) -> list[dict]:
         bounded = max(1, min(int(limit), 500))
         with self._connect() as con:
@@ -64,6 +82,28 @@ class AuraSecReadModel:
                    WHERE a.user_id=?
                    ORDER BY a.requested_at DESC LIMIT ?""",
                 (user_id, bounded),
+            ).fetchall()
+        output: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = self._json(item.pop("details_json", None))
+            output.append(item)
+        return output
+
+    def actions_for_incident(self, user_id: str, incident_id: str, *, limit: int = 100) -> list[dict]:
+        """Return response actions explicitly linked to one member-owned incident."""
+        bounded = max(1, min(int(limit), 500))
+        with self._connect() as con:
+            rows = con.execute(
+                """SELECT a.id,a.incident_id,a.device_id,a.action_type,a.risk_class,a.status,
+                          a.details_json,a.requested_at,a.approved_at,a.executed_at,a.verified_at,
+                          d.display_name,d.platform
+                   FROM aura_sec_actions a
+                   JOIN aura_sec_devices d ON d.id=a.device_id AND d.user_id=a.user_id
+                   JOIN aura_sec_incidents i ON i.id=a.incident_id AND i.user_id=a.user_id
+                   WHERE a.user_id=? AND a.incident_id=?
+                   ORDER BY a.requested_at ASC LIMIT ?""",
+                (user_id, incident_id, bounded),
             ).fetchall()
         output: list[dict] = []
         for row in rows:
