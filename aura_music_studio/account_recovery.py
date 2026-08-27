@@ -30,6 +30,7 @@ RESET_TOKEN_MINUTES = 30
 RESET_WINDOW_MINUTES = 60
 RESET_MAX_REQUESTS_PER_WINDOW = 3
 RESET_MIN_INTERVAL_SECONDS = 60
+SECURITY_RECORD_RETENTION_DAYS = 7
 
 router = APIRouter(tags=["Account Security"])
 
@@ -109,8 +110,13 @@ class AccountRecoveryStore:
     def _consume_request_slot(self, email: str) -> bool:
         identity = self._identity_hash(email)
         now = _utcnow()
+        retention_cutoff = _iso(now - timedelta(days=SECURITY_RECORD_RETENTION_DAYS))
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                "DELETE FROM auth_password_reset_throttle WHERE last_requested_at<?",
+                (retention_cutoff,),
+            )
             row = con.execute(
                 """SELECT request_count,window_started_at,last_requested_at
                    FROM auth_password_reset_throttle WHERE identity_hash=?""",
@@ -163,9 +169,14 @@ class AccountRecoveryStore:
         token_hash = _hash_secret(token)
         now = _utcnow()
         expires = now + timedelta(minutes=RESET_TOKEN_MINUTES)
+        retention_cutoff = _iso(now - timedelta(days=SECURITY_RECORD_RETENTION_DAYS))
 
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
+            con.execute(
+                "DELETE FROM password_reset_tokens WHERE expires_at<?",
+                (retention_cutoff,),
+            )
             con.execute(
                 """UPDATE password_reset_tokens SET invalidated_at=?
                    WHERE user_id=? AND used_at IS NULL AND invalidated_at IS NULL""",
@@ -217,10 +228,6 @@ class AccountRecoveryStore:
 
             expires = _parse_iso(row["expires_at"])
             if not expires or expires <= now:
-                con.execute(
-                    "UPDATE password_reset_tokens SET invalidated_at=? WHERE id=?",
-                    (_iso(now), row["id"]),
-                )
                 raise ValueError("Password reset link has expired")
 
             con.execute(
@@ -274,6 +281,7 @@ class AccountRecoveryStore:
                 "created_at": row["created_at"],
                 "expires_at": row["expires_at"],
                 "current": str(row["id"]) == current_id,
+                "active": True,
             }
             for row in rows
         ]
@@ -295,12 +303,13 @@ class AccountRecoveryStore:
         current_id = self.current_session_id(current_token)
         if not current_id:
             raise PermissionError("Active session required")
+        now = _iso()
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             cursor = con.execute(
                 """UPDATE sessions SET revoked_at=?
-                   WHERE user_id=? AND id<>? AND revoked_at IS NULL""",
-                (_iso(), user_id, current_id),
+                   WHERE user_id=? AND id<>? AND revoked_at IS NULL AND expires_at>?""",
+                (now, user_id, current_id, now),
             )
             return int(cursor.rowcount or 0)
 
@@ -337,8 +346,8 @@ class AccountRecoveryStore:
             )
             cursor = con.execute(
                 """UPDATE sessions SET revoked_at=?
-                   WHERE user_id=? AND id<>? AND revoked_at IS NULL""",
-                (now, user_id, current_id),
+                   WHERE user_id=? AND id<>? AND revoked_at IS NULL AND expires_at>?""",
+                (now, user_id, current_id, now),
             )
             con.execute(
                 """UPDATE password_reset_tokens SET invalidated_at=?
@@ -414,15 +423,17 @@ def request_password_reset(payload: PasswordResetRequest, background_tasks: Back
 
 @router.get("/auth/password-reset", response_class=HTMLResponse)
 def password_reset_page(token: str):
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
     if not store.reset_token_valid(token):
         return HTMLResponse(
             "<h2>Password reset link is invalid or expired.</h2>",
             status_code=410,
+            headers=headers,
         )
     safe_token = escape(token, quote=True)
     return HTMLResponse(
         f"""<!doctype html>
-<html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
+<html><head><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='referrer' content='no-referrer'>
 <title>Password Reset — {escape(PRODUCT_FULL_NAME)}</title>
 <style>
 body{{font-family:system-ui,sans-serif;background:#0d0715;color:#fff;margin:0;padding:30px}}
@@ -436,7 +447,8 @@ button{{padding:14px 22px;border:0;border-radius:12px;font-weight:800;cursor:poi
 <label>New password</label><input type='password' name='new_password' minlength='10' maxlength='512' required>
 <label>Confirm new password</label><input type='password' name='confirm_password' minlength='10' maxlength='512' required>
 <button type='submit'>Reset password</button>
-</form></div></body></html>"""
+</form></div></body></html>""",
+        headers=headers,
     )
 
 
@@ -453,6 +465,7 @@ def confirm_password_reset(payload: PasswordResetConfirm, response: Response):
         details={"all_previous_sessions_revoked": True},
     )
     response.delete_cookie(COOKIE_NAME)
+    response.headers["Cache-Control"] = "no-store"
     return {
         "reset": True,
         "all_previous_sessions_revoked": True,
@@ -462,27 +475,29 @@ def confirm_password_reset(payload: PasswordResetConfirm, response: Response):
 
 @router.post("/auth/password-reset/confirm-form", response_class=HTMLResponse)
 def confirm_password_reset_form(
-    response: Response,
     token: str = Form(...),
     new_password: str = Form(...),
     confirm_password: str = Form(...),
 ):
+    headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
     if new_password != confirm_password:
-        return HTMLResponse("<h2>Passwords did not match.</h2>", status_code=400)
+        return HTMLResponse("<h2>Passwords did not match.</h2>", status_code=400, headers=headers)
     try:
         result = store.consume_password_reset(token, new_password)
     except ValueError as exc:
-        return HTMLResponse(f"<h2>{escape(str(exc))}</h2>", status_code=400)
+        return HTMLResponse(f"<h2>{escape(str(exc))}</h2>", status_code=400, headers=headers)
     audit.append(
         actor="member-recovery",
         action="password_reset_completed",
         subject_user_id=result["user_id"],
         details={"all_previous_sessions_revoked": True},
     )
-    response.delete_cookie(COOKIE_NAME)
-    return HTMLResponse(
-        "<h2>Password updated.</h2><p>All previous sessions were signed out. You can now sign in with your new password.</p>"
+    response = HTMLResponse(
+        "<h2>Password updated.</h2><p>All previous sessions were signed out. You can now sign in with your new password.</p>",
+        headers=headers,
     )
+    response.delete_cookie(COOKIE_NAME)
+    return response
 
 
 @router.post("/auth/password/change")
