@@ -7,6 +7,7 @@ from html import escape
 from fastapi import APIRouter, Form, Header, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from .accounts import AccountStore
 from .audit import AuditLedger
@@ -14,7 +15,13 @@ from .billing import payment_instructions, public_payment_options
 from .branding import PRODUCT_FULL_NAME, TAGLINE
 from .mailer import notify_membership_decision, notify_membership_request
 from .membership import MembershipService
-from .plans import OWNERSHIP_NOTICE, public_plans
+from .paypal_webhooks import (
+    PayPalWebhookError,
+    PayPalWebhookEvidenceStore,
+    PayPalWebhookVerifier,
+    validate_invoice_paid_event,
+)
+from .plans import OWNERSHIP_NOTICE, get_plan, public_plans
 from .subscriptions import SubscriptionLedger
 
 router = APIRouter()
@@ -22,6 +29,8 @@ store = AccountStore()
 memberships = MembershipService(store)
 subscriptions = SubscriptionLedger(store)
 audit = AuditLedger(store)
+paypal_verifier = PayPalWebhookVerifier()
+paypal_events = PayPalWebhookEvidenceStore(store)
 COOKIE_NAME = "lss_session"
 
 
@@ -41,6 +50,12 @@ class PaymentActivationRequest(BaseModel):
     user_id: str
     plan_id: str
     payment_reference: str
+
+
+class PayPalEventActivationRequest(BaseModel):
+    user_id: str
+    plan_id: str
+    event_id: str
 
 
 def session_token(request: Request) -> str | None:
@@ -261,10 +276,99 @@ def current_payment(request: Request):
     return payment_instructions(member.user["requested_plan_id"])
 
 
+@router.post("/webhooks/paypal")
+async def paypal_webhook(request: Request):
+    """Accept only PayPal-signature-verified events and store them idempotently.
+
+    Webhook receipt alone never changes membership access. Paid access remains behind the
+    explicit admin activation endpoint, which validates a fully paid matching invoice.
+    """
+    if not paypal_verifier.configured:
+        raise HTTPException(503, "PayPal webhook verification is not configured")
+    try:
+        event = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, "Invalid PayPal webhook JSON") from exc
+    if not isinstance(event, dict):
+        raise HTTPException(400, "Invalid PayPal webhook event")
+    try:
+        verified = await run_in_threadpool(paypal_verifier.verify, dict(request.headers), event)
+    except PayPalWebhookError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not verified:
+        raise HTTPException(400, "PayPal webhook signature verification failed")
+    try:
+        result = paypal_events.record(event, request.headers.get("paypal-transmission-id", ""))
+    except PayPalWebhookError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return result
+
+
 @router.get("/admin/membership/pending")
 def pending_memberships(x_lss_admin_key: str | None = Header(default=None)):
     require_admin(x_lss_admin_key)
     return store.pending_requests()
+
+
+@router.get("/admin/billing/paypal-events")
+def paypal_billing_events(limit: int = 50, x_lss_admin_key: str | None = Header(default=None)):
+    require_admin(x_lss_admin_key)
+    return {"events": paypal_events.recent(limit)}
+
+
+@router.post("/admin/membership/activate-paypal-event")
+def activate_paypal_event(
+    payload: PayPalEventActivationRequest,
+    x_lss_admin_key: str | None = Header(default=None),
+):
+    """Activate a paid plan using previously verified PayPal invoice evidence."""
+    require_admin(x_lss_admin_key)
+    evidence = paypal_events.get(payload.event_id)
+    if not evidence:
+        raise HTTPException(404, "Verified PayPal event not found")
+    user = store.get_user(payload.user_id)
+    if not user:
+        raise HTTPException(404, "User not found")
+    try:
+        plan = get_plan(payload.plan_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if plan.id == "free":
+        raise HTTPException(400, "Free membership does not require PayPal activation")
+    if user.get("requested_plan_id") != plan.id:
+        raise HTTPException(400, "Requested membership plan does not match the activation plan")
+    try:
+        payment_reference = validate_invoice_paid_event(
+            evidence["payload"],
+            expected_amount_minor=plan.monthly_price_minor,
+            expected_currency=plan.currency,
+            expected_email=user.get("email") or "",
+        )
+        status = subscriptions.verify_payment(payload.user_id, plan.id, payment_reference)
+    except (PayPalWebhookError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    activated_user = status["user"] or {}
+    subscription = status["subscription"] or {}
+    audit.append(
+        actor="ESP admin API",
+        action="subscription_paypal_event_activated",
+        subject_user_id=activated_user.get("id"),
+        details={
+            "plan_id": activated_user.get("plan_id"),
+            "paypal_event_id": payload.event_id,
+            "paypal_resource_id": evidence.get("resource_id"),
+            "billing_period_end": subscription.get("period_end"),
+        },
+    )
+    return {
+        "activated": True,
+        "user_id": activated_user.get("id"),
+        "plan_id": activated_user.get("plan_id"),
+        "billing_status": activated_user.get("billing_status"),
+        "billing_period_end": subscription.get("period_end"),
+        "paypal_event_id": payload.event_id,
+    }
 
 
 @router.post("/admin/membership/activate-payment")
