@@ -246,7 +246,9 @@ def test_runtime_diagnostics_redact_adapter_secrets(tmp_path):
     assert diagnostics["execution_requires_verified_receipt"] is True
     assert diagnostics["safety_policy_rechecked_at_execution"] is True
     assert diagnostics["providers"]["shopify"]["access_token"] == "[redacted]"
-    assert "secret_ref" not in str(diagnostics)
+    assert "vault://shopify/test-credential" not in str(diagnostics)
+    assert all("secret_ref" not in row["credential"] for row in diagnostics["connections"])
+    assert all(row["credential"].get("secret_ref_exposed") is False for row in diagnostics["connections"])
 
 
 def test_overlay_mounts_runtime_routes_without_restoring_member_status_patch():
