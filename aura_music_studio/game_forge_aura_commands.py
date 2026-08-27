@@ -79,6 +79,8 @@ def _target_from_text(text: str) -> tuple[str | None, str | None]:
         return "soundtrack", None
     if any(x in value for x in ("cutscene", "cut scene", "cinematic", "intro video", "opening video")):
         return "cutscene", None
+    if any(x in value for x in ("spatial audio", "positional audio", "3d audio", "sound effect", "sfx", "audio source", "ambient sound", "world sound")):
+        return "entity_audio", None
     if any(x in value for x in ("world background", "game background", "background image", "backdrop", "scene background")):
         return "world_background", None
     slots = {
@@ -115,7 +117,7 @@ def _target_from_text(text: str) -> tuple[str | None, str | None]:
 def _required_kinds(target: str | None) -> set[str]:
     if target in {"world_background", "entity_visual", "entity_texture"}:
         return {"image"}
-    if target == "soundtrack":
+    if target in {"soundtrack", "entity_audio"}:
         return {"music", "audio"}
     if target == "cutscene":
         return {"video"}
@@ -193,7 +195,7 @@ def execute_game_aura_command(game: GameDNA, command: str) -> GameAuraCommandRes
     if target is None:
         return GameAuraCommandResult(
             action="clarify",
-            message="Tell Aura what the media should control: world background, soundtrack, cutscene, an entity visual, or an entity material texture.",
+            message="Tell Aura what the media should control: world background, soundtrack, cutscene, an entity visual/material texture, or positional entity audio.",
             game_id=game.id,
             needs_clarification=True,
             bindings=binding_state(game.id),
@@ -202,15 +204,19 @@ def execute_game_aura_command(game: GameDNA, command: str) -> GameAuraCommandRes
 
     entity_id = None
     entity_candidates: list[dict] = []
-    if target in {"entity_visual", "entity_texture"}:
+    if target in {"entity_visual", "entity_texture", "entity_audio"}:
         entity_candidates = _entity_candidates(game, text)
         if len(entity_candidates) != 1:
+            if target == "entity_audio":
+                missing_message = "Tell Aura which world entity should emit this spatial audio."
+            else:
+                missing_message = "Tell Aura which world entity should receive this visual or texture."
             return GameAuraCommandResult(
                 action="clarify",
                 message=(
                     "I found more than one matching world entity. Choose the exact entity."
                     if len(entity_candidates) > 1
-                    else "Tell Aura which world entity should receive this visual or texture."
+                    else missing_message
                 ),
                 game_id=game.id,
                 needs_clarification=True,

@@ -20,16 +20,18 @@ from .plans import GAME_CREATE
 router = APIRouter(tags=["Aura Game Asset Bindings"])
 
 GlobalBindingTarget = Literal["world_background", "soundtrack", "cutscene"]
-EntityBindingTarget = Literal["entity_visual", "entity_texture"]
+EntityBindingTarget = Literal["entity_visual", "entity_texture", "entity_audio"]
 BindingTarget = Literal[
     "world_background",
     "soundtrack",
     "cutscene",
     "entity_visual",
     "entity_texture",
+    "entity_audio",
 ]
 
 _BINDING_METADATA_KEY = "game_asset_bindings"
+_ENTITY_AUDIO_METADATA_KEY = "game_audio_asset_ref"
 _GLOBAL_TARGETS = {"world_background", "soundtrack", "cutscene"}
 _ALLOWED_MATERIAL_SLOTS = {
     "base_color",
@@ -104,7 +106,9 @@ def _validate_slot(slot: str) -> str:
 def _validate_asset_target(asset: GameAssetRecord, target: BindingTarget) -> None:
     if target in {"world_background", "entity_visual", "entity_texture"} and asset.kind != "image":
         raise ValueError(f"{target} requires an image asset")
-    if target == "soundtrack" and asset.kind not in {"music", "audio"}:
+    if target in {"soundtrack", "entity_audio"} and asset.kind not in {"music", "audio"}:
+        if target == "entity_audio":
+            raise ValueError("entity_audio requires a music or audio asset")
         raise ValueError("soundtrack requires a music or audio asset")
     if target == "cutscene" and asset.kind != "video":
         raise ValueError("cutscene requires a video asset")
@@ -135,6 +139,8 @@ def bind_game_asset(game: GameDNA, body: BindGameAssetRequest) -> dict:
         if entity.material is None:
             entity.material = MaterialDNA()
         entity.material.texture_refs[_validate_slot(body.material_slot)] = asset.id
+    elif body.target == "entity_audio":
+        _entity(world, body.entity_id).metadata[_ENTITY_AUDIO_METADATA_KEY] = asset.id
     else:  # pragma: no cover
         raise ValueError("Unsupported asset binding target")
 
@@ -166,6 +172,10 @@ def unbind_game_asset(game: GameDNA, body: UnbindGameAssetRequest) -> dict:
             if slot in entity.material.texture_refs:
                 entity.material.texture_refs.pop(slot, None)
                 changed = True
+    elif body.target == "entity_audio":
+        entity = _entity(world, body.entity_id)
+        if entity.metadata.pop(_ENTITY_AUDIO_METADATA_KEY, None) is not None:
+            changed = True
     else:  # pragma: no cover
         raise ValueError("Unsupported asset binding target")
 
@@ -190,6 +200,9 @@ def clear_asset_bindings(game_id: str, asset_id: str) -> bool:
     for entity in world.entities:
         if entity.asset_ref == asset_id:
             entity.asset_ref = None
+            changed = True
+        if entity.metadata.get(_ENTITY_AUDIO_METADATA_KEY) == asset_id:
+            entity.metadata.pop(_ENTITY_AUDIO_METADATA_KEY, None)
             changed = True
         if entity.material is not None:
             for slot, value in list(entity.material.texture_refs.items()):
@@ -220,15 +233,18 @@ def binding_runtime_payload(game_id: str, *, world: GameWorldDNA | None = None) 
     entity_rows: dict[str, dict] = {}
     for entity in world.entities:
         visual = assets.get(str(entity.asset_ref)) if entity.asset_ref else None
+        audio_ref = entity.metadata.get(_ENTITY_AUDIO_METADATA_KEY)
+        audio = assets.get(str(audio_ref)) if audio_ref else None
         textures: dict[str, dict] = {}
         if entity.material is not None:
             for slot, asset_id in entity.material.texture_refs.items():
                 row = assets.get(str(asset_id))
                 if row is not None:
                     textures[slot] = row
-        if visual is not None or textures:
+        if visual is not None or audio is not None or textures:
             entity_rows[entity.id] = {
                 "visual": visual,
+                "audio": audio,
                 "textures": textures,
             }
     return {"world": global_rows, "entities": entity_rows}
@@ -261,6 +277,13 @@ def binding_publication_blockers(game_id: str) -> list[str]:
                 blockers.append(f"Entity '{entity.name}' visual binding references a missing asset.")
             elif row.get("kind") != "image":
                 blockers.append(f"Entity '{entity.name}' visual binding must reference an image asset.")
+        audio_ref = entity.metadata.get(_ENTITY_AUDIO_METADATA_KEY)
+        if audio_ref:
+            row = assets.get(str(audio_ref))
+            if row is None:
+                blockers.append(f"Entity '{entity.name}' audio binding references a missing asset.")
+            elif row.get("kind") not in {"music", "audio"}:
+                blockers.append(f"Entity '{entity.name}' audio binding must reference music or audio.")
         if entity.material is not None:
             for slot, asset_id in entity.material.texture_refs.items():
                 row = assets.get(str(asset_id))
@@ -289,10 +312,13 @@ def binding_state(game_id: str, *, world: GameWorldDNA | None = None) -> dict:
             "entities": {
                 entity.id: {
                     "visual": entity.asset_ref,
+                    "audio": entity.metadata.get(_ENTITY_AUDIO_METADATA_KEY),
                     "textures": dict(entity.material.texture_refs) if entity.material else {},
                 }
                 for entity in world.entities
-                if entity.asset_ref or (entity.material and entity.material.texture_refs)
+                if entity.asset_ref
+                or entity.metadata.get(_ENTITY_AUDIO_METADATA_KEY)
+                or (entity.material and entity.material.texture_refs)
             },
         },
         "available_entities": [
@@ -300,6 +326,7 @@ def binding_state(game_id: str, *, world: GameWorldDNA | None = None) -> dict:
             for entity in world.entities
         ],
         "allowed_material_slots": sorted(_ALLOWED_MATERIAL_SLOTS),
+        "entity_audio_binding_supported": True,
         "integrity_bound_to_world_dna": True,
     }
 
