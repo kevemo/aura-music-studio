@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from . import __version__
 from .access_control import MembershipAccessMiddleware
+from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
@@ -52,6 +53,7 @@ app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
+app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
 app.include_router(web_api_router)
