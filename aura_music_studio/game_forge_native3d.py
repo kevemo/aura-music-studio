@@ -2,15 +2,17 @@ from __future__ import annotations
 
 """Compatibility and safety entrypoint for Aura's native 3D renderer.
 
-Aura3D v3 retains v2 PBR material maps and HRTF spatial audio and adds server-validated glTF/GLB
-static model meshes. The public import path stays stable and this boundary enforces an aggregate
-expanded-vertex budget before the reviewed renderer serializes model geometry into playtest HTML.
+Aura3D v4 retains v3 static model meshes, v2 PBR material maps and HRTF spatial audio, then adds
+closed declarative cinematics and built-in bounded particle VFX. The public import path stays stable
+and this boundary continues to enforce the aggregate expanded-vertex model budget before rendering.
 """
 
+import json
 import os
 
-from .game_forge_native3d_v3 import _runtime_payload as _v3_runtime_payload
-from .game_forge_native3d_v3 import render_aura3d_playtest as _render_v3
+from .game_forge_accessibility import harden_game_runtime_html
+from .game_forge_native3d_v4 import _runtime_payload as _v4_runtime_payload
+from .game_forge_native3d_v4 import render_aura3d_playtest as _render_v4
 
 _MAX_RUNTIME_MODEL_VERTICES = max(
     3,
@@ -19,7 +21,7 @@ _MAX_RUNTIME_MODEL_VERTICES = max(
 
 
 def _runtime_payload(game, world) -> dict:
-    payload = _v3_runtime_payload(game, world)
+    payload = _v4_runtime_payload(game, world)
     total_vertices = sum(
         int(row.get("mesh", {}).get("vertex_count") or 0)
         for row in payload.get("models", [])
@@ -30,14 +32,37 @@ def _runtime_payload(game, world) -> dict:
         )
     payload["runtime_contract"]["model_runtime_vertex_budget"] = _MAX_RUNTIME_MODEL_VERTICES
     payload["runtime_contract"]["model_runtime_vertex_count"] = total_vertices
+    payload["runtime_contract"]["mobile_touch_controls"] = True
+    payload["runtime_contract"]["keyboard_focusable"] = True
+    payload["runtime_contract"]["reduced_motion_respected"] = True
+    payload["runtime_contract"]["aria_live_status"] = True
     return payload
 
 
+def _serialize_runtime_payload(html: str, payload: dict) -> str:
+    """Replace the compatibility renderer's cfg with the exact validated v4 contract.
+
+    Aura3D v4 intentionally layers its reviewed rendering hooks over v3. The v3 renderer therefore
+    creates the HTML shell first, but the browser must receive the v4 payload rather than stale v3
+    capability metadata. Fail closed if that stable serialization boundary ever changes.
+    """
+    prefix = "const cfg="
+    suffix = ";\nconst canvas="
+    start = html.find(prefix)
+    end = html.find(suffix, start + len(prefix)) if start >= 0 else -1
+    if start < 0 or end < 0:
+        raise ValueError("Aura3D compatibility payload contract changed; v4 serialization requires review")
+    serialized = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    return html[: start + len(prefix)] + serialized + html[end:]
+
+
 def render_aura3d_playtest(game, world, *, csp: str) -> str:
-    # Validate the exact model set before the renderer serializes it. The renderer performs the same
-    # checksum/parser verification again while building its closed payload; no raw model is loaded by JS.
-    _runtime_payload(game, world)
-    return _render_v3(game, world, csp=csp)
+    # Validate the exact model/cinematic set and serialize that same closed payload into the page.
+    # Raw models and creator-authored executable code are never loaded or run by the browser.
+    payload = _runtime_payload(game, world)
+    html = _render_v4(game, world, csp=csp)
+    html = _serialize_runtime_payload(html, payload)
+    return harden_game_runtime_html(html)
 
 
 __all__ = ["render_aura3d_playtest", "_runtime_payload"]

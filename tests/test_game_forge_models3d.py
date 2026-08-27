@@ -193,7 +193,7 @@ def test_gltf_external_buffer_url_is_rejected(tmp_path):
         extract_static_mesh(path)
 
 
-def test_authenticated_model_upload_binding_integrity_and_v3_renderer(monkeypatch, tmp_path):
+def test_authenticated_model_upload_binding_integrity_and_v4_renderer(monkeypatch, tmp_path):
     game = _game(monkeypatch, tmp_path)
     before = game_integrity_hash(game)
     client = TestClient(_app())
@@ -214,7 +214,7 @@ def test_authenticated_model_upload_binding_integrity_and_v3_renderer(monkeypatc
 
     world = load_world(game.id)
     html = render_aura3d_playtest(game, world, csp=PLAYTEST_CSP)
-    assert "Aura Game Engine 3D v3" in html
+    assert "Aura Game Engine 3D v4" in html
     assert model["id"] in html
     assert "layout(location=2) in vec2 aUV" in html
     assert "makeGeometry" in html
@@ -223,6 +223,7 @@ def test_authenticated_model_upload_binding_integrity_and_v3_renderer(monkeypatc
     assert '"model_runtime_loading": false' in html
     assert '"model_external_resources": false' in html
     assert '"skeletal_animation": false' in html
+    assert '"declarative_cinematics": true' in html
     assert "connect-src 'none'" in html
     assert "fetch(" not in html
     assert "XMLHttpRequest" not in html
@@ -230,7 +231,7 @@ def test_authenticated_model_upload_binding_integrity_and_v3_renderer(monkeypatc
 
     game, built_html = build_private_playtest(game)
     assert game.latest_build is not None
-    assert game.latest_build.runtime == "aura_game_runtime_3d_webgl2_v3"
+    assert game.latest_build.runtime == "aura_game_runtime_3d_webgl2_v4"
     assert model["id"] in built_html
 
 
