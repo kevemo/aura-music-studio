@@ -22,6 +22,19 @@ def _client(monkeypatch, *, signed_in: bool = True, dashboard: bool = False) -> 
         "resolve_session",
         lambda _token: _user() if signed_in else None,
     )
+    monkeypatch.setattr(
+        aura_sec.security_store,
+        "licence",
+        lambda _user_id: {
+            "user_id": _user()["id"],
+            "status": "not_purchased",
+            "sku_id": None,
+            "device_limit": 0,
+            "period_start": None,
+            "period_end": None,
+        },
+    )
+    monkeypatch.setattr(aura_sec.security_store, "list_devices", lambda _user_id: [])
     app = FastAPI()
     app.include_router(aura_sec.router)
     if dashboard:
@@ -41,23 +54,26 @@ def test_security_center_requires_member_session(monkeypatch):
     assert response.headers["location"].startswith("/signin")
 
 
-def test_security_center_is_truthful_about_foundation_state(monkeypatch):
+def test_security_center_uses_new_master_brand_and_truthful_foundation_state(monkeypatch):
     response = _client(monkeypatch).get("/aura-sec")
     assert response.status_code == 200
     text = response.text
-    assert "Foundation status — not yet device protection" in text
+    assert "Elevate Souls Productions Content Creation Command Center" in text
+    assert "Powered by Aura AI" in text
+    assert "Foundation status — native clients not released" in text
     assert "0 / 7" in text
-    assert "Separate" in text
+    assert "Not Purchased" in text
     assert "No price has been invented or activated" in text
     assert "working title" in text.lower()
-    assert "signed client is installed" not in text or "native protection activates only after" not in text
-    assert "X-Frame-Options" in response.headers
+    assert "signed client is installed and verified" not in text
     assert response.headers["X-Frame-Options"] == "DENY"
     assert response.headers["Cache-Control"].startswith("no-store")
 
 
-def test_status_never_reports_device_protected_without_native_agent(monkeypatch):
+def test_status_never_reports_requesting_device_protected_from_web_session(monkeypatch):
     data = _client(monkeypatch).get("/api/aura-sec/status").json()
+    assert data["master_product"] == "Elevate Souls Productions Content Creation Command Center"
+    assert data["master_endorsement"] == "Powered by Aura AI"
     assert data["state"] == "foundation"
     assert data["separate_purchase"] is True
     assert data["included_in_creative_membership"] is False
@@ -66,6 +82,8 @@ def test_status_never_reports_device_protected_without_native_agent(monkeypatch)
     assert data["native_agents_released"] == 0
     assert data["absolute_security_guarantee"] is False
     assert data["commercial_name_clearance"] == "required_before_sale"
+    assert data["licence"]["status"] == "not_purchased"
+    assert data["device_health"]["overall"] == "not_enrolled"
 
 
 def test_all_downloads_fail_closed_until_signed_release_exists(monkeypatch):
@@ -105,3 +123,4 @@ def test_dashboard_middleware_adds_separate_security_entry_once(monkeypatch):
     assert response.text.count("data-aura-sec-card='1'") == 1
     assert "Open Security Center" in response.text
     assert "Separate security purchase" in response.text
+    assert "ESP Content Creation Command Center" in response.text
