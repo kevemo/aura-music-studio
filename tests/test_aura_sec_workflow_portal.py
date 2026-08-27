@@ -161,7 +161,8 @@ def test_approvals_center_has_no_generic_execute_control(monkeypatch):
     assert "requiring strong re-authentication" in response.text
     assert "browser-executable generic commands" in response.text
     assert ">Execute<" not in response.text
-    assert "Execution is intentionally locked here" in response.text
+    assert "Review approval" in response.text
+    assert "Approval and execution remain separate" in response.text
 
 
 def test_restore_drill_page_keeps_launch_disabled_until_native_workflow_exists(monkeypatch):
