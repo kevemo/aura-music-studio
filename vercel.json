@@ -9,7 +9,8 @@
       "feature/creative-studios-game-forge": false,
       "feature/hourly-auto-build": false,
       "feature/stripe-billing": false,
-      "feature/production-security-gates-v2": false
+      "feature/production-security-gates-v2": false,
+      "feature/pro-creative-editors-v2": false
     }
   },
   "functions": {
