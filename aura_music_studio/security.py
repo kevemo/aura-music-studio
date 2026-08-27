@@ -10,12 +10,49 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .account_security_api import router as account_security_router
+from .email_verification import router as email_verification_router
+from .email_verification_integration import install_email_verification
+from .membership_api import router as membership_router
+
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-AUTH_RATE_PATHS = {"/auth/login", "/auth/signup", "/owner/login"}
+AUTH_RATE_PATHS = {
+    "/auth/login",
+    "/auth/signup",
+    "/owner/login",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/email-verification/request",
+    "/auth/email-verification/confirm",
+}
 PUBLIC_PWA_PATHS = {
     "/", "/pricing", "/signin", "/signup", "/ai-music-studio", "/ai-song-generator",
     "/backing-track-maker", "/stem-splitter", "/ai-mastering", "/ai-vocal-studio",
 }
+SENSITIVE_ACCOUNT_PAGES = {
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/verify-email",
+}
+
+# Base API composition imports membership_api before this module, then mounts membership_router.
+# Attach account-security routes once here so every production entrypoint receives the same routes
+# without modifying Creative/ESP feature router tables.
+if not any(
+    getattr(route, "path", None) == "/auth/password-reset/request"
+    for route in membership_router.routes
+):
+    membership_router.include_router(account_security_router)
+
+if not any(
+    getattr(route, "path", None) == "/auth/email-verification/request"
+    for route in membership_router.routes
+):
+    membership_router.include_router(email_verification_router)
+
+# Extend the existing signup/approval callables only after all routes are present. The installer
+# preserves FastAPI's dependency model and does not replace membership/billing/ESP role logic.
+install_email_verification(membership_router)
 
 
 class _SlidingWindowLimiter:
@@ -95,7 +132,18 @@ async def _inject_esp_brand(response, path: str):
         else:
             text = head + text
 
+    if path == "/signin" and "href='/auth/forgot-password'" not in text and "</form>" in text:
+        text = text.replace(
+            "</form>",
+            "</form><p class='help'><a href='/auth/forgot-password'>Forgot password?</a></p>",
+            1,
+        )
+
     extras = ""
+    if path == "/auth/reset-password":
+        # The reset secret is read by the page's inline script first, then removed from browser
+        # history/address state. Referrer policy already prevents query leakage cross-origin.
+        extras += "<script>try{history.replaceState({},'', '/auth/reset-password')}catch(e){}</script>"
     if path in {"/studio", "/production-suite"} and "esp-history-fab" not in text:
         extras += "<a class='esp-history-fab' href='/history' title='Project history and undo'>↶ Project History</a>"
     if path == "/production-suite" and "href='/take-manager'" not in text:
@@ -151,7 +199,7 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
             "img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "
             "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'",
         )
-        if path.startswith(("/auth", "/owner", "/dashboard", "/membership", "/node-coordinator")):
+        if path.startswith(("/auth", "/owner", "/dashboard", "/membership", "/node-coordinator")) or path in SENSITIVE_ACCOUNT_PAGES:
             response.headers.setdefault("Cache-Control", "no-store")
         elif path in PUBLIC_PWA_PATHS or path in {"/robots.txt", "/sitemap.xml", "/manifest.webmanifest", "/service-worker.js"}:
             response.headers.setdefault("Cache-Control", "public, max-age=300")
