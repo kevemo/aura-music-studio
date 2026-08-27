@@ -168,12 +168,11 @@ def test_asset_rights_require_attestation(monkeypatch, tmp_path):
 
 
 def test_asset_router_is_composed_into_world_router():
-    paths = {
-        route.path
-        for route in __import__(
-            "aura_music_studio.game_forge_world_api",
-            fromlist=["router"],
-        ).router.routes
-    }
+    from fastapi import FastAPI
+    from aura_music_studio.game_forge_world_api import router as world_router
+
+    app = FastAPI()
+    app.include_router(world_router)
+    paths = set(app.openapi()["paths"])
     assert "/api/game-forge/games/{game_id}/assets" in paths
     assert "/api/game-forge/games/{game_id}/assets/library" in paths
