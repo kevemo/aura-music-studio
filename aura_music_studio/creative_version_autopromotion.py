@@ -6,24 +6,30 @@ from .commercial_entitlement_routes import router as commercial_entitlement_rout
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
 from .deep_daw_automation_api import router as deep_daw_automation_router
+from .owner_finance import router as owner_finance_router
 from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
 from .professional_editor_lifecycle_api import router as professional_editor_lifecycle_router
 from .professional_editor_render_api import router as professional_editor_render_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
+from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
-# Commercial entitlements, Stripe billing and the professional non-destructive editor are nested
-# here deliberately because this overlay router is already mounted by app.py before the underlying
-# Creative handlers. This avoids another high-conflict application-entrypoint edit while each
-# subsystem keeps its own membership/role/security checks.
+# Commercial entitlements, Stripe billing, protected owner finance reporting and the professional
+# non-destructive editor are nested here deliberately because this overlay router is already
+# mounted by app.py before the underlying Creative handlers. Each subsystem keeps its own
+# membership/owner/role/security checks without another high-conflict application-entrypoint edit.
 router.include_router(commercial_entitlement_router)
-# The renewal preflight must precede the base Stripe webhook route so recurring access cannot
-# extend until exact paid amount, customer and subscription bindings are validated.
+# Commerce receipt persistence owns the public webhook path and delegates first to the hardened
+# renewal preflight, which in turn delegates to the base idempotent Stripe processor. Starlette
+# dispatches the first matching route, so this ordering keeps access/credit mutation authoritative
+# while making verified top-up revenue auditable.
+router.include_router(stripe_commerce_receipts_router)
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
+router.include_router(owner_finance_router)
 router.include_router(deep_daw_automation_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_lifecycle_router)
