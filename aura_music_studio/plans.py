@@ -8,7 +8,8 @@ from decimal import Decimal
 class Plan:
     id: str
     name: str
-    monthly_price_usd: Decimal
+    monthly_price: Decimal
+    currency: str
     description: str
     confirmed_songs_per_day: int | None
     regeneration_until_confirmed: bool
@@ -19,9 +20,43 @@ class Plan:
     def has(self, feature: str) -> bool:
         return feature in self.features
 
+    @property
+    def monthly_price_usd(self) -> Decimal:
+        """Deprecated compatibility alias.
+
+        Historic code named the price field USD even though the authoritative public prices
+        are £4.99 / £9.99. Keep the attribute temporarily so parallel feature branches and
+        persisted integrations do not break while new code uses monthly_price + currency.
+        """
+        return self.monthly_price
+
+    @property
+    def monthly_price_gbp(self) -> Decimal:
+        if self.currency != "GBP":
+            raise ValueError("This plan is not priced in GBP")
+        return self.monthly_price
+
+    @property
+    def monthly_price_minor(self) -> int:
+        return int((self.monthly_price * Decimal("100")).to_integral_value())
+
+    @property
+    def currency_symbol(self) -> str:
+        return {"GBP": "£", "USD": "$", "EUR": "€"}.get(self.currency, self.currency + " ")
+
+    @property
+    def display_price(self) -> str:
+        if self.monthly_price == 0:
+            return "Free"
+        return f"{self.currency_symbol}{self.monthly_price}"
+
     def public_dict(self) -> dict:
         data = asdict(self)
-        data["monthly_price_usd"] = str(self.monthly_price_usd)
+        data["monthly_price"] = str(self.monthly_price)
+        data["monthly_price_minor"] = self.monthly_price_minor
+        data["display_price"] = self.display_price
+        # Deprecated output alias for clients built before the GBP schema correction.
+        data["monthly_price_usd"] = str(self.monthly_price)
         data["features"] = sorted(self.features)
         data["image_poster_creations_unlimited"] = self.image_poster_creations_per_day is None
         return data
@@ -162,7 +197,8 @@ PLANS: dict[str, Plan] = {
     "free": Plan(
         id="free",
         name="Free",
-        monthly_price_usd=Decimal("0.00"),
+        monthly_price=Decimal("0.00"),
+        currency="GBP",
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
             "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
@@ -177,7 +213,8 @@ PLANS: dict[str, Plan] = {
     "base": Plan(
         id="base",
         name="Basic",
-        monthly_price_usd=Decimal("4.99"),
+        monthly_price=Decimal("4.99"),
+        currency="GBP",
         description=(
             "£4.99 tier: one confirmed full track every day with unlimited regenerations until confirmation, up to "
             "10 generated images/posters per day, image/poster saving and downloads, plus music and video downloads. "
@@ -193,7 +230,8 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Pro",
-        monthly_price_usd=Decimal("9.99"),
+        monthly_price=Decimal("9.99"),
+        currency="GBP",
         description=(
             "£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
             "unlimited full-track creation, plus the complete enabled Pulsar-Frequency House production stack: expanded "
