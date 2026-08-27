@@ -10,7 +10,8 @@
       "feature/hourly-auto-build": false,
       "feature/stripe-billing": false,
       "feature/production-security-gates-v2": false,
-      "feature/pro-creative-editors-v2": false
+      "feature/pro-creative-editors-v2": false,
+      "feature/pro-editor-workspace": false
     }
   },
   "functions": {
