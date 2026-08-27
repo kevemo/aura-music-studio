@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import aura_agent_tools as tools
@@ -123,25 +124,46 @@ def _install_specs() -> None:
             tools._SPEC_BY_NAME[spec.name] = spec
 
 
+def _has_intent_phrase(text: str, phrases: tuple[str, ...]) -> bool:
+    """Match whole intent words/phrases rather than unsafe substrings.
+
+    For example, ``assets`` must never satisfy the mutation verb ``set``.
+    Punctuation and repeated whitespace are normalized so natural requests such as
+    ``play-test`` still match ``play test`` without broad substring behavior.
+    """
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(text or "").casefold()).strip()
+    padded = f" {normalized} "
+    for phrase in phrases:
+        wanted = re.sub(r"[^a-z0-9]+", " ", phrase.casefold()).strip()
+        if wanted and f" {wanted} " in padded:
+            return True
+    return False
+
+
 def _explicit_game_write_allowed(name: str, message: str) -> bool:
-    text = (message or "").lower()
     if name == "create_game_project":
-        return any(x in text for x in ("create", "make", "build", "start", "generate")) and "game" in text
+        return _has_intent_phrase(message, ("create", "make", "build", "start", "generate")) and _has_intent_phrase(message, ("game",))
     if name == "scan_game_project":
-        return any(x in text for x in ("scan", "rate", "rating", "check", "review")) and "game" in text
+        return _has_intent_phrase(message, ("scan", "rate", "rating", "check", "review")) and _has_intent_phrase(message, ("game",))
     if name == "build_game_playtest":
-        return any(x in text for x in ("build", "playtest", "play test", "test", "generate")) and "game" in text
+        return _has_intent_phrase(message, ("build", "playtest", "play test", "test", "generate")) and _has_intent_phrase(message, ("game",))
     if name == "bind_game_media_asset":
-        return any(x in text for x in ("use", "set", "apply", "bind", "assign", "change")) and any(
-            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "player", "asset", "media")
+        return _has_intent_phrase(message, ("use", "set", "apply", "bind", "assign", "change")) and _has_intent_phrase(
+            message,
+            ("game", "background", "soundtrack", "cutscene", "texture", "visual", "player", "asset", "media"),
         )
     if name == "unbind_game_media_asset":
-        return any(x in text for x in ("remove", "clear", "unbind", "detach", "stop using")) and any(
-            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media")
+        return _has_intent_phrase(message, ("remove", "clear", "unbind", "detach", "stop using")) and _has_intent_phrase(
+            message,
+            ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media"),
         )
     if name == "apply_game_media_command":
-        return any(x in text for x in ("use", "set", "apply", "bind", "assign", "change", "remove", "clear", "unbind", "show", "list")) and any(
-            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media", "player")
+        return _has_intent_phrase(
+            message,
+            ("use", "set", "apply", "bind", "assign", "change", "remove", "clear", "unbind", "show", "list"),
+        ) and _has_intent_phrase(
+            message,
+            ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media", "player"),
         )
     return True
 
