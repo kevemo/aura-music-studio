@@ -41,7 +41,7 @@ def test_native3d_renderer_consumes_world_dna_without_external_engine(monkeypatc
     html = render_aura3d_playtest(game, world, csp=PLAYTEST_CSP)
 
     assert "Aura Game Engine 3D" in html
-    assert "Aura Game Engine 3D v3" in html
+    assert "Aura Game Engine 3D v4" in html
     assert "getContext('webgl2'" in html
     assert "gl.enable(gl.DEPTH_TEST)" in html
     assert "gl.enable(gl.CULL_FACE)" in html
@@ -50,9 +50,12 @@ def test_native3d_renderer_consumes_world_dna_without_external_engine(monkeypatc
     assert "navigator.gpu" in html
     assert '"native_aura_renderer": true' in html
     assert '"external_engine": null' in html
-    assert '"runtime_version": 3' in html
+    assert '"runtime_version": 4' in html
     assert '"static_3d_models": true' in html
     assert '"model_runtime_loading": false' in html
+    assert '"declarative_cinematics": true' in html
+    assert '"creator_javascript": false' in html
+    assert '"creator_shader_code": false' in html
 
     # The playtest CSP/runtime cannot make provider calls or open network sockets.
     assert "connect-src 'none'" in html
@@ -80,7 +83,7 @@ def test_native3d_creator_text_cannot_break_out_of_config_script(monkeypatch, tm
     assert "<\\/script>" in html
 
 
-def test_build_selects_aura3d_v3_runtime_for_native_3d_game(monkeypatch, tmp_path):
+def test_build_selects_aura3d_v4_runtime_for_native_3d_game(monkeypatch, tmp_path):
     _patch_storage(monkeypatch, tmp_path)
     game = GameDNA(
         title="Native 3D",
@@ -93,8 +96,9 @@ def test_build_selects_aura3d_v3_runtime_for_native_3d_game(monkeypatch, tmp_pat
     generate_foundation_world(game)
     game, html = build_private_playtest(game)
     assert game.latest_build is not None
-    assert game.latest_build.runtime == "aura_game_runtime_3d_webgl2_v3"
+    assert game.latest_build.runtime == "aura_game_runtime_3d_webgl2_v4"
     assert game.latest_build.requested_engine == "aura3d"
     assert "getContext('webgl2'" in html
+    assert "Aura Game Engine 3D v4" in html
     assert game.latest_build.network_access_enabled is False
     assert game.latest_build.arbitrary_server_code_executed is False
