@@ -10,6 +10,7 @@ from .esp_creator_data_import_overlay import router as creator_data_import_route
 from .esp_creator_live_show_planner import router as live_show_planner_router
 from .esp_creator_niche_discovery import router as niche_discovery_router
 from .esp_creator_plan import router as creator_plan_router
+from .esp_creator_progress_intelligence import router as progress_intelligence_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_incentives import router as incentives_router
 from .esp_learning_library import router as learning_library_router
@@ -36,6 +37,7 @@ router.include_router(creator_plan_router)
 router.include_router(live_show_planner_router)
 router.include_router(niche_discovery_router)
 router.include_router(creator_data_import_router)
+router.include_router(progress_intelligence_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(broadcast_tech_router)
@@ -67,6 +69,7 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn primary' href='/command-center/niche-lab'>Niche Discovery Lab</a>",
         "<a class='btn primary' href='/command-center/show-planner'>LIVE Show Planner</a>",
         "<a class='btn primary' href='/command-center/progress/import'>Performance Data Import</a>",
+        "<a class='btn primary' href='/command-center/progress/intelligence'>Progress Intelligence</a>",
         "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>",
         "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>",
         "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>",
