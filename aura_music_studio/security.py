@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .account_security_api import router as account_security_router
+from .csrf_tokens import CSRF_HEADER, router as csrf_router, service as csrf_service
 from .email_verification import router as email_verification_router
 from .email_verification_integration import install_email_verification
 from .membership_api import router as membership_router
@@ -49,6 +50,12 @@ if not any(
     for route in membership_router.routes
 ):
     membership_router.include_router(email_verification_router)
+
+if not any(
+    getattr(route, "path", None) == "/auth/csrf-token"
+    for route in membership_router.routes
+):
+    membership_router.include_router(csrf_router)
 
 # Extend the existing signup/approval callables only after all routes are present. The installer
 # preserves FastAPI's dependency model and does not replace membership/billing/ESP role logic.
@@ -92,6 +99,19 @@ def _same_origin(request: Request) -> bool:
     request_host = (request.headers.get("host") or "").lower()
     origin_host = (parsed.netloc or "").lower()
     return bool(request_host and origin_host and request_host == origin_host)
+
+
+def _requires_session_csrf(request: Request) -> bool:
+    path = request.url.path.rstrip("/") or "/"
+    method = request.method.upper()
+    if method == "DELETE" and path == "/privacy/account":
+        return True
+    if method == "POST" and path == "/auth/sessions/revoke-others":
+        return True
+    if method == "DELETE" and path.startswith("/auth/sessions/"):
+        session_id = path.removeprefix("/auth/sessions/").strip()
+        return bool(session_id and "/" not in session_id)
+    return False
 
 
 def _known_public_url() -> str:
@@ -182,10 +202,24 @@ class StudioSecurityMiddleware(BaseHTTPMiddleware):
                 return JSONResponse({"detail": "Too many authentication attempts. Try again later."}, status_code=429, headers={"Retry-After": str(retry)})
 
         if request.method in UNSAFE_METHODS:
-            has_cookie_auth = bool(request.cookies.get("lss_session") or request.cookies.get("lss_admin_session"))
+            member_cookie = request.cookies.get("lss_session") or ""
+            has_cookie_auth = bool(member_cookie or request.cookies.get("lss_admin_session"))
             bearer = (request.headers.get("authorization") or "").lower().startswith("bearer ")
             if has_cookie_auth and not bearer and not _same_origin(request):
                 return JSONResponse({"detail": "Cross-site write request blocked"}, status_code=403)
+
+            if member_cookie and not bearer and _requires_session_csrf(request):
+                supplied = request.headers.get(CSRF_HEADER) or ""
+                if not csrf_service.verify(member_cookie, supplied):
+                    return JSONResponse(
+                        {
+                            "detail": "A valid session-bound CSRF token is required for this destructive action",
+                            "security_gate": "session_csrf",
+                            "csrf_token_endpoint": "/auth/csrf-token",
+                            "csrf_header": CSRF_HEADER,
+                        },
+                        status_code=403,
+                    )
 
         response = await call_next(request)
         response = await _inject_esp_brand(response, path)
