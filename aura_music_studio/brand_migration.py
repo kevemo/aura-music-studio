@@ -23,6 +23,14 @@ _AURA_CORE_HOME_SECTION = f"""<section class='wrap section' data-pfh-aura-core='
 _LANDING_MEMBERSHIP_MARKER = "<section class='wrap section'><div class='eyebrow'>Memberships</div>"
 
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    # Specific historical phrases must precede their generic substrings so the migration is
+    # deterministic and cannot create mixed legacy/current product names.
+    ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
+    # Historical endorsements and taglines.
+    ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
+    ("Powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
+    ("Powered by Aura AI Systems", ENDORSEMENT),
     # Retired master/public product identities.
     ("Pulsar-Frequency House", PRODUCT_FULL_NAME),
     ("Pulsar-Frequency", "Content Creation Command Center"),
@@ -32,12 +40,6 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("The Live Sound Studio", PRODUCT_FULL_NAME),
     ("Live Sound Studio", PRODUCT_FULL_NAME),
     ("4Infinity", "Content Creation Command Center"),
-    # Historical endorsements and taglines.
-    ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
-    ("Powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
-    ("Powered by Aura AI Systems", ENDORSEMENT),
-    ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
-    ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
     ("For Professional Creation Beyond The Cosmos", TAGLINE),
     ("Music Making for Professionals", TAGLINE),
     # Retired visual asset route. Existing templates can keep their old path in source while the
