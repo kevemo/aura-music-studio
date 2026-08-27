@@ -53,6 +53,11 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("Unified project layer in build", "Creative DNA project layer connected"),
     ("<h3>Base</h3>", "<h3>Basic</h3>"),
     ("href='/signup?plan=base'>Choose Base", "href='/signup?plan=base'>Choose Basic"),
+    # Historical templates hard-coded a dollar symbol around the numeric prices even though
+    # the authoritative Basic/Pro product prices are GBP. These two exact presentation
+    # replacements avoid changing arbitrary monetary content or JSON schema keys.
+    ("$4.99", "£4.99"),
+    ("$9.99", "£9.99"),
     (
         "The target project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable",
         "The Creative DNA project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable",
