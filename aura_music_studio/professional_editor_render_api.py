@@ -14,6 +14,7 @@ from .professional_editor_renderer import (
     ProfessionalEditorRenderer,
 )
 from .professional_image_compositor import AdvancedImageCompositor
+from .professional_video_compositor import AdvancedVideoCompositor
 from .professional_video_effects_compositor import VideoItemEffectsCompositor
 from .tenant_storage import project_path
 
@@ -54,6 +55,27 @@ def _renderer(project_name: str) -> ProfessionalEditorRenderer:
     return ProfessionalEditorRenderer(project)
 
 
+def _sequence_has_non_normal_item_blend(state: dict, sequence_id: str) -> bool:
+    branch = state.get("branch") or {}
+    sequences = {value.get("id"): value for value in branch.get("sequences", [])}
+    tracks = {value.get("id"): value for value in branch.get("tracks", [])}
+    items = {value.get("id"): value for value in branch.get("items", [])}
+    sequence = sequences.get(sequence_id)
+    if sequence is None:
+        return False
+    for track_id in sequence.get("track_ids", []):
+        track = tracks.get(track_id)
+        if not track or not track.get("enabled", True):
+            continue
+        for item_id in track.get("item_ids", []):
+            item = items.get(item_id)
+            if not item or not item.get("enabled", True):
+                continue
+            if str(item.get("blend_mode") or "normal").strip().lower() != "normal":
+                return True
+    return False
+
+
 @router.post("/projects/{project_name}/editor/sequences/{sequence_id}/render")
 def render_editor_sequence(
     project_name: str,
@@ -87,7 +109,15 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            video_renderer = VideoItemEffectsCompositor(_project(project_name))
+            project = _project(project_name)
+            if _sequence_has_non_normal_item_blend(state, sequence_id):
+                # Blend-only routing is deliberately conservative for this increment. The base
+                # compositor renders item blend modes truthfully and continues to fail closed if
+                # masks/effects are also present until their exact authored operation order is
+                # explicitly modeled across the combined stack.
+                video_renderer = AdvancedVideoCompositor(project)
+            else:
+                video_renderer = VideoItemEffectsCompositor(project)
             result = video_renderer.render_video_advanced(sequence_id)
         else:
             image_renderer = AdvancedImageCompositor(_project(project_name))
@@ -151,4 +181,4 @@ def download_editor_export(project_name: str, filename: str, request: Request):
     )
 
 
-__all__ = ["router", "EditorRenderRequest"]
+__all__ = ["router", "EditorRenderRequest", "_sequence_has_non_normal_item_blend"]

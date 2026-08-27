@@ -26,6 +26,30 @@ _SUPPORTED_VIDEO_KEYFRAMES = {
     "transform.rotation",
 }
 
+_SUPPORTED_VIDEO_ITEM_BLEND_MODES = {
+    "normal",
+    "multiply",
+    "screen",
+    "overlay",
+    "soft_light",
+    "hard_light",
+    "darken",
+    "lighten",
+    "difference",
+}
+
+_FFMPEG_VIDEO_BLEND_MODES = {
+    "normal": "normal",
+    "multiply": "multiply",
+    "screen": "screen",
+    "overlay": "overlay",
+    "soft_light": "softlight",
+    "hard_light": "hardlight",
+    "darken": "darken",
+    "lighten": "lighten",
+    "difference": "difference",
+}
+
 
 def _finite(value: Any, default: float = 0.0) -> float:
     try:
@@ -98,6 +122,14 @@ def _item_keyframes(item: dict[str, Any], path: str) -> list[dict]:
     return value if isinstance(value, list) else []
 
 
+def _ffmpeg_blend_mode(mode: Any) -> str:
+    clean = str(mode or "normal").strip().lower()
+    mapped = _FFMPEG_VIDEO_BLEND_MODES.get(clean)
+    if mapped is None:
+        raise EditorRenderUnsupported(f"Video item blend mode is not render-safe: {clean or 'unnamed'}")
+    return mapped
+
+
 class AdvancedVideoCompositor(ProfessionalEditorRenderer):
     """FFmpeg compositor for professional video state that is currently render-safe.
 
@@ -115,7 +147,7 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
             if track.get("keyframes"):
                 raise EditorRenderUnsupported("Video track keyframes are not yet render-safe in the advanced compositor")
             if track.get("blend_mode", "normal") != "normal":
-                raise EditorRenderUnsupported("Non-normal video track blend modes are not yet render-safe")
+                raise EditorRenderUnsupported("Non-normal video track blend modes require grouped track compositing and remain fail-closed")
             for item_id in track.get("item_ids", []):
                 item = items.get(item_id)
                 if not item or not item.get("enabled", True):
@@ -124,8 +156,9 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                     raise EditorRenderUnsupported("Video item effects are not yet render-safe in the advanced compositor")
                 if item.get("masks"):
                     raise EditorRenderUnsupported("Video masks are not yet render-safe in the advanced compositor")
-                if item.get("blend_mode", "normal") != "normal":
-                    raise EditorRenderUnsupported("Non-normal video item blend modes are not yet render-safe")
+                blend_mode = str(item.get("blend_mode") or "normal").strip().lower()
+                if blend_mode not in _SUPPORTED_VIDEO_ITEM_BLEND_MODES:
+                    raise EditorRenderUnsupported(f"Video item blend mode is not render-safe: {blend_mode}")
                 for path in (item.get("keyframes") or {}):
                     if path not in _SUPPORTED_VIDEO_KEYFRAMES:
                         raise EditorRenderUnsupported(f"Video keyframe path is not yet render-safe: {path}")
@@ -278,10 +311,39 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                 x = f"(W-w)/2+({x_expr})"
                 y = f"(H-h)/2+({y_expr})"
                 out = f"base{index}"
-                filters.append(
-                    f"[{current}][layer{index}]overlay=x='{x}':y='{y}':"
-                    f"enable='between(t,{self._ff(start)},{self._ff(start+item_duration)})':eof_action=pass[{out}]"
-                )
+                blend_mode = _ffmpeg_blend_mode(item.get("blend_mode", "normal"))
+                if blend_mode == "normal":
+                    filters.append(
+                        f"[{current}][layer{index}]overlay=x='{x}':y='{y}':"
+                        f"enable='between(t,{self._ff(start)},{self._ff(start+item_duration)})':eof_action=pass[{out}]"
+                    )
+                else:
+                    filters.append(
+                        f"color=c=black@0.0:s={width}x{height}:r={self._ff(fps)}:d={self._ff(duration)},"
+                        f"format=rgba[blendcanvas{index}]"
+                    )
+                    filters.append(
+                        f"[blendcanvas{index}][layer{index}]overlay=x='{x}':y='{y}':"
+                        f"enable='between(t,{self._ff(start)},{self._ff(start+item_duration)})':"
+                        f"eof_action=pass,format=rgba[placed{index}]"
+                    )
+                    filters.append(f"[{current}]split=2[basenormal{index}][baseblend{index}]")
+                    filters.append(
+                        f"[placed{index}]split=3[topnormal{index}][topblend{index}][topmasksrc{index}]"
+                    )
+                    filters.append(
+                        f"[basenormal{index}][topnormal{index}]overlay=0:0:eof_action=pass,"
+                        f"format=gbrp[normal{index}]"
+                    )
+                    filters.append(f"[baseblend{index}]format=gbrp[blendbase{index}]")
+                    filters.append(f"[topblend{index}]format=gbrp[blendtop{index}]")
+                    filters.append(
+                        f"[blendbase{index}][blendtop{index}]blend=all_mode={blend_mode}[blended{index}]"
+                    )
+                    filters.append(f"[topmasksrc{index}]alphaextract[blendmask{index}]")
+                    filters.append(
+                        f"[normal{index}][blended{index}][blendmask{index}]maskedmerge,format=rgba[{out}]"
+                    )
                 current = out
 
             filters.append(f"[{current}]trim=duration={self._ff(duration)},fps={self._ff(fps)},format=yuv420p[vout]")
@@ -365,6 +427,8 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                     "supports_transform_keyframes": sorted(_SUPPORTED_VIDEO_KEYFRAMES),
                     "supports_audio_pan": True,
                     "supports_speed_correct_audio": True,
+                    "supports_item_blend_modes": sorted(_SUPPORTED_VIDEO_ITEM_BLEND_MODES),
+                    "track_blend_modes_require_group_compositing": True,
                     "unsupported_state_fails_closed": True,
                 })
                 metadata.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -375,4 +439,10 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
             shutil.rmtree(work_dir, ignore_errors=True)
 
 
-__all__ = ["AdvancedVideoCompositor", "_atempo_filters", "_keyframe_expr"]
+__all__ = [
+    "AdvancedVideoCompositor",
+    "_SUPPORTED_VIDEO_ITEM_BLEND_MODES",
+    "_atempo_filters",
+    "_ffmpeg_blend_mode",
+    "_keyframe_expr",
+]
