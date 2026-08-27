@@ -112,7 +112,7 @@ def test_aura3d_consumes_verified_texture_soundtrack_and_cutscene(monkeypatch, t
     assert "Play cutscene" in html
     assert '"same_origin_verified_media_only": true' in html
     assert '"network_access": false' in html
-    assert '"runtime_version": 2' in html
+    assert '"runtime_version": 3' in html
     assert "connect-src 'none'" in html
     assert "fetch(" not in html
     assert "XMLHttpRequest" not in html
