@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from .game_forge_asset_bindings import router as game_asset_bindings_router
 from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
@@ -21,6 +22,9 @@ from .game_forge_world import (
 from .plans import GAME_CREATE, GAME_PLAYTEST
 
 router = APIRouter(tags=["Aura Game World"])
+# Binding routes are deliberately composed first so binding-aware asset deletion wins over the
+# lower-level snapshot deletion route and clears every World DNA reference atomically.
+router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
 
 
