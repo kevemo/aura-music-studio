@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Request
+from fastapi import APIRouter, Request
 
 from . import esp_shop_automation as base
 from .esp_command_center import esp
@@ -23,7 +23,7 @@ def _store(request: Request):
 base._store = _store
 
 # Connection status is provider-verified state. The base module keeps the store method for a
-# future OAuth callback/worker adapter, but the member-facing router must not let a creator
+# provider callback/worker adapter, but the member-facing router must not let a creator
 # self-assert that an external provider is connected.
 _PROVIDER_STATUS_PATH = "/command-center/api/shop-automation/connections/{connection_id}"
 base.router.routes[:] = [
@@ -34,7 +34,19 @@ base.router.routes[:] = [
     )
 ]
 
-router = base.router
+# Import only after the canonical ESP store and member-facing route boundary are installed.
+# The provider runtime reuses the exact same Shop state, approval queue and safety policy.
+from . import esp_shop_provider_runtime as runtime
+
+runtime.configure_runtime_db(esp.db_path)
+
+# Compose the already-constructed route objects directly. This avoids depending on FastAPI's
+# include_router copy semantics during module collection while preserving each route's own
+# methods, dependencies, response class, tags and endpoint function. The unsafe member-facing
+# provider-status PATCH has already been removed from the base route list above.
+router = APIRouter()
+router.routes.extend(list(base.router.routes))
+router.routes.extend(list(runtime.router.routes))
 
 
 __all__ = ["router"]
