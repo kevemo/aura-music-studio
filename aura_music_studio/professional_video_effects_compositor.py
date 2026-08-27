@@ -280,6 +280,7 @@ class VideoItemEffectsCompositor(AdvancedVideoCompositor):
                 "transient_derivatives": derived_count,
                 "transient_derivatives_ephemeral": True,
                 "original_source_refs": sorted(original_refs),
+                "source_refs": sorted(original_refs),
                 "mono_pan_stereo_normalization": True,
                 "source_media_mutated": False,
                 "unsupported_state_fails_closed": True,
