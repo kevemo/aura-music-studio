@@ -5,7 +5,12 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .game_forge_assets import GameAssetRecord, find_game_asset, runtime_asset_manifest
+from .game_forge_assets import (
+    GameAssetRecord,
+    detach_game_asset,
+    find_game_asset,
+    runtime_asset_manifest,
+)
 from .game_forge_models import GameDNA
 from .game_forge_store import load_game, remove_public_snapshot, save_game
 from .game_forge_world import GameWorldDNA, MaterialDNA, ensure_world, load_world_optional, save_world
@@ -26,7 +31,6 @@ BindingTarget = Literal[
 
 _BINDING_METADATA_KEY = "game_asset_bindings"
 _GLOBAL_TARGETS = {"world_background", "soundtrack", "cutscene"}
-_ENTITY_TARGETS = {"entity_visual", "entity_texture"}
 _ALLOWED_MATERIAL_SLOTS = {
     "base_color",
     "normal",
@@ -131,7 +135,7 @@ def bind_game_asset(game: GameDNA, body: BindGameAssetRequest) -> dict:
         if entity.material is None:
             entity.material = MaterialDNA()
         entity.material.texture_refs[_validate_slot(body.material_slot)] = asset.id
-    else:  # pragma: no cover - Literal + explicit cases keep this defensive.
+    else:  # pragma: no cover
         raise ValueError("Unsupported asset binding target")
 
     world.touch()
@@ -173,12 +177,7 @@ def unbind_game_asset(game: GameDNA, body: UnbindGameAssetRequest) -> dict:
 
 
 def clear_asset_bindings(game_id: str, asset_id: str) -> bool:
-    """Remove every World DNA reference to one imported asset.
-
-    Called when a Game Forge asset is deleted so stale object/global bindings cannot survive.
-    This helper deliberately does not load/validate the asset itself, which keeps deletion safe
-    even after the manifest row has already been removed.
-    """
+    """Remove every World DNA reference to one imported asset."""
     world = load_world_optional(game_id)
     if world is None:
         return False
@@ -339,6 +338,33 @@ def unbind_asset_route(game_id: str, body: UnbindGameAssetRequest, request: Requ
         raise HTTPException(400, str(exc)) from exc
     return {
         **state,
+        "invalidated_previous_build_and_rating": True,
+    }
+
+
+@router.delete("/api/game-forge/games/{game_id}/assets/{asset_id}")
+def delete_asset_with_binding_cleanup(game_id: str, asset_id: str, request: Request):
+    """Binding-aware asset deletion.
+
+    This route is composed before the lower-level asset router, so normal API deletion removes
+    every World DNA reference before deleting the immutable private snapshot.
+    """
+    _creator(request)
+    game = _game(game_id)
+    try:
+        _require_editable(game)
+        record = find_game_asset(game.id, asset_id)
+        bindings_removed = clear_asset_bindings(game.id, asset_id)
+        detach_game_asset(game.id, asset_id)
+        _invalidate_after_binding_change(game)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Game asset not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "deleted": True,
+        "asset_id": record.id,
+        "bindings_removed": bindings_removed,
         "invalidated_previous_build_and_rating": True,
     }
 
