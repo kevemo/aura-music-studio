@@ -13,11 +13,12 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
   const isPro=document.body.dataset.pro==='true';
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const style=document.createElement('style');
-  style.textContent=`.prostack{border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;background:#ffffff04}.prostack h4{margin:0 0 6px;font-size:.7rem;color:var(--gold)}.prostackrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #ffffff0a}.prostackrow:last-child{border-bottom:0}.prostackname{min-width:0;font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.prostackactions{display:flex;gap:4px;flex-wrap:wrap}.prostackactions .btn{padding:4px 6px;font-size:.6rem}.prostackmeta{display:block;color:var(--muted);font-size:.58rem;margin-top:2px}.prostackempty{font-size:.63rem;color:var(--muted)}.proediting{color:var(--cyan);font-size:.61rem;margin-top:5px}`;
+  style.textContent=`.prostack{border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;background:#ffffff04}.prostack h4{margin:0 0 6px;font-size:.7rem;color:var(--gold)}.prostackrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #ffffff0a}.prostackrow:last-child{border-bottom:0}.prostackname{min-width:0;font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.prostackactions{display:flex;gap:4px;flex-wrap:wrap}.prostackactions .btn{padding:4px 6px;font-size:.6rem}.prostackmeta{display:block;color:var(--muted);font-size:.58rem;margin-top:2px}.prostackempty{font-size:.63rem;color:var(--muted)}.proediting{color:var(--cyan);font-size:.61rem;margin-top:5px}.problendrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:end}`;
   document.head.append(style);
   const lifecycle=document.createElement('div');
   lifecycle.id='proLifecycleStacks';
   lifecycle.innerHTML=`
+    <div class="prostack"><h4>Blend mode</h4><div class="problendrow"><label class="label">Layer blend<select class="field" id="proBlendMode" ${isPro?'':'disabled'}><option value="normal">Normal</option><option value="multiply">Multiply</option><option value="screen">Screen</option><option value="overlay">Overlay</option><option value="soft_light">Soft Light</option><option value="hard_light">Hard Light</option><option value="darken">Darken</option><option value="lighten">Lighten</option><option value="difference">Difference</option></select></label><button class="btn" id="proApplyBlend" ${isPro?'':'disabled'}>Apply</button></div><div id="proBlendMeta" class="prostackmeta">Select an item to inspect its blend mode.</div></div>
     <div class="prostack"><h4>Current masks</h4><div id="proLifecycleMasks"></div><div id="proMaskEditing" class="proediting"></div></div>
     <div class="prostack"><h4>Current effects</h4><div id="proLifecycleEffects"></div><div id="proEffectEditing" class="proediting"></div></div>
     <div class="prostack"><h4>Current keyframe lanes</h4><div id="proLifecycleKeys"></div></div>`;
@@ -42,12 +43,17 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
   }
   function sync(){
     const item=current();
+    const blend=byId('proBlendMode'),blendMeta=byId('proBlendMeta');
     if(!item){
+      if(blend)blend.value='normal';
+      if(blendMeta)blendMeta.textContent='Select an item to inspect its blend mode.';
       byId('proLifecycleMasks').innerHTML='<div class="prostackempty">Select an item to inspect its masks.</div>';
       byId('proLifecycleEffects').innerHTML='<div class="prostackempty">Select an item to inspect its effects.</div>';
       byId('proLifecycleKeys').innerHTML='<div class="prostackempty">Select an item to inspect its keyframes.</div>';
       resetMaskEdit();resetEffectEdit();return;
     }
+    if(blend)blend.value=item.blend_mode||'normal';
+    if(blendMeta)blendMeta.textContent=`Current: ${String(item.blend_mode||'normal').replaceAll('_',' ')} · stored in the reversible edit graph.`;
     if(editingMask&&editingMask.itemId!==item.id)resetMaskEdit();
     if(editingEffect&&editingEffect.itemId!==item.id)resetEffectEdit();
     const masks=item.masks||[];
@@ -58,6 +64,17 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
     const names=Object.keys(lanes);
     byId('proLifecycleKeys').innerHTML=names.length?names.map(name=>`<div class="prostackrow"><div class="prostackname">${esc(name)}<span class="prostackmeta">${(lanes[name]||[]).length} point${(lanes[name]||[]).length===1?'':'s'}</span></div><div class="prostackactions">${actionButton('Delete lane','key-delete',name)}</div></div>`).join(''):'<div class="prostackempty">No keyframe lanes on this item.</div>';
   }
+
+  const blendApply=byId('proApplyBlend');
+  if(blendApply)blendApply.onclick=async()=>{
+    const item=current();if(!item)return status('Select an item first.',true);
+    if(!isPro)return status('Professional blend modes require Pro.',true);
+    try{
+      const blend_mode=byId('proBlendMode').value;
+      const response=await api(endpoint(`/items/${encodeURIComponent(item.id)}`),{method:'PATCH',body:JSON.stringify({changes:{blend_mode}})});
+      refreshGraph(response,item.id);status(`Blend mode saved · ${blend_mode.replaceAll('_',' ')}. Undo can restore it.`);
+    }catch(error){status(error.message,true)}
+  };
 
   const maskAdd=byId('proAddMask');
   const baseMaskAdd=maskAdd?.onclick;
