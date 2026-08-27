@@ -31,7 +31,7 @@ def _project(tmp_path):
 
 def test_mask_effect_and_metadata_are_rendered_not_silently_ignored(tmp_path):
     project, store, sequence, _track, item = _project(tmp_path)
-    store.add_effect(item.id, EditorEffect(type="grayscale", mix=1.0))
+    store.add_effect("item", item.id, EditorEffect(type="grayscale", mix=1.0))
     store.add_mask(
         item.id,
         EditorMask(
@@ -100,7 +100,7 @@ def test_layer_blend_mode_is_rendered(tmp_path):
 
 def test_unknown_effect_fails_closed(tmp_path):
     project, store, sequence, _track, item = _project(tmp_path)
-    store.add_effect(item.id, EditorEffect(type="future_neural_magic", mix=1.0))
+    store.add_effect("item", item.id, EditorEffect(type="future_neural_magic", mix=1.0))
     with pytest.raises(EditorRenderUnsupported, match="Unsupported image effect"):
         AdvancedImageCompositor(project).render_image_advanced(sequence.id, format="png")
 
