@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from .game_forge_assets import router as game_assets_router
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -17,6 +18,7 @@ from .game_forge_world import (
 from .plans import GAME_CREATE
 
 router = APIRouter(tags=["Aura Game World"])
+router.include_router(game_assets_router)
 
 
 def _creator(request: Request):
@@ -102,7 +104,8 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
 
 
 # These two routes deliberately precede the foundation API equivalents in app.py. They bind
-# approval/publishing to Game DNA + Aura World DNA, not just the high-level game questionnaire.
+# approval/publishing to Game DNA + Aura World DNA + imported Game Forge asset snapshots,
+# not just the high-level game questionnaire.
 @router.post("/api/game-forge/games/{game_id}/scan")
 def scan_world_integrity(game_id: str, request: Request):
     _creator(request)
@@ -146,4 +149,5 @@ def publish_world_integrity(game_id: str, request: Request):
         "official_rating": False,
         "rating_note": game.rating_assessment.note,
         "integrity_bound_to_world": True,
+        "integrity_bound_to_assets": True,
     }
