@@ -5,12 +5,22 @@ from dataclasses import dataclass
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .aura_chat_store import AuraChatStore
+from .aura_ui_extension import UI_SCRIPT
+from .aura_work_modes import (
+    WORK_MODE_UI_SCRIPT,
+    activate_work_mode_scope,
+    install_aura_work_modes,
+    router as work_mode_router,
+    work_mode_instruction,
+)
 
 AuraReasoningMode = Literal["fast", "auto", "deep", "creative"]
 router = APIRouter(tags=["Aura Reasoning Modes"])
+router.include_router(work_mode_router)
 store = AuraChatStore()
 
 
@@ -96,6 +106,9 @@ def get_reasoning_mode(chat_store: AuraChatStore, user_id: str, thread_id: str) 
             (thread_id, user_id),
         ).fetchone()
     value = str(row["mode"] if row else "auto").lower()
+    # Streaming already resolves reasoning mode for every turn, so this also activates the
+    # separate work-mode ContextVar before any streaming tool registry is constructed.
+    activate_work_mode_scope(chat_store, user_id, thread_id)
     return value if value in MODE_CONFIGS else "auto"  # type: ignore[return-value]
 
 
@@ -113,11 +126,18 @@ def set_reasoning_mode(chat_store: AuraChatStore, user_id: str, thread_id: str, 
                ON CONFLICT(thread_id) DO UPDATE SET mode=excluded.mode,user_id=excluded.user_id,updated_at=CURRENT_TIMESTAMP""",
             (thread_id, user_id, value),
         )
+    activate_work_mode_scope(chat_store, user_id, thread_id)
     return value  # type: ignore[return-value]
 
 
 def mode_config(mode: str) -> ModeConfig:
-    return MODE_CONFIGS.get((mode or "").lower(), MODE_CONFIGS["auto"])
+    base = MODE_CONFIGS.get((mode or "").lower(), MODE_CONFIGS["auto"])
+    return ModeConfig(
+        name=base.name,
+        temperature=base.temperature,
+        history_messages=base.history_messages,
+        instruction=base.instruction + "\n" + work_mode_instruction(),
+    )
 
 
 def detect_mode_command(text: str) -> AuraReasoningMode | None:
@@ -152,6 +172,21 @@ def put_mode(thread_id: str, body: ModeRequest, request: Request):
     except KeyError as exc:
         raise HTTPException(404, "Aura conversation not found") from exc
     return {"mode": mode, "detail": f"Aura {mode.title()} mode is now active for this conversation."}
+
+
+# This router is mounted before aura_ui_extension_router in app.py. Serving the combined script
+# here keeps the existing Aura extension intact while adding work-mode controls without another
+# app-level route or page fork.
+@router.get("/aura-intelligence/ui-extension.js", include_in_schema=False)
+def combined_aura_ui_extension():
+    return Response(
+        content=UI_SCRIPT + "\n" + WORK_MODE_UI_SCRIPT,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+install_aura_work_modes()
 
 
 __all__ = [
