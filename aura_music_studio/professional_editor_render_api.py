@@ -13,6 +13,7 @@ from .professional_editor_renderer import (
     EditorRenderUnsupported,
     ProfessionalEditorRenderer,
 )
+from .professional_image_compositor import AdvancedImageCompositor
 from .tenant_storage import project_path
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rendering"])
@@ -21,6 +22,9 @@ router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rende
 class EditorRenderRequest(BaseModel):
     format: Literal["png", "webp", "jpeg", "mp4"]
     quality: int = Field(default=92, ge=1, le=100)
+    # Image sequences may contain transform/effect keyframes even though the exported file is
+    # a still. frame_time lets the member choose which authored frame to flatten.
+    frame_time: float = Field(default=0.0, ge=0.0, le=86400.0)
 
 
 def _member(request: Request):
@@ -70,6 +74,8 @@ def render_editor_sequence(
             raise ValueError("Video sequences export as MP4")
         if sequence["kind"] == "image" and body.format == "mp4":
             raise ValueError("Image sequences export as PNG, WebP or JPEG")
+        if sequence["kind"] == "video" and body.frame_time != 0.0:
+            raise ValueError("frame_time applies to still-image sequence exports only")
 
         advanced = renderer.advanced_state(state, sequence_id)
         if advanced["advanced"] and not member.plan.has(AUTOMATION):
@@ -82,7 +88,13 @@ def render_editor_sequence(
                 raise PermissionError("Video export requires a membership tier with video downloads")
             result = renderer.render_video(sequence_id)
         else:
-            result = renderer.render_image(sequence_id, format=expected, quality=body.quality)
+            image_renderer = AdvancedImageCompositor(_project(project_name))
+            result = image_renderer.render_image_advanced(
+                sequence_id,
+                format=expected,
+                quality=body.quality,
+                frame_time=body.frame_time,
+            )
     except KeyError as exc:
         raise HTTPException(404, f"Editor resource not found: {exc.args[0]}") from exc
     except PermissionError as exc:
@@ -97,6 +109,7 @@ def render_editor_sequence(
         "download_url": f"/creative/projects/{project_name}/editor/exports/{result.filename}",
         "non_destructive": True,
         "source_media_mutated": False,
+        "frame_time": body.frame_time if sequence["kind"] == "image" else None,
     }
 
 
