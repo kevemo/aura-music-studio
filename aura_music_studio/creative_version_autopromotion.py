@@ -5,13 +5,16 @@ from fastapi import APIRouter, Request
 from .commercial_entitlement_routes import router as commercial_entitlement_router
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
+from .professional_editor_api import router as professional_editor_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
-# Commercial entitlement routes are nested here deliberately because this overlay router is
-# mounted before the base Creative Project and Creative Media routers in app.py. That makes
-# quota/download enforcement authoritative without duplicating the entire underlying API.
+# Commercial entitlement and professional-editor routes are nested here deliberately because
+# this overlay router is mounted before the base Creative Project and Creative Media routers in
+# app.py. That keeps cross-media edit/version enforcement authoritative without rewriting the
+# high-conflict application entrypoint used by the other build chats.
 router.include_router(commercial_entitlement_router)
+router.include_router(professional_editor_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
 
