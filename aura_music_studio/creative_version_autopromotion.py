@@ -6,6 +6,7 @@ from .commercial_entitlement_routes import router as commercial_entitlement_rout
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
 from .professional_editor_api import router as professional_editor_router
+from .professional_editor_workspace import router as professional_editor_workspace_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .tenant_storage import project_path
@@ -21,6 +22,7 @@ router.include_router(commercial_entitlement_router)
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
 router.include_router(professional_editor_router)
+router.include_router(professional_editor_workspace_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
 
