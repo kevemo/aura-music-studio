@@ -187,17 +187,19 @@ def test_track_effects_and_track_keyframes_remain_fail_closed(tmp_path):
     track = store.create_track(sequence.id, kind="video", name="Picture")
 
     state = store.public_state()
-    track_state = next(value for value in state["tracks"] if value["id"] == track.id)
-    track_state["effects"] = [{"id": "fx_test", "type": "blur", "enabled": True, "mix": 1.0, "params": {}}]
     compositor = GroupedTrackVideoCompositor(project)
+    _sequences, tracks, _items = compositor._branch_maps(state)
+    tracks[track.id]["effects"] = [
+        {"id": "fx_test", "type": "blur", "enabled": True, "mix": 1.0, "params": {}}
+    ]
     compositor.store = _StateProxy(state)  # type: ignore[assignment]
     with pytest.raises(EditorRenderUnsupported, match="track effects"):
         compositor.render_video_advanced(sequence.id)
 
     state = store.public_state()
-    track_state = next(value for value in state["tracks"] if value["id"] == track.id)
-    track_state["keyframes"] = {"opacity": [{"time": 0.0, "value": 1.0}]}
     compositor = GroupedTrackVideoCompositor(project)
+    _sequences, tracks, _items = compositor._branch_maps(state)
+    tracks[track.id]["keyframes"] = {"opacity": [{"time": 0.0, "value": 1.0}]}
     compositor.store = _StateProxy(state)  # type: ignore[assignment]
     with pytest.raises(EditorRenderUnsupported, match="track keyframes"):
         compositor.render_video_advanced(sequence.id)
