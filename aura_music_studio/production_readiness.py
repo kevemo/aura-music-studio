@@ -11,8 +11,16 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Header, Response
 from fastapi.responses import PlainTextResponse
 
+from .access_control import PUBLIC_EXACT
+
 router = APIRouter(tags=["Operations"])
 _STARTED = time.monotonic()
+
+# These GET-only operational paths must pass the membership envelope so container/orchestrator
+# health checks work before any customer signs in. `/internal/metrics` remains independently
+# protected by a constant-time monitoring-token comparison below.
+_OPERATIONS_PUBLIC_PATHS = {"/health/live", "/health/ready", "/internal/metrics"}
+PUBLIC_EXACT.update(_OPERATIONS_PUBLIC_PATHS)
 
 _FALSE = {"", "0", "false", "no", "off", "disabled"}
 _PLACEHOLDER_FRAGMENTS = (
