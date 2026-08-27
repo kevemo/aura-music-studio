@@ -18,7 +18,8 @@ TRUSTED_KEY = "aura-sec-release-key-2026-01"
 
 def _payload(**overrides):
     data = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "release_sequence": 42,
         "product": "aura-sec",
         "channel": "stable",
         "platform": "windows",
@@ -43,6 +44,10 @@ def _manifest(**overrides):
     return AuraSecReleaseManifest.from_dict(_payload(**overrides))
 
 
+def _valid_verifier(key_id: str, payload: bytes, signature: bytes) -> bool:
+    return key_id == TRUSTED_KEY and payload.startswith(b"AURA-SEC-RELEASE-V2\n") and len(signature) == 64
+
+
 def test_release_requires_real_signature_verifier():
     with pytest.raises(ReleaseManifestError, match="No Aura Sec release signature verifier"):
         validate_release_manifest(
@@ -58,7 +63,7 @@ def test_verified_manifest_is_downloadable_only_after_signature_callback_succeed
 
     def verifier(key_id: str, payload: bytes, signature: bytes) -> bool:
         calls.append((key_id, payload, signature))
-        return key_id == TRUSTED_KEY and payload.startswith(b"AURA-SEC-RELEASE-V1\n") and len(signature) == 64
+        return _valid_verifier(key_id, payload, signature)
 
     result = validate_release_manifest(
         _manifest(),
@@ -68,8 +73,88 @@ def test_verified_manifest_is_downloadable_only_after_signature_callback_succeed
     )
     assert result["verified"] is True
     assert result["downloadable"] is True
+    assert result["release_sequence"] == 42
     assert result["artifact_sha256"] == "a" * 64
     assert calls
+    assert b"\n42\n" in calls[0][1]
+
+
+def test_legacy_manifest_schema_without_signed_sequence_is_rejected():
+    with pytest.raises(ReleaseManifestError, match="signed sequence metadata is required"):
+        validate_release_manifest(
+            _manifest(schema_version=1),
+            trusted_key_ids={TRUSTED_KEY},
+            signature_verifier=_valid_verifier,
+            now=NOW,
+        )
+
+
+def test_release_sequence_must_be_positive():
+    with pytest.raises(ReleaseManifestError, match="positive 63-bit integer"):
+        validate_release_manifest(
+            _manifest(release_sequence=0),
+            trusted_key_ids={TRUSTED_KEY},
+            signature_verifier=_valid_verifier,
+            now=NOW,
+        )
+
+
+def test_valid_old_signed_release_is_rejected_as_rollback():
+    with pytest.raises(ReleaseManifestError, match="rollback rejected"):
+        validate_release_manifest(
+            _manifest(release_sequence=41),
+            trusted_key_ids={TRUSTED_KEY},
+            signature_verifier=_valid_verifier,
+            now=NOW,
+            minimum_release_sequence=42,
+            trusted_sequence_sha256="a" * 64,
+        )
+
+
+def test_same_sequence_can_only_redownload_identical_trusted_artifact():
+    result = validate_release_manifest(
+        _manifest(release_sequence=42, artifact_sha256="a" * 64),
+        trusted_key_ids={TRUSTED_KEY},
+        signature_verifier=_valid_verifier,
+        now=NOW,
+        minimum_release_sequence=42,
+        trusted_sequence_sha256="a" * 64,
+    )
+    assert result["downloadable"] is True
+
+    with pytest.raises(ReleaseManifestError, match="equivocation rejected"):
+        validate_release_manifest(
+            _manifest(release_sequence=42, artifact_sha256="b" * 64),
+            trusted_key_ids={TRUSTED_KEY},
+            signature_verifier=_valid_verifier,
+            now=NOW,
+            minimum_release_sequence=42,
+            trusted_sequence_sha256="a" * 64,
+        )
+
+
+def test_same_sequence_without_persisted_trusted_hash_fails_closed():
+    with pytest.raises(ReleaseManifestError, match="previously trusted artifact SHA-256"):
+        validate_release_manifest(
+            _manifest(release_sequence=42),
+            trusted_key_ids={TRUSTED_KEY},
+            signature_verifier=_valid_verifier,
+            now=NOW,
+            minimum_release_sequence=42,
+        )
+
+
+def test_newer_sequence_is_allowed_without_reusing_old_hash():
+    result = validate_release_manifest(
+        _manifest(release_sequence=43, artifact_sha256="b" * 64, version="0.1.1"),
+        trusted_key_ids={TRUSTED_KEY},
+        signature_verifier=_valid_verifier,
+        now=NOW,
+        minimum_release_sequence=42,
+        trusted_sequence_sha256="a" * 64,
+    )
+    assert result["release_sequence"] == 43
+    assert result["artifact_sha256"] == "b" * 64
 
 
 def test_bad_signature_fails_closed():
