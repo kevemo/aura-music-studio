@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_agent_roster import AgentRosterStore
@@ -151,6 +153,11 @@ def test_routes_are_private_agent_overlay_paths():
     assert "/command-center/api/agent/support/cases/{case_id}/internal-notes" in paths
     assert "/command-center/api/agent/support/cases/{case_id}/escalate" in paths
 
-    overlay_paths = {getattr(route, "path", None) for route in agent_overlay_router.routes}
-    assert "/command-center/agent/support" in overlay_paths
-    assert "/command-center/api/agent/support/cases" in overlay_paths
+    # FastAPI nests included APIRouters and does not guarantee that child paths appear as
+    # top-level entries in ``router.routes``. Prove the production overlay registration through
+    # actual ASGI dispatch instead: unauthenticated requests may be denied, but must not be 404.
+    app = FastAPI()
+    app.include_router(agent_overlay_router)
+    client = TestClient(app, raise_server_exceptions=False)
+    assert client.get("/command-center/agent/support").status_code != 404
+    assert client.get("/command-center/api/agent/support/cases").status_code != 404
