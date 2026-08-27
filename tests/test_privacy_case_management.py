@@ -147,7 +147,9 @@ def test_owner_routes_use_existing_owner_authorization_and_do_not_execute_data_a
 def test_integration_overlay_mounts_owner_privacy_routes():
     from aura_music_studio.creative_version_autopromotion import router as integration_router
 
-    paths = {route.path for route in integration_router.routes}
+    app = FastAPI()
+    app.include_router(integration_router)
+    paths = app.openapi()["paths"]
     assert "/owner/privacy/cases" in paths
     assert "/owner/privacy/cases/{request_id}" in paths
     assert "/owner/privacy/cases/{request_id}/transition" in paths
