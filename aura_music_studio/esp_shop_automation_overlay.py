@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import Request
+from fastapi import APIRouter, Request
 
 from . import esp_shop_automation as base
 from .esp_command_center import esp
@@ -39,8 +39,14 @@ base.router.routes[:] = [
 from . import esp_shop_provider_runtime as runtime
 
 runtime.configure_runtime_db(esp.db_path)
-base.router.include_router(runtime.router)
-router = base.router
+
+# Compose into a fresh router rather than mutating the base router after other modules may
+# already have included it. APIRouter.include_router copies routes at inclusion time, so this
+# deterministic composite guarantees both the safe base Shop routes and provider runtime routes
+# are visible wherever this overlay is mounted.
+router = APIRouter()
+router.include_router(base.router)
+router.include_router(runtime.router)
 
 
 __all__ = ["router"]
