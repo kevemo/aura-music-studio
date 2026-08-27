@@ -9,6 +9,7 @@ and this boundary continues to enforce the aggregate expanded-vertex model budge
 
 import os
 
+from .game_forge_accessibility import harden_game_runtime_html
 from .game_forge_native3d_v4 import _runtime_payload as _v4_runtime_payload
 from .game_forge_native3d_v4 import render_aura3d_playtest as _render_v4
 
@@ -30,6 +31,10 @@ def _runtime_payload(game, world) -> dict:
         )
     payload["runtime_contract"]["model_runtime_vertex_budget"] = _MAX_RUNTIME_MODEL_VERTICES
     payload["runtime_contract"]["model_runtime_vertex_count"] = total_vertices
+    payload["runtime_contract"]["mobile_touch_controls"] = True
+    payload["runtime_contract"]["keyboard_focusable"] = True
+    payload["runtime_contract"]["reduced_motion_respected"] = True
+    payload["runtime_contract"]["aria_live_status"] = True
     return payload
 
 
@@ -37,7 +42,7 @@ def render_aura3d_playtest(game, world, *, csp: str) -> str:
     # Validate the exact model and cinematic set before the renderer serializes closed runtime data.
     # Raw models and creator-authored executable code are never loaded or run by the browser.
     _runtime_payload(game, world)
-    return _render_v4(game, world, csp=csp)
+    return harden_game_runtime_html(_render_v4(game, world, csp=csp))
 
 
 __all__ = ["render_aura3d_playtest", "_runtime_payload"]
