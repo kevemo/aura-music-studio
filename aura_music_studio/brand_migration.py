@@ -6,45 +6,46 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .branding import (
+    BRAND_ASSET_PATH,
+    ENDORSEMENT,
+    PLATFORM_DESCRIPTOR,
+    PRODUCT_FULL_NAME,
+    PRODUCT_SHORT_NAME,
+    TAGLINE,
+)
+
 
 # Compatibility bridge: historical product copy may still exist inside legacy modules
-# and persisted templates. This middleware makes Pulsar-Frequency House authoritative
-# at the HTTP boundary without renaming storage keys, cookies or package imports.
+# and persisted templates. This middleware makes the Elevate Souls Productions Content
+# Creation Command Center authoritative at the HTTP boundary without renaming storage
+# keys, cookies, database identifiers or package imports.
 #
 # A few presentation-only replacements below also keep the original compressed landing
 # template current while larger workspaces evolve independently. They intentionally do
 # not claim an external renderer/model is live merely because its software adapter exists.
-_AURA_CORE_HOME_SECTION = """<section class='wrap section' data-pfh-aura-core='0.20'><div class='eyebrow'>Aura Core 0.20</div><h2>Your creative house now has an operating intelligence layer.</h2><p class='sectionintro'>Aura is more than a prompt box: the connected software layer provides private realtime conversations, project-aware tools, hands-free voice workflows, versioned Artifacts, durable Tasks, Notifications, Aura Today, verified multi-step tool chains and encrypted read-only workspace connectors when a member authorizes them.</p><div class='grid'><article class='card' style='--accent:#a66bff'><div class='icon'>🧠</div><h3>Aura Intelligence</h3><p>Persistent private conversations with Fast, Auto, Deep and Creative modes, custom Aura Profiles, project context, research and verified tool workflows.</p><span class='status'>Aura Core 0.20 connected</span><div class='featurelist'><span>Realtime</span><span>Profiles</span><span>Research</span><span>Project-aware</span></div></article><article class='card' style='--accent:#5de7ff'><div class='icon'>🎙️</div><h3>Voice & Embodied Host</h3><p>Single-turn speech, optional hands-free Voice Conversation and an embodied Aura state/runtime. The browser 3D renderer is implemented; the final production rig remains a deployment asset.</p><span class='status'>Host runtime connected · final rig pending</span><div class='featurelist'><span>Listening</span><span>Thinking</span><span>Speaking</span><span>3D-ready runtime</span></div></article><article class='card' style='--accent:#77e0a6'><div class='icon'>☀️</div><h3>Aura Today & Tasks</h3><p>At-a-glance Calendar/Gmail metadata, pinned-project context, durable reminders, scheduled read-only briefings and private notifications across sessions.</p><span class='status'>Workspace intelligence connected</span><div class='featurelist'><span>Today</span><span>Tasks</span><span>Briefings</span><span>Notifications</span></div></article><article class='card' style='--accent:#f4c873'><div class='icon'>▤</div><h3>Artifacts & Safe Tools</h3><p>Versioned documents, lyrics, prompts, data and code with restore history. Code execution remains disabled on the web host and requires a separately configured isolated sandbox.</p><span class='status'>Artifacts connected · sandbox optional</span><div class='featurelist'><span>Versions</span><span>Restore</span><span>Data tools</span><span>Isolation</span></div></article></div><div class='heroactions'><a class='btn primary' href='/aura-intelligence'>Open Aura Intelligence</a><a class='btn' href='/creative-house'>Open Creative House</a></div><p class='tiny'>External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states. Pulsar-Frequency House reports those states instead of presenting an unconfigured backend as complete.</p></section>"""
+_AURA_CORE_HOME_SECTION = f"""<section class='wrap section' data-esp-ccc-aura-core='0.20'><div class='eyebrow'>Aura Core 0.20</div><h2>Your creative command center now has an operating intelligence layer.</h2><p class='sectionintro'>Aura is more than a prompt box: the connected software layer provides private realtime conversations, project-aware tools, hands-free voice workflows, versioned Artifacts, durable Tasks, Notifications, Aura Today, verified multi-step tool chains and encrypted read-only workspace connectors when a member authorizes them.</p><div class='grid'><article class='card' style='--accent:#a66bff'><div class='icon'>🧠</div><h3>Aura Intelligence</h3><p>Persistent private conversations with Fast, Auto, Deep and Creative modes, custom Aura Profiles, project context, research and verified tool workflows.</p><span class='status'>Aura Core 0.20 connected</span><div class='featurelist'><span>Realtime</span><span>Profiles</span><span>Research</span><span>Project-aware</span></div></article><article class='card' style='--accent:#5de7ff'><div class='icon'>🎙️</div><h3>Voice & Embodied Host</h3><p>Single-turn speech, optional hands-free Voice Conversation and an embodied Aura state/runtime. The browser 3D renderer is implemented; the final production rig remains a deployment asset.</p><span class='status'>Host runtime connected · final rig pending</span><div class='featurelist'><span>Listening</span><span>Thinking</span><span>Speaking</span><span>3D-ready runtime</span></div></article><article class='card' style='--accent:#77e0a6'><div class='icon'>☀️</div><h3>Aura Today & Tasks</h3><p>At-a-glance Calendar/Gmail metadata, pinned-project context, durable reminders, scheduled read-only briefings and private notifications across sessions.</p><span class='status'>Workspace intelligence connected</span><div class='featurelist'><span>Today</span><span>Tasks</span><span>Briefings</span><span>Notifications</span></div></article><article class='card' style='--accent:#f4c873'><div class='icon'>▤</div><h3>Artifacts & Safe Tools</h3><p>Versioned documents, lyrics, prompts, data and code with restore history. Code execution remains disabled on the web host and requires a separately configured isolated sandbox.</p><span class='status'>Artifacts connected · sandbox optional</span><div class='featurelist'><span>Versions</span><span>Restore</span><span>Data tools</span><span>Isolation</span></div></article></div><div class='heroactions'><a class='btn primary' href='/aura-intelligence'>Open Aura Intelligence</a><a class='btn' href='/creative-house'>Open Creative House</a></div><p class='tiny'>External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states. {PRODUCT_FULL_NAME} reports those states instead of presenting an unconfigured backend as complete.</p></section>"""
 _LANDING_MEMBERSHIP_MARKER = "<section class='wrap section'><div class='eyebrow'>Memberships</div>"
 
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    (
-        "Powered by Elevate Souls Productions and Aura AI Systems",
-        "Powered by Elevate Souls Productions & Aura AI Systems",
-    ),
-    (
-        "Elevate Souls Productions Presents: The Live Sound Studio",
-        "Pulsar-Frequency House",
-    ),
-    (
-        "Elevate Souls Productions Presents: Live Sound Studio",
-        "Pulsar-Frequency House",
-    ),
-    (
-        "Elevate Souls Productions Presents",
-        "Powered by Elevate Souls Productions & Aura AI Systems",
-    ),
-    ("4Infinity Creative Studios", "Pulsar-Frequency House"),
-    ("Cosmic Creative Studios", "Pulsar-Frequency House"),
-    ("Cosmic Creation Studios", "Pulsar-Frequency House"),
-    ("The Live Sound Studio", "Pulsar-Frequency House"),
-    ("Live Sound Studio", "Pulsar-Frequency House"),
-    ("4Infinity", "Pulsar-Frequency"),
-    (
-        "Music, Video, Image & Creator Intelligence",
-        "For Professional Creation Beyond The Cosmos",
-    ),
-    ("Music Making for Professionals", "For Professional Creation Beyond The Cosmos"),
+    ("Powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
+    ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
+    ("Powered by Elevate Souls Productions & Aura AI", ENDORSEMENT),
+    ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Elevate Souls Productions Presents", PRODUCT_FULL_NAME),
+    ("Pulsar-Frequency House", PRODUCT_FULL_NAME),
+    ("Pulsar-Frequency", PRODUCT_SHORT_NAME),
+    ("4Infinity Creative Studios", PRODUCT_FULL_NAME),
+    ("Cosmic Creative Studios", PRODUCT_FULL_NAME),
+    ("Cosmic Creation Studios", PRODUCT_FULL_NAME),
+    ("The Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Live Sound Studio", PRODUCT_FULL_NAME),
+    ("4Infinity", PRODUCT_SHORT_NAME),
+    ("For Professional Creation Beyond The Cosmos", TAGLINE),
+    ("Music, Video, Image & Creator Intelligence", PLATFORM_DESCRIPTOR),
+    ("Music Making for Professionals", TAGLINE),
+    ("/static/pulsar-frequency-house-logo.svg", BRAND_ASSET_PATH),
     # Current landing-page presentation upgrades. Keep these exact and narrow so legacy
     # API payloads/project data are not semantically rewritten.
     ("href='#suite'>Creative House", "href='/creative-house'>Creative House"),
@@ -85,7 +86,14 @@ _TEXTUAL_CONTENT_TYPES = (
 def rebrand_text(value: str) -> str:
     for old, new in _REPLACEMENTS:
         value = value.replace(old, new)
-    if "data-pfh-aura-core='0.20'" not in value and _LANDING_MEMBERSHIP_MARKER in value:
+    # Compatibility with pages already decorated by the previous branding middleware:
+    # treat the old marker as already containing the Aura section so migration remains
+    # idempotent while gradually moving new responses to the ESP marker.
+    has_aura_section = (
+        "data-esp-ccc-aura-core='0.20'" in value
+        or "data-pfh-aura-core='0.20'" in value
+    )
+    if not has_aura_section and _LANDING_MEMBERSHIP_MARKER in value:
         value = value.replace(
             _LANDING_MEMBERSHIP_MARKER,
             _AURA_CORE_HOME_SECTION + _LANDING_MEMBERSHIP_MARKER,
@@ -115,7 +123,7 @@ def inject_song_dna_lock_entry(value: str, path: str) -> str:
 
 
 class BrandMigrationMiddleware(BaseHTTPMiddleware):
-    """Rewrite legacy public-facing product copy to Pulsar-Frequency House.
+    """Rewrite legacy public-facing product copy to the ESP Content Creation Command Center.
 
     Binary audio/video/image responses are passed through untouched. Response headers,
     including repeated Set-Cookie headers, are preserved while Content-Length is
