@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
+from fastapi import FastAPI
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.credit_wallet import CreditWalletStore
@@ -84,13 +85,19 @@ def test_verified_credit_receipt_is_amount_bearing_and_idempotent(monkeypatch, t
         assert con.execute("SELECT COUNT(*) FROM commerce_receipts").fetchone()[0] == 1
 
 
-def test_receipt_overlay_owns_webhook_route_before_base_handlers():
-    from aura_music_studio.creative_version_autopromotion import router
+def test_receipt_overlay_owns_effective_webhook_route_before_base_handlers():
+    # FastAPI 0.137+ keeps nested router composition in a live route tree. Mirror the existing
+    # Stripe routability regression by including the overlay into an effective app before
+    # checking endpoint precedence.
+    from aura_music_studio.creative_version_autopromotion import router as overlay_router
 
+    effective_app = FastAPI()
+    effective_app.include_router(overlay_router)
     matching = [
         route
-        for route in router.routes
+        for route in effective_app.routes
         if getattr(route, "path", None) == "/billing/stripe/webhook"
+        and "POST" in (getattr(route, "methods", None) or set())
     ]
     assert matching
     assert matching[0].endpoint.__name__ == "stripe_webhook_with_commerce_receipt"
