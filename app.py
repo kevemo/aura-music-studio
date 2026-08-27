@@ -29,6 +29,7 @@ from aura_music_studio.aura_runtime_context import install_aura_runtime_context
 from aura_music_studio.aura_sandbox import install_aura_sandbox_tools, router as aura_sandbox_router
 from aura_music_studio.aura_sec import AuraSecDashboardMiddleware, router as aura_sec_router
 from aura_music_studio.aura_sec_approval_write_guard import AuraSecApprovalWriteGuardMiddleware
+from aura_music_studio.aura_sec_passkey_visibility import AuraSecPasskeyVisibilityMiddleware
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -218,6 +219,7 @@ app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
 app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(AuraSecApprovalWriteGuardMiddleware)
+app.add_middleware(AuraSecPasskeyVisibilityMiddleware)
 app.add_middleware(AuraSecDashboardMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(OwnerLegacyCompatibilityMiddleware)
