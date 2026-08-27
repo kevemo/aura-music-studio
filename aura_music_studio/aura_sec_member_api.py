@@ -8,6 +8,7 @@ from .aura_sec_approval import AuraSecApprovalGateway
 from .aura_sec_approval_portal import router as approval_portal_router
 from .aura_sec_catalog import AuraSecCatalog
 from .aura_sec_health import evaluate_device_health, summarize_security_health
+from .aura_sec_passkey_portal import router as passkey_portal_router
 from .aura_sec_read_model import AuraSecReadModel
 from .aura_sec_recovery import AuraSecRecoveryStore
 from .aura_sec_store import AuraSecStore
@@ -31,6 +32,7 @@ class ApprovalConfirmRequest(BaseModel):
 
     approval_token: str = Field(min_length=16, max_length=256)
     password: str | None = Field(default=None, min_length=1, max_length=1024)
+    strong_reauth_evidence_id: str | None = Field(default=None, min_length=16, max_length=128)
 
 
 def _session_context(request: Request) -> tuple[dict, str]:
@@ -270,6 +272,7 @@ def member_action_approve(action_id: str, payload: ApprovalConfirmRequest, reque
             session_token=session_token,
             approval_token=payload.approval_token,
             password=payload.password,
+            strong_reauth_evidence_id=payload.strong_reauth_evidence_id,
         )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
@@ -319,6 +322,10 @@ def vulnerability_priority(payload: VulnerabilityFinding, request: Request):
 
 router.include_router(api_router)
 router.include_router(workflow_portal_router)
+# Passkey-aware approval POST routes are mounted before the legacy approval portal so
+# high-risk approval cannot fall back to password after a passkey is enrolled. The
+# legacy router continues to serve the read-only GET review page.
+router.include_router(passkey_portal_router)
 router.include_router(approval_portal_router)
 
 
