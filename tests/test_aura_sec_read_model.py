@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.aura_sec_read_model import AuraSecReadModel
-from aura_music_studio.aura_sec_recovery import AuraSecRecoveryStore
+from aura_music_studio.aura_sec_recovery import (
+    AuraSecRecoveryStore,
+    VerifiedBackupTargetConnection,
+    VerifiedRecoveryPointEvidence,
+)
 from aura_music_studio.aura_sec_store import AuraSecStore
+
+
+DEVICE_FP = "a" * 64
+SIGNATURE = base64.b64encode(b"s" * 64).decode("ascii")
 
 
 def _fixture(tmp_path):
@@ -26,9 +37,44 @@ def _fixture(tmp_path):
         display_name="Read Model PC",
         platform="windows",
         architecture="x64",
-        public_key_fingerprint="a" * 64,
+        public_key_fingerprint=DEVICE_FP,
     )
     return accounts, security, recovery, read, signup.user_id, device
+
+
+def _target_verifier(payload, context):
+    if payload.get("provider_connected") is not True:
+        return None
+    target_identity_digest = "7" * 64
+    proof_type = "provider_connection"
+    evidence_digest = hashlib.sha256(
+        context.evidence_payload(
+            target_identity_digest=target_identity_digest,
+            proof_type=proof_type,
+            encrypted=True,
+            isolated_or_immutable=True,
+        )
+    ).hexdigest()
+    return VerifiedBackupTargetConnection(
+        target_identity_digest=target_identity_digest,
+        proof_type=proof_type,
+        verifier_id="read-model-target-verifier",
+        evidence_digest=evidence_digest,
+        encrypted=True,
+        isolated_or_immutable=True,
+    )
+
+
+def _point_verifier(expected_fingerprint, payload, signature):
+    assert expected_fingerprint == DEVICE_FP
+    assert signature == b"s" * 64
+    return VerifiedRecoveryPointEvidence(
+        public_key_fingerprint=DEVICE_FP,
+        verifier_id="read-model-point-verifier",
+        key_algorithm="ed25519",
+        evidence_digest=hashlib.sha256(payload).hexdigest(),
+        malware_scan_state="clean",
+    )
 
 
 def test_read_model_projects_verified_incidents_actions_and_recovery(tmp_path):
@@ -55,9 +101,8 @@ def test_read_model_projects_verified_incidents_actions_and_recovery(tmp_path):
         device["id"],
         target_type="immutable_cloud",
         display_name="Immutable Test Vault",
-        encrypted=True,
-        isolated_or_immutable=True,
-        provider_connection_verified=True,
+        verification_payload={"provider_connected": True},
+        verifier=_target_verifier,
     )
     recovery.record_verified_recovery_point(
         user_id,
@@ -65,8 +110,9 @@ def test_read_model_projects_verified_incidents_actions_and_recovery(tmp_path):
         target["id"],
         content_digest="b" * 64,
         manifest_digest="c" * 64,
-        integrity_verified=True,
         malware_scan_state="clean",
+        signature_b64=SIGNATURE,
+        verifier=_point_verifier,
     )
 
     incidents = read.incidents(user_id)
