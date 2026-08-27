@@ -114,7 +114,9 @@ def _client(
     )
     app = FastAPI()
     app.include_router(member_api.router)
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers.update({"Authorization": "Bearer member-api-session-token-123456"})
+    return client
 
 
 def test_pro_creative_member_still_has_no_security_entitlement_without_purchase(monkeypatch):
