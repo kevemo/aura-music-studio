@@ -120,13 +120,13 @@ def test_professional_editor_routes_are_mounted_in_production_app():
     }
     assert expected <= editor_paths
 
-    # Import the production entrypoint in a clean process. Other tests legitimately start the
-    # shared base FastAPI instance, after which Starlette refuses additional middleware. Uvicorn
-    # and Vercel import app.py in a fresh process, so this verifies the actual deployment startup
-    # boundary without depending on pytest collection/execution order.
+    # FastAPI >=0.137 keeps included routers as lazy _IncludedRouter nodes instead of flattening
+    # child routes into app.routes. Import the production entrypoint in a clean process and use
+    # the generated OpenAPI path table, which proves these routes are actually exposed by the
+    # production application while remaining independent of pytest app-startup order.
     probe = (
         "import json; from app import app; "
-        "print('EDITOR_ROUTES=' + json.dumps(sorted({getattr(r, 'path', '') for r in app.routes})))"
+        "print('EDITOR_PATHS=' + json.dumps(sorted(app.openapi().get('paths', {}).keys())))"
     )
     completed = subprocess.run(
         [sys.executable, "-c", probe],
@@ -136,7 +136,7 @@ def test_professional_editor_routes_are_mounted_in_production_app():
         timeout=30,
     )
     marker = next(
-        line for line in completed.stdout.splitlines() if line.startswith("EDITOR_ROUTES=")
+        line for line in completed.stdout.splitlines() if line.startswith("EDITOR_PATHS=")
     )
     production_paths = set(json.loads(marker.split("=", 1)[1]))
     assert expected <= production_paths
