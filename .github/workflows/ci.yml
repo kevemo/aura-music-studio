@@ -95,7 +95,7 @@ jobs:
             LSS_PAYMENT_MODE=verified_paypal_webhook \
             LSS_PAYPAL_ENVIRONMENT=live \
             LSS_PAYPAL_CLIENT_ID=ci-paypal-client-0123456789 \
-            LSS_PAYPAL_CLIENT_SECRET=ci-paypal-secret-0123456789 \
+            LSS_PAYPAL_CLIENT_SECRET=test-only-paypal-secret-0123456789 \
             LSS_PAYPAL_WEBHOOK_ID=ci-paypal-webhook-0123456789 \
             AURA_GPU_REQUIRED=true \
             AURA_REQUIRE_LIVE_RENDERER=true \
