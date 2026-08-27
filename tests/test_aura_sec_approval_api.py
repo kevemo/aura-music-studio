@@ -33,17 +33,40 @@ class FakeApprovals:
             "action_id": action_id,
             "risk_class": "confirmation_required",
             "strong_reauthentication_required": False,
+            "passkey_enrolled": False,
+            "passkey_required": False,
             "expires_at": "2026-08-27T06:00:00+00:00",
             "one_time": True,
             "command_issued": False,
         }
 
-    def approve(self, user_id, action_id, *, session_token, approval_token, password=None):
-        self.approve_calls.append((user_id, action_id, session_token, approval_token, password))
+    def approve(
+        self,
+        user_id,
+        action_id,
+        *,
+        session_token,
+        approval_token,
+        password=None,
+        strong_reauth_evidence_id=None,
+    ):
+        self.approve_calls.append(
+            (
+                user_id,
+                action_id,
+                session_token,
+                approval_token,
+                password,
+                strong_reauth_evidence_id,
+            )
+        )
         return {
             "approved": True,
             "action": {"id": action_id, "status": "approved"},
-            "strong_reauthentication_verified": bool(password),
+            "strong_reauthentication_verified": bool(password or strong_reauth_evidence_id),
+            "strong_reauthentication_method": (
+                "webauthn" if strong_reauth_evidence_id else "password_bootstrap" if password else None
+            ),
             "command_issued": False,
             "truth": "Approved only; no native command issued.",
         }
@@ -77,7 +100,7 @@ def test_approval_challenge_is_bound_to_authenticated_session_and_does_not_execu
     assert "cannot issue or execute" in data["truth"]
 
 
-def test_approval_confirm_forwards_password_only_to_reauth_gateway(monkeypatch):
+def test_approval_confirm_forwards_password_without_fabricating_passkey_evidence(monkeypatch):
     client, approvals = _client(monkeypatch)
     response = client.post(
         "/api/aura-sec/member/actions/action-wipe/approve",
@@ -96,10 +119,36 @@ def test_approval_confirm_forwards_password_only_to_reauth_gateway(monkeypatch):
             "approval-session-token",
             "approval-token-1234567890",
             "member-password-value",
+            None,
         )
     ]
     assert data["approved"] is True
     assert data["command_issued"] is False
+
+
+def test_approval_confirm_can_forward_opaque_action_bound_passkey_evidence(monkeypatch):
+    client, approvals = _client(monkeypatch)
+    response = client.post(
+        "/api/aura-sec/member/actions/action-wipe/approve",
+        headers=_headers(),
+        json={
+            "approval_token": "approval-token-1234567890",
+            "strong_reauth_evidence_id": "passkey-evidence-123456789",
+        },
+    )
+    assert response.status_code == 200
+    assert approvals.approve_calls == [
+        (
+            USER["id"],
+            "action-wipe",
+            "approval-session-token",
+            "approval-token-1234567890",
+            None,
+            "passkey-evidence-123456789",
+        )
+    ]
+    assert response.json()["strong_reauthentication_method"] == "webauthn"
+    assert response.json()["command_issued"] is False
 
 
 def test_approval_routes_require_authentication(monkeypatch):
