@@ -31,8 +31,7 @@ def _value(env: Mapping[str, str], name: str, default: str = "") -> str:
 
 
 def _bool(env: Mapping[str, str], name: str, default: bool = False) -> bool:
-    raw = _value(env, name, "true" if default else "false").lower()
-    return raw not in _FALSE
+    return _value(env, name, "true" if default else "false").lower() not in _FALSE
 
 
 def _int(env: Mapping[str, str], name: str, default: int) -> int:
@@ -45,7 +44,7 @@ def _int(env: Mapping[str, str], name: str, default: int) -> int:
 def _secret_configured(env: Mapping[str, str], name: str) -> bool:
     value = _value(env, name)
     lowered = value.lower()
-    return bool(value) and len(value) >= 12 and not any(fragment in lowered for fragment in _PLACEHOLDER_FRAGMENTS)
+    return bool(value) and len(value) >= 12 and not any(part in lowered for part in _PLACEHOLDER_FRAGMENTS)
 
 
 def _secret_group(env: Mapping[str, str], names: tuple[str, ...]) -> tuple[bool, list[str]]:
@@ -54,18 +53,13 @@ def _secret_group(env: Mapping[str, str], names: tuple[str, ...]) -> tuple[bool,
 
 
 def _category(*, ok: bool, required: bool, messages: list[str], details: dict | None = None) -> dict:
-    return {
-        "ok": bool(ok),
-        "required": bool(required),
-        "messages": messages,
-        "details": details or {},
-    }
+    return {"ok": bool(ok), "required": bool(required), "messages": messages, "details": details or {}}
 
 
 def _csv_names(env: Mapping[str, str], name: str) -> tuple[str, ...]:
-    rows = []
-    for item in _value(env, name).split(","):
-        item = item.strip()
+    rows: list[str] = []
+    for raw in _value(env, name).split(","):
+        item = raw.strip()
         if item and item.replace("_", "").isalnum() and item.upper() == item:
             rows.append(item)
     return tuple(dict.fromkeys(rows))
@@ -77,9 +71,7 @@ def _storage_details(env: Mapping[str, str]) -> tuple[bool, dict, list[str]]:
     backups = Path(_value(env, "LSS_BACKUP_DIR", "backups"))
     paths = [str(db), str(projects), str(backups)]
     distinct = len(set(paths)) == len(paths)
-    messages: list[str] = []
-    if not distinct:
-        messages.append("Database, project and backup storage must use distinct paths.")
+    messages = [] if distinct else ["Database, project and backup storage must use distinct paths."]
     return distinct, {
         "database_path_configured": bool(str(db)),
         "project_path_configured": bool(str(projects)),
@@ -89,12 +81,7 @@ def _storage_details(env: Mapping[str, str]) -> tuple[bool, dict, list[str]]:
 
 
 def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
-    """Return a secret-free deployment readiness report.
-
-    This is a configuration and safety gate, not a provider network probe. External PayPal,
-    GPU-renderer and provider reachability are checked by deployment probes/workers so an upstream
-    outage cannot make a FastAPI request block on third-party I/O.
-    """
+    """Build a secret-free deployment readiness report without third-party network I/O."""
     env = environ or os.environ
     deployment = _value(env, "AURA_DEPLOYMENT_ENV", "development").lower()
     if deployment not in {"development", "staging", "production"}:
@@ -103,8 +90,6 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     staging = deployment == "staging"
     categories: dict[str, dict] = {}
 
-    # Payments: production uses PayPal's live verification API. Browser returns/manual links are
-    # never proof of payment and do not make this gate ready by themselves.
     provider = _value(env, "LSS_PAYMENT_PROVIDER", "paypal").lower()
     payment_mode = _value(env, "LSS_PAYMENT_MODE", "manual_invoice_link").lower()
     paypal_environment = _value(env, "LSS_PAYPAL_ENVIRONMENT", "sandbox" if staging else "live").lower()
@@ -142,8 +127,6 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
         },
     )
 
-    # Provider credentials are named by the operator, not returned. This lets a deployment require
-    # only the providers it has actually enabled while still failing closed on missing aliases.
     required_provider_secrets = _csv_names(env, "AURA_PRODUCTION_REQUIRED_PROVIDER_SECRETS")
     missing_provider = [name for name in required_provider_secrets if not _secret_configured(env, name)]
     google_any = bool(_value(env, "GOOGLE_OAUTH_CLIENT_ID") or _value(env, "GOOGLE_OAUTH_CLIENT_SECRET"))
@@ -194,14 +177,13 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
 
     monitoring_enabled = _bool(env, "AURA_MONITORING_ENABLED", False)
     monitoring_token_ok = _secret_configured(env, "AURA_MONITORING_TOKEN")
-    monitoring_ok = not production or (monitoring_enabled and monitoring_token_ok)
     monitoring_messages: list[str] = []
     if production and not monitoring_enabled:
         monitoring_messages.append("Production monitoring is disabled.")
     if production and not monitoring_token_ok:
         monitoring_messages.append("Monitoring token is missing or a placeholder.")
     categories["monitoring"] = _category(
-        ok=monitoring_ok,
+        ok=(not production or (monitoring_enabled and monitoring_token_ok)),
         required=production,
         messages=monitoring_messages,
         details={
@@ -215,9 +197,7 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     backup_interval = _int(env, "LSS_AUTO_BACKUP_INTERVAL_HOURS", 24)
     backup_keep = _int(env, "LSS_AUTO_BACKUP_KEEP", 7)
     backup_age = bool(_value(env, "LSS_BACKUP_AGE_RECIPIENT"))
-    backup_ok = not production or (
-        backup_enabled and 1 <= backup_interval <= 24 and backup_keep >= 7 and backup_age
-    )
+    backup_ok = not production or (backup_enabled and 1 <= backup_interval <= 24 and backup_keep >= 7 and backup_age)
     backup_messages: list[str] = []
     if production and not backup_enabled:
         backup_messages.append("Automatic backups are disabled.")
@@ -247,11 +227,7 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     admin_ok = _secret_configured(env, "LSS_ADMIN_KEY")
     web_http_allowed = _bool(env, "AURA_WEB_ALLOW_HTTP", False)
     security_ok = not production or (
-        parsed_public.scheme == "https"
-        and cookie_secure
-        and provenance_ok
-        and admin_ok
-        and not web_http_allowed
+        parsed_public.scheme == "https" and cookie_secure and provenance_ok and admin_ok and not web_http_allowed
     )
     security_messages: list[str] = []
     if production and parsed_public.scheme != "https":
@@ -279,25 +255,14 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     )
 
     storage_ok, storage_details, storage_messages = _storage_details(env)
-    categories["storage"] = _category(
-        ok=storage_ok,
-        required=True,
-        messages=storage_messages,
-        details=storage_details,
-    )
+    categories["storage"] = _category(ok=storage_ok, required=True, messages=storage_messages, details=storage_details)
 
-    deployment_messages: list[str] = []
     deployment_ok = deployment != "invalid"
-    if deployment == "invalid":
-        deployment_messages.append("AURA_DEPLOYMENT_ENV must be development, staging or production.")
     categories["deployment"] = _category(
         ok=deployment_ok,
         required=True,
-        messages=deployment_messages,
-        details={
-            "environment": deployment,
-            "staging_uses_live_paypal": staging and paypal_environment == "live",
-        },
+        messages=[] if deployment_ok else ["AURA_DEPLOYMENT_ENV must be development, staging or production."],
+        details={"environment": deployment, "staging_uses_live_paypal": staging and paypal_environment == "live"},
     )
 
     blocking = [name for name, item in categories.items() if item["required"] and not item["ok"]]
@@ -321,16 +286,14 @@ def _monitoring_authorized(token: str | None, environ: Mapping[str, str] | None 
     if not _secret_configured(env, "AURA_MONITORING_TOKEN"):
         return False, "monitoring_token_unconfigured"
     supplied = (token or "").strip()
-    return bool(supplied and secrets.compare_digest(configured, supplied)), "authorized"
+    if not supplied or not secrets.compare_digest(configured, supplied):
+        return False, "bad_token"
+    return True, "authorized"
 
 
 @router.get("/health/live")
 def health_live():
-    return {
-        "ok": True,
-        "kind": "liveness",
-        "uptime_seconds": round(max(0.0, time.monotonic() - _STARTED), 3),
-    }
+    return {"ok": True, "kind": "liveness", "uptime_seconds": round(max(0.0, time.monotonic() - _STARTED), 3)}
 
 
 @router.get("/health/ready")
@@ -341,17 +304,14 @@ def health_ready(response: Response):
 
 
 @router.get("/internal/metrics", response_class=PlainTextResponse, include_in_schema=False)
-def internal_metrics(
-    x_aura_monitoring_token: str | None = Header(default=None),
-):
+def internal_metrics(x_aura_monitoring_token: str | None = Header(default=None)):
     authorized, reason = _monitoring_authorized(x_aura_monitoring_token)
     if not authorized:
-        status_code = 503 if reason != "authorized" and reason != "bad_token" else 403
-        if reason == "authorized":
-            status_code = 200
-        if reason not in {"monitoring_disabled", "monitoring_token_unconfigured"}:
-            status_code = 403
-        return PlainTextResponse("monitoring unavailable\n", status_code=status_code)
+        return PlainTextResponse(
+            "monitoring unavailable\n",
+            status_code=503 if reason in {"monitoring_disabled", "monitoring_token_unconfigured"} else 403,
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
     report = build_readiness_report()
     rows = [
         "# HELP aura_process_up Process liveness.",
@@ -362,17 +322,19 @@ def internal_metrics(
     ]
     for name, item in sorted(report["categories"].items()):
         rows.append(f'aura_readiness{{category="{name}"}} {1 if item["ok"] else 0}')
-    rows.extend(
-        [
-            "# HELP aura_production_ready Full production readiness gate.",
-            "# TYPE aura_production_ready gauge",
-            f'aura_production_ready {1 if report["production_ready"] else 0}',
-            "# HELP aura_process_uptime_seconds Process uptime in seconds.",
-            "# TYPE aura_process_uptime_seconds gauge",
-            f"aura_process_uptime_seconds {max(0.0, time.monotonic() - _STARTED):.3f}",
-        ]
+    rows.extend([
+        "# HELP aura_production_ready Full production readiness gate.",
+        "# TYPE aura_production_ready gauge",
+        f'aura_production_ready {1 if report["production_ready"] else 0}',
+        "# HELP aura_process_uptime_seconds Process uptime in seconds.",
+        "# TYPE aura_process_uptime_seconds gauge",
+        f"aura_process_uptime_seconds {max(0.0, time.monotonic() - _STARTED):.3f}",
+    ])
+    return PlainTextResponse(
+        "\n".join(rows) + "\n",
+        media_type="text/plain; version=0.0.4",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )
-    return PlainTextResponse("\n".join(rows) + "\n", media_type="text/plain; version=0.0.4")
 
 
 def main() -> int:
