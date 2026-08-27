@@ -239,7 +239,8 @@ def test_gameplay_routes_editor_and_authoritative_build_work_end_to_end(monkeypa
     body = build.json()
     assert body["declarative_gameplay_runtime"] is True
     assert body["runtime_network_access"] is False
-    assert body["runtime"] == "aura_game_runtime_2d_canvas_v2_gameplay"
+    assert body["runtime"] == "aura_game_runtime_2d_canvas_v3_adventure"
+    assert body["adventure_state_runtime"] is True
     assert body["gameplay_editor_url"] == f"/game-creation/gameplay/{game.id}"
 
     delete = client.delete(f"/api/game-forge/games/{game.id}/gameplay/entities/{entity_id}")
