@@ -147,7 +147,6 @@ def test_tracked_mask_and_mask_with_crop_remain_fail_closed(tmp_path):
     with pytest.raises(EditorRenderUnsupported, match="Tracked video masks"):
         VideoItemEffectsCompositor(project).render_video_advanced(sequence.id)
 
-    store.patch_mask = None  # type: ignore[attr-defined]
     project_data = store.load()
     branch = store._branch(project_data)
     stored_item = store._item(branch, item.id)
