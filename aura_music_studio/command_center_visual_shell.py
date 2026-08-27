@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -10,6 +11,9 @@ from .branding import ENDORSEMENT, PLATFORM_DESCRIPTOR, PRODUCT_FULL_NAME, TAGLI
 
 
 _HEAD_MARKER = "data-esp-command-center-shell='1'"
+_BODY_CLASS = "esp-command-center-shell"
+_BODY_TAG_RE = re.compile(r"<body(?P<attrs>[^>]*)>", re.IGNORECASE)
+_CLASS_ATTR_RE = re.compile(r"\bclass=(?P<quote>['\"])(?P<classes>.*?)(?P=quote)", re.IGNORECASE)
 
 
 def shell_head(request: Request) -> str:
@@ -32,17 +36,42 @@ def shell_head(request: Request) -> str:
     )
 
 
+def _inject_body_class(html: str) -> str:
+    match = _BODY_TAG_RE.search(html)
+    if not match:
+        return html
+
+    attrs = match.group("attrs") or ""
+    class_match = _CLASS_ATTR_RE.search(attrs)
+    if class_match:
+        classes = class_match.group("classes").split()
+        if _BODY_CLASS in classes:
+            return html
+        quote = class_match.group("quote")
+        updated_classes = " ".join([*classes, _BODY_CLASS])
+        updated_attrs = (
+            attrs[: class_match.start()]
+            + f"class={quote}{updated_classes}{quote}"
+            + attrs[class_match.end() :]
+        )
+    else:
+        updated_attrs = f" class='{_BODY_CLASS}'{attrs}"
+
+    replacement = f"<body{updated_attrs}>"
+    return html[: match.start()] + replacement + html[match.end() :]
+
+
 def apply_visual_shell(html: str, request: Request) -> str:
+    # Head metadata and body styling are intentionally independent. A prior head
+    # injection must never prevent the body class from being added.
     if _HEAD_MARKER not in html:
         head = shell_head(request)
         if "</head>" in html:
             html = html.replace("</head>", head + "</head>", 1)
-        elif "<body" in html:
+        elif "<body" in html.lower():
             html = head + html
-    if "<body" in html and "esp-command-center-shell" not in html:
-        html = html.replace("<body>", "<body class='esp-command-center-shell'>", 1)
-        if "<body " in html and "esp-command-center-shell" not in html:
-            html = html.replace("<body ", "<body class='esp-command-center-shell' ", 1)
+
+    html = _inject_body_class(html)
     return html
 
 
