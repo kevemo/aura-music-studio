@@ -232,17 +232,31 @@ def test_dangling_and_wrong_type_world_refs_block_publication(monkeypatch, tmp_p
     assert "material slot" in blockers
 
 
-def test_binding_router_precedes_low_level_asset_delete_route():
-    from fastapi import FastAPI
+def test_binding_aware_delete_route_clears_world_refs_before_asset_deletion(monkeypatch, tmp_path):
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
     from aura_music_studio.game_forge_world_api import router as world_router
 
+    _patch_storage(monkeypatch, tmp_path)
+    game = GameDNA(title="Delete Bound Asset", prompt="Delete safely", dimension="3d", engine_target="aura3d")
+    store.create_game(_member(), game)
+    ensure_world(game)
+    image = _asset(game, kind="image", suffix=".png", role="player", payload=b"bound-player")
+    bind_game_asset(game, BindGameAssetRequest(asset_id=image.id, target="entity_visual", entity_id="player"))
+    assert next(row for row in load_world(game.id).entities if row.id == "player").asset_ref == image.id
+
     app = FastAPI()
+
+    @app.middleware("http")
+    async def inject_member(request: Request, call_next):
+        request.state.member = _member()
+        return await call_next(request)
+
     app.include_router(world_router)
-    matches = [
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == "/api/game-forge/games/{game_id}/assets/{asset_id}"
-        and "DELETE" in getattr(route, "methods", set())
-    ]
-    assert len(matches) >= 2
-    assert matches[0].endpoint.__name__ == "delete_asset_with_binding_cleanup"
+    response = TestClient(app).delete(f"/api/game-forge/games/{game.id}/assets/{image.id}")
+
+    assert response.status_code == 200
+    assert response.json()["bindings_removed"] is True
+    assert next(row for row in load_world(game.id).entities if row.id == "player").asset_ref is None
+    with pytest.raises(FileNotFoundError):
+        assets.find_game_asset(game.id, image.id)
