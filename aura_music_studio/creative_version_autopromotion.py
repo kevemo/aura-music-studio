@@ -18,6 +18,7 @@ from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
 from .professional_editor_lifecycle_api import router as professional_editor_lifecycle_router
 from .professional_editor_render_api import router as professional_editor_render_router
+from .safety_appeal_review import router as owner_safety_appeal_router
 from .safety_reports import member_router as member_safety_router, owner_router as owner_safety_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
@@ -37,6 +38,7 @@ router.include_router(privacy_case_management_router)
 router.include_router(privacy_consent_router)
 router.include_router(member_safety_router)
 router.include_router(owner_safety_router)
+router.include_router(owner_safety_appeal_router)
 # Commerce receipt persistence owns the public webhook path and delegates first to the hardened
 # renewal preflight, which in turn delegates to the base idempotent Stripe processor. Starlette
 # dispatches the first matching route, so this ordering keeps access/credit mutation authoritative
