@@ -181,8 +181,9 @@ def reject_data_import_page(import_id: str, request: Request):
 
 
 # Browser routes are registered first so the richer review page replaces the foundation's
-# removed API-only page; all staging/list/JSON API routes remain provided by the base router.
-router.include_router(base.router)
+# removed API-only page. Extend with the already-constructed foundation route objects directly
+# so all staging/list/JSON API routes are visible deterministically during test collection.
+router.routes.extend(list(base.router.routes))
 
 
 __all__ = ["router"]
