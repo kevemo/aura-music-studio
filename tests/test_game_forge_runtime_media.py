@@ -105,13 +105,14 @@ def test_aura3d_consumes_verified_texture_soundtrack_and_cutscene(monkeypatch, t
     assert f"media/{image.imported_filename}" in html
     assert f"media/{music.imported_filename}" in html
     assert f"media/{video.imported_filename}" in html
-    assert "uniform sampler2D uTexture" in html
+    assert "uniform sampler2D uBaseColorMap" in html
     assert "gl.texImage2D" in html
-    assert "uUseTexture" in html
+    assert "uUseBaseColorMap" in html
     assert "new Audio(" in html
     assert "Play cutscene" in html
     assert '"same_origin_verified_media_only": true' in html
     assert '"network_access": false' in html
+    assert '"runtime_version": 2' in html
     assert "connect-src 'none'" in html
     assert "fetch(" not in html
     assert "XMLHttpRequest" not in html
@@ -122,13 +123,7 @@ def test_public_snapshot_copies_exact_verified_media_without_private_metadata(mo
     _patch_storage(monkeypatch, tmp_path)
     game = GameDNA(title="Public Media", prompt="Snapshot media", rights_confirmed=True)
     store.create_game(_member(), game)
-    record, source = _install_asset(
-        game,
-        kind="music",
-        suffix=".flac",
-        role="soundtrack",
-        payload=b"immutable-public-media",
-    )
+    record, source = _install_asset(game, kind="music", suffix=".flac", role="soundtrack", payload=b"immutable-public-media")
     public_id = "public_game_runtime_media"
     store.public_dir(public_id, must_exist=False).mkdir(parents=True)
 
@@ -153,13 +148,7 @@ def test_public_snapshot_refuses_tampered_private_asset(monkeypatch, tmp_path):
     _patch_storage(monkeypatch, tmp_path)
     game = GameDNA(title="Tamper Guard", prompt="Guard media", rights_confirmed=True)
     store.create_game(_member(), game)
-    _record, source = _install_asset(
-        game,
-        kind="image",
-        suffix=".jpg",
-        role="background",
-        payload=b"original-image",
-    )
+    _record, source = _install_asset(game, kind="image", suffix=".jpg", role="background", payload=b"original-image")
     source.write_bytes(b"tampered-image")
     public_id = "public_game_tamper_guard"
     store.public_dir(public_id, must_exist=False).mkdir(parents=True)
@@ -172,13 +161,7 @@ def test_runtime_asset_projection_is_relative_and_path_free(monkeypatch, tmp_pat
     _patch_storage(monkeypatch, tmp_path)
     game = GameDNA(title="Projection", prompt="Project media", rights_confirmed=True)
     store.create_game(_member(), game)
-    record, _ = _install_asset(
-        game,
-        kind="audio",
-        suffix=".ogg",
-        role="sfx",
-        payload=b"ogg-snapshot",
-    )
+    record, _ = _install_asset(game, kind="audio", suffix=".ogg", role="sfx", payload=b"ogg-snapshot")
 
     row = assets.runtime_asset_manifest(game.id)[0]
     assert row["media_url"] == f"media/{record.imported_filename}"
