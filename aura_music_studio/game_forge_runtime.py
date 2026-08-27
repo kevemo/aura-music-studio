@@ -4,6 +4,7 @@ import json
 
 from .game_forge_integrity import game_integrity_hash
 from .game_forge_models import GameBuild, GameDNA
+from .game_forge_native3d import render_aura3d_playtest
 from .game_forge_store import game_dir, save_game
 from .game_forge_world import ensure_world, world_stream_index, world_summary
 
@@ -32,13 +33,16 @@ def _safe_runtime_config(game: GameDNA) -> dict:
 
 
 def render_foundation_playtest(game: GameDNA) -> str:
-    """Render Aura's deterministic no-network native foundation runtime.
+    """Render Aura's deterministic no-network native runtime.
 
-    This stage intentionally executes only Pulsar-owned runtime code. Game/Aura content enters as
-    validated data (Game DNA + World DNA); no creator/LLM JavaScript or Python is executed.
-    Later native Aura 2D/3D render stages replace the simple canvas presentation while preserving
-    this sandbox/integrity contract. External engines remain optional export adapters only.
+    Aura3D projects use Pulsar's own WebGL2 renderer v1. Aura2D and not-yet-implemented export
+    adapters stay on the deterministic Canvas runtime. No creator/LLM JavaScript or Python is
+    inserted or executed in either path.
     """
+    world = ensure_world(game)
+    if game.dimension == "3d" and game.engine_target == "aura3d":
+        return render_aura3d_playtest(game, world, csp=PLAYTEST_CSP)
+
     config = json.dumps(_safe_runtime_config(game), ensure_ascii=False).replace("</", "<\\/")
     return f"""<!doctype html>
 <html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
@@ -59,7 +63,8 @@ def build_private_playtest(game: GameDNA) -> tuple[GameDNA, str]:
     ensure_world(game)
     content_hash = game_integrity_hash(game)
     html = render_foundation_playtest(game)
-    build = GameBuild(content_hash=content_hash, requested_engine=game.engine_target, runtime="aura_game_runtime_v1")
+    runtime_name = "aura_game_runtime_3d_webgl2_v1" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura_game_runtime_2d_canvas_v1"
+    build = GameBuild(content_hash=content_hash, requested_engine=game.engine_target, runtime=runtime_name)
     folder = game_dir(game.id)
     build_dir = folder / "builds" / build.build_id
     build_dir.mkdir(parents=True, exist_ok=False)

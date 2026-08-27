@@ -67,7 +67,6 @@ def test_basic_allows_one_active_game_pro_allows_unlimited(monkeypatch, tmp_path
     store.save_game(first)
     store.create_game(_member("base"), GameDNA(title="Second", prompt="Another game"))
 
-    # Pro is not constrained by the Basic active-workspace count.
     store.create_game(_member("pro"), GameDNA(title="Third", prompt="Third game"))
     store.create_game(_member("pro"), GameDNA(title="Fourth", prompt="Fourth game"))
     assert len(store.list_games()) == 4
@@ -142,7 +141,6 @@ def test_foundation_playtest_is_curated_no_network_and_not_arbitrary_server_code
     root = tmp_path / "games"
     root.mkdir()
     monkeypatch.setattr(store, "games_root", lambda: root)
-    # game_forge_runtime imported game_dir/save_game directly; patch their backing functions too.
     import aura_music_studio.game_forge_runtime as runtime
     monkeypatch.setattr(runtime, "game_dir", store.game_dir)
     monkeypatch.setattr(runtime, "save_game", store.save_game)
@@ -151,11 +149,10 @@ def test_foundation_playtest_is_curated_no_network_and_not_arbitrary_server_code
     store.create_game(_member("base"), game)
     game, html = build_private_playtest(game)
     assert game.latest_build is not None
-    assert game.latest_build.runtime == "aura_game_runtime_v1"
+    assert game.latest_build.runtime == "aura_game_runtime_2d_canvas_v1"
     assert game.latest_build.requested_engine == "aura2d"
     assert game.latest_build.arbitrary_server_code_executed is False
     assert game.latest_build.network_access_enabled is False
-    # Builds are now bound to both high-level Game DNA and complete Aura World DNA.
     assert game.latest_build.content_hash == game_integrity_hash(game)
     assert game.latest_build.content_hash != rating_content_hash(game)
     assert "connect-src 'none'" in PLAYTEST_CSP
