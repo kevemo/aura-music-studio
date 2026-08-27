@@ -27,7 +27,10 @@ def test_mary_and_kev_have_independent_default_widget_orders(tmp_path: Path):
 
 def test_saving_mary_preferences_does_not_change_kev(tmp_path: Path, monkeypatch):
     store = OwnerDashboardPreferenceStore(tmp_path / "owners.sqlite3")
-    monkeypatch.setattr("aura_music_studio.owner_dashboard_preferences.owner_actor", lambda _fallback="": "Mary · ESP Owner")
+    monkeypatch.setattr(
+        "aura_music_studio.owner_dashboard_preferences.owner_actor",
+        lambda _fallback="": "Mary · ESP Owner",
+    )
     kev_before = store.get("kev")
     saved = store.save(
         "mary",
@@ -40,7 +43,11 @@ def test_saving_mary_preferences_does_not_change_kev(tmp_path: Path, monkeypatch
     assert saved.layout_mode == "network"
     assert saved.density == "compact"
     assert saved.default_route == "/owner/users"
-    assert saved.widget_order[:3] == ("esp_network", "creator_development", "executive_summary")
+    assert saved.widget_order[:3] == (
+        "esp_network",
+        "creator_development",
+        "executive_summary",
+    )
     assert "support" in saved.hidden_widgets
     assert "finance" in saved.hidden_widgets
     assert "not-a-widget" not in saved.hidden_widgets
@@ -85,11 +92,31 @@ def test_aura_context_is_explicitly_presentation_only(tmp_path: Path):
     assert "explicit owner action" in context
 
 
-def test_personalized_dashboard_overlay_is_registered_before_access_routes():
-    paths = [getattr(route, "path", "") for route in access_portal.router.routes]
-    assert "/owner/dashboard" in paths
-    assert "/owner/preferences" in paths
-    assert paths.index("/owner/dashboard") < paths.index("/owner/esp-access")
+def test_personalized_dashboard_overlay_is_reachable_through_access_router(
+    monkeypatch, tmp_path: Path
+):
+    store = OwnerDashboardPreferenceStore(tmp_path / "overlay.sqlite3")
+    monkeypatch.setattr(portal, "preferences", store)
+    monkeypatch.setattr(portal, "control", _FakeControl())
+    monkeypatch.setattr(
+        portal,
+        "_credit_summary",
+        lambda: {
+            "wallets": 2,
+            "credits_in_circulation": 40,
+            "purchase_events": 1,
+            "spend_events": 3,
+        },
+    )
+    monkeypatch.setattr(portal, "owner_authorized", lambda _request: True)
+    monkeypatch.setattr(portal, "request_owner_persona", lambda _request: "mary")
+    app = FastAPI()
+    app.include_router(access_portal.router)
+    client = TestClient(app)
+    response = client.get("/owner/dashboard")
+    assert response.status_code == 200
+    assert "Mary's Dashboard" in response.text
+    assert "Customize dashboard" in response.text
 
 
 class _FakeControl:
@@ -144,7 +171,16 @@ def _client(monkeypatch, tmp_path: Path, persona: str = "mary") -> TestClient:
     store = OwnerDashboardPreferenceStore(tmp_path / "portal.sqlite3")
     monkeypatch.setattr(portal, "preferences", store)
     monkeypatch.setattr(portal, "control", _FakeControl())
-    monkeypatch.setattr(portal, "_credit_summary", lambda: {"wallets": 2, "credits_in_circulation": 40, "purchase_events": 1, "spend_events": 3})
+    monkeypatch.setattr(
+        portal,
+        "_credit_summary",
+        lambda: {
+            "wallets": 2,
+            "credits_in_circulation": 40,
+            "purchase_events": 1,
+            "spend_events": 3,
+        },
+    )
     monkeypatch.setattr(portal, "owner_authorized", lambda _request: True)
     monkeypatch.setattr(portal, "request_owner_persona", lambda _request: persona)
     app = FastAPI()
@@ -152,7 +188,9 @@ def _client(monkeypatch, tmp_path: Path, persona: str = "mary") -> TestClient:
     return TestClient(app)
 
 
-def test_personalized_dashboard_renders_selected_owner_and_truthful_finance(monkeypatch, tmp_path: Path):
+def test_personalized_dashboard_renders_selected_owner_and_truthful_finance(
+    monkeypatch, tmp_path: Path
+):
     client = _client(monkeypatch, tmp_path, "mary")
     response = client.get("/owner/dashboard")
     assert response.status_code == 200
@@ -181,11 +219,16 @@ def test_hidden_widget_stays_hidden_after_explicit_save(monkeypatch, tmp_path: P
     assert "Agent Operations" in response.text
 
 
-def test_owner_preference_context_endpoint_requires_selected_owner(monkeypatch, tmp_path: Path):
+def test_owner_preference_context_endpoint_requires_selected_owner(
+    monkeypatch, tmp_path: Path
+):
     client = _client(monkeypatch, tmp_path, "mary")
     response = client.get("/owner/preferences/context")
     assert response.status_code == 200
     payload = response.json()
     assert payload["owner"] == "Mary"
-    assert payload["authority_note"] == "Presentation preferences do not grant or change permissions."
+    assert (
+        payload["authority_note"]
+        == "Presentation preferences do not grant or change permissions."
+    )
     assert "never change permissions" in payload["aura_context"]
