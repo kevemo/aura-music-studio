@@ -195,7 +195,7 @@ def test_game_creation_portal_renders_media_binding_and_creative_library_control
     assert "Import from Music, Video & Image Houses" in html
     assert "Assign to World DNA" in html
     assert "Apply with Aura" in html
-    assert "/creative/api/library" in html
+    assert "/assets/library" in html
     assert "/asset-bindings" in html
     assert "/aura-command" in html
     assert "assetRights" in html
