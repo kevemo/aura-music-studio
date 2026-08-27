@@ -54,10 +54,3 @@ services:
   aura-backup-scheduler:
     environment:
       AURA_DEPLOYMENT_ENV: staging
-
-  ace-step:
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "3"
