@@ -14,8 +14,7 @@ from .professional_editor_renderer import (
     ProfessionalEditorRenderer,
 )
 from .professional_image_compositor import AdvancedImageCompositor
-from .professional_video_compositor import AdvancedVideoCompositor
-from .professional_video_effects_compositor import VideoItemEffectsCompositor
+from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor
 from .tenant_storage import project_path
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rendering"])
@@ -109,15 +108,7 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            project = _project(project_name)
-            if _sequence_has_non_normal_item_blend(state, sequence_id):
-                # Blend-only routing is deliberately conservative for this increment. The base
-                # compositor renders item blend modes truthfully and continues to fail closed if
-                # masks/effects are also present until their exact authored operation order is
-                # explicitly modeled across the combined stack.
-                video_renderer = AdvancedVideoCompositor(project)
-            else:
-                video_renderer = VideoItemEffectsCompositor(project)
+            video_renderer = UnifiedAdvancedVideoCompositor(_project(project_name))
             result = video_renderer.render_video_advanced(sequence_id)
         else:
             image_renderer = AdvancedImageCompositor(_project(project_name))
