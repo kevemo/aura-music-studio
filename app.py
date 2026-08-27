@@ -1,4 +1,6 @@
-"""Production entrypoint for Pulsar-Frequency House.
+"""Production entrypoint for Elevate Souls Productions Content Creation Command Center.
+
+Powered by Aura AI.
 
 Run locally:
     uvicorn app:app --host 0.0.0.0 --port 8000
@@ -78,8 +80,8 @@ from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_p
 from aura_music_studio.media_studios import router as media_studios_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
 from aura_music_studio.output_api import router as output_router
-from aura_music_studio.owner_auth import OwnerLegacyCompatibilityMiddleware
 from aura_music_studio.owner_auth_portal import router as owner_auth_router
+from aura_music_studio.owner_authorization_migration import install_owner_authorization_migration
 from aura_music_studio.owner_backup_portal import router as owner_backup_router
 from aura_music_studio.owner_compute_portal import router as owner_compute_router
 from aura_music_studio.owner_control_center import router as owner_control_center_router
@@ -137,6 +139,7 @@ install_aura_workflow_engine()
 install_aura_chat_hardening()
 install_aura_context_extensions()
 install_aura_profiles()
+install_owner_authorization_migration()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
 app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
@@ -244,7 +247,6 @@ app.add_middleware(AuraArtifactsUIMiddleware)
 app.add_middleware(AuraVoiceConversationMiddleware)
 app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
-app.add_middleware(OwnerLegacyCompatibilityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
 # Added last so this guard wraps all route surfaces at the browser request boundary.
 app.add_middleware(CrossSiteRequestGuardMiddleware)
