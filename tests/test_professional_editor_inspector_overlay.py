@@ -42,7 +42,9 @@ def test_pro_controls_script_targets_real_editor_contract_and_truth_boundary():
 
 
 def test_overlay_router_exposes_script_and_workspace_only_once():
-    paths = [route.path for route in overlay.router.routes]
+    # Included child routers are wrapper objects in this repository's FastAPI compatibility
+    # layer. Count only concrete route entries here; child-router ownership is tested separately.
+    paths = [getattr(route, "path", None) for route in overlay.router.routes]
     assert paths.count("/creative/editor-pro-controls.js") == 1
     assert paths.count("/creative/editor-workspace") == 1
 

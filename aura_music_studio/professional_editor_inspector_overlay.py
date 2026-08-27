@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
+from .professional_editor_lifecycle_inspector import router as professional_editor_lifecycle_inspector_router
 from .professional_editor_workspace import professional_editor_workspace as base_workspace
 
 router = APIRouter(tags=["Professional Editor Inspector"])
+router.include_router(professional_editor_lifecycle_inspector_router)
 
 PRO_EDITOR_CONTROLS_JS = r"""
 (()=>{
@@ -81,9 +83,13 @@ def enhanced_professional_editor_workspace(request: Request, project: str = ""):
     if not isinstance(response, HTMLResponse) or response.status_code >= 300:
         return response
     text = response.body.decode("utf-8")
-    marker = "<script src='/creative/editor-pro-controls.js'></script>"
-    if marker not in text:
-        text = text.replace("</body>", marker + "</body>")
+    markers = (
+        "<script src='/creative/editor-pro-controls.js'></script>",
+        "<script src='/creative/editor-pro-lifecycle-controls.js'></script>",
+    )
+    for marker in markers:
+        if marker not in text:
+            text = text.replace("</body>", marker + "</body>")
     headers = {
         key: value
         for key, value in response.headers.items()
