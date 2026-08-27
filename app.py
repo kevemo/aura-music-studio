@@ -39,6 +39,7 @@ from aura_music_studio.brand_migration import BrandMigrationMiddleware
 from aura_music_studio.brand_ui import router as brand_router
 from aura_music_studio.commercial_entitlement_routes import router as commercial_entitlement_router
 from aura_music_studio.compute_node_api import router as compute_node_router
+from aura_music_studio.credit_wallet import router as credit_wallet_router
 from aura_music_studio.creative_library import router as creative_library_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
@@ -163,6 +164,7 @@ app.include_router(aura_workspace_router)
 app.include_router(brand_router)
 app.include_router(discovery_router)
 app.include_router(compute_node_router)
+app.include_router(credit_wallet_router)
 app.include_router(creative_version_autopromotion_router)
 # Commercial entitlement routes intentionally precede their underlying Creative handlers.
 # This makes image/poster daily limits and media-download gates authoritative server-side.
