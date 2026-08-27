@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_passkeys import AuraSecPasskeyService
 from .aura_sec_protocol import ActionRisk
 from .aura_sec_store import AuraSecStore
 
@@ -29,11 +30,22 @@ class AuraSecApprovalGateway:
     Approval is intentionally a separate phase from command issuance. Completing a
     challenge can move a bounded action from `proposed` to `approved`; only a later
     verified native-device poll can obtain the typed command.
+
+    Strong re-authentication is downgrade-resistant: once a member has an Aura Sec
+    passkey, a high-risk action requires one-time WebAuthn evidence bound to the exact
+    action and login session. Password re-authentication remains only as a bootstrap path
+    for members who have not yet enrolled a passkey.
     """
 
-    def __init__(self, accounts: AccountStore | None = None, security: AuraSecStore | None = None):
+    def __init__(
+        self,
+        accounts: AccountStore | None = None,
+        security: AuraSecStore | None = None,
+        passkeys: AuraSecPasskeyService | None = None,
+    ):
         self.accounts = accounts or AccountStore()
         self.security = security or AuraSecStore(self.accounts)
+        self.passkeys = passkeys or AuraSecPasskeyService(self.accounts, self.security)
         self._init_schema()
 
     def _connect(self):
@@ -122,12 +134,17 @@ class AuraSecApprovalGateway:
                     _iso(expires),
                 ),
             )
+        passkey_enrolled = self.passkeys.has_active_credential(user_id)
         return {
             "challenge_id": challenge_id,
             "approval_token": token,
             "action_id": action_id,
             "risk_class": action["risk_class"],
             "strong_reauthentication_required": action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value,
+            "passkey_enrolled": passkey_enrolled,
+            "passkey_required": (
+                action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value and passkey_enrolled
+            ),
             "expires_at": _iso(expires),
             "one_time": True,
             "command_issued": False,
@@ -141,6 +158,7 @@ class AuraSecApprovalGateway:
         session_token: str,
         approval_token: str,
         password: str | None = None,
+        strong_reauth_evidence_id: str | None = None,
         now: datetime | None = None,
     ) -> dict:
         if not session_token or not approval_token:
@@ -176,15 +194,34 @@ class AuraSecApprovalGateway:
             raise PermissionError("Aura Sec approval risk classification changed; request a new challenge")
 
         strong_reauth = action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value
+        strong_reauth_method: str | None = None
         if strong_reauth:
-            if not password:
-                raise PermissionError("Password re-authentication is required for this high-risk Aura Sec action")
-            user = self.accounts.get_user(user_id)
-            if not user:
-                raise PermissionError("Aura Sec member account no longer exists")
-            authenticated = self.accounts.authenticate(user["email"], password)
-            if not authenticated or authenticated.get("id") != user_id:
-                raise PermissionError("Aura Sec password re-authentication failed")
+            passkey_enrolled = self.passkeys.has_active_credential(user_id)
+            if strong_reauth_evidence_id:
+                self.passkeys.consume_action_evidence(
+                    user_id,
+                    action_id,
+                    session_token=session_token,
+                    evidence_id=strong_reauth_evidence_id,
+                    now=current,
+                )
+                strong_reauth_method = "webauthn"
+            elif passkey_enrolled:
+                raise PermissionError(
+                    "Passkey verification is required for this high-risk Aura Sec action; password downgrade is not allowed"
+                )
+            else:
+                if not password:
+                    raise PermissionError(
+                        "Password re-authentication is required until an Aura Sec passkey is enrolled"
+                    )
+                user = self.accounts.get_user(user_id)
+                if not user:
+                    raise PermissionError("Aura Sec member account no longer exists")
+                authenticated = self.accounts.authenticate(user["email"], password)
+                if not authenticated or authenticated.get("id") != user_id:
+                    raise PermissionError("Aura Sec password re-authentication failed")
+                strong_reauth_method = "password_bootstrap"
 
         # Consume first so one token cannot race two approval attempts. If the action was
         # concurrently changed after validation, the challenge is safely spent and a new
@@ -208,6 +245,7 @@ class AuraSecApprovalGateway:
             "approved": True,
             "action": approved,
             "strong_reauthentication_verified": strong_reauth,
+            "strong_reauthentication_method": strong_reauth_method,
             "command_issued": False,
             "truth": (
                 "Member approval is recorded, but no endpoint command has been issued. "
