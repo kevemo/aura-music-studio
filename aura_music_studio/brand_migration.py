@@ -50,6 +50,17 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("/static/pulsar-frequency-house-logo.svg", BRAND_LOGO_PATH),
     # The scalable SVG remains a valid compact icon when explicitly requested by new UI.
     ("/static/elevate-souls-command-center-logo.svg", BRAND_ICON_PATH),
+    # User-facing legacy ESP shorthand. Keep internal esp_* identifiers untouched by using
+    # only exact presentation phrases rather than replacing the bare acronym globally.
+    ("ESP Creator Network Hub", "Elevate Souls Productions Creator Network Hub"),
+    ("ESP Creator Network", "Elevate Souls Productions Creator Network"),
+    ("ESP Member Hub", "Elevate Souls Productions Member Hub"),
+    ("ESP Command Center", "Elevate Souls Productions Command Center"),
+    ("ESP Social", "Elevate Souls Productions Social"),
+    ("ESP Creator", "Elevate Souls Productions Creator"),
+    ("ESP Agent", "Elevate Souls Productions Agent"),
+    ("ESP Owner", "Elevate Souls Productions Owner"),
+    ("ESP Hub", "Elevate Souls Productions Hub"),
     # Current landing-page presentation upgrades.
     ("href='#suite'>Creative House", "href='/creative-house'>Creative House"),
     ("Workspace architecture staged", "Creative DNA + renderer bridge connected"),
