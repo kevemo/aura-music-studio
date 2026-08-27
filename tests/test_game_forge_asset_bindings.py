@@ -160,7 +160,7 @@ def test_aura3d_uses_explicit_per_entity_texture_bindings(monkeypatch, tmp_path)
     _patch_storage(monkeypatch, tmp_path)
     game = GameDNA(title="Bound 3D", prompt="Entity textures", dimension="3d", engine_target="aura3d")
     store.create_game(_member(), game)
-    world = ensure_world(game)
+    ensure_world(game)
     ground = _asset(game, kind="image", suffix=".png", role="generic", payload=b"ground")
     player = _asset(game, kind="image", suffix=".webp", role="generic", payload=b"player")
 
@@ -233,11 +233,14 @@ def test_dangling_and_wrong_type_world_refs_block_publication(monkeypatch, tmp_p
 
 
 def test_binding_router_precedes_low_level_asset_delete_route():
+    from fastapi import FastAPI
     from aura_music_studio.game_forge_world_api import router as world_router
 
+    app = FastAPI()
+    app.include_router(world_router)
     matches = [
         route
-        for route in world_router.routes
+        for route in app.routes
         if getattr(route, "path", None) == "/api/game-forge/games/{game_id}/assets/{asset_id}"
         and "DELETE" in getattr(route, "methods", set())
     ]
