@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .account_security_api import router as account_security_router
+from .email_verification import router as email_verification_router
+from .email_verification_integration import install_email_verification
 from .membership_api import router as membership_router
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -20,12 +22,18 @@ AUTH_RATE_PATHS = {
     "/owner/login",
     "/auth/password-reset/request",
     "/auth/password-reset/confirm",
+    "/auth/email-verification/request",
+    "/auth/email-verification/confirm",
 }
 PUBLIC_PWA_PATHS = {
     "/", "/pricing", "/signin", "/signup", "/ai-music-studio", "/ai-song-generator",
     "/backing-track-maker", "/stem-splitter", "/ai-mastering", "/ai-vocal-studio",
 }
-SENSITIVE_ACCOUNT_PAGES = {"/auth/forgot-password", "/auth/reset-password"}
+SENSITIVE_ACCOUNT_PAGES = {
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/verify-email",
+}
 
 # Base API composition imports membership_api before this module, then mounts membership_router.
 # Attach account-security routes once here so every production entrypoint receives the same routes
@@ -35,6 +43,16 @@ if not any(
     for route in membership_router.routes
 ):
     membership_router.include_router(account_security_router)
+
+if not any(
+    getattr(route, "path", None) == "/auth/email-verification/request"
+    for route in membership_router.routes
+):
+    membership_router.include_router(email_verification_router)
+
+# Extend the existing signup/approval callables only after all routes are present. The installer
+# preserves FastAPI's dependency model and does not replace membership/billing/ESP role logic.
+install_email_verification(membership_router)
 
 
 class _SlidingWindowLimiter:
