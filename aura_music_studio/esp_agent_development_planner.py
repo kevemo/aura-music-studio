@@ -241,7 +241,7 @@ class AgentDevelopmentStore:
                     """INSERT INTO esp_agent_development_plans
                        (id,agent_user_id,creator_user_id,objective,notes,status,outcome,baseline_metrics_json,
                         baseline_evidence_id,created_at,updated_at,completed_at)
-                       VALUES (?,?,?,?,?,'active','',?,?,?,?,?,NULL)""",
+                       VALUES (?,?,?,?,?,'active','',?,?,?,?,NULL)""",
                     (
                         plan_id, agent_user_id, creator_user_id, objective, _clean(notes, 3000),
                         json.dumps(baseline, sort_keys=True), (evidence or {}).get("id"), now, now,
