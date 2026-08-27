@@ -40,13 +40,13 @@ from . import esp_shop_provider_runtime as runtime
 
 runtime.configure_runtime_db(esp.db_path)
 
-# Compose into a fresh router rather than mutating the base router after other modules may
-# already have included it. APIRouter.include_router copies routes at inclusion time, so this
-# deterministic composite guarantees both the safe base Shop routes and provider runtime routes
-# are visible wherever this overlay is mounted.
+# Compose the already-constructed route objects directly. This avoids depending on FastAPI's
+# include_router copy semantics during module collection while preserving each route's own
+# methods, dependencies, response class, tags and endpoint function. The unsafe member-facing
+# provider-status PATCH has already been removed from the base route list above.
 router = APIRouter()
-router.include_router(base.router)
-router.include_router(runtime.router)
+router.routes.extend(list(base.router.routes))
+router.routes.extend(list(runtime.router.routes))
 
 
 __all__ = ["router"]
