@@ -144,8 +144,14 @@ def test_mfa_required_login_creates_no_owner_session_until_totp_succeeds(tmp_pat
     challenge = client.cookies.get(OWNER_MFA_CHALLENGE_COOKIE)
     assert challenge
     assert client.cookies.get("lss_admin_session") is None
+    # OwnerSessionStore is intentionally lazy. Before a successful second factor the
+    # owner_sessions table may not exist at all; if it does, it must still be empty.
     with sqlite3.connect(tmp_path / "accounts.sqlite3") as con:
-        assert con.execute("SELECT COUNT(*) FROM owner_sessions").fetchone()[0] == 0
+        table = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='owner_sessions'"
+        ).fetchone()
+        if table:
+            assert con.execute("SELECT COUNT(*) FROM owner_sessions").fetchone()[0] == 0
 
     verified = client.post(
         "/owner/login",
