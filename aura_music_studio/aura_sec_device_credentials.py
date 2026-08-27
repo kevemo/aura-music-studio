@@ -60,9 +60,7 @@ class CredentialRotationContext:
         )
         if any("\n" in part or "\r" in part for part in parts):
             raise ValueError("Credential rotation canonical fields must not contain newlines")
-        return (
-            "AURA-SEC-CREDENTIAL-ROTATION-V1\n" + "\n".join(parts) + "\n"
-        ).encode("utf-8")
+        return ("AURA-SEC-CREDENTIAL-ROTATION-V1\n" + "\n".join(parts) + "\n").encode("utf-8")
 
 
 @dataclass(frozen=True)
@@ -82,12 +80,12 @@ CredentialRotationVerifier = Callable[
 
 
 class AuraSecDeviceCredentialRotation:
-    """Native-only dual-key device credential rotation.
+    """Native-only, dual-key device credential rotation.
 
-    The member approval gateway owns human authorization. This service accepts only a
-    previously approved ``rotate_device_credential`` action, then proves authority from
-    both the current enrolled key and the proposed replacement key over one canonical,
-    one-time challenge. No private key material is persisted here.
+    Human authorization is owned by the existing passkey-aware approval gateway. This
+    service only accepts an already approved ``rotate_device_credential`` action and then
+    proves possession of both the currently enrolled key and its proposed replacement over
+    one short-lived canonical challenge. Private key material is never persisted here.
     """
 
     def __init__(
@@ -142,8 +140,7 @@ class AuraSecDeviceCredentialRotation:
     def _device_identity(self, user_id: str, device_id: str) -> dict:
         with self._connect() as con:
             row = con.execute(
-                """SELECT id,user_id,platform,architecture,public_key_fingerprint,
-                          status,revoked_at
+                """SELECT id,user_id,platform,architecture,public_key_fingerprint,status,revoked_at
                    FROM aura_sec_devices WHERE user_id=? AND id=?""",
                 (user_id, device_id),
             ).fetchone()
@@ -156,27 +153,16 @@ class AuraSecDeviceCredentialRotation:
         item["public_key_fingerprint"] = fingerprint
         return item
 
-    def _approved_rotation_action(
-        self,
-        user_id: str,
-        device_id: str,
-        action_id: str,
-    ) -> dict:
+    def _approved_rotation_action(self, user_id: str, device_id: str, action_id: str) -> dict:
         action = self.security.get_action(user_id, action_id)
         if action.get("device_id") != device_id:
-            raise PermissionError(
-                "Credential rotation approval is bound to a different device"
-            )
+            raise PermissionError("Credential rotation approval is bound to a different device")
         if action.get("action_type") != ActionType.ROTATE_DEVICE_CREDENTIAL.value:
             raise PermissionError("Approved action is not a device credential rotation")
         if action.get("risk_class") != ActionRisk.STRONG_REAUTH_REQUIRED.value:
-            raise PermissionError(
-                "Device credential rotation must retain strong re-authentication risk"
-            )
+            raise PermissionError("Device credential rotation must retain strong re-authentication risk")
         if action.get("status") != "approved":
-            raise PermissionError(
-                "Device credential rotation requires a previously approved action"
-            )
+            raise PermissionError("Device credential rotation requires a previously approved action")
         return action
 
     def create_challenge(
@@ -189,29 +175,19 @@ class AuraSecDeviceCredentialRotation:
         ttl_seconds: int = 300,
     ) -> dict:
         if self.security.licence(user_id).get("status") != "active":
-            raise PermissionError(
-                "Active Aura Sec licence required for credential rotation"
-            )
+            raise PermissionError("Active Aura Sec licence required for credential rotation")
         device = self._device_identity(user_id, device_id)
         if device.get("status") == "revoked" or device.get("revoked_at"):
             raise PermissionError("Revoked Aura Sec device cannot rotate credentials")
         self._approved_rotation_action(user_id, device_id, approved_action_id)
         if not 60 <= int(ttl_seconds) <= 600:
-            raise ValueError(
-                "Credential rotation challenge lifetime must be between 60 and 600 seconds"
-            )
+            raise ValueError("Credential rotation challenge lifetime must be between 60 and 600 seconds")
 
         new_fingerprint = (new_public_key_fingerprint or "").strip().lower()
         if not _HEX_256.fullmatch(new_fingerprint):
-            raise ValueError(
-                "New device public-key fingerprint must be a SHA-256 hex digest"
-            )
-        if secrets.compare_digest(
-            new_fingerprint, device["public_key_fingerprint"]
-        ):
-            raise ValueError(
-                "Replacement device key must differ from the currently enrolled key"
-            )
+            raise ValueError("New device public-key fingerprint must be a SHA-256 hex digest")
+        if secrets.compare_digest(new_fingerprint, device["public_key_fingerprint"]):
+            raise ValueError("Replacement device key must differ from the currently enrolled key")
         with self._connect() as con:
             duplicate = con.execute(
                 """SELECT id FROM aura_sec_devices
@@ -229,15 +205,14 @@ class AuraSecDeviceCredentialRotation:
             con.execute(
                 """UPDATE aura_sec_device_key_rotations
                    SET status='superseded',attempt_id=NULL
-                   WHERE user_id=? AND device_id=?
-                     AND status IN ('pending','verifying')""",
+                   WHERE user_id=? AND device_id=? AND status IN ('pending','verifying')""",
                 (user_id, device_id),
             )
             con.execute(
                 """INSERT INTO aura_sec_device_key_rotations
                    (id,user_id,device_id,approved_action_id,challenge_hash,
-                    old_public_key_fingerprint,new_public_key_fingerprint,
-                    platform,architecture,status,created_at,expires_at)
+                    old_public_key_fingerprint,new_public_key_fingerprint,platform,architecture,
+                    status,created_at,expires_at)
                    VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)""",
                 (
                     challenge_id,
@@ -280,34 +255,24 @@ class AuraSecDeviceCredentialRotation:
                 (user_id, challenge_id, _hash_secret(challenge)),
             ).fetchone()
             if not row:
-                raise PermissionError(
-                    "Aura Sec credential rotation challenge is invalid"
-                )
+                raise PermissionError("Aura Sec credential rotation challenge is invalid")
             item = dict(row)
             if item.get("status") != "pending":
-                raise PermissionError(
-                    "Aura Sec credential rotation challenge is no longer pending"
-                )
+                raise PermissionError("Aura Sec credential rotation challenge is no longer pending")
             expires = datetime.fromisoformat(item["expires_at"]).astimezone(timezone.utc)
             if now >= expires:
                 con.execute(
-                    """UPDATE aura_sec_device_key_rotations
-                       SET status='expired',attempt_id=NULL WHERE id=?""",
+                    "UPDATE aura_sec_device_key_rotations SET status='expired',attempt_id=NULL WHERE id=?",
                     (challenge_id,),
                 )
-                raise PermissionError(
-                    "Aura Sec credential rotation challenge has expired"
-                )
+                raise PermissionError("Aura Sec credential rotation challenge has expired")
             cursor = con.execute(
-                """UPDATE aura_sec_device_key_rotations
-                   SET status='verifying',attempt_id=?
+                """UPDATE aura_sec_device_key_rotations SET status='verifying',attempt_id=?
                    WHERE id=? AND status='pending'""",
                 (attempt_id, challenge_id),
             )
             if cursor.rowcount != 1:
-                raise PermissionError(
-                    "Aura Sec credential rotation challenge was concurrently claimed"
-                )
+                raise PermissionError("Aura Sec credential rotation challenge was concurrently claimed")
         return item, attempt_id
 
     def _release_failed_attempt(self, challenge_id: str, attempt_id: str) -> None:
@@ -321,12 +286,10 @@ class AuraSecDeviceCredentialRotation:
             if not row:
                 return
             expires = datetime.fromisoformat(row["expires_at"]).astimezone(timezone.utc)
-            status = "expired" if current >= expires else "pending"
             con.execute(
-                """UPDATE aura_sec_device_key_rotations
-                   SET status=?,attempt_id=NULL
+                """UPDATE aura_sec_device_key_rotations SET status=?,attempt_id=NULL
                    WHERE id=? AND status='verifying' AND attempt_id=?""",
-                (status, challenge_id, attempt_id),
+                ("expired" if current >= expires else "pending", challenge_id, attempt_id),
             )
 
     @staticmethod
@@ -334,9 +297,7 @@ class AuraSecDeviceCredentialRotation:
         try:
             decoded = base64.b64decode((value or "").strip(), validate=True)
         except Exception as exc:
-            raise PermissionError(
-                f"Aura Sec {label} signature is not valid base64"
-            ) from exc
+            raise PermissionError(f"Aura Sec {label} signature is not valid base64") from exc
         if not 32 <= len(decoded) <= 1024:
             raise PermissionError(f"Aura Sec {label} signature length is invalid")
         return decoded
@@ -351,9 +312,7 @@ class AuraSecDeviceCredentialRotation:
         verifier: CredentialRotationVerifier | None,
     ) -> VerifiedCredentialRotation:
         if verifier is None:
-            raise PermissionError(
-                "A trusted Aura Sec credential rotation verifier is required"
-            )
+            raise PermissionError("A trusted Aura Sec credential rotation verifier is required")
         context = CredentialRotationContext(
             user_id=str(item["user_id"]),
             device_id=str(item["device_id"]),
@@ -379,13 +338,9 @@ class AuraSecDeviceCredentialRotation:
                 new_signature,
             )
         except Exception as exc:
-            raise PermissionError(
-                "Aura Sec credential rotation verification failed closed"
-            ) from exc
+            raise PermissionError("Aura Sec credential rotation verification failed closed") from exc
         if not isinstance(proof, VerifiedCredentialRotation):
-            raise PermissionError(
-                "Aura Sec credential rotation dual-key proof was not verified"
-            )
+            raise PermissionError("Aura Sec credential rotation dual-key proof was not verified")
 
         old_fp = (proof.old_public_key_fingerprint or "").strip().lower()
         new_fp = (proof.new_public_key_fingerprint or "").strip().lower()
@@ -393,33 +348,18 @@ class AuraSecDeviceCredentialRotation:
         old_alg = (proof.old_key_algorithm or "").strip().lower()
         new_alg = (proof.new_key_algorithm or "").strip().lower()
         evidence_digest = (proof.evidence_digest or "").strip().lower()
-        if not secrets.compare_digest(
-            old_fp, context.old_public_key_fingerprint
-        ):
-            raise PermissionError(
-                "Credential rotation proof does not match the currently enrolled key"
-            )
-        if not secrets.compare_digest(
-            new_fp, context.new_public_key_fingerprint
-        ):
-            raise PermissionError(
-                "Credential rotation proof does not match the replacement key"
-            )
+        if not secrets.compare_digest(old_fp, context.old_public_key_fingerprint):
+            raise PermissionError("Credential rotation proof does not match the currently enrolled key")
+        if not secrets.compare_digest(new_fp, context.new_public_key_fingerprint):
+            raise PermissionError("Credential rotation proof does not match the replacement key")
         expected_digest = hashlib.sha256(payload).hexdigest()
         if not _HEX_256.fullmatch(evidence_digest) or not secrets.compare_digest(
             evidence_digest, expected_digest
         ):
-            raise PermissionError(
-                "Credential rotation evidence digest does not match the signed payload"
-            )
+            raise PermissionError("Credential rotation evidence digest does not match the signed payload")
         if not verifier_id or len(verifier_id) > 160:
-            raise PermissionError(
-                "Trusted credential rotation verifier identity is required"
-            )
-        if (
-            old_alg not in _ALLOWED_KEY_ALGORITHMS
-            or new_alg not in _ALLOWED_KEY_ALGORITHMS
-        ):
+            raise PermissionError("Trusted credential rotation verifier identity is required")
+        if old_alg not in _ALLOWED_KEY_ALGORITHMS or new_alg not in _ALLOWED_KEY_ALGORITHMS:
             raise PermissionError("Unsupported Aura Sec device key algorithm")
         return VerifiedCredentialRotation(
             old_public_key_fingerprint=old_fp,
@@ -433,14 +373,9 @@ class AuraSecDeviceCredentialRotation:
 
     @staticmethod
     def _table_exists(con: sqlite3.Connection, table_name: str) -> bool:
-        return (
-            con.execute(
-                """SELECT 1 FROM sqlite_master
-                   WHERE type='table' AND name=?""",
-                (table_name,),
-            ).fetchone()
-            is not None
-        )
+        return con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
+        ).fetchone() is not None
 
     def complete_rotation(
         self,
@@ -454,30 +389,19 @@ class AuraSecDeviceCredentialRotation:
         now: datetime | None = None,
     ) -> dict:
         current = (now or _now()).astimezone(timezone.utc)
-        item, attempt_id = self._reserve(
-            user_id, challenge_id, challenge, now=current
-        )
+        item, attempt_id = self._reserve(user_id, challenge_id, challenge, now=current)
         try:
             if self.security.licence(user_id).get("status") != "active":
-                raise PermissionError(
-                    "Active Aura Sec licence required for credential rotation"
-                )
+                raise PermissionError("Active Aura Sec licence required for credential rotation")
             device = self._device_identity(user_id, str(item["device_id"]))
             if device.get("status") == "revoked" or device.get("revoked_at"):
-                raise PermissionError(
-                    "Revoked Aura Sec device cannot rotate credentials"
-                )
+                raise PermissionError("Revoked Aura Sec device cannot rotate credentials")
             if not secrets.compare_digest(
-                device["public_key_fingerprint"],
-                str(item["old_public_key_fingerprint"]),
+                device["public_key_fingerprint"], str(item["old_public_key_fingerprint"])
             ):
-                raise PermissionError(
-                    "Aura Sec device credential changed after this challenge was issued"
-                )
+                raise PermissionError("Aura Sec device credential changed after this challenge was issued")
             self._approved_rotation_action(
-                user_id,
-                str(item["device_id"]),
-                str(item["approved_action_id"]),
+                user_id, str(item["device_id"]), str(item["approved_action_id"])
             )
             proof = self._verify(
                 item,
@@ -490,15 +414,11 @@ class AuraSecDeviceCredentialRotation:
             with self._connect() as con:
                 device_update = con.execute(
                     """UPDATE aura_sec_devices
-                       SET public_key_fingerprint=?,
-                           protection_state='awaiting_heartbeat',
-                           last_seen_at=NULL,last_policy_version=NULL,
-                           last_report_digest=NULL,last_heartbeat_sequence=0,
-                           last_heartbeat_verifier_id=NULL,
-                           last_heartbeat_key_algorithm=NULL,
-                           last_heartbeat_evidence_digest=NULL
-                       WHERE user_id=? AND id=?
-                         AND public_key_fingerprint=? AND revoked_at IS NULL""",
+                       SET public_key_fingerprint=?,protection_state='awaiting_heartbeat',
+                           last_seen_at=NULL,last_policy_version=NULL,last_report_digest=NULL,
+                           last_heartbeat_sequence=0,last_heartbeat_verifier=NULL,
+                           last_heartbeat_key_algorithm=NULL,last_heartbeat_evidence_digest=NULL
+                       WHERE user_id=? AND id=? AND public_key_fingerprint=? AND revoked_at IS NULL""",
                     (
                         proof.new_public_key_fingerprint,
                         user_id,
@@ -507,22 +427,17 @@ class AuraSecDeviceCredentialRotation:
                     ),
                 )
                 if device_update.rowcount != 1:
-                    raise PermissionError(
-                        "Aura Sec device credential changed concurrently"
-                    )
+                    raise PermissionError("Aura Sec device credential changed concurrently")
 
                 if self._table_exists(con, "aura_sec_native_poll_state"):
                     con.execute(
-                        """DELETE FROM aura_sec_native_poll_state
-                           WHERE user_id=? AND device_id=?""",
+                        "DELETE FROM aura_sec_native_poll_state WHERE user_id=? AND device_id=?",
                         (user_id, item["device_id"]),
                     )
                 if self._table_exists(con, "aura_sec_heartbeat_challenges"):
                     con.execute(
-                        """UPDATE aura_sec_heartbeat_challenges
-                           SET status='superseded',attempt_id=NULL
-                           WHERE user_id=? AND device_id=?
-                             AND status IN ('pending','verifying')""",
+                        """UPDATE aura_sec_heartbeat_challenges SET status='superseded',attempt_id=NULL
+                           WHERE user_id=? AND device_id=? AND status IN ('pending','verifying')""",
                         (user_id, item["device_id"]),
                     )
 
@@ -541,17 +456,14 @@ class AuraSecDeviceCredentialRotation:
                     ),
                 )
                 if action_update.rowcount != 1:
-                    raise PermissionError(
-                        "Aura Sec credential rotation approval changed concurrently"
-                    )
+                    raise PermissionError("Aura Sec credential rotation approval changed concurrently")
 
                 rotation_update = con.execute(
                     """UPDATE aura_sec_device_key_rotations
-                       SET status='consumed',attempt_id=NULL,consumed_at=?,
-                           verifier_id=?,old_key_algorithm=?,new_key_algorithm=?,
-                           evidence_digest=?,new_key_hardware_backed=?
-                       WHERE id=? AND user_id=? AND status='verifying'
-                         AND attempt_id=?""",
+                       SET status='consumed',attempt_id=NULL,consumed_at=?,verifier_id=?,
+                           old_key_algorithm=?,new_key_algorithm=?,evidence_digest=?,
+                           new_key_hardware_backed=?
+                       WHERE id=? AND user_id=? AND status='verifying' AND attempt_id=?""",
                     (
                         completed_at,
                         proof.verifier_id,
@@ -565,17 +477,13 @@ class AuraSecDeviceCredentialRotation:
                     ),
                 )
                 if rotation_update.rowcount != 1:
-                    raise RuntimeError(
-                        "Aura Sec credential rotation completion failed closed"
-                    )
+                    raise RuntimeError("Aura Sec credential rotation completion failed closed")
         except Exception:
             self._release_failed_attempt(challenge_id, attempt_id)
             raise
 
         return {
-            "device": self.security.get_device(
-                user_id, str(item["device_id"])
-            ),
+            "device": self.security.get_device(user_id, str(item["device_id"])),
             "rotation_consumed": True,
             "approved_action_id": item["approved_action_id"],
             "action_status": "verified",
