@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
+from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
+from .game_forge_assets import snapshot_public_assets
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
 from .game_forge_runtime import private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
@@ -15,18 +18,30 @@ from .game_forge_world import (
     world_stream_index,
     world_summary,
 )
-from .plans import GAME_CREATE
+from .plans import GAME_CREATE, GAME_PLAYTEST
 
 router = APIRouter(tags=["Aura Game World"])
 router.include_router(game_assets_router)
 
 
-def _creator(request: Request):
+def _member(request: Request):
     member = getattr(request.state, "member", None)
     if member is None:
         raise HTTPException(401, "Sign in required")
+    return member
+
+
+def _creator(request: Request):
+    member = _member(request)
     if not member.plan.has(GAME_CREATE):
         raise HTTPException(403, "Game world editing unlocks on the Basic £4.99 tier")
+    return member
+
+
+def _tester(request: Request):
+    member = _member(request)
+    if not member.plan.has(GAME_PLAYTEST):
+        raise HTTPException(403, "Game playtesting is unavailable on this membership")
     return member
 
 
@@ -137,8 +152,13 @@ def publish_world_integrity(game_id: str, request: Request):
     try:
         html = private_play_html(game)
         game.public_id = publish_snapshot(game, html)
+        public_assets = snapshot_public_assets(game.id, game.public_id)
     except FileNotFoundError as exc:
         raise HTTPException(409, "Private playtest build is unavailable") from exc
+    except (OSError, ValueError) as exc:
+        remove_public_snapshot(game)
+        game.public_id = None
+        raise HTTPException(409, f"Public media snapshot failed: {exc}") from exc
     game.status = "public_test"
     save_game(game)
     return {
@@ -150,4 +170,30 @@ def publish_world_integrity(game_id: str, request: Request):
         "rating_note": game.rating_assessment.note,
         "integrity_bound_to_world": True,
         "integrity_bound_to_assets": True,
+        "verified_media_snapshot_count": len(public_assets),
+        "external_media_urls_included": False,
     }
+
+
+@router.get(
+    "/game-gallery/{public_id}/media/{filename}",
+    response_class=FileResponse,
+    include_in_schema=False,
+)
+def public_game_runtime_media(public_id: str, filename: str, request: Request):
+    _tester(request)
+    try:
+        path, row = public_runtime_asset_path(public_id, filename)
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        raise HTTPException(404, "Published game media not found") from exc
+    return FileResponse(
+        path,
+        media_type=str(row.get("mime_type") or "application/octet-stream"),
+        filename=None,
+        headers={
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": f'"{row.get("sha256") or ""}"',
+            "X-Content-Type-Options": "nosniff",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
+    )

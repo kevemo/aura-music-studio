@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
 import os
 import shutil
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 from .creative_library import scan_creative_library
 from .creative_project import CreativeProjectStore
 from .game_forge_models import GameDNA
-from .game_forge_store import game_dir, load_game, remove_public_snapshot, save_game
+from .game_forge_store import game_dir, load_game, public_dir, remove_public_snapshot, save_game
 from .plans import GAME_CREATE
 from .tenant_storage import project_path
 
@@ -226,6 +227,24 @@ def find_game_asset(game_id: str, asset_id: str) -> GameAssetRecord:
     return record
 
 
+def _runtime_filename(record: GameAssetRecord) -> str:
+    name = Path(record.imported_filename).name
+    if name != record.imported_filename or not name.startswith(f"{record.id}."):
+        raise ValueError("Game asset filename does not match its generated identity")
+    if Path(name).suffix.lower() not in _ALLOWED_SUFFIXES:
+        raise ValueError("Game asset filename has an unsupported media extension")
+    return name
+
+
+def find_game_asset_by_filename(game_id: str, filename: str) -> GameAssetRecord:
+    if not filename or Path(filename).name != filename:
+        raise FileNotFoundError(filename)
+    record = next((row for row in list_game_assets(game_id) if _runtime_filename(row) == filename), None)
+    if record is None:
+        raise FileNotFoundError(filename)
+    return record
+
+
 def update_game_asset_rights(
     game_id: str,
     asset_id: str,
@@ -277,6 +296,108 @@ def public_asset(record: GameAssetRecord) -> dict:
     }
 
 
+def runtime_asset_manifest(game_id: str) -> list[dict]:
+    """Project private asset records into the closed renderer media contract.
+
+    Media URLs are intentionally relative. The same immutable play.html therefore resolves against
+    the authenticated private frame or the published public snapshot without embedding tenant paths.
+    """
+    rows: list[dict] = []
+    for record in list_game_assets(game_id):
+        filename = _runtime_filename(record)
+        rows.append(
+            {
+                "id": record.id,
+                "kind": record.kind,
+                "label": record.label,
+                "role": record.role,
+                "media_url": f"media/{filename}",
+                "mime_type": mimetypes.guess_type(filename)[0] or "application/octet-stream",
+                "sha256": record.source_media_sha256,
+                "byte_size": record.byte_size,
+            }
+        )
+    return sorted(rows, key=lambda row: row["id"])
+
+
+def private_runtime_asset_path(game_id: str, filename: str) -> tuple[Path, GameAssetRecord]:
+    record = find_game_asset_by_filename(game_id, filename)
+    path = _asset_file(game_id, record)
+    if not path.is_file() or path.stat().st_size != record.byte_size:
+        raise FileNotFoundError(filename)
+    return path, record
+
+
+def snapshot_public_assets(game_id: str, public_id: str) -> list[dict]:
+    """Copy the exact verified private media bytes into an immutable public game snapshot."""
+    blockers = asset_publication_blockers(game_id)
+    if blockers:
+        raise ValueError("; ".join(blockers))
+
+    destination = public_dir(public_id).resolve()
+    media_root = (destination / "media").resolve()
+    if destination not in media_root.parents:
+        raise ValueError("Public game media path escaped storage")
+    if media_root.exists():
+        shutil.rmtree(media_root)
+    media_root.mkdir(parents=True, exist_ok=True)
+
+    records = {record.id: record for record in list_game_assets(game_id)}
+    runtime_rows = runtime_asset_manifest(game_id)
+    for row in runtime_rows:
+        record = records[row["id"]]
+        source = _asset_file(game_id, record)
+        target = (media_root / _runtime_filename(record)).resolve()
+        if media_root not in target.parents:
+            raise ValueError("Published game asset escaped media storage")
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        shutil.copyfile(source, tmp)
+        if tmp.stat().st_size != record.byte_size or _sha256(tmp) != record.source_media_sha256:
+            tmp.unlink(missing_ok=True)
+            raise IOError("Published game asset failed checksum verification")
+        tmp.replace(target)
+
+    manifest = {
+        "schema_version": 1,
+        "game_id": game_id,
+        "public_id": public_id,
+        "assets": runtime_rows,
+        "creator_private_data_included": False,
+        "external_media_urls_included": False,
+    }
+    (destination / "assets.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return runtime_rows
+
+
+def public_runtime_asset_path(public_id: str, filename: str) -> tuple[Path, dict]:
+    if not filename or Path(filename).name != filename:
+        raise FileNotFoundError(filename)
+    root = public_dir(public_id).resolve()
+    manifest_path = root / "assets.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError(filename)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    row = next(
+        (
+            item
+            for item in manifest.get("assets", [])
+            if item.get("media_url") == f"media/{filename}"
+        ),
+        None,
+    )
+    if not row:
+        raise FileNotFoundError(filename)
+    target = (root / "media" / filename).resolve()
+    if root not in target.parents or not target.is_file():
+        raise FileNotFoundError(filename)
+    if target.stat().st_size != int(row.get("byte_size") or -1):
+        raise FileNotFoundError(filename)
+    return target, row
+
+
 def asset_integrity_payload(game_id: str) -> list[dict]:
     rows = []
     for record in list_game_assets(game_id):
@@ -321,6 +442,19 @@ def _invalidate_after_asset_change(game: GameDNA) -> None:
     save_game(game)
 
 
+def _file_response(path: Path, *, media_type: str, etag: str, private: bool) -> FileResponse:
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=None,
+        headers={
+            "Cache-Control": "private, no-store" if private else "private, max-age=31536000, immutable",
+            "ETag": f'"{etag}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/api/game-forge/games/{game_id}/assets/library")
 def game_asset_library(game_id: str, request: Request):
     member = _creator(request)
@@ -345,6 +479,7 @@ def game_assets(game_id: str, request: Request):
     return {
         "game_id": game.id,
         "assets": [public_asset(row) for row in rows],
+        "runtime_assets": runtime_asset_manifest(game.id),
         "count": len(rows),
         "build_integrity_bound_to_assets": True,
         "filesystem_paths_exposed": False,
@@ -426,15 +561,31 @@ def game_asset_media(game_id: str, asset_id: str, request: Request):
     if not path.is_file():
         raise HTTPException(409, "Imported game asset is unavailable")
     media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    return FileResponse(
+    return _file_response(
         path,
         media_type=media_type,
-        filename=None,
-        headers={
-            "Cache-Control": "private, no-store",
-            "ETag": f"\"{record.source_media_sha256}\"",
-            "X-Content-Type-Options": "nosniff",
-        },
+        etag=record.source_media_sha256,
+        private=True,
+    )
+
+
+@router.get(
+    "/api/game-forge/games/{game_id}/media/{filename}",
+    response_class=FileResponse,
+    include_in_schema=False,
+)
+def private_game_runtime_media(game_id: str, filename: str, request: Request):
+    _creator(request)
+    game = _game(game_id)
+    try:
+        path, record = private_runtime_asset_path(game.id, filename)
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(404, "Game runtime media not found") from exc
+    return _file_response(
+        path,
+        media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        etag=record.source_media_sha256,
+        private=True,
     )
 
 
@@ -447,9 +598,14 @@ __all__ = [
     "attach_creative_asset",
     "list_game_assets",
     "find_game_asset",
+    "find_game_asset_by_filename",
     "update_game_asset_rights",
     "detach_game_asset",
     "public_asset",
+    "runtime_asset_manifest",
+    "private_runtime_asset_path",
+    "snapshot_public_assets",
+    "public_runtime_asset_path",
     "asset_integrity_payload",
     "asset_publication_blockers",
 ]
