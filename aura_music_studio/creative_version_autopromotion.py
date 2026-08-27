@@ -7,8 +7,8 @@ from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
 from .deep_daw_automation_api import router as deep_daw_automation_router
 from .professional_editor_api import router as professional_editor_router
+from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
 from .professional_editor_render_api import router as professional_editor_render_router
-from .professional_editor_workspace import router as professional_editor_workspace_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .tenant_storage import project_path
@@ -26,6 +26,9 @@ router.include_router(stripe_billing_router)
 router.include_router(deep_daw_automation_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_render_router)
+# The inspector overlay delegates to the existing authenticated workspace function, then injects
+# the Pro mask/effect/keyframe/export controls. The original workspace router is intentionally not
+# mounted separately so there is only one /creative/editor-workspace route.
 router.include_router(professional_editor_workspace_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
