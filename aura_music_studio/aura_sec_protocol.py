@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
@@ -116,6 +117,15 @@ class DeviceHeartbeat(StrictModel):
         if len(ids) != len(set(ids)):
             raise ValueError("heartbeat capability ids must be unique")
         return self
+
+    def signed_payload(self) -> bytes:
+        """Canonical payload signed by the enrolled native-device key."""
+        return json.dumps(
+            self.model_dump(mode="json"),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
 
 
 class SecurityCommand(StrictModel):

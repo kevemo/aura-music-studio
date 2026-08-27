@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
+import re
+import secrets
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 from uuid import uuid4
 
 from .accounts import AccountStore
-from .aura_sec_protocol import ActionRisk, ActionType, EXPECTED_RISK, ProtectionState
+from .aura_sec_protocol import ActionRisk, ActionType, DeviceHeartbeat, EXPECTED_RISK
+
+
+_HEX_256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _now() -> datetime:
@@ -34,12 +43,28 @@ class SecurityLicence:
     period_end: str | None
 
 
+@dataclass(frozen=True)
+class VerifiedHeartbeatSignature:
+    """Auditable result returned only by a trusted native signature verifier."""
+
+    public_key_fingerprint: str
+    verifier_id: str
+    key_algorithm: str
+    evidence_digest: str
+
+
+HeartbeatSignatureVerifier = Callable[
+    [str, bytes, bytes], VerifiedHeartbeatSignature | None
+]
+
+
 class AuraSecStore:
     """Persistent control-plane state for the separate Aura Sec product.
 
-    Creative Free/Basic/Pro membership never implies Aura Sec entitlement. Billing
-    verification, device attestation and cryptographic heartbeat verification happen
-    in trusted protocol/service layers before their verified result is persisted here.
+    Creative Free/Basic/Pro membership never implies Aura Sec entitlement. Billing,
+    enrolment and heartbeat trust all fail closed. A heartbeat is persisted only after
+    the store verifies a signed canonical DeviceHeartbeat through a trusted verifier
+    adapter bound to the enrolled device key.
     """
 
     def __init__(self, accounts: AccountStore | None = None):
@@ -97,6 +122,10 @@ class AuraSecStore:
                     last_seen_at TEXT,
                     last_policy_version TEXT,
                     last_report_digest TEXT,
+                    last_heartbeat_sequence INTEGER NOT NULL DEFAULT 0,
+                    last_heartbeat_verifier TEXT,
+                    last_heartbeat_key_algorithm TEXT,
+                    last_heartbeat_evidence_digest TEXT,
                     revoked_at TEXT,
                     UNIQUE(user_id, public_key_fingerprint),
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -144,6 +173,19 @@ class AuraSecStore:
                 ON aura_sec_actions(device_id, status, requested_at);
                 """
             )
+            existing = {
+                str(row["name"])
+                for row in con.execute("PRAGMA table_info(aura_sec_devices)").fetchall()
+            }
+            migrations = {
+                "last_heartbeat_sequence": "INTEGER NOT NULL DEFAULT 0",
+                "last_heartbeat_verifier": "TEXT",
+                "last_heartbeat_key_algorithm": "TEXT",
+                "last_heartbeat_evidence_digest": "TEXT",
+            }
+            for column, sql_type in migrations.items():
+                if column not in existing:
+                    con.execute(f"ALTER TABLE aura_sec_devices ADD COLUMN {column} {sql_type}")
 
     def licence(self, user_id: str) -> dict:
         with self._connect() as con:
@@ -298,45 +340,105 @@ class AuraSecStore:
             raise ValueError("Aura Sec device not found")
         return dict(row)
 
+    def _heartbeat_identity(self, user_id: str, device_id: str) -> dict:
+        with self._connect() as con:
+            row = con.execute(
+                """SELECT id,platform,architecture,public_key_fingerprint,status,revoked_at,
+                          last_heartbeat_sequence
+                   FROM aura_sec_devices WHERE user_id=? AND id=?""",
+                (user_id, device_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Aura Sec device not found")
+        return dict(row)
+
     def record_verified_heartbeat(
         self,
         user_id: str,
-        device_id: str,
+        heartbeat: DeviceHeartbeat,
         *,
-        signature_verified: bool,
-        agent_version: str,
-        policy_version: str,
-        report_digest: str,
-        protection_state: str,
+        signature_b64: str,
+        signature_verifier: HeartbeatSignatureVerifier | None,
     ) -> dict:
-        """Persist heartbeat state only after the protocol layer verifies its signature."""
-        if not signature_verified:
-            raise PermissionError("Unverified Aura Sec heartbeat rejected")
-        try:
-            state = ProtectionState(protection_state)
-        except ValueError as exc:
-            raise ValueError("Invalid protection state") from exc
-        if len((report_digest or "").strip()) < 32:
-            raise ValueError("Signed report digest is required")
-        device = self.get_device(user_id, device_id)
-        if device.get("status") == "revoked" or device.get("revoked_at"):
+        """Verify and persist a native heartbeat without a boolean trust shortcut."""
+        if self.licence(user_id).get("status") != "active":
+            raise PermissionError("Active Aura Sec licence required for device heartbeat")
+        if signature_verifier is None:
+            raise PermissionError("A trusted Aura Sec heartbeat signature verifier is required")
+
+        identity = self._heartbeat_identity(user_id, heartbeat.device_id)
+        if identity.get("status") == "revoked" or identity.get("revoked_at"):
             raise PermissionError("Revoked Aura Sec device cannot report protection state")
+        if str(identity.get("platform") or "").lower() != heartbeat.platform:
+            raise PermissionError("Heartbeat platform does not match enrolled device identity")
+        if str(identity.get("architecture") or "").lower() != heartbeat.architecture.lower():
+            raise PermissionError("Heartbeat architecture does not match enrolled device identity")
+
+        current = _now()
+        if heartbeat.issued_at > current + timedelta(seconds=60):
+            raise PermissionError("Aura Sec heartbeat issuance is too far in the future")
+        if current >= heartbeat.expires_at:
+            raise PermissionError("Aura Sec heartbeat has expired")
+        if heartbeat.sequence <= int(identity.get("last_heartbeat_sequence") or 0):
+            raise PermissionError("Aura Sec heartbeat sequence was replayed or moved backwards")
+
+        signature_text = (signature_b64 or "").strip()
+        try:
+            signature = base64.b64decode(signature_text, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise PermissionError("Aura Sec heartbeat signature is malformed") from exc
+        if not 32 <= len(signature) <= 4096:
+            raise PermissionError("Aura Sec heartbeat signature length is invalid")
+
+        fingerprint = str(identity.get("public_key_fingerprint") or "").strip().lower()
+        payload = heartbeat.signed_payload()
+        try:
+            verified = signature_verifier(fingerprint, payload, signature)
+        except Exception as exc:
+            raise PermissionError("Aura Sec heartbeat signature verifier failed closed") from exc
+        if not isinstance(verified, VerifiedHeartbeatSignature):
+            raise PermissionError("Aura Sec heartbeat signature was not verified")
+
+        verified_fingerprint = (verified.public_key_fingerprint or "").strip().lower()
+        if not secrets.compare_digest(verified_fingerprint, fingerprint):
+            raise PermissionError("Verified heartbeat key does not match enrolled device identity")
+        evidence_digest = (verified.evidence_digest or "").strip().lower()
+        expected_digest = hashlib.sha256(payload).hexdigest()
+        if not _HEX_256.fullmatch(evidence_digest) or not secrets.compare_digest(
+            evidence_digest, expected_digest
+        ):
+            raise PermissionError("Verified heartbeat evidence digest does not match signed payload")
+        verifier_id = (verified.verifier_id or "").strip()
+        key_algorithm = (verified.key_algorithm or "").strip().lower()
+        if not 1 <= len(verifier_id) <= 160 or not 2 <= len(key_algorithm) <= 80:
+            raise PermissionError("Verified heartbeat metadata is invalid")
+
         with self._connect() as con:
-            con.execute(
+            cursor = con.execute(
                 """UPDATE aura_sec_devices SET agent_version=?,last_policy_version=?,last_report_digest=?,
-                          protection_state=?,last_seen_at=?
-                   WHERE user_id=? AND id=? AND revoked_at IS NULL""",
+                          protection_state=?,last_seen_at=?,last_heartbeat_sequence=?,
+                          last_heartbeat_verifier=?,last_heartbeat_key_algorithm=?,
+                          last_heartbeat_evidence_digest=?
+                   WHERE user_id=? AND id=? AND revoked_at IS NULL
+                     AND COALESCE(last_heartbeat_sequence,0) < ?""",
                 (
-                    (agent_version or "").strip()[:80],
-                    (policy_version or "").strip()[:80],
-                    report_digest.strip().lower()[:256],
-                    state.value,
-                    _iso(),
+                    heartbeat.agent_version,
+                    heartbeat.policy_version,
+                    heartbeat.report_digest.lower(),
+                    heartbeat.protection_state.value,
+                    _iso(current),
+                    heartbeat.sequence,
+                    verifier_id,
+                    key_algorithm,
+                    evidence_digest,
                     user_id,
-                    device_id,
+                    heartbeat.device_id,
+                    heartbeat.sequence,
                 ),
             )
-        return self.get_device(user_id, device_id)
+            if cursor.rowcount != 1:
+                raise PermissionError("Aura Sec heartbeat replay or device revocation detected")
+        return self.get_device(user_id, heartbeat.device_id)
 
     def revoke_device(self, user_id: str, device_id: str) -> dict:
         self.get_device(user_id, device_id)
@@ -483,4 +585,9 @@ class AuraSecStore:
         return item
 
 
-__all__ = ["AuraSecStore", "SecurityLicence"]
+__all__ = [
+    "AuraSecStore",
+    "HeartbeatSignatureVerifier",
+    "SecurityLicence",
+    "VerifiedHeartbeatSignature",
+]
