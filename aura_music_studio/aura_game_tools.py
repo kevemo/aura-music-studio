@@ -4,9 +4,19 @@ from typing import Any
 
 from . import aura_agent_tools as tools
 from .game_forge_api import CreateGameRequest, create_game_for_member
-from .game_forge_ratings import assess_game
+from .game_forge_asset_bindings import (
+    BindGameAssetRequest,
+    UnbindGameAssetRequest,
+    bind_game_asset,
+    binding_state,
+    unbind_game_asset,
+)
+from .game_forge_assets import list_game_assets, public_asset
+from .game_forge_aura_commands import execute_game_aura_command
+from .game_forge_integrity import assess_game_integrity
 from .game_forge_runtime import build_private_playtest
 from .game_forge_store import list_games, load_game, save_game
+from .plans import GAME_CREATE
 
 _INSTALLED = False
 _GAME_TOOL_NAMES = {
@@ -15,6 +25,11 @@ _GAME_TOOL_NAMES = {
     "create_game_project",
     "scan_game_project",
     "build_game_playtest",
+    "list_game_media_assets",
+    "inspect_game_asset_bindings",
+    "bind_game_media_asset",
+    "unbind_game_media_asset",
+    "apply_game_media_command",
 }
 
 
@@ -27,7 +42,7 @@ def _install_specs() -> None:
         ),
         tools.ToolSpec(
             "inspect_game_project",
-            "Read one private Aura-owned engine-independent Game DNA project, including mechanics, content disclosures, build and provisional rating state.",
+            "Read one private Aura-owned engine-independent Game DNA project, including mechanics, content disclosures, build, provisional rating, imported creative media and current World DNA media bindings.",
             {"game_id": "Stable Game Forge id."},
         ),
         tools.ToolSpec(
@@ -48,14 +63,56 @@ def _install_specs() -> None:
         ),
         tools.ToolSpec(
             "scan_game_project",
-            "Run Aura/Pulsar's provisional content/rating/privacy/monetisation preflight for the current Game DNA. This never issues an official ESRB/PEGI/IARC or authority rating.",
+            "Run Aura/Pulsar's provisional content/rating/privacy/monetisation preflight for current Game DNA, World DNA, imported asset integrity and asset bindings. This never issues an official ESRB/PEGI/IARC or authority rating.",
             {"game_id": "Stable Game Forge id."},
             write=True,
         ),
         tools.ToolSpec(
             "build_game_playtest",
-            "Build the current private Game DNA into Aura's isolated no-network browser playtest runtime. Arbitrary generated server code is never executed in the API host.",
+            "Build the current private Game DNA into Aura's isolated no-network browser playtest runtime, including verified same-origin Creative Studio media. Arbitrary generated server code is never executed in the API host.",
             {"game_id": "Stable Game Forge id."},
+            write=True,
+        ),
+        tools.ToolSpec(
+            "list_game_media_assets",
+            "List the verified image, video, audio and music snapshots already imported into one private Game Forge project. Does not expose tenant filesystem paths.",
+            {"game_id": "Stable Game Forge id."},
+        ),
+        tools.ToolSpec(
+            "inspect_game_asset_bindings",
+            "Inspect exact World DNA media assignments: world background, soundtrack, cutscene, entity visuals and per-entity material texture slots.",
+            {"game_id": "Stable Game Forge id."},
+        ),
+        tools.ToolSpec(
+            "bind_game_media_asset",
+            "Assign one already-imported verified Game Forge media asset to an exact World DNA target. Use image assets for background/entity visuals/textures, music/audio for soundtrack, and video for cutscene.",
+            {
+                "game_id": "Stable Game Forge id.",
+                "asset_id": "Imported Game Forge asset id.",
+                "target": "world_background, soundtrack, cutscene, entity_visual or entity_texture.",
+                "entity_id": "Required for entity_visual/entity_texture.",
+                "material_slot": "For entity_texture: base_color, normal, metallic, roughness, emissive, opacity, height or ao.",
+            },
+            write=True,
+        ),
+        tools.ToolSpec(
+            "unbind_game_media_asset",
+            "Remove one exact World DNA media assignment without deleting the underlying imported asset.",
+            {
+                "game_id": "Stable Game Forge id.",
+                "target": "world_background, soundtrack, cutscene, entity_visual or entity_texture.",
+                "entity_id": "Required for entity_visual/entity_texture.",
+                "material_slot": "For entity_texture; defaults to base_color.",
+            },
+            write=True,
+        ),
+        tools.ToolSpec(
+            "apply_game_media_command",
+            "Apply a plain-language Game Forge media instruction such as 'use Cosmic Sky as the world background', 'set Sparkles as the soundtrack', 'apply Neon Stone to ground base color', or 'remove the cutscene'. Fails safely with candidates when the asset/entity is ambiguous.",
+            {
+                "game_id": "Stable Game Forge id.",
+                "command": "Explicit member instruction for imported game media/bindings.",
+            },
             write=True,
         ),
     ]
@@ -74,6 +131,18 @@ def _explicit_game_write_allowed(name: str, message: str) -> bool:
         return any(x in text for x in ("scan", "rate", "rating", "check", "review")) and "game" in text
     if name == "build_game_playtest":
         return any(x in text for x in ("build", "playtest", "play test", "test", "generate")) and "game" in text
+    if name == "bind_game_media_asset":
+        return any(x in text for x in ("use", "set", "apply", "bind", "assign", "change")) and any(
+            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "player", "asset", "media")
+        )
+    if name == "unbind_game_media_asset":
+        return any(x in text for x in ("remove", "clear", "unbind", "detach", "stop using")) and any(
+            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media")
+        )
+    if name == "apply_game_media_command":
+        return any(x in text for x in ("use", "set", "apply", "bind", "assign", "change", "remove", "clear", "unbind", "show", "list")) and any(
+            x in text for x in ("game", "background", "soundtrack", "cutscene", "texture", "visual", "asset", "media", "player")
+        )
     return True
 
 
@@ -94,6 +163,29 @@ def _summary(game) -> dict:
     }
 
 
+def _asset_summary(game_id: str) -> list[dict]:
+    rows = []
+    for record in list_game_assets(game_id):
+        item = public_asset(record)
+        rows.append(
+            {
+                "id": item["id"],
+                "label": item["label"],
+                "kind": item["kind"],
+                "role": item["role"],
+                "rights_confirmed": item["rights_confirmed"],
+                "media_url": item["media_url"],
+                "filesystem_path_exposed": False,
+            }
+        )
+    return rows
+
+
+def _game_create_allowed(member) -> None:
+    if not member.plan.has(GAME_CREATE):
+        raise PermissionError("Game editing unlocks on the Basic £4.99 tier")
+
+
 def install_aura_game_tools() -> None:
     global _INSTALLED
     if _INSTALLED:
@@ -106,13 +198,26 @@ def install_aura_game_tools() -> None:
             return original_execute(self, call, latest_user_message=latest_user_message)
         if not self.tools_enabled:
             raise PermissionError("Aura tools are disabled for this conversation")
-        if call.name in {"create_game_project", "scan_game_project", "build_game_playtest"} and not _explicit_game_write_allowed(call.name, latest_user_message):
-            raise PermissionError("Aura game-changing tools require an explicit game creation/build/scan request in the member's latest message")
+        write_names = {
+            "create_game_project",
+            "scan_game_project",
+            "build_game_playtest",
+            "bind_game_media_asset",
+            "unbind_game_media_asset",
+            "apply_game_media_command",
+        }
+        if call.name in write_names and not _explicit_game_write_allowed(call.name, latest_user_message):
+            raise PermissionError("Aura game-changing tools require an explicit matching Game Forge request in the member's latest message")
         args = dict(call.arguments or {})
         if call.name == "list_game_projects":
             return [_summary(game) for game in list_games()]
         if call.name == "inspect_game_project":
-            return load_game(str(args.get("game_id") or "")).model_dump(mode="json")
+            game = load_game(str(args.get("game_id") or ""))
+            return {
+                "game_dna": game.model_dump(mode="json"),
+                "assets": _asset_summary(game.id),
+                "asset_bindings": binding_state(game.id),
+            }
         if call.name == "create_game_project":
             dimension = str(args.get("dimension") or "2d")
             body = CreateGameRequest(
@@ -135,8 +240,16 @@ def install_aura_game_tools() -> None:
                 "aura_native_engine": game.engine_target in {"aura2d", "aura3d"},
             }
         game = load_game(str(args.get("game_id") or ""))
+        if call.name in {
+            "scan_game_project",
+            "build_game_playtest",
+            "bind_game_media_asset",
+            "unbind_game_media_asset",
+            "apply_game_media_command",
+        }:
+            _game_create_allowed(self.member)
         if call.name == "scan_game_project":
-            assessment = assess_game(game)
+            assessment = assess_game_integrity(game)
             game.rating_assessment = assessment
             if assessment.public_test_allowed and game.latest_build and game.latest_build.content_hash == assessment.content_hash:
                 game.status = "approved_test"
@@ -147,16 +260,56 @@ def install_aura_game_tools() -> None:
                 "assessment": assessment.model_dump(mode="json"),
                 "official_rating": False,
                 "public_test_allowed": assessment.public_test_allowed,
+                "integrity_bound_to_world_and_assets": True,
             }
         if call.name == "build_game_playtest":
             game, _html = build_private_playtest(game)
             return {
                 "game": _summary(game),
                 "private_playtest_url": f"/game-creation/play/{game.id}",
-                "runtime": "aura_game_runtime_v1",
+                "runtime": game.latest_build.runtime if game.latest_build else "aura_game_runtime_v1",
                 "arbitrary_server_code_executed": False,
                 "network_access_enabled": False,
             }
+        if call.name == "list_game_media_assets":
+            return {
+                "game_id": game.id,
+                "assets": _asset_summary(game.id),
+                "filesystem_paths_exposed": False,
+            }
+        if call.name == "inspect_game_asset_bindings":
+            return binding_state(game.id)
+        if call.name == "bind_game_media_asset":
+            state = bind_game_asset(
+                game,
+                BindGameAssetRequest(
+                    asset_id=str(args.get("asset_id") or ""),
+                    target=str(args.get("target") or ""),
+                    entity_id=(str(args.get("entity_id")) if args.get("entity_id") else None),
+                    material_slot=str(args.get("material_slot") or "base_color"),
+                ),
+            )
+            return {
+                "changed": True,
+                "bindings": state,
+                "invalidated_previous_build_and_rating": True,
+            }
+        if call.name == "unbind_game_media_asset":
+            state = unbind_game_asset(
+                game,
+                UnbindGameAssetRequest(
+                    target=str(args.get("target") or ""),
+                    entity_id=(str(args.get("entity_id")) if args.get("entity_id") else None),
+                    material_slot=str(args.get("material_slot") or "base_color"),
+                ),
+            )
+            return {
+                "changed": True,
+                "bindings": state,
+                "invalidated_previous_build_and_rating": True,
+            }
+        if call.name == "apply_game_media_command":
+            return execute_game_aura_command(game, str(args.get("command") or "")).model_dump(mode="json")
         raise ValueError(f"Aura game tool is not implemented: {call.name}")
 
     tools.AuraToolRegistry.execute = execute
