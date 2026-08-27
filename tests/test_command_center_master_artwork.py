@@ -52,6 +52,16 @@ def test_legacy_and_canonical_logo_routes_serve_the_same_supplied_artwork():
     assert legacy_static.content == canonical.content
 
 
+def test_visible_esp_shorthand_is_expanded_without_touching_internal_identifiers():
+    rendered = rebrand_text("ESP Creator Network Hub · ESP Agent · ESP Social · ESP Hub")
+    assert rendered == (
+        "Elevate Souls Productions Creator Network Hub · "
+        "Elevate Souls Productions Agent · Elevate Souls Productions Social · Elevate Souls Productions Hub"
+    )
+    internal = "aura_music_studio esp_shop_provider_runtime /command-center/api/esp/internal"
+    assert rebrand_text(internal) == internal
+
+
 def test_aura_receives_current_command_center_identity_before_inference():
     original = [
         {
