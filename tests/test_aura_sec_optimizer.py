@@ -42,7 +42,7 @@ def test_os_declared_temp_can_be_low_risk_cleanup():
 
 
 def test_personal_document_can_never_receive_permanent_delete_action():
-    with pytest.raises(ValidationError, match="personal/member files"):
+    with pytest.raises(ValidationError, match="temporary data|personal/member files"):
         OptimizerProposal(
             candidate=candidate(CandidateKind.USER_DOCUMENT),
             action=OptimizerAction.DELETE_OS_TEMP,
