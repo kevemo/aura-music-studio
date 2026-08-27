@@ -22,11 +22,12 @@ from .game_forge_world import (
     world_summary,
 )
 from .plans import GAME_CREATE, GAME_PLAYTEST
+from .production_readiness import router as production_readiness_router
 
 router = APIRouter(tags=["Aura Game World"])
-# Binding and cinematic routes are composed inside the existing Game Forge world router so no
-# application-level route surgery is needed. Binding-aware deletion still precedes the lower-level
-# snapshot route and clears World DNA references atomically.
+# Binding/cinematic routes and the global operations readiness plane are composed inside this
+# already-mounted router so parallel build chats do not need to edit the central app.py router list.
+router.include_router(production_readiness_router)
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
 router.include_router(game_aura_commands_router)
