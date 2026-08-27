@@ -14,7 +14,12 @@ PLATFORM_DESCRIPTOR = "Music, Video, Image, Voice, Creator Intelligence, Commerc
 AI_PRODUCER_NAME = "Aura"
 AI_SYSTEM_NAME = "Aura AI"
 COMPANY_NAME = "Elevate Souls Productions"
-BRAND_LOGO_PATH = "/static/elevate-souls-command-center-logo.svg"
+
+# The supplied purple/gold artwork is the canonical full brand visual across the site.
+# The scalable SVG remains available as a compact icon/fallback, but is not the master artwork.
+BRAND_LOGO_PATH = "/brand/elevate-souls-productions-content-creation-command-center.webp"
+BRAND_ICON_PATH = "/static/elevate-souls-command-center-logo.svg"
+BRAND_ARTWORK_FILENAME = "elevate-souls-productions-content-creation-command-center.webp"
 
 # Historical public names remain valid only as compatibility aliases. They must not be
 # presented as the current product identity in new UI or documentation.
