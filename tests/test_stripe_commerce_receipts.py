@@ -4,6 +4,7 @@ import sqlite3
 
 import pytest
 from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.credit_wallet import CreditWalletStore
@@ -85,21 +86,28 @@ def test_verified_credit_receipt_is_amount_bearing_and_idempotent(monkeypatch, t
         assert con.execute("SELECT COUNT(*) FROM commerce_receipts").fetchone()[0] == 1
 
 
-def test_receipt_overlay_owns_effective_webhook_route_before_base_handlers():
-    # Starlette dispatches matching routes in registration order. OpenAPI generation is not a
-    # dispatch oracle for duplicate method/path registrations: later operations can overwrite the
-    # documented operation metadata even though the first matching runtime route still executes.
+def test_receipt_overlay_owns_effective_webhook_route_before_base_handlers(monkeypatch):
+    # Prove actual ASGI dispatch rather than relying on OpenAPI or internal route flattening.
+    # The commerce overlay must receive the request first and then delegate to the hardened Stripe
+    # processor. A non-credit event avoids finance mutation while still exercising that routing.
     from aura_music_studio.creative_version_autopromotion import router as overlay_router
+
+    calls: list[str] = []
+
+    async def fake_hardened(request):
+        calls.append("hardened_delegate")
+        return {"source": "commerce_overlay"}
+
+    monkeypatch.setattr(commerce_overlay, "hardened_stripe_webhook", fake_hardened)
 
     effective_app = FastAPI()
     effective_app.include_router(overlay_router)
-    webhook_routes = [
-        route
-        for route in effective_app.router.routes
-        if getattr(route, "path", None) == "/billing/stripe/webhook"
-        and "POST" in (getattr(route, "methods", set()) or set())
-    ]
+    client = TestClient(effective_app)
+    response = client.post(
+        "/billing/stripe/webhook",
+        json={"id": "evt_route_probe", "type": "customer.updated", "data": {"object": {}}},
+    )
 
-    assert len(webhook_routes) >= 2
-    assert webhook_routes[0].endpoint is commerce_overlay.stripe_webhook_with_commerce_receipt
-    assert webhook_routes[0].name == "stripe_webhook_with_commerce_receipt"
+    assert response.status_code == 200
+    assert response.json() == {"source": "commerce_overlay"}
+    assert calls == ["hardened_delegate"]
