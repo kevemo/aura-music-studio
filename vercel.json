@@ -14,7 +14,8 @@
       "feature/pro-editor-workspace": false,
       "feature/pro-editor-compositor": false,
       "feature/owner-finance-dashboard": false,
-      "feature/owner-finance-dashboard-v2": false
+      "feature/owner-finance-dashboard-v2": false,
+      "feature/global-compliance-i18n": false
     }
   },
   "functions": {
