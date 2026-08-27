@@ -5,9 +5,11 @@ from scripts.scan_committed_secrets import scan_file
 
 def test_secret_scanner_detects_private_keys_and_live_tokens(tmp_path: Path):
     candidate = tmp_path / "bad.py"
+    github_token = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcd"
+    private_key_header = "-----BEGIN " + "PRIVATE KEY-----"
     candidate.write_text(
-        "TOKEN = 'ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcd'\n"
-        "KEY = '''-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----'''\n",
+        f"TOKEN = '{github_token}'\n"
+        f"KEY = '''{private_key_header}\nabc\n-----END PRIVATE KEY-----'''\n",
         encoding="utf-8",
     )
     findings = scan_file(candidate)
