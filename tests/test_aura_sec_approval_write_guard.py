@@ -11,6 +11,14 @@ def _client():
     def portal_start():
         return {"ok": True}
 
+    @app.post("/aura-sec/passkeys/register/options")
+    def passkey_registration():
+        return {"ok": True}
+
+    @app.post("/aura-sec/approval/action-1/passkey/options")
+    def passkey_action():
+        return {"ok": True}
+
     @app.post("/api/aura-sec/member/actions/action-1/approval-challenge")
     def api_challenge():
         return {"ok": True}
@@ -37,6 +45,25 @@ def test_browser_approval_post_allows_exact_same_origin():
         headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"},
     )
     assert response.status_code == 200
+
+
+def test_passkey_registration_and_action_posts_use_same_origin_guard():
+    client = _client()
+    for path in (
+        "/aura-sec/passkeys/register/options",
+        "/aura-sec/approval/action-1/passkey/options",
+    ):
+        rejected = client.post(
+            path,
+            headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"},
+        )
+        assert rejected.status_code == 403
+        assert rejected.json()["command_issued"] is False
+        accepted = client.post(
+            path,
+            headers={"Origin": "http://testserver", "Sec-Fetch-Site": "same-origin"},
+        )
+        assert accepted.status_code == 200
 
 
 def test_default_port_serialization_is_normalized():
