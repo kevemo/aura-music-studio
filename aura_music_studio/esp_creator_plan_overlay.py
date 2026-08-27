@@ -13,6 +13,7 @@ from .esp_learning_library import router as learning_library_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_member_hub import router as member_hub_router
 from .esp_owner_focus import router as owner_focus_router
+from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 
@@ -22,6 +23,7 @@ router.include_router(learning_library_router)
 router.include_router(incentives_router)
 router.include_router(collaborations_router)
 router.include_router(commercial_growth_router)
+router.include_router(shop_automation_router)
 router.include_router(owner_focus_router)
 router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
@@ -48,6 +50,7 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn' href='/command-center/incentives'>Incentives</a>",
         "<a class='btn' href='/command-center/collaborations'>Collaborations</a>",
         "<a class='btn' href='/command-center/commerce'>Commerce &amp; Shop</a>",
+        "<a class='btn primary' href='/command-center/shop-automation'>Shop Automation</a>",
         "<a class='btn' href='/command-center/brands'>Brands</a>",
         "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>",
         "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>",
