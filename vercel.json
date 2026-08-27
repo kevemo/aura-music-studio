@@ -20,7 +20,8 @@
       "feature/privacy-rights-consent-v2": false,
       "feature/privacy-rights-consent-v3": false,
       "feature/privacy-case-management": false,
-      "feature/privacy-consent-controls": false
+      "feature/privacy-consent-controls": false,
+      "feature/safety-reports-appeals": false
     }
   },
   "functions": {
