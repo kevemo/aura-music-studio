@@ -11,6 +11,7 @@ from .professional_editor_render_api import router as professional_editor_render
 from .professional_editor_workspace import router as professional_editor_workspace_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
+from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
@@ -19,8 +20,10 @@ router = APIRouter(tags=["Creative Version Promotion"])
 # mounted by app.py before the underlying Creative handlers. Each subsystem keeps its own
 # membership/owner/role/security checks without another high-conflict application-entrypoint edit.
 router.include_router(commercial_entitlement_router)
-# The renewal preflight must precede the base Stripe webhook route so recurring access cannot
-# extend until exact paid amount, customer and subscription bindings are validated.
+# Commerce receipt persistence owns the public webhook path and delegates first to the hardened
+# renewal preflight, which in turn delegates to the base idempotent Stripe processor. This keeps
+# access/credit mutation authoritative while making verified top-up revenue auditable.
+router.include_router(stripe_commerce_receipts_router)
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
 router.include_router(owner_finance_router)
