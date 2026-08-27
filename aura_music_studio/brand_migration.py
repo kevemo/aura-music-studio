@@ -7,23 +7,23 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .branding import BRAND_LOGO_PATH, ENDORSEMENT, PRODUCT_FULL_NAME, TAGLINE
+from .command_center_visual_shell import apply_visual_shell
 
 
-# Compatibility bridge: historical public product copy still exists inside some legacy modules
-# and persisted templates. This middleware makes the Elevate Souls Productions Content Creation
-# Command Center authoritative at the HTTP boundary without renaming storage keys, cookies,
+# Compatibility bridge: historical public product copy still exists inside legacy modules and
+# persisted templates. Public responses are migrated without renaming storage keys, cookies,
 # package imports, project IDs or deployment configuration.
-#
-# Presentation-only replacements below are intentionally narrow. They do not rewrite user
-# project data or claim an external renderer/provider is live merely because an adapter exists.
-# Keep the historical data-pfh marker alongside the new canonical marker because older
-# presentation tests/integrations use it as a non-public DOM hook. Public branding remains the
-# Command Center; this is compatibility metadata only.
+# The historical data-pfh marker remains compatibility metadata only.
 _AURA_CORE_HOME_SECTION = f"""<section class='wrap section' data-pfh-aura-core='0.20' data-esp-command-center-aura-core='0.20'><div class='eyebrow'>Aura Core 0.20</div><h2>Your Content Creation Command Center has an operating intelligence layer.</h2><p class='sectionintro'>Aura is more than a prompt box: the connected software layer provides private realtime conversations, project-aware tools, hands-free voice workflows, versioned Artifacts, durable Tasks, Notifications, Aura Today, verified multi-step tool chains and encrypted read-only workspace connectors when a member authorizes them.</p><div class='grid'><article class='card' style='--accent:#a66bff'><div class='icon'>🧠</div><h3>Aura Intelligence</h3><p>Persistent private conversations with Fast, Auto, Deep and Creative modes, custom Aura Profiles, project context, research and verified tool workflows.</p><span class='status'>Aura Core 0.20 connected</span><div class='featurelist'><span>Realtime</span><span>Profiles</span><span>Research</span><span>Project-aware</span></div></article><article class='card' style='--accent:#5de7ff'><div class='icon'>🎙️</div><h3>Voice & Embodied Host</h3><p>Single-turn speech, optional hands-free Voice Conversation and an embodied Aura state/runtime. The browser 3D renderer is implemented; the final production rig remains a deployment asset.</p><span class='status'>Host runtime connected · final rig pending</span><div class='featurelist'><span>Listening</span><span>Thinking</span><span>Speaking</span><span>3D-ready runtime</span></div></article><article class='card' style='--accent:#77e0a6'><div class='icon'>☀️</div><h3>Aura Today & Tasks</h3><p>At-a-glance Calendar/Gmail metadata, pinned-project context, durable reminders, scheduled read-only briefings and private notifications across sessions.</p><span class='status'>Workspace intelligence connected</span><div class='featurelist'><span>Today</span><span>Tasks</span><span>Briefings</span><span>Notifications</span></div></article><article class='card' style='--accent:#f4c873'><div class='icon'>▤</div><h3>Artifacts & Safe Tools</h3><p>Versioned documents, lyrics, prompts, data and code with restore history. Code execution remains disabled on the web host and requires a separately configured isolated sandbox.</p><span class='status'>Artifacts connected · sandbox optional</span><div class='featurelist'><span>Versions</span><span>Restore</span><span>Data tools</span><span>Isolation</span></div></article></div><div class='heroactions'><a class='btn primary' href='/aura-intelligence'>Open Aura Intelligence</a><a class='btn' href='/creative-house'>Open Creative House</a></div><p class='tiny'>External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states. {PRODUCT_FULL_NAME} reports those states instead of presenting an unconfigured backend as complete.</p></section>"""
 _LANDING_MEMBERSHIP_MARKER = "<section class='wrap section'><div class='eyebrow'>Memberships</div>"
 
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    # Retired master/public product identities.
+    # Specific phrases precede their generic substrings to avoid mixed old/new names.
+    ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
+    ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
+    ("Powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
+    ("Powered by Aura AI Systems", ENDORSEMENT),
     ("Pulsar-Frequency House", PRODUCT_FULL_NAME),
     ("Pulsar-Frequency", "Content Creation Command Center"),
     ("4Infinity Creative Studios", PRODUCT_FULL_NAME),
@@ -32,28 +32,16 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("The Live Sound Studio", PRODUCT_FULL_NAME),
     ("Live Sound Studio", PRODUCT_FULL_NAME),
     ("4Infinity", "Content Creation Command Center"),
-    # Historical endorsements and taglines.
-    ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
-    ("Powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
-    ("Powered by Aura AI Systems", ENDORSEMENT),
-    ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
-    ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
     ("For Professional Creation Beyond The Cosmos", TAGLINE),
     ("Music Making for Professionals", TAGLINE),
-    # Retired visual asset route. Existing templates can keep their old path in source while the
-    # public response resolves to the new canonical mark.
     ("/static/pulsar-frequency-house-logo.svg", BRAND_LOGO_PATH),
-    # Current landing-page presentation upgrades. Keep these exact and narrow so legacy
-    # API payloads/project data are not semantically rewritten.
+    # Current landing-page compatibility/presentation upgrades.
     ("href='#suite'>Creative House", "href='/creative-house'>Creative House"),
     ("Workspace architecture staged", "Creative DNA + renderer bridge connected"),
     ("Aura routes connected", "Aura Core 0.20 connected"),
     ("Unified project layer in build", "Creative DNA project layer connected"),
     ("<h3>Base</h3>", "<h3>Basic</h3>"),
     ("href='/signup?plan=base'>Choose Base", "href='/signup?plan=base'>Choose Basic"),
-    # Historical templates hard-coded a dollar symbol around the numeric prices even though
-    # the authoritative Basic/Pro product prices are GBP. These two exact presentation
-    # replacements avoid changing arbitrary monetary content or JSON schema keys.
     ("$4.99", "£4.99"),
     ("$9.99", "£9.99"),
     (
@@ -113,12 +101,7 @@ def inject_song_dna_lock_entry(value: str, path: str) -> str:
 
 
 class BrandMigrationMiddleware(BaseHTTPMiddleware):
-    """Rewrite legacy public-facing product copy to the current Command Center brand.
-
-    Binary audio/video/image responses are passed through untouched. Response headers,
-    including repeated Set-Cookie headers, are preserved while Content-Length is
-    recalculated after text replacement.
-    """
+    """Rewrite legacy copy and apply the shared Command Center HTML visual shell."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -129,7 +112,6 @@ class BrandMigrationMiddleware(BaseHTTPMiddleware):
         body = b""
         async for chunk in response.body_iterator:
             body += chunk
-
         try:
             text = body.decode("utf-8")
         except UnicodeDecodeError:
@@ -143,13 +125,11 @@ class BrandMigrationMiddleware(BaseHTTPMiddleware):
         branded_text = rebrand_text(text)
         if request.method.upper() == "GET":
             branded_text = inject_song_dna_lock_entry(branded_text, request.url.path)
-        branded = branded_text.encode("utf-8")
-        migrated = Response(
-            content=branded,
-            status_code=response.status_code,
-            background=response.background,
-        )
+        if content_type.startswith("text/html"):
+            branded_text = apply_visual_shell(branded_text, request)
 
+        branded = branded_text.encode("utf-8")
+        migrated = Response(content=branded, status_code=response.status_code, background=response.background)
         raw_headers = [
             (key, value)
             for key, value in response.raw_headers

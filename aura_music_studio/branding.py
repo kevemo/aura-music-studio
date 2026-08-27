@@ -15,6 +15,10 @@ AI_PRODUCER_NAME = "Aura"
 AI_SYSTEM_NAME = "Aura AI"
 COMPANY_NAME = "Elevate Souls Productions"
 BRAND_LOGO_PATH = "/static/elevate-souls-command-center-logo.svg"
+BRAND_MARK_ROUTE = "/brand/command-center-mark.svg"
+BRAND_ART_ROUTE = "/brand/command-center-art.webp"
+BRAND_THEME_ROUTE = "/brand/theme.css"
+BRAND_FAVICON_ROUTE = "/favicon.webp"
 
 # Historical public names remain valid only as compatibility aliases. They must not be
 # presented as the current product identity in new UI or documentation.
