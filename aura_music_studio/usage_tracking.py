@@ -7,6 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from .accounts import AccountStore
+from . import credit_wallet_registration as _credit_wallet_registration  # noqa: F401
 
 _PROJECT_RE = re.compile(r"^/(?:creative/)?projects/([^/]+)")
 
