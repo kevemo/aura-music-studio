@@ -1,4 +1,4 @@
-name: Pulsar-Frequency House CI
+name: Elevate Souls Command Center CI
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: pulsar-frequency-house-ci-${{ github.workflow }}-${{ github.ref }}
+  group: elevate-souls-command-center-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
       - name: System audio and self-host tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1 miniupnpc
 
-      - name: Install Pulsar-Frequency core + dev
+      - name: Install Command Center core + dev
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
