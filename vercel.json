@@ -22,7 +22,8 @@
       "feature/privacy-case-management": false,
       "feature/privacy-consent-controls": false,
       "feature/safety-reports-appeals": false,
-      "feature/ip-rights-notice-review": false
+      "feature/ip-rights-notice-review": false,
+      "feature/creative-ip-firewall": false
     }
   },
   "functions": {
