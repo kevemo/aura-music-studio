@@ -175,12 +175,14 @@ def test_successful_rotation_invalidates_old_trust_and_requires_fresh_heartbeat(
     assert result["rotation_consumed"] is True
     assert result["old_credential_invalidated"] is True
     assert result["fresh_heartbeat_required"] is True
+    assert result["action_status"] == "verified"
     assert result["device"]["protection_state"] == "awaiting_heartbeat"
     assert result["device"]["last_seen_at"] is None
     assert result["verification"]["new_key_hardware_backed"] is True
+    assert security.get_action(user_id, approved["id"])["status"] == "verified"
     with _db(accounts) as con:
         device_row = con.execute(
-            "SELECT public_key_fingerprint,last_heartbeat_sequence,last_heartbeat_verifier_id FROM aura_sec_devices WHERE user_id=? AND id=?",
+            "SELECT public_key_fingerprint,last_heartbeat_sequence,last_heartbeat_verifier FROM aura_sec_devices WHERE user_id=? AND id=?",
             (user_id, device["id"]),
         ).fetchone()
         poll_row = con.execute("SELECT device_id FROM aura_sec_native_poll_state WHERE user_id=? AND device_id=?", (user_id, device["id"])).fetchone()
@@ -188,7 +190,7 @@ def test_successful_rotation_invalidates_old_trust_and_requires_fresh_heartbeat(
         rotation_row = con.execute("SELECT status,verifier_id,evidence_digest FROM aura_sec_device_key_rotations WHERE id=?", (challenge["challenge_id"],)).fetchone()
     assert device_row["public_key_fingerprint"] == NEW_FP
     assert device_row["last_heartbeat_sequence"] == 0
-    assert device_row["last_heartbeat_verifier_id"] is None
+    assert device_row["last_heartbeat_verifier"] is None
     assert poll_row is None
     assert heartbeat_row["status"] == "superseded"
     assert rotation_row["status"] == "consumed"
