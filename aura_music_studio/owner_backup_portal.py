@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 from html import escape
 from pathlib import Path
 
@@ -12,18 +11,16 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from .backup import StudioBackupManager
 from .backup_scheduler import BackupScheduler
 from .branding import PRODUCT_FULL_NAME
+from .owner_auth import owner_authorized
 from .studio_settings import StudioSettings
 
 router = APIRouter()
-ADMIN_COOKIE = "lss_admin_session"
 manager = StudioBackupManager()
 settings = StudioSettings()
 
 
 def _authorized(request: Request) -> bool:
-    configured = os.getenv("LSS_ADMIN_KEY") or ""
-    supplied = request.cookies.get(ADMIN_COOKIE) or ""
-    return bool(configured and supplied and secrets.compare_digest(configured, supplied))
+    return owner_authorized(request)
 
 
 def _root() -> Path:
