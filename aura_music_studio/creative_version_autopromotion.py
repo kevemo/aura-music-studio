@@ -5,6 +5,7 @@ from fastapi import APIRouter, Request
 from .commercial_entitlement_routes import router as commercial_entitlement_router
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
+from .deep_daw_automation_api import router as deep_daw_automation_router
 from .professional_editor_api import router as professional_editor_router
 from .professional_editor_render_api import router as professional_editor_render_router
 from .professional_editor_workspace import router as professional_editor_workspace_router
@@ -22,6 +23,7 @@ router.include_router(commercial_entitlement_router)
 # extend until exact paid amount, customer and subscription bindings are validated.
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
+router.include_router(deep_daw_automation_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_render_router)
 router.include_router(professional_editor_workspace_router)
