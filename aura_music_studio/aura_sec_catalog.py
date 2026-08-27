@@ -8,6 +8,7 @@ from decimal import Decimal
 
 _SKU_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,79}$")
 _CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
+_RESERVED_CREATIVE_PLAN_IDS = {"free", "basic", "pro", "ultimate", "ultimate-pro", "ultimate_pro"}
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,10 @@ class AuraSecSku:
     def validate(self) -> "AuraSecSku":
         if not _SKU_RE.fullmatch(self.id):
             raise ValueError("Aura Sec SKU id must be a stable lowercase identifier")
+        if self.id in _RESERVED_CREATIVE_PLAN_IDS:
+            raise ValueError("Creative membership plan ids cannot be used as Aura Sec security SKUs")
+        if not self.id.startswith("aura-sec-"):
+            raise ValueError("Aura Sec SKU ids must use the aura-sec- namespace")
         if not self.display_name.strip() or len(self.display_name) > 120:
             raise ValueError("Aura Sec SKU display name is invalid")
         if not _CURRENCY_RE.fullmatch(self.currency):
@@ -46,8 +51,8 @@ class AuraSecCatalog:
     """Owner-configured standalone Aura Sec commercial catalogue.
 
     No security SKU exists by default. Production config can provide `AURA_SEC_SKUS_JSON`
-    after commercial/legal/payment configuration has been approved. This intentionally
-    does not reuse creative plan ids or amounts.
+    after commercial/legal/payment configuration has been approved. Security SKU ids are
+    namespaced and cannot reuse creative membership plan ids or amounts.
     """
 
     def __init__(self, skus: tuple[AuraSecSku, ...] = ()):
