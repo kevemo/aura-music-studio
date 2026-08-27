@@ -21,6 +21,19 @@ def _store(request: Request):
 # Route functions resolve `_store` from their module globals at request time, so this adapter
 # installs the canonical ESP database boundary without duplicating the API or HTML surface.
 base._store = _store
+
+# Connection status is provider-verified state. The base module keeps the store method for a
+# future OAuth callback/worker adapter, but the member-facing router must not let a creator
+# self-assert that an external provider is connected.
+_PROVIDER_STATUS_PATH = "/command-center/api/shop-automation/connections/{connection_id}"
+base.router.routes[:] = [
+    route for route in base.router.routes
+    if not (
+        getattr(route, "path", None) == _PROVIDER_STATUS_PATH
+        and "PATCH" in (getattr(route, "methods", set()) or set())
+    )
+]
+
 router = base.router
 
 
