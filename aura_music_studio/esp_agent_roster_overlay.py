@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
+from .esp_agent_development_planner import router as development_planner_router
 from .esp_agent_health import router as agent_health_router
 from .esp_agent_operations import router as agent_operations_router
 from .esp_agent_roster import router as agent_roster_router
@@ -18,6 +19,7 @@ router.include_router(agent_roster_router)
 router.include_router(agent_health_router)
 router.include_router(agent_operations_router)
 router.include_router(backstage_evidence_router)
+router.include_router(development_planner_router)
 router.include_router(creator_discovery_router)
 router.include_router(brand_opportunities_router)
 
@@ -74,9 +76,14 @@ def level_up_with_agent_roster(request: Request):
     health_link = "<a class='btn primary' href='/command-center/agent/health'>Creator Health Queue</a>"
     operations_link = "<a class='btn primary' href='/command-center/agent/operations'>Creator Success Operations</a>"
     backstage_link = "<a class='btn primary' href='/command-center/agent/backstage-evidence'>Backstage Evidence &amp; Analysis</a>"
+    development_link = "<a class='btn primary' href='/command-center/agent/development'>Creator Development Planner</a>"
     discovery_link = "<a class='btn primary' href='/command-center/agent/discovery'>Creator Discovery</a>"
     if marker in html and "/command-center/agent/roster" not in html:
-        html = html.replace(marker, marker + roster_link + health_link + operations_link + backstage_link + discovery_link, 1)
+        html = html.replace(
+            marker,
+            marker + roster_link + health_link + operations_link + backstage_link + development_link + discovery_link,
+            1,
+        )
     else:
         if roster_link in html and "/command-center/agent/health" not in html:
             html = html.replace(roster_link, roster_link + health_link, 1)
@@ -84,7 +91,11 @@ def level_up_with_agent_roster(request: Request):
             html = html.replace(health_link, health_link + operations_link, 1)
         if operations_link in html and "/command-center/agent/backstage-evidence" not in html:
             html = html.replace(operations_link, operations_link + backstage_link, 1)
-        if backstage_link in html and "/command-center/agent/discovery" not in html:
+        if backstage_link in html and "/command-center/agent/development" not in html:
+            html = html.replace(backstage_link, backstage_link + development_link, 1)
+        if development_link in html and "/command-center/agent/discovery" not in html:
+            html = html.replace(development_link, development_link + discovery_link, 1)
+        elif backstage_link in html and "/command-center/agent/discovery" not in html:
             html = html.replace(backstage_link, backstage_link + discovery_link, 1)
         elif operations_link in html and "/command-center/agent/discovery" not in html:
             html = html.replace(operations_link, operations_link + discovery_link, 1)
