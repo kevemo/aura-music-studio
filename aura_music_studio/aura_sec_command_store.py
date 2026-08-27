@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+import re
+import secrets
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 from uuid import uuid4
 
 from .accounts import AccountStore
 from .aura_sec_protocol import ActionRisk, ActionType, CommandReceipt, SecurityCommand
 from .aura_sec_store import AuraSecStore
+
+_HEX_256 = re.compile(r"^[0-9a-f]{64}$")
+_ALLOWED_KEY_ALGORITHMS = {"ed25519", "p256", "rsa-pss-sha256"}
 
 
 def _now() -> datetime:
@@ -23,6 +31,38 @@ def _hash_nonce(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def canonical_command_receipt_payload(receipt: CommandReceipt) -> bytes:
+    """Return the deterministic bytes that a native device signs for a command receipt."""
+    payload = {
+        "command_id": receipt.command_id,
+        "detail": receipt.detail,
+        "device_id": receipt.device_id,
+        "evidence_digest": receipt.evidence_digest.lower() if receipt.evidence_digest else None,
+        "occurred_at": receipt.occurred_at.astimezone(timezone.utc).isoformat(),
+        "result_code": receipt.result_code,
+        "schema_version": receipt.schema_version,
+        "status": receipt.status,
+    }
+    return (
+        "AURA-SEC-COMMAND-RECEIPT-V1\n"
+        + json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        + "\n"
+    ).encode("utf-8")
+
+
+@dataclass(frozen=True)
+class VerifiedCommandReceiptSignature:
+    public_key_fingerprint: str
+    verifier_id: str
+    key_algorithm: str
+    evidence_digest: str
+
+
+CommandReceiptSignatureVerifier = Callable[
+    [str, bytes, bytes], VerifiedCommandReceiptSignature | None
+]
+
+
 _ALLOWED_RECEIPT_TRANSITIONS: dict[str, set[str]] = {
     "issued": {"received", "rejected", "failed"},
     "received": {"executed", "failed"},
@@ -34,11 +74,7 @@ _ALLOWED_RECEIPT_TRANSITIONS: dict[str, set[str]] = {
 
 
 class AuraSecCommandStore:
-    """Persist short-lived typed endpoint commands and verified receipts.
-
-    The command payload is constructed from the bounded `SecurityCommand` schema. There is
-    no storage or API field for arbitrary command lines, scripts, PowerShell or shell text.
-    """
+    """Persist short-lived typed endpoint commands and cryptographically verified receipts."""
 
     def __init__(self, accounts: AccountStore | None = None, security: AuraSecStore | None = None):
         self.accounts = accounts or AccountStore()
@@ -72,17 +108,101 @@ class AuraSecCommandStore:
                     last_receipt_at TEXT,
                     result_code TEXT,
                     evidence_digest TEXT,
+                    last_receipt_verifier TEXT,
+                    last_receipt_key_algorithm TEXT,
+                    last_receipt_signature_digest TEXT,
                     updated_at TEXT NOT NULL,
                     UNIQUE(device_id, nonce_hash),
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
                     FOREIGN KEY(device_id) REFERENCES aura_sec_devices(id) ON DELETE CASCADE,
                     FOREIGN KEY(action_id) REFERENCES aura_sec_actions(id) ON DELETE CASCADE
                 );
-
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_commands_device_status
                 ON aura_sec_commands(device_id, status, expires_at);
                 """
             )
+            existing = {
+                str(row["name"])
+                for row in con.execute("PRAGMA table_info(aura_sec_commands)").fetchall()
+            }
+            migrations = {
+                "last_receipt_verifier": "TEXT",
+                "last_receipt_key_algorithm": "TEXT",
+                "last_receipt_signature_digest": "TEXT",
+            }
+            for column, sql_type in migrations.items():
+                if column not in existing:
+                    con.execute(f"ALTER TABLE aura_sec_commands ADD COLUMN {column} {sql_type}")
+
+    def _device_identity(self, user_id: str, device_id: str) -> dict:
+        with self._connect() as con:
+            row = con.execute(
+                """SELECT public_key_fingerprint,status,revoked_at
+                   FROM aura_sec_devices WHERE user_id=? AND id=?""",
+                (user_id, device_id),
+            ).fetchone()
+        if not row:
+            raise ValueError("Aura Sec device not found")
+        item = dict(row)
+        fingerprint = str(item.get("public_key_fingerprint") or "").strip().lower()
+        if not _HEX_256.fullmatch(fingerprint):
+            raise PermissionError("Aura Sec enrolled device key fingerprint is invalid")
+        item["public_key_fingerprint"] = fingerprint
+        return item
+
+    @staticmethod
+    def _decode_signature(signature_b64: str) -> bytes:
+        try:
+            signature = base64.b64decode((signature_b64 or "").strip(), validate=True)
+        except Exception as exc:
+            raise PermissionError("Aura Sec command receipt signature is not valid base64") from exc
+        if not 32 <= len(signature) <= 1024:
+            raise PermissionError("Aura Sec command receipt signature length is invalid")
+        return signature
+
+    def _verify_receipt_signature(
+        self,
+        user_id: str,
+        receipt: CommandReceipt,
+        *,
+        signature_b64: str,
+        signature_verifier: CommandReceiptSignatureVerifier | None,
+    ) -> VerifiedCommandReceiptSignature:
+        if signature_verifier is None:
+            raise PermissionError("A trusted Aura Sec command receipt verifier is required")
+        device = self._device_identity(user_id, receipt.device_id)
+        if device.get("status") == "revoked" or device.get("revoked_at"):
+            raise PermissionError("Revoked Aura Sec device cannot submit command receipts")
+        payload = canonical_command_receipt_payload(receipt)
+        signature = self._decode_signature(signature_b64)
+        try:
+            proof = signature_verifier(device["public_key_fingerprint"], payload, signature)
+        except Exception as exc:
+            raise PermissionError("Aura Sec command receipt verification failed closed") from exc
+        if not isinstance(proof, VerifiedCommandReceiptSignature):
+            raise PermissionError("Aura Sec command receipt signature was not verified")
+
+        fingerprint = (proof.public_key_fingerprint or "").strip().lower()
+        verifier_id = (proof.verifier_id or "").strip()
+        key_algorithm = (proof.key_algorithm or "").strip().lower()
+        evidence_digest = (proof.evidence_digest or "").strip().lower()
+        if not secrets.compare_digest(fingerprint, device["public_key_fingerprint"]):
+            raise PermissionError("Aura Sec command receipt verifier returned the wrong device key")
+        if not verifier_id or len(verifier_id) > 160:
+            raise PermissionError("Trusted Aura Sec command receipt verifier identity is required")
+        if key_algorithm not in _ALLOWED_KEY_ALGORITHMS:
+            raise PermissionError("Unsupported Aura Sec command receipt key algorithm")
+        expected_digest = hashlib.sha256(payload).hexdigest()
+        if not _HEX_256.fullmatch(evidence_digest) or not secrets.compare_digest(
+            evidence_digest, expected_digest
+        ):
+            raise PermissionError("Aura Sec command receipt evidence digest does not match the signed payload")
+        return VerifiedCommandReceiptSignature(
+            public_key_fingerprint=fingerprint,
+            verifier_id=verifier_id,
+            key_algorithm=key_algorithm,
+            evidence_digest=evidence_digest,
+        )
 
     def issue_approved_action(
         self,
@@ -102,7 +222,6 @@ class AuraSecCommandStore:
             raise PermissionError("Cannot issue Aura Sec command to a revoked device")
         if not 30 <= int(ttl_seconds) <= 900:
             raise ValueError("Aura Sec command lifetime must be between 30 and 900 seconds")
-
         try:
             action_type = ActionType(action["action_type"])
             risk = ActionRisk(action["risk_class"])
@@ -126,7 +245,6 @@ class AuraSecCommandStore:
             approval_id=approval_id,
             parameters=parameters or {},
         )
-
         with self._connect() as con:
             try:
                 con.execute(
@@ -174,56 +292,91 @@ class AuraSecCommandStore:
         user_id: str,
         receipt: CommandReceipt,
         *,
-        signature_verified: bool,
+        signature_b64: str,
+        signature_verifier: CommandReceiptSignatureVerifier | None,
         now: datetime | None = None,
     ) -> dict:
-        if not signature_verified:
-            raise PermissionError("Unverified Aura Sec command receipt rejected")
         command = self.get(user_id, receipt.command_id)
         if command["device_id"] != receipt.device_id:
             raise PermissionError("Aura Sec receipt device does not match command target")
 
         current = (now or _now()).astimezone(timezone.utc)
+        occurred = receipt.occurred_at.astimezone(timezone.utc)
+        issued = datetime.fromisoformat(command["issued_at"]).astimezone(timezone.utc)
         expiry = datetime.fromisoformat(command["expires_at"]).astimezone(timezone.utc)
-        if current > expiry and receipt.status not in {"failed", "rejected"}:
+        if occurred < issued - timedelta(seconds=120):
+            raise PermissionError("Aura Sec command receipt predates command issuance")
+        if occurred > current + timedelta(seconds=120):
+            raise PermissionError("Aura Sec command receipt timestamp is too far in the future")
+        if (current > expiry or occurred > expiry) and receipt.status not in {"failed", "rejected"}:
             raise PermissionError("Expired Aura Sec command cannot report a new successful state")
 
         old_status = command["status"]
         if receipt.status not in _ALLOWED_RECEIPT_TRANSITIONS.get(old_status, set()):
             raise ValueError(f"Invalid Aura Sec command transition {old_status} -> {receipt.status}")
+        verification = self._verify_receipt_signature(
+            user_id,
+            receipt,
+            signature_b64=signature_b64,
+            signature_verifier=signature_verifier,
+        )
 
         with self._connect() as con:
-            con.execute(
+            updated = con.execute(
                 """UPDATE aura_sec_commands
-                   SET status=?,last_receipt_at=?,result_code=?,evidence_digest=?,updated_at=?
-                   WHERE user_id=? AND id=?""",
+                   SET status=?,last_receipt_at=?,result_code=?,evidence_digest=?,
+                       last_receipt_verifier=?,last_receipt_key_algorithm=?,
+                       last_receipt_signature_digest=?,updated_at=?
+                   WHERE user_id=? AND id=? AND status=?""",
                 (
                     receipt.status,
-                    receipt.occurred_at.isoformat(),
+                    occurred.isoformat(),
                     receipt.result_code,
                     receipt.evidence_digest.lower() if receipt.evidence_digest else None,
+                    verification.verifier_id,
+                    verification.key_algorithm,
+                    verification.evidence_digest,
                     _iso(current),
                     user_id,
                     receipt.command_id,
+                    old_status,
                 ),
             )
+            if updated.rowcount != 1:
+                raise PermissionError("Aura Sec command receipt state changed concurrently")
+
             if receipt.status == "executed":
-                con.execute(
-                    "UPDATE aura_sec_actions SET status='executed',executed_at=? WHERE user_id=? AND id=?",
-                    (receipt.occurred_at.isoformat(), user_id, command["action_id"]),
+                action_update = con.execute(
+                    """UPDATE aura_sec_actions SET status='executed',executed_at=?
+                       WHERE user_id=? AND id=? AND status='approved'""",
+                    (occurred.isoformat(), user_id, command["action_id"]),
                 )
+                if action_update.rowcount != 1:
+                    raise PermissionError("Aura Sec action state changed before execution receipt")
             elif receipt.status == "verified":
-                con.execute(
-                    """UPDATE aura_sec_actions
-                       SET status='verified',verified_at=? WHERE user_id=? AND id=?""",
-                    (receipt.occurred_at.isoformat(), user_id, command["action_id"]),
+                action_update = con.execute(
+                    """UPDATE aura_sec_actions SET status='verified',verified_at=?
+                       WHERE user_id=? AND id=? AND status='executed'""",
+                    (occurred.isoformat(), user_id, command["action_id"]),
                 )
+                if action_update.rowcount != 1:
+                    raise PermissionError("Aura Sec action state changed before verification receipt")
             elif receipt.status in {"failed", "rejected"}:
-                con.execute(
-                    "UPDATE aura_sec_actions SET status=? WHERE user_id=? AND id=?",
-                    (receipt.status, user_id, command["action_id"]),
+                allowed_action_states = ("approved", "executed")
+                placeholders = ",".join("?" for _ in allowed_action_states)
+                action_update = con.execute(
+                    f"""UPDATE aura_sec_actions SET status=?
+                        WHERE user_id=? AND id=? AND status IN ({placeholders})""",
+                    (receipt.status, user_id, command["action_id"], *allowed_action_states),
                 )
+                if action_update.rowcount != 1:
+                    raise PermissionError("Aura Sec action state changed before failure receipt")
         return self.get(user_id, receipt.command_id)
 
 
-__all__ = ["AuraSecCommandStore"]
+__all__ = [
+    "AuraSecCommandStore",
+    "CommandReceiptSignatureVerifier",
+    "VerifiedCommandReceiptSignature",
+    "canonical_command_receipt_payload",
+]
