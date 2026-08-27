@@ -92,6 +92,7 @@ from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.professional_editor_api import router as professional_editor_router
+from aura_music_studio.professional_editor_ui import ProfessionalEditorUIMiddleware, router as professional_editor_ui_router
 from aura_music_studio.pulsar_player import PulsarPlayerMiddleware, router as pulsar_player_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
@@ -168,9 +169,9 @@ app.include_router(discovery_router)
 app.include_router(compute_node_router)
 app.include_router(credit_wallet_router)
 app.include_router(creative_version_autopromotion_router)
-# Nested compatibility routers are not flattened by the current overlay adapter. Mount the
-# professional editor directly so its authenticated/gated endpoints are present in production.
+# Keep the professional editor API at one explicit registration point in the production app.
 app.include_router(professional_editor_router)
+app.include_router(professional_editor_ui_router)
 # Commercial entitlement routes intentionally precede their underlying Creative handlers.
 # This makes image/poster daily limits and media-download gates authoritative server-side.
 app.include_router(commercial_entitlement_router)
@@ -238,6 +239,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
+app.add_middleware(ProfessionalEditorUIMiddleware)
 app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
