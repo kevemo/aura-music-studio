@@ -18,22 +18,27 @@ from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
 from .professional_editor_lifecycle_api import router as professional_editor_lifecycle_router
 from .professional_editor_render_api import router as professional_editor_render_router
+from .safety_appeal_review import router as owner_safety_appeal_router
+from .safety_reports import member_router as member_safety_router, owner_router as owner_safety_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Creative Version Promotion"])
-# Commercial entitlements, compliance/privacy workflows, Stripe billing, protected owner finance
-# reporting and the professional non-destructive editor are nested here deliberately because this
-# overlay router is already mounted by app.py before the underlying Creative handlers. Each
-# subsystem keeps its own membership/owner/role/security checks without another high-conflict
+# Commercial entitlements, compliance/privacy/safety workflows, Stripe billing, protected owner
+# finance reporting and the professional non-destructive editor are nested here deliberately
+# because this overlay router is already mounted by app.py before the underlying Creative handlers.
+# Each subsystem keeps its own membership/owner/role/security checks without another high-conflict
 # application-entrypoint edit.
 router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
 router.include_router(privacy_rights_router)
 router.include_router(privacy_case_management_router)
 router.include_router(privacy_consent_router)
+router.include_router(member_safety_router)
+router.include_router(owner_safety_router)
+router.include_router(owner_safety_appeal_router)
 # Commerce receipt persistence owns the public webhook path and delegates first to the hardened
 # renewal preflight, which in turn delegates to the base idempotent Stripe processor. Starlette
 # dispatches the first matching route, so this ordering keeps access/credit mutation authoritative
@@ -55,13 +60,7 @@ _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
 @router.get("/daw/mixer-ui.js", include_in_schema=False)
 def daw_mixer_ui_with_deep_automation():
-    """Serve the existing mixer UI plus the Pro deep-automation extension.
-
-    This route lives on the early integration overlay, so it wins before the legacy mixer-script
-    route without changing app.py or the mature DAW page. The base mixer remains the source of
-    truth for channel controls; the appended extension targets only the validated v2 automation
-    API and stays Pro-gated by the page's existing FLAGS.automation entitlement.
-    """
+    """Serve the existing mixer UI plus the Pro deep-automation extension."""
     base = base_daw_mixer_ui()
     text = base.body.decode("utf-8")
     enhanced = enhance_daw_mixer_javascript(text)
