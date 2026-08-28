@@ -23,15 +23,7 @@ def test_lifecycle_script_targets_reversible_graph_routes_and_escapes_names():
 
 def test_lifecycle_script_exposes_reversible_professional_blend_modes():
     script = PRO_EDITOR_LIFECYCLE_JS
-
-    assert "id=\"proBlendMode\"" in script
-    assert "id=\"proApplyBlend\"" in script
-    assert "changes:{blend_mode}" in script
-    assert "/items/${encodeURIComponent(item.id)}" in script
-    assert "Professional blend modes require Pro." in script
-    assert "stored in the reversible edit graph" in script
-    assert "Blend mode saved" in script
-    for mode in (
+    modes = (
         "normal",
         "multiply",
         "screen",
@@ -41,8 +33,21 @@ def test_lifecycle_script_exposes_reversible_professional_blend_modes():
         "darken",
         "lighten",
         "difference",
-    ):
-        assert f'value="{mode}"' in script
+    )
+
+    assert "id=\"proBlendMode\"" in script
+    assert "id=\"proApplyBlend\"" in script
+    assert "changes:{blend_mode}" in script
+    assert "/items/${encodeURIComponent(item.id)}" in script
+    assert "Professional blend modes require Pro." in script
+    assert "stored in the reversible edit graph" in script
+    assert "Blend mode saved" in script
+    # The browser builds the option markup from one canonical blend-mode contract shared by
+    # layer and track controls. Verify that contract rather than depending on generated HTML
+    # being handwritten as literal <option> tags in the JavaScript source.
+    expected_contract = "const blendModes=['" + "','".join(modes) + "'];"
+    assert expected_contract in script
+    assert 'const blendOptions=blendModes.map(value=>`<option value="${value}">' in script
 
 
 def test_lifecycle_router_exposes_secondary_script_once():

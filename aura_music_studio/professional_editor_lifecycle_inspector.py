@@ -11,14 +11,18 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
   const root=byId('proInspectorControls');
   if(!root||byId('proLifecycleStacks'))return;
   const isPro=document.body.dataset.pro==='true';
+  const blendModes=['normal','multiply','screen','overlay','soft_light','hard_light','darken','lighten','difference'];
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  const clamp01=value=>Math.max(0,Math.min(1,Number.isFinite(Number(value))?Number(value):1));
+  const blendOptions=blendModes.map(value=>`<option value="${value}">${value.replaceAll('_',' ').replace(/\b\w/g,ch=>ch.toUpperCase())}</option>`).join('');
   const style=document.createElement('style');
-  style.textContent=`.prostack{border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;background:#ffffff04}.prostack h4{margin:0 0 6px;font-size:.7rem;color:var(--gold)}.prostackrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #ffffff0a}.prostackrow:last-child{border-bottom:0}.prostackname{min-width:0;font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.prostackactions{display:flex;gap:4px;flex-wrap:wrap}.prostackactions .btn{padding:4px 6px;font-size:.6rem}.prostackmeta{display:block;color:var(--muted);font-size:.58rem;margin-top:2px}.prostackempty{font-size:.63rem;color:var(--muted)}.proediting{color:var(--cyan);font-size:.61rem;margin-top:5px}.problendrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:end}`;
+  style.textContent=`.prostack{border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0;background:#ffffff04}.prostack h4{margin:0 0 6px;font-size:.7rem;color:var(--gold)}.prostackrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid #ffffff0a}.prostackrow:last-child{border-bottom:0}.prostackname{min-width:0;font-size:.66rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.prostackactions{display:flex;gap:4px;flex-wrap:wrap}.prostackactions .btn{padding:4px 6px;font-size:.6rem}.prostackmeta{display:block;color:var(--muted);font-size:.58rem;margin-top:2px}.prostackempty{font-size:.63rem;color:var(--muted)}.proediting{color:var(--cyan);font-size:.61rem;margin-top:5px}.problendrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:end}.protrackgrid{display:grid;grid-template-columns:minmax(0,.7fr) minmax(0,1fr) auto;gap:6px;align-items:end}.protrackgrid input[type=number]{min-width:0}@media(max-width:760px){.protrackgrid{grid-template-columns:1fr 1fr}.protrackgrid .btn{grid-column:1/-1}}`;
   document.head.append(style);
   const lifecycle=document.createElement('div');
   lifecycle.id='proLifecycleStacks';
   lifecycle.innerHTML=`
-    <div class="prostack"><h4>Blend mode</h4><div class="problendrow"><label class="label">Layer blend<select class="field" id="proBlendMode" ${isPro?'':'disabled'}><option value="normal">Normal</option><option value="multiply">Multiply</option><option value="screen">Screen</option><option value="overlay">Overlay</option><option value="soft_light">Soft Light</option><option value="hard_light">Hard Light</option><option value="darken">Darken</option><option value="lighten">Lighten</option><option value="difference">Difference</option></select></label><button class="btn" id="proApplyBlend" ${isPro?'':'disabled'}>Apply</button></div><div id="proBlendMeta" class="prostackmeta">Select an item to inspect its blend mode.</div></div>
+    <div class="prostack"><h4>Layer blend mode</h4><div class="problendrow"><label class="label">Layer blend<select class="field" id="proBlendMode" ${isPro?'':'disabled'}>${blendOptions}</select></label><button class="btn" id="proApplyBlend" ${isPro?'':'disabled'}>Apply</button></div><div id="proBlendMeta" class="prostackmeta">Select an item to inspect its blend mode.</div></div>
+    <div class="prostack"><h4>Track composite</h4><div class="protrackgrid"><label class="label">Track opacity<input class="field" id="proTrackOpacity" type="number" min="0" max="1" step="0.01" value="1" ${isPro?'':'disabled'}></label><label class="label">Track blend<select class="field" id="proTrackBlend" ${isPro?'':'disabled'}>${blendOptions}</select></label><button class="btn" id="proApplyTrackComposite" ${isPro?'':'disabled'}>Apply track</button></div><div id="proTrackMeta" class="prostackmeta">Select an item to inspect its containing track.</div></div>
     <div class="prostack"><h4>Current masks</h4><div id="proLifecycleMasks"></div><div id="proMaskEditing" class="proediting"></div></div>
     <div class="prostack"><h4>Current effects</h4><div id="proLifecycleEffects"></div><div id="proEffectEditing" class="proediting"></div></div>
     <div class="prostack"><h4>Current keyframe lanes</h4><div id="proLifecycleKeys"></div></div>`;
@@ -27,6 +31,12 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
   let editingMask=null;
   let editingEffect=null;
   function current(){try{return selected||null}catch(_){return null}}
+  function currentTrack(item=current()){
+    try{
+      if(!item)return null;
+      return (branch().tracks||[]).find(track=>(track.item_ids||[]).includes(item.id))||null;
+    }catch(_){return null}
+  }
   function parseJSON(id,fallback){const raw=byId(id)?.value?.trim?.()||'';if(!raw)return fallback;return JSON.parse(raw)}
   function resetMaskEdit(){editingMask=null;const button=byId('proAddMask');if(button)button.textContent='Add mask';const note=byId('proMaskEditing');if(note)note.textContent=''}
   function resetEffectEdit(){editingEffect=null;const button=byId('proAddEffect');if(button)button.textContent='Add effect';const note=byId('proEffectEditing');if(note)note.textContent=''}
@@ -43,10 +53,16 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
   }
   function sync(){
     const item=current();
+    const track=currentTrack(item);
     const blend=byId('proBlendMode'),blendMeta=byId('proBlendMeta');
+    const trackOpacity=byId('proTrackOpacity'),trackBlend=byId('proTrackBlend'),trackApply=byId('proApplyTrackComposite'),trackMeta=byId('proTrackMeta');
     if(!item){
       if(blend)blend.value='normal';
       if(blendMeta)blendMeta.textContent='Select an item to inspect its blend mode.';
+      if(trackOpacity){trackOpacity.value='1';trackOpacity.disabled=true}
+      if(trackBlend){trackBlend.value='normal';trackBlend.disabled=true}
+      if(trackApply)trackApply.disabled=true;
+      if(trackMeta)trackMeta.textContent='Select an item to inspect its containing track.';
       byId('proLifecycleMasks').innerHTML='<div class="prostackempty">Select an item to inspect its masks.</div>';
       byId('proLifecycleEffects').innerHTML='<div class="prostackempty">Select an item to inspect its effects.</div>';
       byId('proLifecycleKeys').innerHTML='<div class="prostackempty">Select an item to inspect its keyframes.</div>';
@@ -54,6 +70,17 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
     }
     if(blend)blend.value=item.blend_mode||'normal';
     if(blendMeta)blendMeta.textContent=`Current: ${String(item.blend_mode||'normal').replaceAll('_',' ')} · stored in the reversible edit graph.`;
+    if(track){
+      if(trackOpacity){trackOpacity.value=String(clamp01(track.opacity??1));trackOpacity.disabled=!isPro}
+      if(trackBlend){trackBlend.value=track.blend_mode||'normal';trackBlend.disabled=!isPro}
+      if(trackApply)trackApply.disabled=!isPro;
+      if(trackMeta)trackMeta.textContent=`${track.name||'Track'} · opacity ${clamp01(track.opacity??1).toFixed(2)} · ${String(track.blend_mode||'normal').replaceAll('_',' ')} · grouped before sequence compositing.`;
+    }else{
+      if(trackOpacity){trackOpacity.value='1';trackOpacity.disabled=true}
+      if(trackBlend){trackBlend.value='normal';trackBlend.disabled=true}
+      if(trackApply)trackApply.disabled=true;
+      if(trackMeta)trackMeta.textContent='The selected item is not attached to a track.';
+    }
     if(editingMask&&editingMask.itemId!==item.id)resetMaskEdit();
     if(editingEffect&&editingEffect.itemId!==item.id)resetEffectEdit();
     const masks=item.masks||[];
@@ -73,6 +100,21 @@ PRO_EDITOR_LIFECYCLE_JS = r"""
       const blend_mode=byId('proBlendMode').value;
       const response=await api(endpoint(`/items/${encodeURIComponent(item.id)}`),{method:'PATCH',body:JSON.stringify({changes:{blend_mode}})});
       refreshGraph(response,item.id);status(`Blend mode saved · ${blend_mode.replaceAll('_',' ')}. Undo can restore it.`);
+    }catch(error){status(error.message,true)}
+  };
+
+  const trackApply=byId('proApplyTrackComposite');
+  if(trackApply)trackApply.onclick=async()=>{
+    const item=current();if(!item)return status('Select an item first.',true);
+    const track=currentTrack(item);if(!track)return status('The selected item is not attached to a track.',true);
+    if(!isPro)return status('Professional track compositing requires Pro.',true);
+    try{
+      const opacity=clamp01(byId('proTrackOpacity').value);
+      byId('proTrackOpacity').value=String(opacity);
+      const blend_mode=byId('proTrackBlend').value;
+      if(!blendModes.includes(blend_mode))throw new Error('Unsupported track blend mode.');
+      const response=await api(endpoint(`/tracks/${encodeURIComponent(track.id)}`),{method:'PATCH',body:JSON.stringify({changes:{opacity,blend_mode}})});
+      refreshGraph(response,item.id);status(`Track composite saved · opacity ${opacity.toFixed(2)} · ${blend_mode.replaceAll('_',' ')}. Undo can restore it.`);
     }catch(error){status(error.message,true)}
   };
 
