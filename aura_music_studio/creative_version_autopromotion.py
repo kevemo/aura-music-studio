@@ -40,6 +40,7 @@ from .video_music_sync import router as video_music_sync_router
 from .video_scene_local_revision import router as video_scene_local_revision_router
 from .video_scene_render import router as video_scene_render_router
 from .video_scene_timeline import router as video_scene_timeline_router
+from .video_sync_entitlement_routes import router as video_sync_entitlement_router
 from .video_visual_continuity import router as video_visual_continuity_router
 
 router = APIRouter(tags=["Creative Version Promotion"])
@@ -68,6 +69,9 @@ router.include_router(video_scene_timeline_router)
 router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
 router.include_router(video_scene_local_revision_router)
+# These duplicate-path wrappers must precede the base video/music sync routers. Starlette resolves
+# the first matching route, so Free/Basic direct API calls are denied before project lookup or I/O.
+router.include_router(video_sync_entitlement_router)
 router.include_router(video_music_sync_router)
 router.include_router(video_audio_analysis_router)
 router.include_router(music_video_storyboard_router)
