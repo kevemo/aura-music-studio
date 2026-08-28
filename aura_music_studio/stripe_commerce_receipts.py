@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from .commerce_receipts import CommerceReceiptStore
 from .payment_reversals import PaymentReversalStore
-from .stripe_billing import accounts, credit_packs
+from .stripe_billing import accounts, credit_packs, evidence_store
 from .stripe_billing_hardening import hardened_stripe_webhook
 
 router = APIRouter(tags=["Stripe Commerce Receipts"])
@@ -125,6 +125,13 @@ async def stripe_webhook_with_commerce_receipt(request: Request):
         response["finance_receipt_recorded"] = True
         response["finance_receipt_id"] = receipt["id"]
     if refund is not None:
+        # The base entitlement processor intentionally treats refund lifecycle events as unused.
+        # Once this verified finance layer has durably recorded the refund/reconciliation evidence,
+        # update the same signed-event ledger so owner event-health reporting reflects that the
+        # event was handled by the application rather than remaining misleadingly "ignored".
+        event_id = str(event.get("id") or "").strip()
+        if event_id:
+            evidence_store.finish_event(event_id, "processed")
         response["finance_refund_evidence"] = True
         response["finance_refund_linked"] = bool(refund.get("linked"))
         response["finance_refund_status"] = refund.get("status")
