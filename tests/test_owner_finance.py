@@ -10,6 +10,7 @@ from aura_music_studio.accounts import AccountStore
 from aura_music_studio.commerce_receipts import CommerceReceiptStore
 from aura_music_studio.owner_auth import OWNER_COOKIE, OwnerSessionStore
 from aura_music_studio.owner_finance import OwnerFinanceService, router
+from aura_music_studio.payment_reversals import PaymentReversalStore
 from aura_music_studio.subscriptions import SubscriptionLedger
 
 
@@ -47,6 +48,9 @@ def test_finance_snapshot_uses_verified_ledgers_and_never_claims_bank_settlement
     assert snapshot["subscription_receipts_minor"]["GBP"] == 1498
     assert snapshot["credit_topup_receipts_minor"]["GBP"] == 299
     assert snapshot["verified_gross_receipts_minor"]["GBP"] == 1797
+    assert snapshot["verified_refunds_minor"] == {}
+    assert snapshot["verified_net_receipts_minor"]["GBP"] == 1797
+    assert snapshot["unmatched_verified_refund_count"] == 0
     assert snapshot["active_paid_subscriptions"] == {"base": 1, "pro": 1}
     assert snapshot["estimated_monthly_recurring_access_value_minor_gbp"] == 1498
     assert snapshot["purchased_credits"] == 500
@@ -59,6 +63,51 @@ def test_finance_snapshot_uses_verified_ledgers_and_never_claims_bank_settlement
     assert "sort code" not in serialized
     assert "account number" not in serialized
     assert "creator" in snapshot["role_boundary"].lower()
+
+
+def test_finance_net_subtracts_only_linked_successful_refunds(tmp_path):
+    db = tmp_path / "finance.sqlite3"
+    accounts = AccountStore(db)
+    user = _approved_user(accounts, "refund@example.com", "base")
+    CommerceReceiptStore(db).record(
+        provider="stripe",
+        kind="credit_topup",
+        reference="stripe:checkout:cs_refund",
+        user_id=user["id"],
+        pack_id="credits-500",
+        amount_minor=299,
+        currency="GBP",
+        units=500,
+    )
+    reversals = PaymentReversalStore(db)
+    reversals.bind_credit_payment(
+        payment_intent_id="pi_refund",
+        receipt_reference="stripe:checkout:cs_refund",
+        user_id=user["id"],
+        amount_minor=299,
+        currency="GBP",
+    )
+    reversals.record_stripe_refund(
+        {
+            "id": "evt_refund",
+            "type": "refund.created",
+            "data": {
+                "object": {
+                    "id": "re_refund",
+                    "payment_intent": "pi_refund",
+                    "amount": 100,
+                    "currency": "gbp",
+                    "status": "succeeded",
+                }
+            },
+        }
+    )
+
+    snapshot = OwnerFinanceService(db).snapshot()
+    assert snapshot["verified_gross_receipts_minor"] == {"GBP": 299}
+    assert snapshot["verified_refunds_minor"] == {"GBP": 100}
+    assert snapshot["verified_net_receipts_minor"] == {"GBP": 199}
+    assert len(snapshot["recent_verified_refunds"]) == 1
 
 
 def test_commerce_receipt_is_idempotent_and_rejects_reference_reuse(tmp_path):
@@ -116,6 +165,7 @@ def test_owner_finance_json_requires_owner_session(monkeypatch, tmp_path):
     allowed = client.get("/owner/finance.json", cookies={OWNER_COOKIE: token})
     assert allowed.status_code == 200
     assert allowed.json()["basis"] == "verified_local_payment_evidence"
+    assert "verified_net_receipts_minor" in allowed.json()
     assert allowed.headers["cache-control"] == "private, no-store"
 
 
