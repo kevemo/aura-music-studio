@@ -35,6 +35,7 @@ from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
+from .video_audio_analysis_ingestion import router as video_audio_analysis_router
 from .video_music_sync import router as video_music_sync_router
 from .video_scene_local_revision import router as video_scene_local_revision_router
 from .video_scene_render import router as video_scene_render_router
@@ -68,6 +69,7 @@ router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
 router.include_router(video_scene_local_revision_router)
 router.include_router(video_music_sync_router)
+router.include_router(video_audio_analysis_router)
 router.include_router(music_video_storyboard_router)
 # Pro visual entitlement routes intentionally precede the generic editor/render routes so direct
 # API calls cannot bypass the same blend/group gates shown in the professional browser inspector.
