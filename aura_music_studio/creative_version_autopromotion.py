@@ -35,6 +35,7 @@ from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
 from .video_scene_render import router as video_scene_render_router
 from .video_scene_timeline import router as video_scene_timeline_router
+from .video_visual_continuity import router as video_visual_continuity_router
 
 router = APIRouter(tags=["Creative Version Promotion"])
 router.include_router(commercial_entitlement_router)
@@ -59,6 +60,7 @@ router.include_router(stripe_billing_router)
 router.include_router(owner_finance_router)
 router.include_router(deep_daw_automation_router)
 router.include_router(video_scene_timeline_router)
+router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_lifecycle_router)
