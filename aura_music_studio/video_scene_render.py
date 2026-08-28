@@ -12,6 +12,7 @@ from .creative_project_api import (
 )
 from .creative_render_resource_governance import store as creative_render_resource_store
 from .video_scene_timeline import _project_dir, _read, _write
+from .video_visual_continuity import continuity_prompt, resolve_profiles
 
 router = APIRouter(prefix="/creative", tags=["video-scene-render"])
 
@@ -38,20 +39,47 @@ def _scene(project_name: str, scene_id: str) -> tuple[dict, dict]:
     return data, scene
 
 
-def _scene_prompt(scene: dict, override: str | None) -> str:
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for raw in values:
+        value = str(raw).strip()
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _scene_prompt(scene: dict, override: str | None, profiles: list[dict]) -> str:
     if override:
-        return override
-    parts = [str(scene.get("description") or "").strip()]
-    if scene.get("shot_type"):
-        parts.append(f"Shot type: {scene['shot_type']}")
-    if scene.get("camera_direction"):
-        parts.append(f"Camera direction: {scene['camera_direction']}")
-    if scene.get("continuity_notes"):
-        parts.append(f"Continuity: {scene['continuity_notes']}")
-    prompt = "\n".join(part for part in parts if part).strip()
+        base = override.strip()
+    else:
+        parts = [str(scene.get("description") or "").strip()]
+        if scene.get("shot_type"):
+            parts.append(f"Shot type: {scene['shot_type']}")
+        if scene.get("camera_direction"):
+            parts.append(f"Camera direction: {scene['camera_direction']}")
+        if scene.get("continuity_notes"):
+            parts.append(f"Continuity: {scene['continuity_notes']}")
+        base = "\n".join(part for part in parts if part).strip()
+    locks = continuity_prompt(profiles).strip()
+    prompt = "\n\n".join(part for part in (base, locks) if part).strip()
     if not prompt:
-        raise HTTPException(400, "Scene requires a description, camera direction, continuity note, or prompt_override before rendering")
+        raise HTTPException(400, "Scene requires creative direction or a continuity profile before rendering")
     return prompt
+
+
+def _continuity_inputs(scene: dict, profiles: list[dict]) -> tuple[list[str], list[str]]:
+    references = list(scene.get("reference_ids") or [])
+    preserved = list(scene.get("preserve_element_ids") or [])
+    for profile in profiles:
+        references.extend(profile.get("reference_ids") or [])
+        preserved.extend(profile.get("preserve_element_ids") or [])
+    references = _dedupe(references)
+    preserved = _dedupe(preserved)
+    if len(references) > 100 or len(preserved) > 100:
+        raise HTTPException(400, "Combined scene continuity references exceed the renderer safety limit")
+    return references, preserved
 
 
 @router.post("/projects/{project_name}/video-timeline/scenes/{scene_id}/render")
@@ -68,20 +96,25 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
     if previous_output and not any(item.id == previous_output for item in manifest.elements):
         raise HTTPException(409, "Scene output linkage no longer exists in the creative manifest")
 
+    profile_ids = list(scene.get("continuity_profile_ids") or [])
+    profiles = resolve_profiles(project_name, profile_ids)
+    reference_ids, preserve_element_ids = _continuity_inputs(scene, profiles)
+
     directive = CreativeDirective(
-        instruction=_scene_prompt(scene, body.prompt_override),
+        instruction=_scene_prompt(scene, body.prompt_override, profiles),
         input_mode="text",
         operation="replace" if previous_output else "create",
         target_kind="video",
         target_element_ids=[previous_output] if previous_output else [],
-        reference_ids=list(scene.get("reference_ids") or []),
-        preserve_element_ids=list(scene.get("preserve_element_ids") or []),
+        reference_ids=reference_ids,
+        preserve_element_ids=preserve_element_ids,
         metadata={
             "video_scene": {
                 "scene_id": scene_id,
                 "start_seconds": scene.get("start_seconds"),
                 "end_seconds": scene.get("end_seconds"),
                 "previous_output_element_id": previous_output or None,
+                "continuity_profile_ids": profile_ids,
             }
         },
     )
@@ -118,6 +151,7 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         "prompt_id": response["submission"]["prompt_id"],
         "provider": response["submission"]["provider"],
         "workflow_name": response["submission"]["workflow_name"],
+        "continuity_profile_ids": profile_ids,
     }
     _write(project_name, data)
     return {
@@ -125,6 +159,7 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         "directive": response["directive"],
         "submission": response["submission"],
         "resource_governance": reservation,
+        "continuity_profiles_applied": profile_ids,
         "grants_esp_role_or_permission": False,
         "alters_billing_or_membership": False,
     }
