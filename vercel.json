@@ -32,7 +32,8 @@
       "feature/compliance-jurisdiction-applicability": false,
       "feature/creative-render-resource-governance": false,
       "feature/aura-realtime-voice-broker": false,
-      "feature/aura-realtime-webrtc-ui": false
+      "feature/aura-realtime-webrtc-ui": false,
+      "feature/aura-realtime-thread-sync": false
     }
   },
   "functions": {
