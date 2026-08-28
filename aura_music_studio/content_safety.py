@@ -5,6 +5,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .creative_ip_policy import enforce_creation_ip_policy, public_ip_policy_summary
+
 POLICY_VERSION = "esp-professional-creation-v1"
 
 # These are intent patterns, not an exhaustive moderation system. Production deployments
@@ -80,6 +82,10 @@ def enforce_creation_policy(*texts: str | None, context: str = "creation") -> No
                 f"{context} blocked by {decision.policy_version}: {decision.reason} "
                 "Reframe the idea so it does not target or demean people, provoke harassment/drama, promote hate, or glorify violent conflict."
             )
+    # Copyright/IP/likeness preflight is part of the same creation boundary so all callers
+    # already using enforce_creation_policy inherit the protection before a renderer/model
+    # can be reached. This does not assert legal clearance or perform similarity matching.
+    enforce_creation_ip_policy(*texts, context=context)
 
 
 def public_policy_summary() -> dict:
@@ -94,9 +100,10 @@ def public_policy_summary() -> dict:
             "Respectful professional creator conduct",
             "Platform/community rules remain an additional requirement",
         ],
+        "creative_ip": public_ip_policy_summary(),
         "owner_blocked_terms_enabled": bool(_owner_blocked_terms()),
         "note": (
-            "This local policy is a baseline, not a substitute for official platform moderation or evolving platform rules. "
+            "This local policy is a baseline, not a substitute for official platform moderation, copyright review or evolving platform rules. "
             "Owner-managed blocked terms can extend it without source-code changes."
         ),
     }
