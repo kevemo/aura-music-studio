@@ -133,3 +133,58 @@ def test_receipt_overlay_owns_effective_webhook_route_before_base_handlers(monke
     assert response.status_code == 200
     assert response.json() == {"source": "commerce_overlay"}
     assert calls == ["hardened_delegate"]
+
+
+def test_verified_refund_marks_shared_stripe_event_as_processed_after_finance_evidence(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    async def fake_hardened(request):
+        return {
+            "received": True,
+            "event_id": "evt_refund_processed",
+            "processed": False,
+            "ignored": True,
+            "reason": "event_type_not_used",
+        }
+
+    class FakeReversalStore:
+        def __init__(self, db_path):
+            self.db_path = db_path
+
+        def record_stripe_refund(self, event):
+            assert event["id"] == "evt_refund_processed"
+            return {"id": "adjustment_1", "linked": True, "status": "succeeded"}
+
+    monkeypatch.setattr(commerce_overlay, "hardened_stripe_webhook", fake_hardened)
+    monkeypatch.setattr(commerce_overlay, "PaymentReversalStore", FakeReversalStore)
+    monkeypatch.setattr(
+        commerce_overlay.evidence_store,
+        "finish_event",
+        lambda event_id, status, error=None: calls.append((event_id, status)),
+    )
+
+    effective_app = FastAPI()
+    effective_app.include_router(commerce_overlay.router)
+    client = TestClient(effective_app)
+    response = client.post(
+        "/billing/stripe/webhook",
+        json={
+            "id": "evt_refund_processed",
+            "type": "refund.updated",
+            "data": {
+                "object": {
+                    "id": "re_processed",
+                    "payment_intent": "pi_processed",
+                    "amount": 100,
+                    "currency": "gbp",
+                    "status": "succeeded",
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["finance_refund_evidence"] is True
+    assert response.json()["finance_refund_linked"] is True
+    assert response.json()["finance_adjustment_id"] == "adjustment_1"
+    assert calls == [("evt_refund_processed", "processed")]
