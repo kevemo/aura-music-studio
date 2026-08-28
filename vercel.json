@@ -42,7 +42,8 @@
       "feature/music-video-storyboard-refresh": false,
       "feature/video-audio-analysis-ingestion": false,
       "feature/video-sync-pro-entitlement-gate": false,
-      "feature/stripe-creation-coins-storefront-refresh": false
+      "feature/stripe-creation-coins-storefront-refresh": false,
+      "feature/creation-coin-image-overage": false
     }
   },
   "functions": {
