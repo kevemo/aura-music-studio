@@ -16,8 +16,10 @@ from .stripe_billing import (
     stripe_webhook as base_stripe_webhook,
     verify_webhook_signature,
 )
+from .stripe_creation_coins import router as stripe_creation_coins_router
 
 router = APIRouter(tags=["Stripe Billing Security"])
+router.include_router(stripe_creation_coins_router)
 
 
 def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[str, Any]) -> None:
@@ -60,7 +62,7 @@ def hardened_stripe_success(session_id: str = ""):
         "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Payment received</title></head><body style='font-family:system-ui;background:#08050d;color:#fff;padding:36px'>"
         "<main style='max-width:680px;margin:auto'><h1>Thank you.</h1>"
-        "<p>Stripe has returned you to the Command Center. Access or credits are confirmed only after the signed Stripe webhook is verified.</p>"
+        "<p>Stripe has returned you to the Command Center. Access or Creation Coins are confirmed only after the signed Stripe webhook is verified.</p>"
         f"<p style='opacity:.7'>Checkout session: {safe}</p><p><a href='/dashboard' style='color:#f4c873'>Return to dashboard</a></p></main></body></html>"
     )
 
