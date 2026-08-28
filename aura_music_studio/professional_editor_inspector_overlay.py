@@ -4,10 +4,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
 from .professional_editor_lifecycle_inspector import router as professional_editor_lifecycle_inspector_router
+from .professional_editor_track_group_ui import router as professional_editor_track_group_router
 from .professional_editor_workspace import professional_editor_workspace as base_workspace
 
 router = APIRouter(tags=["Professional Editor Inspector"])
 router.include_router(professional_editor_lifecycle_inspector_router)
+router.include_router(professional_editor_track_group_router)
 
 PRO_EDITOR_CONTROLS_JS = r"""
 (()=>{
@@ -86,6 +88,7 @@ def enhanced_professional_editor_workspace(request: Request, project: str = ""):
     markers = (
         "<script src='/creative/editor-pro-controls.js'></script>",
         "<script src='/creative/editor-pro-lifecycle-controls.js'></script>",
+        "<script src='/creative/editor-track-group-controls.js'></script>",
     )
     for marker in markers:
         if marker not in text:
