@@ -29,7 +29,8 @@
       "feature/creative-ip-firewall": false,
       "feature/creative-ip-firewall-v2": false,
       "feature/export-provenance-review-refresh": false,
-      "feature/compliance-jurisdiction-applicability": false
+      "feature/compliance-jurisdiction-applicability": false,
+      "feature/creative-render-resource-governance": false
     }
   },
   "functions": {
