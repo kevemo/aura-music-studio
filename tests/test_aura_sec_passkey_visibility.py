@@ -120,11 +120,12 @@ def test_browser_guard_status_is_truthful_and_authenticated(monkeypatch):
 def test_browser_guard_manual_inspection_redacts_credentials_and_does_not_claim_cloud_reputation(monkeypatch):
     _authenticated(monkeypatch)
     client = _client()
+    submitted_credential = "LEAKME-DO-NOT-SHOW-9981"
     response = client.post(
         "/aura-sec/browser-guard",
         cookies={"lss_session": "test-session-token"},
         data={
-            "url": "https://user:secret@example.com/account/login?utm_source=test",
+            "url": f"https://user:{submitted_credential}@example.com/account/login?utm_source=test",
             "source": "email",
         },
     )
@@ -133,7 +134,8 @@ def test_browser_guard_manual_inspection_redacts_credentials_and_does_not_claim_
     assert "Local inspection result" in text
     assert "https://example.com/account/login?utm_source=test" in text
     assert "https://example.com/account/login" in text
-    assert "secret" not in text
+    assert submitted_credential not in text
+    assert f"user:{submitted_credential}@" not in text
     assert "Embedded Credentials" in text
     assert "No cloud reputation claim is being made" in text
     assert "server did not visit the submitted destination" in text
