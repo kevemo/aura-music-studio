@@ -19,6 +19,7 @@ from .esp_live_compliance import member_router as esp_live_compliance_router, ow
 from .export_provenance import member_router as export_provenance_router, owner_router as owner_export_provenance_router
 from .global_compliance import router as global_compliance_router
 from .ip_rights import member_router as member_ip_rights_router, owner_router as owner_ip_rights_router
+from .music_video_storyboard import router as music_video_storyboard_router
 from .owner_finance import router as owner_finance_router
 from .privacy_case_management import router as privacy_case_management_router
 from .privacy_consent import router as privacy_consent_router
@@ -66,6 +67,7 @@ router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
 router.include_router(video_scene_local_revision_router)
 router.include_router(video_music_sync_router)
+router.include_router(music_video_storyboard_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_lifecycle_router)
 router.include_router(professional_editor_render_router)
