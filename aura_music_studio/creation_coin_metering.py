@@ -9,6 +9,7 @@ from .credit_wallet import CreditWalletStore
 
 _COST_ENV = "LSS_CREATION_COIN_COSTS_JSON"
 _IMAGE_POSTER_OVERAGE = "image_poster_overage"
+_FREE_VIDEO_RENDER = "free_video_render"
 _MAX_COST = 1_000_000
 
 
@@ -23,8 +24,9 @@ def creation_coin_costs() -> dict[str, int]:
     """Return owner-configured Creation Coin costs without inventing commercial values.
 
     The deployment supplies a small JSON object, for example
-    ``{"image_poster_overage": 25}``. Unknown keys are ignored so future products can be
-    introduced independently, while malformed or unsafe configured values fail closed.
+    ``{"image_poster_overage": 25, "free_video_render": 100}``. Unknown keys are ignored so
+    future products can be introduced independently, while malformed or unsafe configured
+    values fail closed.
     """
 
     raw = (os.getenv(_COST_ENV) or "").strip()
@@ -38,7 +40,7 @@ def creation_coin_costs() -> dict[str, int]:
         raise ValueError(f"{_COST_ENV} must be a JSON object")
 
     result: dict[str, int] = {}
-    for key in (_IMAGE_POSTER_OVERAGE,):
+    for key in (_IMAGE_POSTER_OVERAGE, _FREE_VIDEO_RENDER):
         if key not in payload:
             continue
         value = payload[key]
@@ -54,12 +56,8 @@ def creation_coin_costs() -> dict[str, int]:
     return result
 
 
-def image_poster_overage_cost() -> int | None:
-    return creation_coin_costs().get(_IMAGE_POSTER_OVERAGE)
-
-
-def image_poster_overage_quote(user_id: str) -> dict:
-    cost = image_poster_overage_cost()
+def _quote(user_id: str, product_key: str) -> dict:
+    cost = creation_coin_costs().get(product_key)
     wallet = CreditWalletStore()
     balance = wallet.balance(user_id)
     return {
@@ -73,33 +71,33 @@ def image_poster_overage_quote(user_id: str) -> dict:
     }
 
 
-def charge_image_poster_overage(
+def _charge(
     user_id: str,
     *,
+    product_key: str,
     project_id: str,
     directive_id: str,
+    reason: str,
 ) -> CreationCoinCharge:
-    cost = image_poster_overage_cost()
+    cost = creation_coin_costs().get(product_key)
     if cost is None:
-        raise RuntimeError("Creation Coin image/poster overage is not configured")
+        raise RuntimeError(f"Creation Coin {product_key.replace('_', ' ')} is not configured")
 
     attempt_id = uuid4().hex
-    charge_reference = f"creation:image_poster:{user_id}:{project_id}:{directive_id}:{attempt_id}"
-    refund_reference = f"creation:image_poster_refund:{user_id}:{project_id}:{directive_id}:{attempt_id}"
+    charge_reference = f"creation:{product_key}:{user_id}:{project_id}:{directive_id}:{attempt_id}"
+    refund_reference = f"creation:{product_key}_refund:{user_id}:{project_id}:{directive_id}:{attempt_id}"
     wallet = CreditWalletStore()
     transaction = wallet.spend(
         user_id,
         cost,
-        reason="Image/poster generation beyond the included daily allowance",
+        reason=reason,
         reference=charge_reference,
         actor="creative_metering",
     )
     return CreationCoinCharge(cost=cost, transaction=transaction, refund_reference=refund_reference)
 
 
-def refund_image_poster_overage(user_id: str, charge: CreationCoinCharge, *, reason: str) -> dict:
-    """Return a pre-submission charge when the renderer does not accept the job."""
-
+def _refund(user_id: str, charge: CreationCoinCharge, *, reason: str) -> dict:
     return CreditWalletStore().adjust(
         user_id,
         charge.cost,
@@ -110,11 +108,73 @@ def refund_image_poster_overage(user_id: str, charge: CreationCoinCharge, *, rea
     )
 
 
+def image_poster_overage_cost() -> int | None:
+    return creation_coin_costs().get(_IMAGE_POSTER_OVERAGE)
+
+
+def image_poster_overage_quote(user_id: str) -> dict:
+    return _quote(user_id, _IMAGE_POSTER_OVERAGE)
+
+
+def charge_image_poster_overage(
+    user_id: str,
+    *,
+    project_id: str,
+    directive_id: str,
+) -> CreationCoinCharge:
+    return _charge(
+        user_id,
+        product_key=_IMAGE_POSTER_OVERAGE,
+        project_id=project_id,
+        directive_id=directive_id,
+        reason="Image/poster generation beyond the included daily allowance",
+    )
+
+
+def refund_image_poster_overage(user_id: str, charge: CreationCoinCharge, *, reason: str) -> dict:
+    """Return a pre-submission image charge when the renderer does not accept the job."""
+
+    return _refund(user_id, charge, reason=reason)
+
+
+def free_video_render_cost() -> int | None:
+    return creation_coin_costs().get(_FREE_VIDEO_RENDER)
+
+
+def free_video_render_quote(user_id: str) -> dict:
+    return _quote(user_id, _FREE_VIDEO_RENDER)
+
+
+def charge_free_video_render(
+    user_id: str,
+    *,
+    project_id: str,
+    directive_id: str,
+) -> CreationCoinCharge:
+    return _charge(
+        user_id,
+        product_key=_FREE_VIDEO_RENDER,
+        project_id=project_id,
+        directive_id=directive_id,
+        reason="Free-tier video render purchased with Creation Coins",
+    )
+
+
+def refund_free_video_render(user_id: str, charge: CreationCoinCharge, *, reason: str) -> dict:
+    """Return a prepaid Free video charge when the renderer does not accept the job."""
+
+    return _refund(user_id, charge, reason=reason)
+
+
 __all__ = [
     "CreationCoinCharge",
+    "charge_free_video_render",
     "charge_image_poster_overage",
     "creation_coin_costs",
+    "free_video_render_cost",
+    "free_video_render_quote",
     "image_poster_overage_cost",
     "image_poster_overage_quote",
+    "refund_free_video_render",
     "refund_image_poster_overage",
 ]
