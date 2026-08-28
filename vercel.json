@@ -26,7 +26,8 @@
       "feature/esp-live-compliance-training": false,
       "feature/esp-live-compliance-training-v2": false,
       "feature/creative-ip-firewall": false,
-      "feature/creative-ip-firewall-v2": false
+      "feature/creative-ip-firewall-v2": false,
+      "feature/export-provenance-review": false
     }
   },
   "functions": {
