@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from . import aura_agent_tools as tools
+from .game_forge_export_portal import router as game_export_portal_router
 from .game_forge_state_machine import (
     CreateStateMachineEntityRequest,
     ReplaceStateMachineRequest,
@@ -12,6 +13,7 @@ from .game_forge_state_machine import (
     create_state_machine_entity,
     delete_state_machine_entity,
     replace_state_machine,
+    router as game_state_machine_router,
     state_machine_state,
 )
 from .game_forge_state_machine_runtime import build_state_machine_playtest
@@ -118,6 +120,9 @@ def install_aura_state_machine_tools() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+    # game_state_machine_router is already an owned Game Forge composition boundary. Mounting the
+    # export surface here keeps both API and creator UI reachable without editing shared app.py.
+    game_state_machine_router.include_router(game_export_portal_router)
     _install_specs()
     original_execute = tools.AuraToolRegistry.execute
 
