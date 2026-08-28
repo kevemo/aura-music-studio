@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from .commercial_entitlement_routes import router as commercial_entitlement_router
+from .compliance_applicability import owner_router as owner_compliance_applicability_router, router as compliance_applicability_router
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
 from .daw_mixer_ui import daw_mixer_ui as base_daw_mixer_ui
@@ -31,6 +32,8 @@ from .tenant_storage import project_path
 router = APIRouter(tags=["Creative Version Promotion"])
 router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
+router.include_router(compliance_applicability_router)
+router.include_router(owner_compliance_applicability_router)
 router.include_router(esp_live_compliance_router)
 router.include_router(owner_esp_live_compliance_router)
 router.include_router(privacy_rights_router)
