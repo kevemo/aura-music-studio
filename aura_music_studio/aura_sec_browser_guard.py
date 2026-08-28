@@ -46,7 +46,9 @@ _LURE_TOKENS = {
     "wallet",
 }
 _MAX_URL_LENGTH = 8192
-_MAX_REPUTATION_LIFETIME = timedelta(days=7)
+# URL reputation is intentionally short-lived. This matches Aura Sec's threat-intelligence
+# freshness policy for URL_REPUTATION rather than allowing old verdicts to remain authoritative.
+_MAX_REPUTATION_LIFETIME = timedelta(hours=1)
 
 
 def _utc(value: datetime) -> datetime:
