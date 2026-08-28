@@ -7,10 +7,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 
 from .commerce_receipts import CommerceReceiptStore
+from .payment_reversals import PaymentReversalStore
 from .stripe_billing import accounts, credit_packs
 from .stripe_billing_hardening import hardened_stripe_webhook
 
 router = APIRouter(tags=["Stripe Commerce Receipts"])
+reversals = PaymentReversalStore(accounts.db_path)
 
 
 def _credit_transaction_exists(user_id: str, reference: str, credits: int) -> bool:
@@ -31,12 +33,25 @@ def _credit_transaction_exists(user_id: str, reference: str, credits: int) -> bo
     return row is not None
 
 
+def _provider_id(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()[:180]
+    if isinstance(value, dict):
+        return str(value.get("id") or "").strip()[:180]
+    return ""
+
+
+def _event_object(event: dict[str, Any]) -> dict[str, Any]:
+    data = event.get("data")
+    obj = (data or {}).get("object") if isinstance(data, dict) else None
+    return obj if isinstance(obj, dict) else {}
+
+
 def _record_verified_credit_receipt(event: dict[str, Any]) -> dict[str, Any] | None:
     if str(event.get("type") or "") != "checkout.session.completed":
         return None
-    data = event.get("data")
-    obj = (data or {}).get("object") if isinstance(data, dict) else None
-    if not isinstance(obj, dict):
+    obj = _event_object(event)
+    if not obj:
         return None
     metadata = obj.get("metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -74,14 +89,33 @@ def _record_verified_credit_receipt(event: dict[str, Any]) -> dict[str, Any] | N
     )
 
 
+def _bind_credit_refund_correlation(
+    event: dict[str, Any], receipt: dict[str, Any]
+) -> dict[str, Any] | None:
+    obj = _event_object(event)
+    payment_intent_id = _provider_id(obj.get("payment_intent"))
+    if not payment_intent_id:
+        # The paid receipt remains valid finance evidence even if Stripe did not include a
+        # PaymentIntent reference in this delivery. Any later refund will remain explicitly
+        # unmatched rather than being guessed onto a member purchase.
+        return None
+    return reversals.bind_credit_payment(
+        payment_intent_id=payment_intent_id,
+        receipt_reference=str(receipt["reference"]),
+        user_id=str(receipt["user_id"]),
+        amount_minor=int(receipt["amount_minor"]),
+        currency=str(receipt["currency"]),
+    )
+
+
 @router.post("/billing/stripe/webhook")
 async def stripe_webhook_with_commerce_receipt(request: Request):
-    """Delegate to the hardened Stripe processor before persisting finance evidence.
+    """Persist finance evidence only after the hardened Stripe processor succeeds.
 
     The delegated route performs signature verification, replay/idempotency controls and all
-    subscription/credit entitlement validation. Only after it succeeds do we persist the
-    amount-bearing top-up receipt. Duplicate Stripe deliveries are useful recovery attempts:
-    the local credit transaction proves the original event completed without granting twice.
+    subscription/Creation Coin entitlement validation. Duplicate Stripe deliveries remain useful
+    repair attempts: already-created local purchases and append-only finance rows make the outer
+    receipt/refund layer idempotent without granting Coins twice.
     """
     result = await hardened_stripe_webhook(request)
     if not isinstance(result, dict):
@@ -98,17 +132,32 @@ async def stripe_webhook_with_commerce_receipt(request: Request):
 
     try:
         receipt = _record_verified_credit_receipt(event)
-    except ValueError as exc:
-        # A retry can repair receipt persistence because the underlying credit transaction
-        # and Stripe event evidence are both idempotent. Fail visibly rather than understate
-        # owner finance totals.
-        raise HTTPException(500, f"Verified payment processed but finance receipt failed: {exc}") from exc
+        correlation = _bind_credit_refund_correlation(event, receipt) if receipt is not None else None
+        refund = reversals.record_stripe_refund(event)
+    except (TypeError, ValueError) as exc:
+        # Stripe can retry a signed event. Existing entitlement, receipt and adjustment ledgers are
+        # all idempotent, so failing visibly is safer than silently understating owner finance.
+        raise HTTPException(500, f"Verified payment processed but finance evidence failed: {exc}") from exc
 
+    output = dict(result)
     if receipt is not None:
-        result = dict(result)
-        result["finance_receipt_recorded"] = True
-        result["finance_receipt_id"] = receipt["id"]
-    return result
+        output["finance_receipt_recorded"] = True
+        output["finance_receipt_id"] = receipt["id"]
+        output["refund_correlation_recorded"] = correlation is not None
+    if refund is not None:
+        output["finance_refund_recorded"] = True
+        output["finance_refund_linked"] = bool(refund.get("linked"))
+        output["finance_reconciliation_required"] = not bool(refund.get("linked"))
+        output["wallet_effect"] = "none"
+        output["subscription_effect"] = "none"
+        output["esp_role_effect"] = "none"
+    return output
 
 
-__all__ = ["_record_verified_credit_receipt", "router", "stripe_webhook_with_commerce_receipt"]
+__all__ = [
+    "_bind_credit_refund_correlation",
+    "_record_verified_credit_receipt",
+    "reversals",
+    "router",
+    "stripe_webhook_with_commerce_receipt",
+]
