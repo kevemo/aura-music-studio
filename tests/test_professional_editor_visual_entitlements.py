@@ -40,10 +40,15 @@ def _visual_state(*, advanced: bool) -> dict:
         "item_ids": ["item_1"],
         "blend_mode": "multiply" if advanced else "normal",
         "opacity": 0.6 if advanced else 1.0,
+        "effects": ([{"id": "fx_track", "type": "invert"}] if advanced else []),
+        "keyframes": ({"opacity": [{"time": 0.0, "value": 1.0}]} if advanced else {}),
     }
     item = {
         "id": "item_1",
         "blend_mode": "screen" if advanced else "normal",
+        "effects": ([{"id": "fx_item", "type": "contrast"}] if advanced else []),
+        "masks": ([{"id": "mask_1", "shape": "rectangle"}] if advanced else []),
+        "keyframes": ({"transform.x": [{"time": 0.0, "value": 0.0}]} if advanced else {}),
     }
     return {
         "branch": {
@@ -56,14 +61,21 @@ def _visual_state(*, advanced: bool) -> dict:
 
 def test_visual_patch_classification_keeps_basic_item_opacity_basic():
     assert ent.item_patch_requires_pro({"blend_mode": "multiply"}) is True
+    assert ent.item_patch_requires_pro({"effects": [{"type": "invert"}]}) is True
+    assert ent.item_patch_requires_pro({"masks": [{"shape": "rectangle"}]}) is True
+    assert ent.item_patch_requires_pro({"keyframes": {"opacity": [{"time": 0.0, "value": 1.0}]}}) is True
     assert ent.item_patch_requires_pro({"blend_mode": "normal"}) is False
+    assert ent.item_patch_requires_pro({"effects": [], "masks": [], "keyframes": {}}) is False
     assert ent.item_patch_requires_pro({"opacity": 0.25}) is False
+
     assert ent.track_patch_requires_pro({"blend_mode": "screen"}) is True
     assert ent.track_patch_requires_pro({"opacity": 0.25}) is True
-    assert ent.track_patch_requires_pro({"blend_mode": "normal", "opacity": 1.0}) is False
+    assert ent.track_patch_requires_pro({"effects": [{"type": "blur"}]}) is True
+    assert ent.track_patch_requires_pro({"keyframes": {"opacity": [{"time": 0.0, "value": 1.0}]}}) is True
+    assert ent.track_patch_requires_pro({"blend_mode": "normal", "opacity": 1.0, "effects": [], "keyframes": {}}) is False
 
 
-def test_basic_item_blend_is_blocked_before_base_mutation(monkeypatch):
+def test_basic_advanced_item_patch_is_blocked_before_base_mutation(monkeypatch):
     called = False
 
     def base(*args, **kwargs):
@@ -72,31 +84,67 @@ def test_basic_item_blend_is_blocked_before_base_mutation(monkeypatch):
         return {"unexpected": True}
 
     monkeypatch.setattr(ent, "base_patch_item", base)
-    with pytest.raises(HTTPException) as exc:
-        ent.patch_item_with_visual_entitlements(
-            "Demo",
-            "item_1",
-            PatchRequest(changes={"blend_mode": "multiply"}),
-            _request(pro=False),
-        )
-    assert exc.value.status_code == 403
-    assert "require Pro" in str(exc.value.detail)
+    for changes in (
+        {"blend_mode": "multiply"},
+        {"effects": [{"type": "invert"}]},
+        {"masks": [{"shape": "rectangle"}]},
+        {"keyframes": {"opacity": [{"time": 0.0, "value": 1.0}]}},
+    ):
+        with pytest.raises(HTTPException) as exc:
+            ent.patch_item_with_visual_entitlements(
+                "Demo",
+                "item_1",
+                PatchRequest(changes=changes),
+                _request(pro=False),
+            )
+        assert exc.value.status_code == 403
+        assert "require Pro" in str(exc.value.detail)
     assert called is False
 
 
-def test_basic_can_reset_visual_state_to_defaults(monkeypatch):
+def test_basic_advanced_track_patch_is_blocked_before_base_mutation(monkeypatch):
+    called = False
+
+    def base(*args, **kwargs):
+        nonlocal called
+        called = True
+        return {"unexpected": True}
+
+    monkeypatch.setattr(ent, "base_patch_track", base)
+    for changes in (
+        {"blend_mode": "overlay"},
+        {"opacity": 0.5},
+        {"effects": [{"type": "blur"}]},
+        {"keyframes": {"opacity": [{"time": 0.0, "value": 1.0}]}},
+    ):
+        with pytest.raises(HTTPException) as exc:
+            ent.patch_track_with_visual_entitlements(
+                "Demo",
+                "track_1",
+                PatchRequest(changes=changes),
+                _request(pro=False),
+            )
+        assert exc.value.status_code == 403
+        assert "require Pro" in str(exc.value.detail)
+    assert called is False
+
+
+def test_basic_can_reset_advanced_visual_state_to_defaults(monkeypatch):
     item_calls = []
     track_calls = []
     monkeypatch.setattr(ent, "base_patch_item", lambda *args: item_calls.append(args) or {"ok": True})
     monkeypatch.setattr(ent, "base_patch_track", lambda *args: track_calls.append(args) or {"ok": True})
 
     ent.patch_item_with_visual_entitlements(
-        "Demo", "item_1", PatchRequest(changes={"blend_mode": "normal"}), _request(pro=False)
+        "Demo",
+        "item_1",
+        PatchRequest(changes={"blend_mode": "normal", "effects": [], "masks": [], "keyframes": {}}),
+        _request(pro=False),
     )
     ent.patch_track_with_visual_entitlements(
         "Demo",
         "track_1",
-        PatchRequest(changes={"blend_mode": "normal", "opacity": 1.0}),
+        PatchRequest(changes={"blend_mode": "normal", "opacity": 1.0, "effects": [], "keyframes": {}}),
         _request(pro=False),
     )
 
@@ -104,19 +152,22 @@ def test_basic_can_reset_visual_state_to_defaults(monkeypatch):
     assert len(track_calls) == 1
 
 
-def test_pro_can_write_item_and_track_group_state(monkeypatch):
+def test_pro_can_write_item_and_track_advanced_state(monkeypatch):
     item_calls = []
     track_calls = []
     monkeypatch.setattr(ent, "base_patch_item", lambda *args: item_calls.append(args) or {"ok": True})
     monkeypatch.setattr(ent, "base_patch_track", lambda *args: track_calls.append(args) or {"ok": True})
 
     ent.patch_item_with_visual_entitlements(
-        "Demo", "item_1", PatchRequest(changes={"blend_mode": "overlay"}), _request(pro=True)
+        "Demo",
+        "item_1",
+        PatchRequest(changes={"blend_mode": "overlay", "effects": [{"type": "invert"}]}),
+        _request(pro=True),
     )
     ent.patch_track_with_visual_entitlements(
         "Demo",
         "track_1",
-        PatchRequest(changes={"blend_mode": "multiply", "opacity": 0.55}),
+        PatchRequest(changes={"blend_mode": "multiply", "opacity": 0.55, "effects": [{"type": "blur"}]}),
         _request(pro=True),
     )
 
@@ -129,7 +180,12 @@ def test_preserved_professional_visual_state_is_detected_for_downgrade_safety():
     assert ent.professional_visual_state_reasons(_visual_state(advanced=True), "seq_1") == [
         "track:track_1:blend_mode",
         "track:track_1:opacity",
+        "track:track_1:effects",
+        "track:track_1:keyframes",
         "item:item_1:blend_mode",
+        "item:item_1:effects",
+        "item:item_1:masks",
+        "item:item_1:keyframes",
     ]
 
 

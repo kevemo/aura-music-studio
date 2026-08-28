@@ -39,22 +39,29 @@ def _default_track_opacity(value: Any) -> bool:
         return False
 
 
+def _nonempty_advanced_field(changes: dict[str, Any], field: str) -> bool:
+    """Treat authored advanced graph state as Pro while allowing empty-value downgrade resets."""
+    return field in changes and bool(changes.get(field))
+
+
 def item_patch_requires_pro(changes: dict[str, Any]) -> bool:
-    """Only non-normal item blend is Pro; item opacity remains a Basic transform control."""
-    return "blend_mode" in changes and not _normal_blend(changes.get("blend_mode"))
+    """Protect advanced item graph state; item opacity remains a Basic transform control."""
+    if "blend_mode" in changes and not _normal_blend(changes.get("blend_mode")):
+        return True
+    return any(_nonempty_advanced_field(changes, field) for field in ("effects", "masks", "keyframes"))
 
 
 def track_patch_requires_pro(changes: dict[str, Any]) -> bool:
-    """Track grouping is Pro while allowing downgraded members to reset state to defaults."""
+    """Protect advanced track/group state while allowing downgraded members to reset defaults."""
     if "blend_mode" in changes and not _normal_blend(changes.get("blend_mode")):
         return True
     if "opacity" in changes and not _default_track_opacity(changes.get("opacity")):
         return True
-    return False
+    return any(_nonempty_advanced_field(changes, field) for field in ("effects", "keyframes"))
 
 
 def professional_visual_state_reasons(state: dict[str, Any], sequence_id: str) -> list[str]:
-    """Return preserved Pro visual-group state that must not render on a downgraded Basic plan."""
+    """Return preserved Pro visual state that must not render on a downgraded Basic plan."""
     branch = state.get("branch") or {}
     sequences = {value.get("id"): value for value in branch.get("sequences", [])}
     tracks = {value.get("id"): value for value in branch.get("tracks", [])}
@@ -72,19 +79,31 @@ def professional_visual_state_reasons(state: dict[str, Any], sequence_id: str) -
             reasons.append(f"track:{track_id}:blend_mode")
         if not _default_track_opacity(track.get("opacity", 1.0)):
             reasons.append(f"track:{track_id}:opacity")
+        if track.get("effects"):
+            reasons.append(f"track:{track_id}:effects")
+        if track.get("keyframes"):
+            reasons.append(f"track:{track_id}:keyframes")
         for item_id in track.get("item_ids", []):
             item = items.get(item_id)
-            if item and not _normal_blend(item.get("blend_mode")):
+            if not item:
+                continue
+            if not _normal_blend(item.get("blend_mode")):
                 reasons.append(f"item:{item_id}:blend_mode")
+            if item.get("effects"):
+                reasons.append(f"item:{item_id}:effects")
+            if item.get("masks"):
+                reasons.append(f"item:{item_id}:masks")
+            if item.get("keyframes"):
+                reasons.append(f"item:{item_id}:keyframes")
     return reasons
 
 
 def _require_pro_visual(member, reasons: list[str] | None = None) -> None:
     if member.plan.has(AUTOMATION):
         return
-    detail = "Professional blend and track-group controls require Pro."
+    detail = "Professional masks, effects, keyframes, blend and track-group controls require Pro."
     if reasons:
-        detail += " The authored Pro state is preserved; switch to Pro to render it, or reset the blend/group values to their defaults."
+        detail += " The authored Pro state is preserved; switch to Pro to render it, or reset the advanced values to their defaults."
     raise HTTPException(403, detail)
 
 
