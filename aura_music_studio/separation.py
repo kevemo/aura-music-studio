@@ -3,14 +3,66 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .cloud_providers import ElevenMusicClient
 
 
 VALID_MODES = {"two_stems", "four_stems", "six_stems", "detailed"}
+_MAX_ARCHIVE_FILES = 64
+_MAX_ARCHIVE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+
+
+def _safe_extract_stem_archive(archive: Path, destination: Path) -> None:
+    """Extract a provider stem archive without allowing it to escape destination.
+
+    Provider responses are untrusted input. Reject traversal/absolute paths, Windows
+    drive-like names, links and unexpectedly large archives before writing a member.
+    """
+    root = destination.resolve()
+    root.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(archive) as z:
+        members = z.infolist()
+        if len(members) > _MAX_ARCHIVE_FILES:
+            raise ValueError("Stem archive contains too many entries")
+        if sum(max(0, info.file_size) for info in members) > _MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+            raise ValueError("Stem archive is too large when extracted")
+
+        planned: list[tuple[zipfile.ZipInfo, Path]] = []
+        for info in members:
+            normalized = info.filename.replace("\\", "/")
+            member = PurePosixPath(normalized)
+            parts = member.parts
+            if (
+                not normalized
+                or member.is_absolute()
+                or ".." in parts
+                or (parts and ":" in parts[0])
+            ):
+                raise ValueError("Unsafe path in stem archive")
+
+            unix_mode = (info.external_attr >> 16) & 0xFFFF
+            if stat.S_ISLNK(unix_mode):
+                raise ValueError("Links are not allowed in stem archives")
+
+            target = (root / Path(*parts)).resolve()
+            if target != root and root not in target.parents:
+                raise ValueError("Stem archive entry escapes extraction directory")
+            planned.append((info, target))
+
+        # Validate every member first so a malicious later member cannot leave a
+        # partially extracted provider response behind.
+        for info, target in planned:
+            if info.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(info, "r") as source, target.open("wb") as sink:
+                shutil.copyfileobj(source, sink)
 
 
 class StemSeparator:
@@ -67,10 +119,12 @@ class StemSeparator:
         out = self.work_dir / f"eleven_{mode}"
         out.mkdir(parents=True, exist_ok=True)
         archive = out / "stems.zip"
+        extracted = out / "extracted"
         ElevenMusicClient().separate_stems(source, archive, six_stems=(mode in {"six_stems", "detailed"}))
-        with zipfile.ZipFile(archive) as z:
-            z.extractall(out)
-        return self._collect(out)
+        if extracted.exists():
+            shutil.rmtree(extracted)
+        _safe_extract_stem_archive(archive, extracted)
+        return self._collect(extracted)
 
     def _demucs(self, source: Path, mode: str) -> dict[str, Path]:
         binary = shutil.which("demucs")
