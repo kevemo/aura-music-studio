@@ -36,7 +36,8 @@
       "feature/aura-realtime-thread-sync": false,
       "feature/video-scene-timeline": false,
       "feature/video-scene-render-regeneration": false,
-      "feature/video-visual-continuity-locks": false
+      "feature/video-visual-continuity-locks": false,
+      "feature/video-localized-scene-revisions": false
     }
   },
   "functions": {
