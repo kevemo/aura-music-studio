@@ -6,6 +6,7 @@
       "feature/aura-platform-core": false,
       "feature/core-email-verification": false,
       "feature/core-password-recovery-sessions": false,
+      "feature/core-account-security-consolidation": false,
       "feature/esp-command-centers": false,
       "feature/creative-studios-game-forge": false,
       "feature/hourly-auto-build": false,
