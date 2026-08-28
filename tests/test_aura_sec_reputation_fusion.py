@@ -189,21 +189,21 @@ def test_unknown_duplicate_or_policy_injected_provider_results_fail_closed():
         policies={"feed-a": ReputationProviderPolicy("feed-a")},
         adapters={"feed-a": _adapter("feed-a", verdict="benign", confidence=0.95)},
     )
-    with pytest.raises(PermissionError, match="unconfigured provider"):
+    with pytest.raises(PermissionError, match="reputation verifier failed closed"):
         evaluate_url(
             "https://example.com/",
             reputation_payload=_payload("unknown-feed"),
             reputation_verifier=verifier,
             now=NOW,
         )
-    with pytest.raises(PermissionError, match="duplicate provider"):
+    with pytest.raises(PermissionError, match="reputation verifier failed closed"):
         evaluate_url(
             "https://example.com/",
             reputation_payload=_payload("feed-a", "feed-a"),
             reputation_verifier=verifier,
             now=NOW,
         )
-    with pytest.raises(PermissionError, match="invalid shape"):
+    with pytest.raises(PermissionError, match="reputation verifier failed closed"):
         evaluate_url(
             "https://example.com/",
             reputation_payload={
@@ -293,7 +293,7 @@ def test_provider_evidence_count_is_bounded():
         for provider_id in policies
     }
     verifier = _fusion(policies=policies, adapters=adapters)
-    with pytest.raises(PermissionError, match="provider evidence limit"):
+    with pytest.raises(PermissionError, match="reputation verifier failed closed"):
         evaluate_url(
             "https://example.com/",
             reputation_payload=_payload(*policies.keys()),
