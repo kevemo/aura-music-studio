@@ -44,7 +44,8 @@
       "feature/video-sync-pro-entitlement-gate": false,
       "feature/stripe-creation-coins-storefront-refresh": false,
       "feature/creation-coin-image-overage": false,
-      "feature/creation-coin-free-video-render": false
+      "feature/creation-coin-free-video-render": false,
+      "feature/video-verified-lyric-sync-ingestion": false
     }
   },
   "functions": {
