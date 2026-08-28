@@ -29,10 +29,11 @@ def test_export_studio_html_is_truthful_about_adapter_status():
     request.state.member = SimpleNamespace(plan=SimpleNamespace(has=lambda _cap: True))
     response = game_export_portal("game_demo", request)
     body = response.body.decode("utf-8")
+    lowered = body.lower()
     assert "Game Export Studio" in body
     assert "No fake engine exports" in body
-    assert "production ready" in body.lower()
-    assert "planned external-engine adapters" in body
+    assert "production ready" in lowered
+    assert "planned external-engine adapters" in lowered
 
 
 def test_capability_contract_keeps_external_engines_planned():
