@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
-from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -71,10 +69,6 @@ class CreateGameExportRequest(BaseModel):
     target: ExportTarget = "aura_web"
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
 def _creator(request: Request):
     member = getattr(request.state, "member", None)
     if member is None:
@@ -120,7 +114,7 @@ def _sha256_bytes(data: bytes) -> str:
 
 
 def _zip_info(name: str) -> ZipInfo:
-    # Fixed metadata makes identical logical inputs byte-for-byte reproducible.
+    # Fixed archive metadata plus deterministic manifest data makes identical builds reproducible.
     info = ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
     info.compress_type = ZIP_DEFLATED
     info.external_attr = 0o644 << 16
@@ -180,7 +174,8 @@ def create_aura_web_export(game: GameDNA) -> dict:
         )
         media_bytes.append((media_url, data))
 
-    export_id = f"export_{uuid4().hex}"
+    export_seed = f"aura_web:{game.id}:{content_hash}".encode("utf-8")
+    export_id = f"export_{hashlib.sha256(export_seed).hexdigest()[:32]}"
     manifest = {
         "schema_version": 1,
         "export_id": export_id,
@@ -199,7 +194,7 @@ def create_aura_web_export(game: GameDNA) -> dict:
         },
         "assets": media_entries,
         "provenance": {
-            "generated_at": _now(),
+            "build_created_at": game.latest_build.created_at,
             "game_rights_confirmed": True,
             "asset_rights_verified_before_export": True,
             "content_integrity_bound": True,
@@ -239,6 +234,7 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "asset_count": len(media_entries),
         "download_url": f"/api/game-forge/games/{game.id}/exports/{export_id}/download",
         "production_ready": True,
+        "deterministic_for_current_build": True,
         "creator_private_paths_included": False,
         "server_secrets_included": False,
         "llm_generated_executable_code_included": False,
