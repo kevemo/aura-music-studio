@@ -9,8 +9,15 @@ from aura_music_studio.game_forge_export_portal import game_export_portal
 from aura_music_studio.game_forge_world_api import router as game_world_router
 
 
+def _mounted_app() -> FastAPI:
+    app = FastAPI()
+    app.include_router(game_world_router)
+    return app
+
+
 def test_live_game_forge_router_mounts_export_api_and_studio():
-    paths = {route.path for route in game_world_router.routes}
+    app = _mounted_app()
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/api/game-forge/games/{game_id}/exports/capabilities" in paths
     assert "/api/game-forge/games/{game_id}/exports" in paths
     assert "/api/game-forge/games/{game_id}/exports/{export_id}/download" in paths
@@ -46,8 +53,6 @@ def test_capability_contract_keeps_external_engines_planned():
 
 
 def test_export_routes_require_membership_when_mounted_directly():
-    app = FastAPI()
-    app.include_router(game_world_router)
-    client = TestClient(app)
+    client = TestClient(_mounted_app())
     response = client.get("/api/game-forge/games/game_hidden/exports/capabilities")
     assert response.status_code == 401
