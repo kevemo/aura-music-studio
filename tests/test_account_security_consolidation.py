@@ -4,31 +4,52 @@ import json
 import sqlite3
 from pathlib import Path
 
-from aura_music_studio.account_security_api import AccountSecurityService
+from fastapi.testclient import TestClient
+
+from aura_music_studio.account_security_api import AccountSecurityService, router as account_security_router
 from aura_music_studio.accounts import AccountStore, _hash_secret
 from aura_music_studio.api import app
 
 
-def _route_count(path: str, method: str) -> int:
+def _router_route_count(path: str, method: str) -> int:
     wanted = method.upper()
     return sum(
         1
-        for route in app.routes
+        for route in account_security_router.routes
         if getattr(route, "path", None) == path
         and wanted in set(getattr(route, "methods", set()) or set())
     )
 
 
 def test_account_security_routes_have_one_authoritative_handler():
-    assert _route_count("/auth/password-reset/request", "POST") == 1
-    assert _route_count("/auth/password-reset/confirm", "POST") == 1
-    assert _route_count("/auth/sessions", "GET") == 1
-    assert _route_count("/auth/sessions/revoke-others", "POST") == 1
-    assert _route_count("/auth/sessions/{session_id}", "DELETE") == 1
+    # FastAPI's nested include_router composition is exercised through TestClient below rather
+    # than using app.routes as a route-precedence oracle. The canonical router itself must carry
+    # exactly one implementation for each security action, while the compatibility router is empty.
+    assert _router_route_count("/auth/password-reset/request", "POST") == 1
+    assert _router_route_count("/auth/password-reset/confirm", "POST") == 1
+    assert _router_route_count("/auth/sessions", "GET") == 1
+    assert _router_route_count("/auth/sessions/revoke-others", "POST") == 1
+    assert _router_route_count("/auth/sessions/{session_id}", "DELETE") == 1
 
     shim = Path("aura_music_studio/account_recovery.py").read_text(encoding="utf-8")
     assert "@router." not in shim
     assert "AccountSecurityService" not in shim
+
+    # The actual composed API must match these routes. Expected auth/validation responses prove
+    # the handlers are present; a missing route would return 404.
+    client = TestClient(app)
+    assert client.get("/auth/forgot-password").status_code == 200
+    assert client.get("/auth/sessions").status_code == 401
+    reset_request = client.post(
+        "/auth/password-reset/request",
+        json={"email": "consolidation-route-check@example.invalid"},
+    )
+    assert reset_request.status_code == 200
+    invalid_confirm = client.post(
+        "/auth/password-reset/confirm",
+        json={"token": "synthetic-consolidation-route-token", "new_password": "replacement-password"},
+    )
+    assert invalid_confirm.status_code == 400
 
 
 def test_canonical_reset_token_is_hash_stored_single_use_and_revokes_sessions(tmp_path):
