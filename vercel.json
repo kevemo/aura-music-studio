@@ -38,7 +38,8 @@
       "feature/video-scene-render-regeneration": false,
       "feature/video-visual-continuity-locks": false,
       "feature/video-localized-scene-revisions": false,
-      "feature/video-music-sync-map-refresh": false
+      "feature/video-music-sync-map-refresh": false,
+      "feature/music-video-storyboard-planner": false
     }
   },
   "functions": {
