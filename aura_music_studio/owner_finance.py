@@ -62,6 +62,7 @@ class OwnerFinanceService:
         active_by_plan: dict[str, int] = defaultdict(int)
         stripe_event_health: dict[str, int] = defaultdict(int)
         mrr_minor = 0
+        purchased_credits = 0
 
         with self._connect() as con:
             tables = {
@@ -102,6 +103,22 @@ class OwnerFinanceService:
                             }
                         )
 
+            # Accounting totals must cover the complete verified commerce ledger. The bounded
+            # ``recent()`` query below exists only for the owner UI history window and must never
+            # determine gross/net finance totals or purchased-credit counts.
+            if "commerce_receipts" in tables:
+                rows = con.execute(
+                    """SELECT provider,amount_minor,currency,units
+                       FROM commerce_receipts
+                       WHERE kind='credit_topup' AND status='paid'"""
+                ).fetchall()
+                for row in rows:
+                    currency = str(row["currency"] or "").upper()
+                    amount_minor = int(row["amount_minor"] or 0)
+                    credit_totals[currency] += amount_minor
+                    provider_receipts[str(row["provider"] or "unknown")] += amount_minor
+                    purchased_credits += int(row["units"] or 0)
+
             if "subscription_state" in tables:
                 rows = con.execute(
                     """SELECT plan_id,COUNT(*) AS n FROM subscription_state
@@ -127,15 +144,6 @@ class OwnerFinanceService:
                     stripe_event_health[str(row["processing_status"] or "unknown")] = int(row["n"] or 0)
 
         credit_recent = self.receipts.recent(kind="credit_topup", limit=recent_limit)
-        purchased_credits = 0
-        for item in credit_recent:
-            if item.get("status") != "paid":
-                continue
-            currency = str(item.get("currency") or "").upper()
-            amount_minor = int(item.get("amount_minor") or 0)
-            credit_totals[currency] += amount_minor
-            provider_receipts[str(item.get("provider") or "unknown")] += amount_minor
-            purchased_credits += int(item.get("units") or 0)
 
         currencies = sorted(set(subscription_totals) | set(credit_totals))
         verified_gross = {
