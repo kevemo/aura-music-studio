@@ -116,6 +116,42 @@ def test_unmatched_verified_refund_is_preserved_but_not_linked(tmp_path):
     assert summary["unmatched_verified_refund_count"] == 1
 
 
+def test_summary_totals_cover_full_ledger_while_recent_lists_stay_bounded(tmp_path):
+    db = tmp_path / "refunds.sqlite3"
+    accounts = AccountStore(db)
+    user = _user(accounts)
+    store = PaymentReversalStore(db)
+    store.bind_credit_payment(
+        payment_intent_id="pi_many",
+        receipt_reference="stripe:checkout:cs_many",
+        user_id=user["id"],
+        amount_minor=10_000,
+        currency="GBP",
+    )
+
+    for index in range(60):
+        recorded = store.record_stripe_refund(
+            _refund(refund_id=f"re_many_{index}", payment_intent="pi_many", amount=10)
+        )
+        assert recorded is not None and recorded["linked"] is True
+    for index in range(12):
+        unmatched = store.record_stripe_refund(
+            _refund(
+                refund_id=f"re_unmatched_{index}",
+                payment_intent=f"pi_unmatched_{index}",
+                amount=7,
+            )
+        )
+        assert unmatched is not None and unmatched["linked"] is False
+
+    summary = store.summary(limit=5)
+    assert summary["verified_refunds_minor"] == {"GBP": 600}
+    assert len(summary["recent_verified_refunds"]) == 5
+    assert summary["unmatched_verified_refunds_minor"] == {"GBP": 84}
+    assert summary["unmatched_verified_refund_count"] == 12
+    assert len(summary["recent_unmatched_verified_refunds"]) == 5
+
+
 def test_refund_finance_evidence_never_mutates_roles_or_credit_wallet(tmp_path):
     db = tmp_path / "refunds.sqlite3"
     accounts = AccountStore(db)
