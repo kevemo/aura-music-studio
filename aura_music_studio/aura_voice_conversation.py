@@ -6,9 +6,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from .aura_realtime_voice import router as realtime_voice_router
+from .aura_realtime_voice_ui import router as realtime_voice_ui_router
 
 router = APIRouter(include_in_schema=False)
 router.include_router(realtime_voice_router)
+router.include_router(realtime_voice_ui_router)
 
 VOICE_SCRIPT = r"""
 (()=>{
@@ -117,7 +119,7 @@ def voice_conversation_script():
 
 
 class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
-    """Inject the hands-free voice layer only into Aura's signed-in HTML workspace."""
+    """Inject the standard fallback and Realtime WebRTC voice layers into Aura's signed-in workspace."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -133,9 +135,13 @@ class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        fallback_marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
+        realtime_marker = "<script src='/aura-intelligence/realtime-voice.js'></script>"
+        markers = fallback_marker + realtime_marker
+        if fallback_marker not in text:
+            text = text.replace("</body>", markers + "</body>")
+        elif realtime_marker not in text:
+            text = text.replace(fallback_marker, markers)
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]

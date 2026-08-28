@@ -31,7 +31,8 @@
       "feature/export-provenance-review-refresh": false,
       "feature/compliance-jurisdiction-applicability": false,
       "feature/creative-render-resource-governance": false,
-      "feature/aura-realtime-voice-broker": false
+      "feature/aura-realtime-voice-broker": false,
+      "feature/aura-realtime-webrtc-ui": false
     }
   },
   "functions": {
