@@ -133,8 +133,6 @@ def test_render_request_commercial_rights_contract():
 def test_integration_overlay_mounts_export_governance_routes():
     from aura_music_studio.creative_version_autopromotion import router
 
-    app = FastAPI()
-    app.include_router(router)
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = {getattr(route, "path", "") for route in router.routes}
     assert "/creative/export-governance/{export_id}" in paths
     assert "/owner/creative/export-governance/{export_id}/review" in paths
