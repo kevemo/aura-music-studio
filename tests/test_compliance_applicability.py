@@ -137,9 +137,32 @@ def test_owner_policy_review_route_hidden_and_requires_owner():
     assert response.status_code == 403
 
 
-def test_integration_overlay_mounts_applicability_routes():
+def test_integration_overlay_dispatches_applicability_routes():
     from aura_music_studio.creative_version_autopromotion import router as integration_router
 
-    paths = {getattr(route, "path", "") for route in integration_router.routes}
-    assert "/compliance/applicability" in paths
-    assert "/owner/compliance/policy-registry/reviews" in paths
+    app = FastAPI()
+    app.include_router(integration_router)
+    client = TestClient(app)
+
+    member_response = client.get("/compliance/applicability?country=GB&feature=privacy")
+    assert member_response.status_code != 404
+
+    owner_response = client.post(
+        "/owner/compliance/policy-registry/reviews",
+        json={
+            "policy_id": "integration-probe",
+            "jurisdiction": "GB",
+            "title": "Integration probe",
+            "source_url": "https://example.gov/policy",
+            "effective_from": "2026-01-01",
+            "reviewed_at": "2026-08-28",
+            "next_review_at": "2026-09-28",
+            "status": "active",
+            "features": ["privacy"],
+            "roles": ["member"],
+            "confidence": "high",
+            "source_class": "official_government",
+            "evidence_reference": "review:integration-probe"
+        },
+    )
+    assert owner_response.status_code == 403
