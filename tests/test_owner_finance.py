@@ -110,6 +110,34 @@ def test_finance_net_subtracts_only_linked_successful_refunds(tmp_path):
     assert len(snapshot["recent_verified_refunds"]) == 1
 
 
+def test_credit_gross_totals_cover_full_ledger_while_recent_history_stays_bounded(tmp_path):
+    db = tmp_path / "finance.sqlite3"
+    accounts = AccountStore(db)
+    user = _approved_user(accounts, "volume@example.com", "base")
+    receipts = CommerceReceiptStore(db)
+
+    for index in range(7):
+        receipts.record(
+            provider="stripe",
+            kind="credit_topup",
+            reference=f"stripe:checkout:cs_volume_{index}",
+            user_id=user["id"],
+            pack_id="credits-volume",
+            amount_minor=100,
+            currency="GBP",
+            units=10,
+        )
+
+    snapshot = OwnerFinanceService(db).snapshot(recent_limit=3)
+    assert snapshot["credit_topup_receipts_minor"] == {"GBP": 700}
+    assert snapshot["verified_gross_receipts_minor"] == {"GBP": 700}
+    assert snapshot["verified_net_receipts_minor"] == {"GBP": 700}
+    assert snapshot["verified_receipts_by_provider_minor"] == {"stripe": 700}
+    assert snapshot["purchased_credits"] == 70
+    assert len(snapshot["recent_verified_receipts"]) == 3
+    assert all(item["kind"] == "credit_topup" for item in snapshot["recent_verified_receipts"])
+
+
 def test_commerce_receipt_is_idempotent_and_rejects_reference_reuse(tmp_path):
     db = tmp_path / "finance.sqlite3"
     accounts = AccountStore(db)
