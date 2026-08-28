@@ -30,7 +30,8 @@
       "feature/creative-ip-firewall-v2": false,
       "feature/export-provenance-review-refresh": false,
       "feature/compliance-jurisdiction-applicability": false,
-      "feature/creative-render-resource-governance": false
+      "feature/creative-render-resource-governance": false,
+      "feature/aura-realtime-voice-broker": false
     }
   },
   "functions": {
