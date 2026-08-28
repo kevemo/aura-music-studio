@@ -187,7 +187,9 @@ def test_cover_worker_returns_only_project_relative_output(monkeypatch, tmp_path
     assert result["source_asset_id"] == "asset-1"
     assert result["output_ref"].startswith("output/transformations/asset-1/cover_")
     assert not Path(result["output_ref"]).is_absolute()
-    assert "output" not in {"path", "source_path"}
+    assert "output" not in result
+    assert "path" not in result
+    assert "source_path" not in result
 
 
 def test_worker_rejects_asset_path_outside_project(monkeypatch, tmp_path):
