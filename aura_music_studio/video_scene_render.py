@@ -11,6 +11,7 @@ from .creative_project_api import (
     sync_creative_outputs,
 )
 from .creative_render_resource_governance import store as creative_render_resource_store
+from .video_music_sync import resolve_scene_cues, sync_prompt
 from .video_scene_timeline import _project_dir, _read, _write
 from .video_visual_continuity import continuity_prompt, resolve_profiles
 
@@ -50,7 +51,7 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _scene_prompt(scene: dict, override: str | None, profiles: list[dict]) -> str:
+def _scene_prompt(scene: dict, override: str | None, profiles: list[dict], sync_cues: list[dict]) -> str:
     if override:
         base = override.strip()
     else:
@@ -63,9 +64,10 @@ def _scene_prompt(scene: dict, override: str | None, profiles: list[dict]) -> st
             parts.append(f"Continuity: {scene['continuity_notes']}")
         base = "\n".join(part for part in parts if part).strip()
     locks = continuity_prompt(profiles).strip()
-    prompt = "\n\n".join(part for part in (base, locks) if part).strip()
+    synchronization = sync_prompt(sync_cues).strip()
+    prompt = "\n\n".join(part for part in (base, locks, synchronization) if part).strip()
     if not prompt:
-        raise HTTPException(400, "Scene requires creative direction or a continuity profile before rendering")
+        raise HTTPException(400, "Scene requires creative direction, a continuity profile, or synchronization cues before rendering")
     return prompt
 
 
@@ -99,9 +101,11 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
     profile_ids = list(scene.get("continuity_profile_ids") or [])
     profiles = resolve_profiles(project_name, profile_ids)
     reference_ids, preserve_element_ids = _continuity_inputs(scene, profiles)
+    sync_cues = resolve_scene_cues(project_name, scene)
+    sync_cue_ids = [str(cue["id"]) for cue in sync_cues]
 
     directive = CreativeDirective(
-        instruction=_scene_prompt(scene, body.prompt_override, profiles),
+        instruction=_scene_prompt(scene, body.prompt_override, profiles, sync_cues),
         input_mode="text",
         operation="replace" if previous_output else "create",
         target_kind="video",
@@ -115,6 +119,18 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
                 "end_seconds": scene.get("end_seconds"),
                 "previous_output_element_id": previous_output or None,
                 "continuity_profile_ids": profile_ids,
+                "sync_cue_ids": sync_cue_ids,
+                "sync_cues": [
+                    {
+                        "id": cue["id"],
+                        "kind": cue["kind"],
+                        "at_seconds": cue["at_seconds"],
+                        "end_seconds": cue.get("end_seconds"),
+                        "label": cue.get("label", ""),
+                        "text": cue.get("text", ""),
+                    }
+                    for cue in sync_cues
+                ],
             }
         },
     )
@@ -152,6 +168,7 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         "provider": response["submission"]["provider"],
         "workflow_name": response["submission"]["workflow_name"],
         "continuity_profile_ids": profile_ids,
+        "sync_cue_ids": sync_cue_ids,
     }
     _write(project_name, data)
     return {
@@ -160,6 +177,7 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         "submission": response["submission"],
         "resource_governance": reservation,
         "continuity_profiles_applied": profile_ids,
+        "sync_cues_applied": sync_cue_ids,
         "grants_esp_role_or_permission": False,
         "alters_billing_or_membership": False,
     }
