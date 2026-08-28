@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
 from .commercial_entitlement_routes import router as commercial_entitlement_router
 from .compliance_applicability import owner_router as owner_compliance_applicability_router, router as compliance_applicability_router
 from .creative_project import CreativeDirective, CreativeProjectStore
-from .creative_project_api import sync_creative_outputs as base_sync_creative_outputs
+from .creative_project_api import (
+    QueueRendererRequest,
+    queue_creative_render as base_queue_creative_render,
+    sync_creative_outputs as base_sync_creative_outputs,
+)
+from .creative_render_resource_governance import store as creative_render_resource_store
 from .daw_mixer_ui import daw_mixer_ui as base_daw_mixer_ui
 from .deep_daw_automation_api import router as deep_daw_automation_router
 from .deep_daw_automation_ui import enhance_daw_mixer_javascript
@@ -57,6 +62,7 @@ router.include_router(professional_editor_render_router)
 router.include_router(professional_editor_workspace_router)
 _SAFE_AUTO_PROMOTE_OPERATIONS = {"revise", "replace", "transform", "style"}
 
+
 @router.get("/daw/mixer-ui.js", include_in_schema=False)
 def daw_mixer_ui_with_deep_automation():
     base = base_daw_mixer_ui()
@@ -65,6 +71,7 @@ def daw_mixer_ui_with_deep_automation():
     headers = {key: value for key, value in base.headers.items() if key.lower() not in {"content-length", "content-type", "cache-control"}}
     headers["Cache-Control"] = "private, no-store"
     return Response(enhanced, media_type="application/javascript", headers=headers)
+
 
 def auto_promote_single_target_revision(store: CreativeProjectStore, directive: CreativeDirective, imported_elements: list[dict], *, target_was_current: bool) -> dict:
     result = {"promoted": False, "reason": "manual_selection_required", "element_id": None, "version_family": None}
@@ -91,6 +98,60 @@ def auto_promote_single_target_revision(store: CreativeProjectStore, directive: 
     result.update({"promoted": True, "reason": "single_target_single_output_revision", "element_id": element_id, "version_family": family, "active_element_ids": list(promoted.active_element_ids), "previous_media_retained": True})
     return result
 
+
+@router.post("/creative/projects/{project_name}/directives/{directive_id}/render")
+def queue_render_with_resource_governance(
+    project_name: str,
+    directive_id: str,
+    body: QueueRendererRequest,
+    request: Request,
+):
+    member = getattr(request.state, "member", None)
+    user_id = str(getattr(member, "user_id", "") or "")
+    plan = getattr(member, "plan", None)
+    plan_id = str(getattr(plan, "id", "") or "")
+    if not user_id or not plan_id:
+        raise HTTPException(401, "Authenticated member identity and plan are required")
+
+    try:
+        project = project_path(project_name, must_exist=True)
+        manifest = CreativeProjectStore(project).load()
+    except FileNotFoundError as exc:
+        raise HTTPException(404, "Project not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, "Invalid project path") from exc
+    directive = next((item for item in manifest.directives if item.id == directive_id), None)
+    if directive is None:
+        raise HTTPException(404, "Aura directive not found")
+    if directive.target_kind not in {"image", "video"}:
+        return base_queue_creative_render(project_name, directive_id, body, request)
+
+    try:
+        reservation = creative_render_resource_store.reserve(
+            user_id=user_id,
+            plan_id=plan_id,
+            project_name=project_name,
+            directive_id=directive_id,
+            media_kind=directive.target_kind,
+            width=body.width,
+            height=body.height,
+            frames=body.frames,
+        )
+    except PermissionError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, "Creative renderer resource policy is misconfigured") from exc
+
+    try:
+        response = base_queue_creative_render(project_name, directive_id, body, request)
+    except Exception:
+        creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        raise
+    if isinstance(response, dict):
+        response["resource_governance"] = reservation
+    return response
+
+
 @router.post("/creative/projects/{project_name}/directives/{directive_id}/sync-outputs")
 def sync_outputs_with_safe_version_promotion(project_name: str, directive_id: str, request: Request):
     project = project_path(project_name, must_exist=True)
@@ -107,4 +168,5 @@ def sync_outputs_with_safe_version_promotion(project_name: str, directive_id: st
     response["detail"] = "Single targeted revision promoted to CURRENT; previous media remains available in History." if promotion["promoted"] else "Outputs imported. CURRENT was not changed automatically because manual selection is safer for this result set."
     return response
 
-__all__ = ["router", "auto_promote_single_target_revision"]
+
+__all__ = ["router", "auto_promote_single_target_revision", "queue_render_with_resource_governance"]
