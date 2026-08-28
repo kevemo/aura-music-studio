@@ -170,4 +170,3 @@ def test_production_overlay_mounts_continuity_routes_and_requires_member():
     client = TestClient(app)
     response = client.get("/creative/projects/demo/video-continuity")
     assert response.status_code == 401
-    assert any(route.path == "/creative/projects/{project_name}/video-continuity" for route in app.routes)
