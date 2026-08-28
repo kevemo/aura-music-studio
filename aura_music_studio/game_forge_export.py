@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from html import escape
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
@@ -11,6 +12,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from .brand_ui import COMMAND_CENTER_ART_PATH
 from .game_forge_assets import (
     asset_publication_blockers,
     private_runtime_asset_path,
@@ -24,15 +26,19 @@ from .plans import GAME_CREATE
 
 router = APIRouter(tags=["Aura Game Export"])
 
+AURA_WEB_EXPORT_VERSION = 2
 ExportTarget = Literal["aura_web", "phaser4", "playcanvas", "babylon", "godot"]
 
 _EXPORT_CAPABILITIES: dict[str, dict] = {
     "aura_web": {
-        "label": "Aura Web Package",
+        "label": "Aura Web PWA Package",
         "production_ready": True,
         "executable_export": True,
-        "format": "deterministic_zip",
-        "runtime": "existing reviewed Aura playtest runtime",
+        "format": "deterministic_pwa_zip_v2",
+        "runtime": "existing reviewed Aura playtest runtime in a sandboxed installable shell",
+        "installable_pwa": True,
+        "offline_core": True,
+        "verified_media_cache": "same_origin_on_demand",
     },
     "phaser4": {
         "label": "Phaser 4 adapter",
@@ -145,6 +151,102 @@ def _validate_exportable(game: GameDNA, target: ExportTarget) -> str:
     return current_hash
 
 
+def _brand_art_bytes() -> bytes:
+    try:
+        data = COMMAND_CENTER_ART_PATH.read_bytes()
+    except OSError as exc:
+        raise ValueError("Command Center brand artwork is unavailable for the installable export") from exc
+    if len(data) < 16 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise ValueError("Command Center brand artwork failed WebP integrity validation")
+    return data
+
+
+def _webp_size(data: bytes) -> str | None:
+    """Return an exact WebP width/height without requiring Pillow at runtime."""
+    if len(data) < 20 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    offset = 12
+    while offset + 8 <= len(data):
+        kind = data[offset : offset + 4]
+        size = int.from_bytes(data[offset + 4 : offset + 8], "little")
+        start = offset + 8
+        end = start + size
+        if end > len(data):
+            return None
+        chunk = data[start:end]
+        if kind == b"VP8X" and len(chunk) >= 10:
+            width = 1 + int.from_bytes(chunk[4:7], "little")
+            height = 1 + int.from_bytes(chunk[7:10], "little")
+            return f"{width}x{height}"
+        if kind == b"VP8L" and len(chunk) >= 5 and chunk[0] == 0x2F:
+            bits = int.from_bytes(chunk[1:5], "little")
+            width = (bits & 0x3FFF) + 1
+            height = ((bits >> 14) & 0x3FFF) + 1
+            return f"{width}x{height}"
+        if kind == b"VP8 " and len(chunk) >= 10 and chunk[3:6] == b"\x9d\x01\x2a":
+            width = int.from_bytes(chunk[6:8], "little") & 0x3FFF
+            height = int.from_bytes(chunk[8:10], "little") & 0x3FFF
+            if width and height:
+                return f"{width}x{height}"
+        offset = end + (size & 1)
+    return None
+
+
+def _pwa_manifest(game: GameDNA, brand_art: bytes) -> bytes:
+    icon: dict[str, str] = {
+        "src": "./brand-icon.webp",
+        "type": "image/webp",
+        "purpose": "any maskable",
+    }
+    size = _webp_size(brand_art)
+    if size:
+        icon["sizes"] = size
+    payload = {
+        "id": "./",
+        "name": game.title[:120],
+        "short_name": game.title[:30],
+        "description": "Aura Game Forge installable export — Powered by Aura AI",
+        "start_url": "./index.html",
+        "scope": "./",
+        "display": "standalone",
+        "orientation": "any",
+        "background_color": "#030207",
+        "theme_color": "#7030b8",
+        "icons": [icon],
+    }
+    return (json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _pwa_index(game: GameDNA) -> bytes:
+    title = escape(game.title[:160])
+    html = f"""<!doctype html>
+<html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>
+<meta name='theme-color' content='#7030b8'><meta name='color-scheme' content='dark'>
+<meta http-equiv='Content-Security-Policy' content=\"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; frame-src 'self'; worker-src 'self'; manifest-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'\">
+<link rel='manifest' href='./manifest.webmanifest'><link rel='icon' href='./brand-icon.webp' type='image/webp'><title>{title}</title><style>
+*{{box-sizing:border-box}}html,body{{margin:0;width:100%;height:100%;overflow:hidden;background:#030207;color:#fff;font-family:system-ui,sans-serif}}#shell{{height:100%;display:grid;grid-template-rows:auto 1fr}}header{{min-height:56px;display:flex;align-items:center;gap:10px;padding:8px max(10px,env(safe-area-inset-right)) 8px max(10px,env(safe-area-inset-left));background:#08040ff2;border-bottom:1px solid #e9bb5840}}header img{{width:40px;height:40px;border-radius:50%;object-fit:cover}}header div{{min-width:0}}header b{{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}header small{{color:#ffe9a6}}iframe{{width:100%;height:100%;border:0;background:#050611}}#offline{{position:fixed;right:10px;top:10px;z-index:3;border:1px solid #e9bb5848;background:#08040fe8;border-radius:999px;padding:5px 8px;font-size:11px;color:#ffe9a6}}
+</style></head><body><div id='shell'><header><img src='./brand-icon.webp' alt='Elevate Souls Productions'><div><b>{title}</b><small>Content Creation Command Center · Powered by Aura AI</small></div></header><iframe title='Aura Game' src='./play.html' sandbox='allow-scripts allow-pointer-lock' referrerpolicy='no-referrer' allow='gamepad'></iframe></div><div id='offline' role='status' aria-live='polite'>Installable Aura Web package</div><script>
+'use strict';const badge=document.getElementById('offline');function status(){{badge.textContent=navigator.onLine?'Installable Aura Web package':'Offline · cached package'}}addEventListener('online',status);addEventListener('offline',status);status();if('serviceWorker' in navigator){{addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js',{{scope:'./'}}).catch(()=>{{badge.textContent='Package ready · offline cache unavailable'}}))}}
+</script></body></html>"""
+    return html.encode("utf-8")
+
+
+def _service_worker(content_hash: str, media_paths: list[str]) -> bytes:
+    cache_name = f"aura-game-v{AURA_WEB_EXPORT_VERSION}-{content_hash[:20]}"
+    core = ["", "index.html", "play.html", "manifest.webmanifest", "brand-icon.webp"]
+    allowed = sorted(set(core + [path.lstrip("./") for path in media_paths]))
+    script = f"""'use strict';
+const CACHE={json.dumps(cache_name)};
+const CORE={json.dumps(["./", "./index.html", "./play.html", "./manifest.webmanifest", "./brand-icon.webp"])};
+const ALLOWED=new Set({json.dumps(allowed)});
+function relativePath(request){{const url=new URL(request.url),scope=new URL(self.registration.scope);if(url.origin!==scope.origin||!url.pathname.startsWith(scope.pathname))return null;return decodeURIComponent(url.pathname.slice(scope.pathname.length));}}
+self.addEventListener('install',event=>{{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting()))}});
+self.addEventListener('activate',event=>{{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('aura-game-v')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()))}});
+self.addEventListener('fetch',event=>{{if(event.request.method!=='GET')return;const path=relativePath(event.request);if(path===null||!ALLOWED.has(path))return;event.respondWith(caches.open(CACHE).then(async cache=>{{const hit=await cache.match(event.request,{{ignoreSearch:true}});if(hit)return hit;try{{const response=await fetch(event.request);if(response&&response.ok)await cache.put(event.request,response.clone());return response}}catch(error){{const fallback=await cache.match('./index.html');if(event.request.mode==='navigate'&&fallback)return fallback;throw error}}}}))}});
+"""
+    return script.encode("utf-8")
+
+
 def create_aura_web_export(game: GameDNA) -> dict:
     content_hash = _validate_exportable(game, "aura_web")
     html = private_play_html(game).encode("utf-8")
@@ -174,10 +276,11 @@ def create_aura_web_export(game: GameDNA) -> dict:
         )
         media_bytes.append((media_url, data))
 
-    export_seed = f"aura_web:{game.id}:{content_hash}".encode("utf-8")
+    brand_art = _brand_art_bytes()
+    export_seed = f"aura_web:v{AURA_WEB_EXPORT_VERSION}:{game.id}:{content_hash}".encode("utf-8")
     export_id = f"export_{hashlib.sha256(export_seed).hexdigest()[:32]}"
     manifest = {
-        "schema_version": 1,
+        "schema_version": AURA_WEB_EXPORT_VERSION,
         "export_id": export_id,
         "target": "aura_web",
         "product": "Elevate Souls Productions Content Creation Command Center",
@@ -193,6 +296,14 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "content_hash": content_hash,
         },
         "assets": media_entries,
+        "pwa": {
+            "installable_shell": True,
+            "offline_core_cache": True,
+            "verified_media_cache": "same_origin_on_demand",
+            "service_worker_external_origins_allowed": False,
+            "runtime_frame_sandboxed": True,
+            "brand_artwork_included": True,
+        },
         "provenance": {
             "build_created_at": game.latest_build.created_at,
             "game_rights_confirmed": True,
@@ -205,12 +316,21 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "external_network_dependency_added": False,
             "llm_generated_executable_code_included": False,
         },
-        "launch": {"entrypoint": "play.html", "serve_over_http": True},
+        "launch": {
+            "entrypoint": "index.html",
+            "runtime_entrypoint": "play.html",
+            "serve_over_http": True,
+            "https_required_for_installability_outside_localhost": True,
+        },
     }
 
     buffer = BytesIO()
     with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=9) as zf:
+        _write_zip_entry(zf, "index.html", _pwa_index(game))
         _write_zip_entry(zf, "play.html", html)
+        _write_zip_entry(zf, "manifest.webmanifest", _pwa_manifest(game, brand_art))
+        _write_zip_entry(zf, "service-worker.js", _service_worker(content_hash, [name for name, _ in media_bytes]))
+        _write_zip_entry(zf, "brand-icon.webp", brand_art)
         _write_zip_entry(
             zf,
             "manifest.json",
@@ -234,6 +354,9 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "asset_count": len(media_entries),
         "download_url": f"/api/game-forge/games/{game.id}/exports/{export_id}/download",
         "production_ready": True,
+        "pwa_installable": True,
+        "offline_core_cache": True,
+        "verified_media_cache": "same_origin_on_demand",
         "deterministic_for_current_build": True,
         "creator_private_paths_included": False,
         "server_secrets_included": False,
