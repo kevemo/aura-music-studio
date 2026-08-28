@@ -17,6 +17,7 @@ def test_new_song_project_initializes_release_grade_editable_dna(tmp_path):
         CreateSongRequest(
             title="Editable Release",
             lyrics="First line\nSecond line\n\nChorus one\nChorus two",
+            lyrics_rights_confirmed=True,
             genre="pop",
             mood="uplifting",
             instruments=["drums", "bass", "piano"],

@@ -7,6 +7,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy
+from .creative_ip_policy import build_clearance_record, require_input_rights
 from .lyrics import LyricRequest, generate_lyrics
 from .presets import get_preset, preset_dict
 from .song_dna import create_song_dna
@@ -17,6 +18,7 @@ class CreateSongRequest(BaseModel):
     concept: str = ""
     lyrics: str = ""
     generate_lyrics: bool = False
+    lyrics_rights_confirmed: bool = False
     genre: str = "pop"
     subgenre: str = ""
     mood: str = "uplifting"
@@ -32,6 +34,7 @@ class CreateSongRequest(BaseModel):
     vocal_gender: str | None = None
     voice_profile_id: str | None = None
     reference_audio: str | None = None
+    reference_audio_rights_confirmed: bool = False
     reference_strength: float = Field(default=0.65, ge=0.0, le=1.0)
     seed: int | None = None
     preferred_engines: list[str] = Field(default_factory=lambda: [
@@ -41,6 +44,21 @@ class CreateSongRequest(BaseModel):
 
 
 def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
+    user_lyrics_provided = bool(request.lyrics.strip())
+    reference_audio_provided = bool((request.reference_audio or "").strip())
+    require_input_rights(
+        "lyrics",
+        provided=user_lyrics_provided,
+        rights_confirmed=request.lyrics_rights_confirmed,
+    )
+    require_input_rights(
+        "audio_reference",
+        provided=reference_audio_provided,
+        rights_confirmed=request.reference_audio_rights_confirmed,
+    )
+    if request.vocal_mode == "approved_voice" and not (request.voice_profile_id or "").strip():
+        raise ValueError("Approved-voice creation requires an active consent-approved Aura Voice Profile")
+
     enforce_creation_policy(
         request.title,
         request.concept,
@@ -103,11 +121,24 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
     if request.extra_prompt:
         style_bits.append(request.extra_prompt)
 
+    rights_clearance = build_clearance_record(
+        user_lyrics_provided=user_lyrics_provided,
+        lyrics_rights_confirmed=request.lyrics_rights_confirmed,
+        reference_audio_provided=reference_audio_provided,
+        reference_audio_rights_confirmed=request.reference_audio_rights_confirmed,
+        approved_voice_requested=request.vocal_mode == "approved_voice",
+    )
+    rights_confirmed = (
+        (not user_lyrics_provided or request.lyrics_rights_confirmed)
+        and (not reference_audio_provided or request.reference_audio_rights_confirmed)
+    )
+
     manifest = {
         "project_name": slug,
         "title": request.title,
         "mode": "original",
-        "rights_confirmed": True,
+        "rights_confirmed": rights_confirmed,
+        "rights_clearance": rights_clearance,
         "tempo_bpm": request.bpm,
         "meter": request.meter,
         "key": request.key,
@@ -202,6 +233,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "reference_audio": request.reference_audio,
             "reference_strength": request.reference_strength,
             "seed": request.seed,
+            "rights_clearance": rights_clearance,
         },
     )
     return project

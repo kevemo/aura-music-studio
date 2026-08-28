@@ -3,14 +3,25 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from .aura_adventure_tools import install_aura_adventure_tools
+from .aura_gameplay_tools import install_aura_gameplay_tools
+from .aura_state_machine_tools import install_aura_state_machine_tools
+from .aura_world_events_tools import install_aura_world_events_tools
+from .aura_world_logic_tools import install_aura_world_logic_tools
+from .game_forge_adventure import router as game_adventure_router
+from .game_forge_adventure_portal import router as game_adventure_portal_router
 from .game_forge_asset_bindings import router as game_asset_bindings_router
 from .game_forge_assets import public_runtime_asset_path
 from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
 from .game_forge_aura_commands import router as game_aura_commands_router
 from .game_forge_cinematics import router as game_cinematics_router
+from .game_forge_gameplay import router as game_gameplay_router
+from .game_forge_gameplay_portal import router as game_gameplay_portal_router
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
-from .game_forge_runtime import private_play_html
+from .game_forge_state_machine import router as game_state_machine_router
+from .game_forge_state_machine_portal import router as game_state_machine_portal_router
+from .game_forge_state_machine_runtime import build_state_machine_playtest, private_play_html
 from .game_forge_store import load_game, publish_snapshot, remove_public_snapshot, save_game
 from .game_forge_world import (
     GameWorldDNA,
@@ -21,17 +32,41 @@ from .game_forge_world import (
     world_stream_index,
     world_summary,
 )
+from .game_forge_world_events import router as game_world_events_router
+from .game_forge_world_events_portal import router as game_world_events_portal_router
+from .game_forge_world_logic import router as game_world_logic_router
+from .game_forge_world_logic_portal import router as game_world_logic_portal_router
 from .plans import GAME_CREATE, GAME_PLAYTEST
 from .production_readiness import router as production_readiness_router
 
+# This module is imported before the central install_aura_game_tools() call in app.py. These
+# dedicated wrappers become lower layers in AuraToolRegistry's chain; existing game/media tools
+# remain authoritative for their own names and delegate gameplay/Adventure/World Logic/Event/
+# State Machine names safely.
+install_aura_gameplay_tools()
+install_aura_adventure_tools()
+install_aura_world_logic_tools()
+install_aura_world_events_tools()
+install_aura_state_machine_tools()
+
 router = APIRouter(tags=["Aura Game World"])
-# Binding/cinematic routes and the global operations readiness plane are composed inside this
-# already-mounted router so parallel build chats do not need to edit the central app.py router list.
+# Binding/cinematic/gameplay/Adventure/World Logic/World Event/State Machine routes and global
+# operations readiness are composed here so parallel build chats do not need to edit shared app.py.
 router.include_router(production_readiness_router)
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
 router.include_router(game_aura_commands_router)
 router.include_router(game_cinematics_router)
+router.include_router(game_gameplay_router)
+router.include_router(game_gameplay_portal_router)
+router.include_router(game_adventure_router)
+router.include_router(game_adventure_portal_router)
+router.include_router(game_world_logic_router)
+router.include_router(game_world_logic_portal_router)
+router.include_router(game_world_events_router)
+router.include_router(game_world_events_portal_router)
+router.include_router(game_state_machine_router)
+router.include_router(game_state_machine_portal_router)
 
 
 def _member(request: Request):
@@ -72,6 +107,16 @@ def _invalidate_game_after_world_change(game) -> None:
     save_game(game)
 
 
+def _editor_urls(game_id: str) -> dict[str, str]:
+    return {
+        "gameplay_editor_url": f"/game-creation/gameplay/{game_id}",
+        "adventure_editor_url": f"/game-creation/adventure/{game_id}",
+        "world_logic_editor_url": f"/game-creation/world-logic/{game_id}",
+        "world_events_editor_url": f"/game-creation/world-events/{game_id}",
+        "state_machine_editor_url": f"/game-creation/state-machines/{game_id}",
+    }
+
+
 @router.get("/api/game-forge/games/{game_id}/world")
 def get_world(game_id: str, request: Request):
     _creator(request)
@@ -83,6 +128,7 @@ def get_world(game_id: str, request: Request):
         "stream_index": world_stream_index(world),
         "native_engine": True,
         "arbitrary_script_source_allowed": False,
+        **_editor_urls(game.id),
     }
 
 
@@ -96,6 +142,7 @@ def regenerate_world(game_id: str, request: Request):
         "world": world.model_dump(mode="json"),
         "summary": world_summary(world),
         "invalidated_previous_build_and_rating": True,
+        **_editor_urls(game.id),
     }
 
 
@@ -125,12 +172,55 @@ def replace_world(game_id: str, body: GameWorldDNA, request: Request):
         "world": body.model_dump(mode="json"),
         "summary": world_summary(body),
         "invalidated_previous_build_and_rating": True,
+        **_editor_urls(game.id),
     }
 
 
-# These two routes deliberately precede the foundation API equivalents in app.py. They bind
-# approval/publishing to Game DNA + Aura World DNA + imported Game Forge asset/model snapshots +
-# cinematic/VFX DNA, not just the high-level game questionnaire.
+# This route deliberately precedes the foundation API equivalent in app.py. The normal portal/API
+# Build action produces the cumulative State Machine runtime, which progressively delegates to the
+# previously validated World Events/World Logic/Adventure runtimes when no State Machines exist.
+@router.post("/api/game-forge/games/{game_id}/build")
+def build_world_state_machine(game_id: str, request: Request):
+    _creator(request)
+    game = _game(game_id)
+    ensure_world(game)
+    try:
+        game, _html = build_state_machine_playtest(game)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, f"Aura State Machine build failed: {exc}") from exc
+    return {
+        "game": {
+            "id": game.id,
+            "title": game.title,
+            "status": game.status,
+            "version": game.version,
+            "latest_build": game.latest_build.model_dump(mode="json") if game.latest_build else None,
+        },
+        "private_playtest_url": f"/game-creation/play/{game.id}",
+        **_editor_urls(game.id),
+        "runtime": game.latest_build.runtime if game.latest_build else None,
+        "requested_engine": game.engine_target,
+        "aura_native_runtime": True,
+        "declarative_gameplay_runtime": True,
+        "adventure_state_runtime": True,
+        "advanced_world_logic_runtime": True,
+        "world_events_runtime": True,
+        "state_machine_runtime": True,
+        "max_state_machine_transitions_per_frame": 1,
+        "state_machine_adventure_flags_only": True,
+        "verified_same_origin_world_audio": True,
+        "external_world_audio_urls_allowed": False,
+        "browser_local_save": True,
+        "server_save_sync": False,
+        "world_dna_physics": True,
+        "arbitrary_server_code_executed": False,
+        "runtime_network_access": False,
+    }
+
+
+# These routes deliberately precede foundation API equivalents in app.py. They bind approval and
+# publishing to Game DNA + World DNA + verified media/models + cinematic/VFX + gameplay + Adventure
+# State + Advanced World Logic + World Events + typed State Machines.
 @router.post("/api/game-forge/games/{game_id}/scan")
 def scan_world_integrity(game_id: str, request: Request):
     _creator(request)
@@ -181,6 +271,13 @@ def publish_world_integrity(game_id: str, request: Request):
         "integrity_bound_to_world": True,
         "integrity_bound_to_assets": True,
         "integrity_bound_to_cinematics": True,
+        "integrity_bound_to_gameplay": True,
+        "integrity_bound_to_adventure_state": True,
+        "integrity_bound_to_advanced_world_logic": True,
+        "integrity_bound_to_world_events": True,
+        "integrity_bound_to_state_machines": True,
+        "verified_same_origin_world_audio": True,
+        "player_save_storage": "browser_local_only",
         "verified_media_snapshot_count": len(public_assets),
         "external_media_urls_included": False,
     }

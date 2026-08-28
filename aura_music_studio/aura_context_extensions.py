@@ -5,6 +5,8 @@ from threading import RLock
 from typing import Callable
 
 from . import aura_agent_core as core
+from .brand_migration import rebrand_text
+from .branding import PRODUCT_FULL_NAME
 
 ContextProvider = Callable[[str, str], str | None]
 
@@ -12,7 +14,10 @@ _INSTALLED = False
 _PROVIDERS: list[ContextProvider] = []
 _PROVIDER_LOCK = RLock()
 _ACTIVE_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar("aura_context_extension_scope", default=None)
-_CORE_SIGNATURE = "You are Aura, the general AI co-creator and operating intelligence inside Pulsar-Frequency House"
+_CORE_SIGNATURES = (
+    "You are Aura, the general AI co-creator and operating intelligence inside Pulsar-Frequency House",
+    f"You are Aura, the general AI co-creator and operating intelligence inside {PRODUCT_FULL_NAME}",
+)
 
 
 def register_context_provider(provider: ContextProvider) -> None:
@@ -54,21 +59,26 @@ def _inject_messages(messages: list[dict], user_id: str, thread_id: str) -> list
     if not messages:
         return messages
     first = messages[0]
-    if first.get("role") != "system" or _CORE_SIGNATURE not in str(first.get("content") or ""):
+    content = str(first.get("content") or "")
+    if first.get("role") != "system" or not any(signature in content for signature in _CORE_SIGNATURES):
         return messages
-    extensions = context_extensions(user_id, thread_id)
-    if not extensions:
-        return messages
+
+    # Aura's authoritative identity must be current before inference, not only rewritten in the
+    # HTTP response after the model has already received a retired product identity.
     copied = [dict(item) for item in messages]
-    copied[0]["content"] = str(copied[0].get("content") or "") + "\n\n" + "\n\n".join(extensions)
+    copied[0]["content"] = rebrand_text(content)
+
+    extensions = context_extensions(user_id, thread_id)
+    if extensions:
+        copied[0]["content"] = str(copied[0].get("content") or "") + "\n\n" + "\n\n".join(extensions)
     return copied
 
 
 def install_aura_context_extensions() -> None:
-    """Inject registered private context into normal, streaming and regenerated Aura turns.
+    """Inject private context and current branding into normal, streaming and regenerated Aura turns.
 
     The active user/thread scope is a ContextVar, so concurrent requests cannot inherit one
-    another's profile/workspace context. Normal model calls are injected only when the first
+    another's profile/workspace context. Normal model calls are changed only when the first
     system message is Aura Core itself; private tool routing and summarisation prompts remain
     unaffected by user profile instructions.
     """
