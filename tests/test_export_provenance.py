@@ -130,9 +130,23 @@ def test_render_request_commercial_rights_contract():
     assert commercial.rights_attested is True
 
 
-def test_integration_overlay_mounts_export_governance_routes():
+def test_integration_overlay_dispatches_export_governance_routes():
     from aura_music_studio.creative_version_autopromotion import router
 
-    paths = {getattr(route, "path", "") for route in router.routes}
-    assert "/creative/export-governance/{export_id}" in paths
-    assert "/owner/creative/export-governance/{export_id}/review" in paths
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    member_response = client.get("/creative/export-governance/missing")
+    assert member_response.status_code == 401
+
+    owner_response = client.post(
+        "/owner/creative/export-governance/missing/review",
+        json={
+            "status": "blocked",
+            "review_method": "manual_ip_review",
+            "evidence_reference": "review:missing",
+            "note": "test",
+        },
+    )
+    assert owner_response.status_code == 403
