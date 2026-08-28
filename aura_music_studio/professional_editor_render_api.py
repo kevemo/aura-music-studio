@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
@@ -23,9 +24,9 @@ router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rende
 class EditorRenderRequest(BaseModel):
     format: Literal["png", "webp", "jpeg", "mp4"]
     quality: int = Field(default=92, ge=1, le=100)
-    # Image sequences may contain transform/effect keyframes even though the exported file is
-    # a still. frame_time lets the member choose which authored frame to flatten.
     frame_time: float = Field(default=0.0, ge=0.0, le=86400.0)
+    commercial_use: bool = False
+    rights_attested: bool = False
 
 
 def _member(request: Request):
@@ -83,6 +84,15 @@ def render_editor_sequence(
     request: Request,
 ):
     member = _member(request)
+    user_id = str(getattr(member, "user_id", "") or "")
+    if not user_id:
+        raise HTTPException(401, "Authenticated member identity unavailable")
+    if body.commercial_use and not body.rights_attested:
+        raise HTTPException(
+            400,
+            "Commercial-use export requires an explicit confirmation that you own or are licensed to use all supplied material.",
+        )
+
     renderer = _renderer(project_name)
     try:
         state = renderer.store.public_state()
@@ -118,6 +128,19 @@ def render_editor_sequence(
                 quality=body.quality,
                 frame_time=body.frame_time,
             )
+
+        output_path = renderer.resolve_export(result.filename)
+        provenance = export_provenance_store.record_export(
+            user_id=user_id,
+            project_name=project_name,
+            sequence_id=sequence_id,
+            filename=result.filename,
+            media_kind=sequence["kind"],
+            format=expected,
+            path=output_path,
+            commercial_use_requested=body.commercial_use,
+            rights_attested=body.rights_attested,
+        )
     except KeyError as exc:
         raise HTTPException(404, f"Editor resource not found: {exc.args[0]}") from exc
     except PermissionError as exc:
@@ -130,6 +153,11 @@ def render_editor_sequence(
     return {
         "export": result.model_dump(mode="json"),
         "download_url": f"/creative/projects/{project_name}/editor/exports/{result.filename}",
+        "provenance": provenance,
+        "commercial_release_status": (
+            "review_required" if body.commercial_use else "not_requested"
+        ),
+        "automatic_legal_clearance": False,
         "non_destructive": True,
         "source_media_mutated": False,
         "frame_time": body.frame_time if sequence["kind"] == "image" else None,
@@ -139,11 +167,21 @@ def render_editor_sequence(
 @router.get("/projects/{project_name}/editor/exports/{filename}")
 def download_editor_export(project_name: str, filename: str, request: Request):
     member = _member(request)
+    user_id = str(getattr(member, "user_id", "") or "")
+    if not user_id:
+        raise HTTPException(401, "Authenticated member identity unavailable")
     renderer = _renderer(project_name)
     try:
         path = renderer.resolve_export(filename)
     except (FileNotFoundError, EditorRenderError) as exc:
         raise HTTPException(404, "Editor export not found") from exc
+
+    provenance = export_provenance_store.latest_for_file(user_id, project_name, filename)
+    if provenance and provenance["commercial_use_requested"] and not provenance["commercial_platform_export_allowed"]:
+        raise HTTPException(
+            403,
+            "This commercial-use export is awaiting IP/similarity review. A platform review does not replace legal advice or guarantee copyrightability/non-infringement.",
+        )
 
     suffix = path.suffix.lower()
     media_types = {
@@ -168,6 +206,7 @@ def download_editor_export(project_name: str, filename: str, request: Request):
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
             "X-Aura-Editor-Export": "non-destructive",
+            "X-Aura-Automatic-Legal-Clearance": "false",
         },
     )
 
