@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -314,9 +313,13 @@ class PaymentReversalStore:
         return result
 
     def summary(self, *, limit: int = 100) -> dict[str, Any]:
+        """Return complete finance totals plus bounded recent evidence rows.
+
+        ``limit`` controls only the recent lists. Monetary totals and unmatched counts always
+        cover the entire verified ledger so owner net-receipt reporting cannot drift upward as
+        older refund evidence falls outside the UI window.
+        """
         limit = max(1, min(int(limit), 500))
-        totals: dict[str, int] = defaultdict(int)
-        unmatched_totals: dict[str, int] = defaultdict(int)
         with self._connect() as con:
             rows = con.execute(
                 """SELECT id,provider,adjustment_kind,provider_adjustment_id,payment_intent_id,
@@ -333,17 +336,37 @@ class PaymentReversalStore:
                    ORDER BY verified_at DESC,provider_adjustment_id DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
+            total_rows = con.execute(
+                """SELECT currency,COALESCE(SUM(amount_minor),0) AS total
+                   FROM verified_payment_adjustments
+                   WHERE adjustment_kind='refund' AND status='succeeded'
+                   GROUP BY currency"""
+            ).fetchall()
+            unmatched_total_rows = con.execute(
+                """SELECT currency,COALESCE(SUM(amount_minor),0) AS total
+                   FROM unmatched_payment_adjustments
+                   WHERE adjustment_kind='refund'
+                   GROUP BY currency"""
+            ).fetchall()
+            unmatched_count = int(
+                con.execute(
+                    """SELECT COUNT(*) AS total FROM unmatched_payment_adjustments
+                       WHERE adjustment_kind='refund'"""
+                ).fetchone()["total"]
+                or 0
+            )
+
         items = [dict(row) for row in rows]
         unmatched = [dict(row) for row in unmatched_rows]
-        for row in items:
-            totals[str(row["currency"])] += int(row["amount_minor"])
-        for row in unmatched:
-            unmatched_totals[str(row["currency"])] += int(row["amount_minor"])
+        totals = {str(row["currency"]): int(row["total"] or 0) for row in total_rows}
+        unmatched_totals = {
+            str(row["currency"]): int(row["total"] or 0) for row in unmatched_total_rows
+        }
         return {
-            "verified_refunds_minor": dict(totals),
+            "verified_refunds_minor": totals,
             "recent_verified_refunds": items,
-            "unmatched_verified_refunds_minor": dict(unmatched_totals),
-            "unmatched_verified_refund_count": len(unmatched),
+            "unmatched_verified_refunds_minor": unmatched_totals,
+            "unmatched_verified_refund_count": unmatched_count,
             "recent_unmatched_verified_refunds": unmatched,
         }
 
