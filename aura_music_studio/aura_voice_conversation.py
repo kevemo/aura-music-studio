@@ -5,7 +5,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .aura_realtime_voice import router as realtime_voice_router
+
 router = APIRouter(include_in_schema=False)
+router.include_router(realtime_voice_router)
 
 VOICE_SCRIPT = r"""
 (()=>{
