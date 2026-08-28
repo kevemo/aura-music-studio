@@ -9,7 +9,7 @@ REALTIME_VOICE_SCRIPT = r"""
 (()=>{
   const api='/aura-intelligence/api';
   const realtimeUrl='https://api.openai.com/v1/realtime/calls';
-  let pc=null,micStream=null,remoteAudio=null,events=null,active=false,connecting=false,legacyClick=null;
+  let pc=null,micStream=null,remoteAudio=null,events=null,active=false,connecting=false,legacyClick=null,transcriptSession=null,realtimeThread=null;
 
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
   function hostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
@@ -17,7 +17,7 @@ REALTIME_VOICE_SCRIPT = r"""
   function setButton(label){const b=button();if(b)b.textContent=label}
 
   function cleanupRealtime(){
-    active=false;connecting=false;
+    active=false;connecting=false;transcriptSession=null;realtimeThread=null;
     if(events){try{events.close()}catch(_){}events=null}
     if(pc){try{pc.close()}catch(_){}pc=null}
     if(micStream){for(const track of micStream.getTracks()){try{track.stop()}catch(_){}}micStream=null}
@@ -33,6 +33,28 @@ REALTIME_VOICE_SCRIPT = r"""
     else toast('Aura Voice fallback is unavailable in this browser.',true);
   }
 
+  async function syncTranscript(event){
+    if(!transcriptSession||!realtimeThread)return;
+    const type=String(event?.type||'');
+    const supported=new Set([
+      'conversation.item.input_audio_transcription.completed',
+      'response.output_audio_transcript.done',
+      'response.audio_transcript.done'
+    ]);
+    if(!supported.has(type))return;
+    const transcript=String(event?.transcript||'').trim();
+    const eventId=String(event?.event_id||event?.item_id||event?.response_id||'').trim();
+    if(!transcript||!eventId)return;
+    try{
+      const response=await fetch(`${api}/threads/${encodeURIComponent(realtimeThread)}/realtime-transcript`,{
+        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','Accept':'application/json'},
+        body:JSON.stringify({transcript_session_id:transcriptSession,event_id:eventId,event_type:type,transcript})
+      });
+      if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.detail||'Realtime transcript could not be saved.');}
+      try{if(typeof loadMessages==='function')await loadMessages(realtimeThread)}catch(_){}
+    }catch(error){toast(String(error?.message||'Realtime transcript could not be saved.'),true)}
+  }
+
   function handleEvent(raw){
     let event;try{event=JSON.parse(raw)}catch(_){return}
     const type=String(event?.type||'');
@@ -44,6 +66,7 @@ REALTIME_VOICE_SCRIPT = r"""
       const message=String(event?.error?.message||'Aura Realtime Voice reported an error.');
       toast(message,true);hostState('warning',{transport:'webrtc',error:message});
     }
+    void syncTranscript(event);
   }
 
   async function startRealtime(){
@@ -58,13 +81,16 @@ REALTIME_VOICE_SCRIPT = r"""
       if(!status.available_to_plan)throw new Error('Aura Realtime Voice is not enabled for this membership.');
       if(!status.configured)return fallback('Realtime voice is not configured on this host; using standard Aura Voice.');
 
-      const secretResponse=await fetch(`${api}/threads/${encodeURIComponent(current)}/realtime-client-secret`,{
+      realtimeThread=String(current);
+      const secretResponse=await fetch(`${api}/threads/${encodeURIComponent(realtimeThread)}/realtime-client-secret`,{
         method:'POST',credentials:'same-origin',headers:{'Accept':'application/json'}
       });
       const secretBody=await secretResponse.json();
       if(!secretResponse.ok)throw new Error(secretBody.detail||'Aura Realtime Voice session could not be created.');
       const ephemeralKey=String(secretBody.client_secret||'');
+      transcriptSession=String(secretBody.transcript_session_id||'');
       if(!ephemeralKey)throw new Error('Aura Realtime Voice returned no short-lived client credential.');
+      if(!transcriptSession)throw new Error('Aura Realtime Voice returned no transcript session.');
 
       micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       pc=new RTCPeerConnection();
