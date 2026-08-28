@@ -11,6 +11,7 @@ class _Plan:
 
 
 class _Member:
+    user_id = "grouped-video-test-user"
     plan = _Plan()
 
 
@@ -38,6 +39,9 @@ class _Renderer:
         assert sequence_id == "seq_video"
         return {"advanced": False}
 
+    def resolve_export(self, filename):
+        return Path("/tmp") / filename
+
 
 class _Result:
     filename = "grouped-export.mp4"
@@ -45,6 +49,18 @@ class _Result:
     def model_dump(self, *, mode: str):
         assert mode == "json"
         return {"filename": self.filename, "renderer": "grouped-proof"}
+
+
+class _Provenance:
+    def record_export(self, **kwargs):
+        assert kwargs["user_id"] == "grouped-video-test-user"
+        assert kwargs["commercial_use_requested"] is False
+        assert kwargs["rights_attested"] is False
+        return {
+            "id": "grouped-video-provenance",
+            "commercial_platform_export_allowed": False,
+            "automatic_legal_clearance": False,
+        }
 
 
 def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
@@ -62,6 +78,7 @@ def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
     monkeypatch.setattr(api, "_renderer", lambda project_name: _Renderer())
     monkeypatch.setattr(api, "_project", lambda project_name: Path("/tmp/grouped-video-project"))
     monkeypatch.setattr(api, "GroupedUnifiedAdvancedVideoCompositor", _Grouped)
+    monkeypatch.setattr(api, "export_provenance_store", _Provenance())
 
     response = api.render_editor_sequence(
         "DemoProject",
@@ -76,6 +93,8 @@ def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
     }
     assert response["export"]["renderer"] == "grouped-proof"
     assert response["download_url"].endswith("/editor/exports/grouped-export.mp4")
+    assert response["provenance"]["id"] == "grouped-video-provenance"
+    assert response["automatic_legal_clearance"] is False
     assert response["non_destructive"] is True
     assert response["source_media_mutated"] is False
     assert response["frame_time"] is None
