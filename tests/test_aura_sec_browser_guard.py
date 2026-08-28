@@ -22,14 +22,15 @@ def _reputation_verifier(
     confidence=0.97,
     indicator_type="host",
     indicator_override=None,
-    expires_delta=timedelta(hours=2),
+    expires_delta=timedelta(minutes=30),
+    observed_delta=timedelta(minutes=-5),
     digest_override=None,
 ):
     def verify(payload, context):
         if payload.get("provider_response") != "verified-fixture":
             return None
         indicator = indicator_override or (context.host if indicator_type == "host" else context.normalized_url)
-        observed = NOW - timedelta(minutes=5)
+        observed = NOW + observed_delta
         expires = NOW + expires_delta
         evidence_digest = hashlib.sha256(
             context.evidence_payload(
@@ -156,7 +157,7 @@ def test_reputation_requires_real_verifier_and_exact_destination_binding():
         )
 
 
-def test_reputation_rejects_expired_and_tampered_evidence():
+def test_reputation_rejects_expired_tampered_and_overlong_evidence():
     with pytest.raises(PermissionError, match="expired"):
         evaluate_url(
             "https://example.com/",
@@ -170,6 +171,30 @@ def test_reputation_rejects_expired_and_tampered_evidence():
             "https://example.com/",
             reputation_payload={"provider_response": "verified-fixture"},
             reputation_verifier=_reputation_verifier(digest_override="a" * 64),
+            now=NOW,
+        )
+
+    with pytest.raises(PermissionError, match="lifetime"):
+        evaluate_url(
+            "https://example.com/",
+            reputation_payload={"provider_response": "verified-fixture"},
+            reputation_verifier=_reputation_verifier(
+                observed_delta=timedelta(minutes=-5),
+                expires_delta=timedelta(minutes=56),
+            ),
+            now=NOW,
+        )
+
+
+def test_reputation_rejects_future_observation_beyond_clock_skew():
+    with pytest.raises(PermissionError, match="future"):
+        evaluate_url(
+            "https://example.com/",
+            reputation_payload={"provider_response": "verified-fixture"},
+            reputation_verifier=_reputation_verifier(
+                observed_delta=timedelta(minutes=6),
+                expires_delta=timedelta(minutes=30),
+            ),
             now=NOW,
         )
 
