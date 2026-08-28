@@ -75,6 +75,12 @@ def test_voice_workspace_injects_fallback_before_realtime_layer():
     assert response.text.index(fallback) < response.text.index(realtime)
 
 
-def test_voice_overlay_router_contains_realtime_ui_route():
-    paths = {getattr(route, "path", "") for route in voice_router.routes}
-    assert "/aura-intelligence/realtime-voice.js" in paths
+def test_voice_overlay_router_dispatches_realtime_ui_route():
+    app = FastAPI()
+    app.include_router(voice_router)
+    client = TestClient(app)
+    response = client.get("/aura-intelligence/realtime-voice.js")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "RTCPeerConnection" in response.text
