@@ -90,7 +90,9 @@ def test_payment_correlation_requires_matching_verified_receipt(tmp_path):
     assert first["payment_intent_id"] == "pi_verified"
     assert duplicate["receipt_reference"] == receipt["reference"]
 
-    with pytest.raises(ValueError, match="reused"):
+    # A caller cannot alter the financial amount on an existing correlation. The verified
+    # local receipt mismatch is detected before duplicate-correlation reuse is even considered.
+    with pytest.raises(ValueError, match="does not match the verified local receipt"):
         reversals.bind_credit_payment(
             payment_intent_id="pi_verified",
             receipt_reference=receipt["reference"],
