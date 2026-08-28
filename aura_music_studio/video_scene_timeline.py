@@ -133,6 +133,7 @@ class SceneCreateRequest(BaseModel):
     shot_type: str = Field(default="", max_length=120)
     camera_direction: str = Field(default="", max_length=1000)
     continuity_notes: str = Field(default="", max_length=2000)
+    continuity_profile_ids: list[str] = Field(default_factory=list, max_length=50)
     preserve_element_ids: list[str] = Field(default_factory=list, max_length=100)
     reference_ids: list[str] = Field(default_factory=list, max_length=100)
     output_element_id: str | None = Field(default=None, max_length=96)
@@ -142,6 +143,8 @@ class SceneCreateRequest(BaseModel):
     def timing(self):
         if self.end_seconds <= self.start_seconds:
             raise ValueError("end_seconds must be greater than start_seconds")
+        if len(self.continuity_profile_ids) != len(set(self.continuity_profile_ids)):
+            raise ValueError("continuity_profile_ids cannot contain duplicates")
         return self
 
 
@@ -153,10 +156,17 @@ class SceneUpdateRequest(BaseModel):
     shot_type: str | None = Field(default=None, max_length=120)
     camera_direction: str | None = Field(default=None, max_length=1000)
     continuity_notes: str | None = Field(default=None, max_length=2000)
+    continuity_profile_ids: list[str] | None = Field(default=None, max_length=50)
     preserve_element_ids: list[str] | None = Field(default=None, max_length=100)
     reference_ids: list[str] | None = Field(default=None, max_length=100)
     output_element_id: str | None = Field(default=None, max_length=96)
     status: Literal["planned", "ready", "rendering", "rendered", "approved"] | None = None
+
+    @model_validator(mode="after")
+    def continuity_ids(self):
+        if self.continuity_profile_ids is not None and len(self.continuity_profile_ids) != len(set(self.continuity_profile_ids)):
+            raise ValueError("continuity_profile_ids cannot contain duplicates")
+        return self
 
 
 class ReorderScenesRequest(BaseModel):
