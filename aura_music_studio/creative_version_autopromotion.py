@@ -27,13 +27,13 @@ from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
 from .professional_editor_lifecycle_api import router as professional_editor_lifecycle_router
 from .professional_editor_render_api import router as professional_editor_render_router
+from .professional_editor_visual_entitlements import router as professional_editor_visual_entitlement_router
 from .safety_appeal_review import router as owner_safety_appeal_router
 from .safety_reports import member_router as member_safety_router, owner_router as owner_safety_router
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
 from .tenant_storage import project_path
-from .video_music_sync import router as video_music_sync_router
 from .video_scene_local_revision import router as video_scene_local_revision_router
 from .video_scene_render import router as video_scene_render_router
 from .video_scene_timeline import router as video_scene_timeline_router
@@ -65,7 +65,9 @@ router.include_router(video_scene_timeline_router)
 router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
 router.include_router(video_scene_local_revision_router)
-router.include_router(video_music_sync_router)
+# Pro visual entitlement routes intentionally precede the generic editor/render routes so direct
+# API calls cannot bypass the same blend/group gates shown in the professional browser inspector.
+router.include_router(professional_editor_visual_entitlement_router)
 router.include_router(professional_editor_router)
 router.include_router(professional_editor_lifecycle_router)
 router.include_router(professional_editor_render_router)
