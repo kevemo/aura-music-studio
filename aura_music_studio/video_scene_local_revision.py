@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
 from .creative_project_api import QueueRendererRequest
-from .video_scene_render import SceneRenderRequest, _scene, render_video_scene
+from .video_scene_render import SceneRenderRequest, _member_identity, _scene, render_video_scene
 from .video_scene_timeline import _read, _write
 
 router = APIRouter(prefix="/creative", tags=["video-scene-local-revision"])
@@ -47,6 +47,7 @@ def render_localized_scene_revision(
     body: LocalizedSceneRevisionRequest,
     request: Request,
 ):
+    _member_identity(request)
     _, scene = _scene(project_name, scene_id)
     previous_output = str(scene.get("output_element_id") or "").strip()
     if not previous_output:
