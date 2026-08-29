@@ -76,9 +76,9 @@ def _install_routes_once(routes) -> None:
 
 
 def install_professional_editor_patch_guard() -> None:
-    """Install the guarded PATCH route plus the existing hardened render/export surface.
+    """Install guarded editor mutation, direct render/export and queued render surfaces.
 
-    The render module is imported lazily so importing the package or this overlay remains
+    Heavy render modules are imported lazily so importing the package or this overlay remains
     lightweight for production-readiness commands. The PATCH guard is prepended because it
     must win route precedence; render routes are appended because they do not shadow legacy
     editor endpoints.
@@ -95,12 +95,13 @@ def install_professional_editor_patch_guard() -> None:
         if not already_installed:
             professional_editor_router.routes.insert(0, guarded)
 
-    # This render/export implementation already existed in the repository but was not mounted
-    # by the production app. Activate it only through the authenticated Professional Editor
-    # router so its Basic/Pro entitlement checks and project-scoped path confinement apply.
+    # Activate rendering only through the authenticated Professional Editor router so its
+    # membership, Pro-feature and tenant-storage boundaries remain authoritative.
     from .professional_editor_render_api import router as render_router
+    from .professional_editor_render_jobs import router as render_jobs_router
 
     _install_routes_once(render_router.routes)
+    _install_routes_once(render_jobs_router.routes)
 
 
 __all__ = [
