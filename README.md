@@ -13,16 +13,16 @@ Aura AI is the intelligence and orchestration layer across the Command Center. A
 
 > Legacy repository, package, cookie and environment-variable identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `LSS_*`, or earlier public product names. These are retained only where compatibility requires them and are **not** the current public brand.
 
----
+## Authoritative public identity
 
-## Brand authority
+The README and all new public product documentation must use only the following public identity unless the Owners deliberately rebrand the platform:
 
-- **Public product name:** Elevate Souls Productions Content Creation Command Center
+- **Product:** Elevate Souls Productions Content Creation Command Center
 - **Endorsement:** Powered by Aura AI
 - **Company:** Elevate Souls Productions LCN LLC & LTD
 - **Tagline:** Elevate Your Soul Through Purposeful Media
 
-Any remaining public-facing references to earlier product names are branding migration debt and should be removed safely without breaking compatibility-sensitive internal identifiers.
+Older names such as Pulsar-Frequency House are legacy branding only and must not be presented as the current product name.
 
 ---
 
