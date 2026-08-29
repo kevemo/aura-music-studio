@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 router = APIRouter(tags=["Aura LIVE Overlay Event Engine"])
 DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3"))
 EVENT_LIMIT = 1000
+GIFT_STREAK_WINDOW_SECONDS = int(os.getenv("AURA_LIVE_GIFT_STREAK_WINDOW_SECONDS", "15"))
 EVENT_TYPES = {
     "viewer_joined", "follow", "subscribe", "gift", "share", "like", "like_milestone", "comment",
     "battle_start", "battle_progress", "battle_end", "poll", "treasure_chest", "question", "pinned_message",
@@ -111,6 +112,29 @@ def _init_schema() -> None:
                 leader_value REAL NOT NULL DEFAULT 0,
                 ends_at TEXT,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS live_overlay_gift_reactions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                gift_name TEXT NOT NULL,
+                min_count INTEGER NOT NULL DEFAULT 1,
+                visual TEXT NOT NULL DEFAULT 'gift_cannon',
+                media_id TEXT,
+                sound_media_id TEXT,
+                tts_template TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id,gift_name,min_count)
+            );
+            CREATE TABLE IF NOT EXISTS live_overlay_gift_streaks (
+                user_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                current_streak INTEGER NOT NULL DEFAULT 0,
+                best_streak INTEGER NOT NULL DEFAULT 0,
+                last_gift_at TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(user_id,username)
             );
             """
         )
@@ -226,6 +250,65 @@ def _update_stats(con: sqlite3.Connection, user_id: str, event_type: str, payloa
     )
 
 
+def _update_gift_streak(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> dict | None:
+    if event_type != "gift":
+        return None
+    username = str(payload.get("username") or payload.get("display_name") or "").strip()[:80]
+    if not username:
+        return None
+    now_dt = datetime.now(timezone.utc)
+    row = con.execute("SELECT * FROM live_overlay_gift_streaks WHERE user_id=? AND username=?", (user_id, username)).fetchone()
+    increment = max(1, int(payload.get("gift_count") or 1))
+    previous = 0
+    best = 0
+    if row:
+        previous = int(row["current_streak"] or 0)
+        best = int(row["best_streak"] or 0)
+        try:
+            last = datetime.fromisoformat(str(row["last_gift_at"])) if row["last_gift_at"] else None
+        except ValueError:
+            last = None
+        if last is None or (now_dt - last).total_seconds() > GIFT_STREAK_WINDOW_SECONDS:
+            previous = 0
+    current = previous + increment
+    best = max(best, current)
+    con.execute(
+        "INSERT INTO live_overlay_gift_streaks(user_id,username,current_streak,best_streak,last_gift_at,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(user_id,username) DO UPDATE SET current_streak=excluded.current_streak,best_streak=excluded.best_streak,last_gift_at=excluded.last_gift_at,updated_at=excluded.updated_at",
+        (user_id, username, current, best, now_dt.isoformat(), now_dt.isoformat()),
+    )
+    return {"username": username, "current_streak": current, "best_streak": best, "window_seconds": GIFT_STREAK_WINDOW_SECONDS}
+
+
+def _gift_reaction(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> dict | None:
+    if event_type != "gift":
+        return None
+    gift_name = str(payload.get("gift_name") or "").strip()
+    if not gift_name:
+        return None
+    count = max(1, int(payload.get("gift_count") or 1))
+    row = con.execute(
+        "SELECT * FROM live_overlay_gift_reactions WHERE user_id=? AND enabled=1 AND lower(gift_name)=lower(?) AND min_count<=? ORDER BY min_count DESC LIMIT 1",
+        (user_id, gift_name, count),
+    ).fetchone()
+    if not row:
+        return None
+    actions: list[dict] = []
+    visual = str(row["visual"] or "gift_cannon")
+    username = str(payload.get("username") or payload.get("display_name") or "friend")[:80]
+    if visual == "spotlight":
+        actions.append({"action": "spotlight_viewer", "params": {"text": f"{username} sent {gift_name}!"}})
+    if row["media_id"]:
+        actions.append({"action": "play_media", "params": {"media_id": str(row["media_id"])[:80]}})
+    if row["sound_media_id"]:
+        actions.append({"action": "play_sound", "params": {"media_id": str(row["sound_media_id"])[:80]}})
+    if row["tts_template"]:
+        spoken = str(row["tts_template"] or "")[:300].replace("{username}", username).replace("{gift_name}", gift_name).replace("{gift_count}", str(count))
+        actions.append({"action": "speak", "params": {"text": spoken}})
+    if not actions and visual in {"alert", "confetti"}:
+        actions.append({"action": "spotlight_viewer", "params": {"text": f"{username} · {gift_name} ×{count}"}})
+    return {"reaction_id": row["id"], "gift_name": gift_name, "visual": visual, "actions": actions}
+
+
 def _update_challenges(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> list[dict]:
     updates: list[dict] = []
     rows = con.execute("SELECT * FROM live_overlay_challenges WHERE user_id=? AND enabled=1", (user_id,)).fetchall()
@@ -267,6 +350,20 @@ def _update_auction(con: sqlite3.Connection, user_id: str, event_type: str, payl
     return {"active": True, "leader_changed": True, "leader_username": username, "leader_value": value, "unit": "normalized_gift_value", "payment_processed": False}
 
 
+def _emit_automation(con: sqlite3.Connection, user_id: str, title: str, actions: list[dict], synthetic: bool, source: str) -> None:
+    if not actions:
+        return
+    con.execute(
+        "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+        (
+            user_id,
+            "custom",
+            json.dumps({"title": title[:100], "label": "automation", "message": json.dumps(actions, separators=(",", ":"))[:500], "source": source[:80], "synthetic": bool(synthetic)}, separators=(",", ":")),
+            _now(),
+        ),
+    )
+
+
 def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synthetic: bool = False) -> dict:
     if event_type not in EVENT_TYPES:
         raise ValueError("Unsupported LIVE event type")
@@ -276,6 +373,8 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
     goal_updates: list[dict] = []
     challenge_updates: list[dict] = []
     auction_update: dict | None = None
+    streak_update: dict | None = None
+    gift_reaction: dict | None = None
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         con.execute(
@@ -283,6 +382,7 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
             (user_id, event_type, json.dumps(clean, separators=(",", ":")), _now()),
         )
         _update_stats(con, user_id, event_type, clean)
+        streak_update = _update_gift_streak(con, user_id, event_type, clean)
         goals = con.execute("SELECT * FROM live_overlay_goals WHERE user_id=? AND enabled=1", (user_id,)).fetchall()
         for goal in goals:
             delta = _goal_delta(str(goal["metric"]), event_type, clean)
@@ -293,6 +393,9 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
             goal_updates.append({"goal_id": goal["id"], "current": new_value, "target": float(goal["target"])})
         challenge_updates = _update_challenges(con, user_id, event_type, clean)
         auction_update = _update_auction(con, user_id, event_type, clean)
+        gift_reaction = _gift_reaction(con, user_id, event_type, clean)
+        if gift_reaction and gift_reaction.get("actions"):
+            _emit_automation(con, user_id, f"{gift_reaction['gift_name']} reaction", gift_reaction["actions"], synthetic, "aura_gift_reaction")
         rules = con.execute("SELECT * FROM live_overlay_rules WHERE user_id=? AND event_type=? AND enabled=1 ORDER BY updated_at DESC", (user_id, event_type)).fetchall()
         now_mono = time.monotonic()
         for row in rules:
@@ -316,17 +419,7 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
             if not safe:
                 continue
             _rule_last_fired[key] = now_mono
-            automation_payload = {
-                "title": str(row["name"])[:100],
-                "label": "automation",
-                "message": json.dumps(safe, separators=(",", ":"))[:500],
-                "source": "aura_rule_engine",
-                "synthetic": bool(synthetic),
-            }
-            con.execute(
-                "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-                (user_id, "custom", json.dumps(automation_payload, separators=(",", ":")), _now()),
-            )
+            _emit_automation(con, user_id, str(row["name"]), safe, synthetic, "aura_rule_engine")
             fired.append({"rule_id": row["id"], "name": row["name"], "actions": safe})
         for challenge in challenge_updates:
             if challenge.get("completed"):
@@ -351,6 +444,8 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
         "goals_updated": goal_updates,
         "challenges_updated": challenge_updates,
         "auction_update": auction_update,
+        "gift_streak": streak_update,
+        "gift_reaction": gift_reaction,
     }
 
 
@@ -391,6 +486,7 @@ def reset_session_stats(request: Request):
     member = _member(request)
     with _connect() as con:
         con.execute("DELETE FROM live_overlay_session_stats WHERE user_id=?", (member.user_id,))
+        con.execute("DELETE FROM live_overlay_gift_streaks WHERE user_id=?", (member.user_id,))
         rows = con.execute("SELECT id,reset_mode FROM live_overlay_goals WHERE user_id=?", (member.user_id,)).fetchall()
         for row in rows:
             if row["reset_mode"] == "per_live":
