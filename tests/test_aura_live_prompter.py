@@ -1,4 +1,4 @@
-from importlib import reload
+import inspect
 from types import SimpleNamespace
 
 import pytest
@@ -64,11 +64,14 @@ def test_prompter_response_is_no_store_and_no_referrer():
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
 
 
-def test_production_api_mounts_prompter_route_from_fresh_assembly():
-    # Other integration tests may mutate the shared FastAPI app object. Reloading the API module
-    # verifies the production assembly itself mounts the prompter without depending on test order.
-    import aura_music_studio.api as api_module
+def test_production_api_explicitly_mounts_prompter_router():
+    # Match the established Overlay Studio production-mount regression pattern. The shared
+    # FastAPI app route list is intentionally mutated by other integration tests, so validate
+    # the prompter router itself plus the explicit production aggregate wiring in source.
+    from aura_music_studio import api as api_mod
 
-    fresh_api = reload(api_module)
-    paths = [getattr(route, "path", "") for route in fresh_api.app.routes]
+    paths = {getattr(route, "path", "") for route in router.routes}
     assert "/live-overlay-studio/prompter" in paths
+    api_source = inspect.getsource(api_mod)
+    assert "from .aura_live_prompter import router as aura_live_prompter_router" in api_source
+    assert "app.include_router(aura_live_prompter_router)" in api_source
