@@ -16,6 +16,7 @@ from .game_forge_assets import router as game_assets_router
 from .game_forge_assets import snapshot_public_assets
 from .game_forge_aura_commands import router as game_aura_commands_router
 from .game_forge_cinematics import router as game_cinematics_router
+from .game_forge_export_portal import router as game_export_portal_router
 from .game_forge_gameplay import router as game_gameplay_router
 from .game_forge_gameplay_portal import router as game_gameplay_portal_router
 from .game_forge_integrity import assess_game_integrity, game_integrity_hash
@@ -50,8 +51,9 @@ install_aura_world_events_tools()
 install_aura_state_machine_tools()
 
 router = APIRouter(tags=["Aura Game World"])
-# Binding/cinematic/gameplay/Adventure/World Logic/World Event/State Machine routes and global
-# operations readiness are composed here so parallel build chats do not need to edit shared app.py.
+# Binding/cinematic/gameplay/Adventure/World Logic/World Event/State Machine/export routes and
+# global operations readiness are composed here so consumers mounting Game Forge get the complete
+# subsystem without relying on application import order.
 router.include_router(production_readiness_router)
 router.include_router(game_asset_bindings_router)
 router.include_router(game_assets_router)
@@ -67,6 +69,7 @@ router.include_router(game_world_events_router)
 router.include_router(game_world_events_portal_router)
 router.include_router(game_state_machine_router)
 router.include_router(game_state_machine_portal_router)
+router.include_router(game_export_portal_router)
 
 
 def _member(request: Request):
@@ -114,6 +117,8 @@ def _editor_urls(game_id: str) -> dict[str, str]:
         "world_logic_editor_url": f"/game-creation/world-logic/{game_id}",
         "world_events_editor_url": f"/game-creation/world-events/{game_id}",
         "state_machine_editor_url": f"/game-creation/state-machines/{game_id}",
+        "export_studio_url": f"/game-creation/export/{game_id}",
+        "godot_source_preview_url": f"/game-creation/godot-export/{game_id}",
     }
 
 
