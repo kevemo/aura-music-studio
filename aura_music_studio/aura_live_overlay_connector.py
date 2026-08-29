@@ -227,7 +227,7 @@ def rotate_connector(body: ConnectorRotate, request: Request):
         )
     return JSONResponse(
         {
-            "ingest_path": "/live-overlay/connector",
+            "ingest_path": "/live-overlay/source/relay/ingest",
             "authorization_scheme": "Bearer",
             "token": raw,
             "token_returned_once": True,
@@ -249,7 +249,7 @@ def disable_connector(request: Request):
     return {"disabled": True}
 
 
-@router.post("/live-overlay/connector", include_in_schema=False)
+@router.post("/live-overlay/source/relay/ingest", include_in_schema=False)
 def connector_ingest(body: ConnectorEvent, request: Request):
     token = _bearer_token(request)
     row = _resolve(token)
