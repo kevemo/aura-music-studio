@@ -135,6 +135,7 @@ def test_scene_image_to_video_route_is_mounted_in_production_aggregate():
         json={"rights_confirmed": False},
     )
 
-    # A mounted route reaches its fail-closed rights gate. An unmounted route would return 404.
-    assert response.status_code == 400
-    assert "Confirm" in response.json()["detail"]
+    # The mounted production aggregate authenticates before route-local rights validation.
+    # An unmounted route would return 404 instead of the expected fail-closed 401.
+    assert response.status_code == 401
+    assert "Authenticated member" in response.json()["detail"]
