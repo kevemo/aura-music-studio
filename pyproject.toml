@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # Retained as a compatibility distribution identifier. The authoritative public
-# product brand is Pulsar-Frequency House.
+# product brand is Elevate Souls Productions Content Creation Command Center.
 name = "aura-music-studio"
 version = "0.20.0"
-description = "Pulsar-Frequency House — professional music, video, image, voice and creator intelligence powered by Elevate Souls Productions & Aura AI Systems"
+description = "Elevate Souls Productions Content Creation Command Center — professional music, video, image, voice and creator intelligence — Powered by Aura AI"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
@@ -19,6 +19,7 @@ dependencies = [
   "requests>=2.31",
   "cryptography>=42.0",
   "argon2-cffi>=23.1",
+  "webauthn>=3.0,<4",
   "gradio>=5.0",
   "gradio-client>=1.7",
   "typer>=0.12",
