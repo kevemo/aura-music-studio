@@ -72,6 +72,42 @@ class AgentRosterStore:
                     ON esp_agent_followups(agent_user_id,status,due_at);
                 CREATE INDEX IF NOT EXISTS idx_agent_followups_creator
                     ON esp_agent_followups(creator_user_id,status);
+
+                -- Assignment rows are durable audit records, but their active state must never
+                -- outlive the current server-authoritative ESP role/status on either side.
+                -- These triggers make that invariant apply to every assignment consumer, not
+                -- just this roster service.
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_creator_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('creator','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE creator_user_id=NEW.user_id
+                       AND status='active';
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_agent_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('agent','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE agent_user_id=NEW.user_id
+                       AND status='active';
+                END;
                 """
             )
 
