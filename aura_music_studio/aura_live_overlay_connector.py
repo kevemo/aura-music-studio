@@ -69,6 +69,13 @@ def _init_schema() -> None:
             );
             """
         )
+        receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts)").fetchall()}
+        if "state" not in receipt_columns:
+            # Stale #226 development databases recorded a row only after accepting an event.
+            # Preserve those rows as completed so a schema upgrade cannot replay historical events.
+            con.execute("ALTER TABLE live_overlay_connector_receipts ADD COLUMN state TEXT NOT NULL DEFAULT 'completed'")
+        if "completed_at" not in receipt_columns:
+            con.execute("ALTER TABLE live_overlay_connector_receipts ADD COLUMN completed_at TEXT")
 
 
 _init_schema()
