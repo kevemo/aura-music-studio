@@ -12,7 +12,7 @@ def test_creator_policy_deduplicates_phrases_and_matches_case_insensitively(tmp_
         spam_sensitivity="high",
         actor="member:creator-1",
     )
-    assert policy.blocked_phrases == ("no drama", "NO DRAMA", "spam link")[:1] + ("spam link",)
+    assert policy.blocked_phrases == ("no drama", "spam link")
     assert store.phrase_matches("creator-1", "Please stop the NO DRAMA comments") == ("no drama",)
 
 
