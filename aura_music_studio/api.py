@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -11,7 +12,7 @@ from . import __version__
 from .access_control import MembershipAccessMiddleware
 from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
-from .assets import AssetLibrary
+from .assets import AUDIO_EXTS, AssetLibrary
 from .aura_live_guardian import router as aura_live_guardian_router
 from .aura_live_guardian_policy_ui import router as aura_live_guardian_policy_router
 from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
@@ -46,6 +47,13 @@ from .studio_portal import router as studio_portal_router
 from .styles import StyleBlend, build_style_dna, style_prompt
 from .tenant_storage import list_project_dirs, project_path, projects_root
 from .transcription import audio_to_midi
+from .upload_security import (
+    UploadTooLargeError,
+    asset_upload_limit,
+    safe_upload_filename,
+    save_bounded_upload,
+    voice_upload_limit,
+)
 from .voice import create_voice_profile
 from .web_api import router as web_api_router
 from .web_portal import router as web_portal_router
@@ -99,6 +107,31 @@ def _session_path(project: Path) -> Path:
     return project / "aura_session.json"
 
 
+def _upload_limit(factory) -> int:
+    try:
+        return int(factory())
+    except ValueError as exc:
+        raise HTTPException(503, "Upload security policy is unavailable") from exc
+
+
+def _upload_name(filename: str | None, *, default: str) -> str:
+    try:
+        return safe_upload_filename(filename, default=default)
+    except ValueError as exc:
+        raise HTTPException(400, "Upload filename is invalid") from exc
+
+
+async def _save_member_upload(upload: UploadFile, destination: Path, *, max_bytes: int, label: str) -> None:
+    try:
+        await save_bounded_upload(upload, destination, max_bytes=max_bytes)
+    except UploadTooLargeError as exc:
+        raise HTTPException(413, f"{label} exceeds the configured size limit") from exc
+    except ValueError as exc:
+        if str(exc) == "Upload is empty":
+            raise HTTPException(400, f"{label} is empty") from exc
+        raise
+
+
 @app.get("/health")
 def health():
     return {
@@ -137,6 +170,7 @@ def health():
         "security_headers": True,
         "cookie_write_origin_protection": True,
         "auth_rate_limiting": True,
+        "bounded_legacy_uploads": True,
         "api_version": __version__,
     }
 
@@ -246,22 +280,28 @@ async def upload_asset(
     tags: str = Form(""),
 ):
     project = _project(project_name)
+    safe_name = _upload_name(file.filename, default="upload.bin")
+    if AssetLibrary.detect_kind(Path(safe_name)) == "unsupported":
+        raise HTTPException(400, "Unsupported asset type")
     incoming = project / "input" / "uploads"
-    incoming.mkdir(parents=True, exist_ok=True)
-    safe_name = Path(file.filename or "upload.bin").name
-    tmp = incoming / safe_name
-    with tmp.open("wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
-    record = AssetLibrary(project).ingest(
+    tmp = incoming / f"{uuid4().hex}_{safe_name}"
+    await _save_member_upload(
+        file,
         tmp,
-        kind=kind,
-        rights_basis=rights_basis,
-        attestation=attestation,
-        tags=[x.strip() for x in (tags or "").split(",") if x.strip()],
+        max_bytes=_upload_limit(asset_upload_limit),
+        label="Asset upload",
     )
-    tmp.unlink(missing_ok=True)
-    return record.model_dump()
+    try:
+        record = AssetLibrary(project).ingest(
+            tmp,
+            kind=kind,
+            rights_basis=rights_basis,
+            attestation=attestation,
+            tags=[x.strip() for x in (tags or "").split(",") if x.strip()],
+        )
+        return record.model_dump()
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @app.get("/projects/{project_name}/assets")
@@ -369,19 +409,28 @@ async def new_voice_profile(
     reference: UploadFile = File(...),
 ):
     project = _project(project_name)
+    safe_name = _upload_name(reference.filename, default="voice.wav")
+    if Path(safe_name).suffix.lower() not in AUDIO_EXTS:
+        raise HTTPException(400, "Voice reference must use a supported audio file type")
     voice_dir = project / "input" / "voice_profiles"
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    target = voice_dir / Path(reference.filename or "voice.wav").name
-    with target.open("wb") as f:
-        while chunk := await reference.read(1024 * 1024):
-            f.write(chunk)
-    profile = create_voice_profile(
-        RightsLedger(project / ".aura_rights"),
-        name=name,
-        owner_label=owner_label,
-        reference_files=[target],
-        consent_statement=consent_statement,
+    target = voice_dir / f"{uuid4().hex}_{safe_name}"
+    await _save_member_upload(
+        reference,
+        target,
+        max_bytes=_upload_limit(voice_upload_limit),
+        label="Voice reference",
     )
+    try:
+        profile = create_voice_profile(
+            RightsLedger(project / ".aura_rights"),
+            name=name,
+            owner_label=owner_label,
+            reference_files=[target],
+            consent_statement=consent_statement,
+        )
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return profile.model_dump()
 
 
