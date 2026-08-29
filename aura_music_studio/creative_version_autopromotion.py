@@ -12,6 +12,7 @@ from .creative_project_api import (
     sync_creative_outputs as base_sync_creative_outputs,
 )
 from .creative_render_resource_governance import store as creative_render_resource_store
+from .creative_safety_overlay import router as creative_safety_overlay_router
 from .daw_mixer_ui import daw_mixer_ui as base_daw_mixer_ui
 from .deep_daw_automation_api import router as deep_daw_automation_router
 from .deep_daw_automation_ui import enhance_daw_mixer_javascript
@@ -48,6 +49,9 @@ from .video_sync_entitlement_routes import router as video_sync_entitlement_rout
 from .video_visual_continuity import router as video_visual_continuity_router
 
 router = APIRouter(tags=["Creative Version Promotion"])
+# Safety must be the first duplicate-path layer so prohibited intent is rejected before
+# billing/Creation Coin charging, capacity reservation, project mutation or renderer submission.
+router.include_router(creative_safety_overlay_router)
 router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
 router.include_router(compliance_applicability_router)

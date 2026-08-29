@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-POLICY_VERSION = "esp-creative-ip-v1-2026-08-28"
+POLICY_VERSION = "esp-creative-ip-v2-2026-08-29"
 
 IpInputKind = Literal[
     "lyrics",
@@ -12,6 +12,7 @@ IpInputKind = Literal[
     "voice_reference",
     "image_reference",
     "video_reference",
+    "training_data",
     "other_reference",
 ]
 
@@ -51,6 +52,16 @@ _VOICE_OR_LIKENESS_CLONE = re.compile(
     r"\b(?:use|make|create)\b.{0,30}\b(?:the )?(?:voice|vocal|face|likeness) of\b",
     re.I | re.S,
 )
+_UNAUTHORIZED_TRAINING_DATA = re.compile(
+    r"(?:\b(?:train|fine[- ]?tune|finetune|adapt)\b.{0,80}\b(?:model|ai|generator)\b.{0,100}"
+    r"\b(?:copyrighted|protected|licensed|commercial|artist|creator|catalogue|catalog|songs?|recordings?|"
+    r"images?|artwork|books?|articles?|videos?|dataset)\b.{0,70}"
+    r"\b(?:without (?:permission|a license|licence)|unlicensed|pirated|stolen|scraped without permission)\b)"
+    r"|(?:\b(?:copyrighted|protected|commercial|artist|creator|catalogue|catalog|songs?|recordings?|images?|"
+    r"artwork|books?|articles?|videos?)\b.{0,90}\bwithout (?:permission|a license|licence)\b.{0,90}"
+    r"\b(?:train|fine[- ]?tune|finetune|adapt)\b)",
+    re.I | re.S,
+)
 _BYPASS_RIGHTS = re.compile(
     r"\b(?:without (?:permission|consent|a license)|ignore (?:copyright|licensing|rights)|"
     r"bypass (?:copyright|rights|licensing)|remove (?:copyright|watermark|provenance) protection)\b",
@@ -66,6 +77,14 @@ def evaluate_ip_text(
     value = (text or "").strip()
     if not value:
         return IpDecision(True)
+
+    if _UNAUTHORIZED_TRAINING_DATA.search(value):
+        return IpDecision(
+            False,
+            "unauthorized_training_or_finetuning_sources",
+            "The request asks to train or fine-tune an AI system on protected or third-party material without an authorized rights basis.",
+            "Use material you own, have licensed/permission to use for that purpose, or another source that has been qualified for the intended training use.",
+        )
 
     if _BYPASS_RIGHTS.search(value):
         return IpDecision(
@@ -141,6 +160,7 @@ def require_input_rights(
             "voice_reference": "voice reference",
             "image_reference": "image/reference artwork",
             "video_reference": "video/reference footage",
+            "training_data": "training/fine-tuning source material",
             "other_reference": "reference material",
         }
         raise ValueError(
@@ -171,6 +191,7 @@ def build_clearance_record(
         "approved_voice_requires_active_consent_profile": bool(approved_voice_requested),
         "direct_imitation_prohibited": True,
         "existing_work_reproduction_prohibited_without_rights": True,
+        "model_training_or_finetuning_requires_authorized_sources": True,
         "commercial_use_is_not_a_copyright_guarantee": True,
         "copyright_protectability_varies_by_jurisdiction": True,
         "automatic_legal_clearance": False,
@@ -185,12 +206,15 @@ def public_ip_policy_summary() -> dict:
             "No recreation of existing songs, recordings, lyrics, melodies, artwork or video without a verified rights basis",
             "No cloning or impersonation of another person's voice or likeness without explicit authorization",
             "User-provided lyrics and references require ownership/license confirmation before generation",
+            "AI training or fine-tuning source material must have an authorized rights basis under platform policy",
             "Commercial-use permission does not guarantee copyright protection or non-infringement",
+            "Copyright protectability and AI-training rules vary by jurisdiction and use case",
             "Rights/provenance evidence should remain attached to creative projects and exports",
         ],
         "automatic_legal_clearance": False,
+        "legal_advice": False,
         "note": (
             "This deterministic preflight is a production safety gate, not a copyright search engine or legal opinion. "
-            "Similarity and jurisdiction-specific questions can still require human/legal review."
+            "Similarity, training-data exceptions/licensing and jurisdiction-specific copyright questions can still require human/legal review."
         ),
     }

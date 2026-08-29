@@ -5,9 +5,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .creative_abuse_policy import enforce_creation_abuse_policy, public_abuse_policy_summary
 from .creative_ip_policy import enforce_creation_ip_policy, public_ip_policy_summary
 
-POLICY_VERSION = "esp-professional-creation-v1"
+POLICY_VERSION = "esp-professional-creation-v2-2026-08-29"
 
 # These are intent patterns, not an exhaustive moderation system. Production deployments
 # can add owner-managed blocked terms (including slurs) without committing them to source.
@@ -75,6 +76,9 @@ def evaluate_text(text: str | None) -> SafetyDecision:
 
 
 def enforce_creation_policy(*texts: str | None, context: str = "creation") -> None:
+    # High-severity illegal-use/abuse intent is checked first so a prohibited renderer request
+    # cannot be downgraded into an ordinary professional-conduct or IP warning.
+    enforce_creation_abuse_policy(*texts, context=context)
     for text in texts:
         decision = evaluate_text(text)
         if not decision.allowed:
@@ -92,6 +96,9 @@ def public_policy_summary() -> dict:
     return {
         "version": POLICY_VERSION,
         "principles": [
+            "No sexualised or intimate creation involving children or minors",
+            "No non-consensual or unverified real-person intimate synthetic media",
+            "No synthetic identity/voice/video used for fraud or financial deception",
             "No hate or dehumanisation",
             "No racial or protected-class abuse",
             "No targeted bullying, harassment or doxxing",
@@ -100,10 +107,12 @@ def public_policy_summary() -> dict:
             "Respectful professional creator conduct",
             "Platform/community rules remain an additional requirement",
         ],
+        "creative_abuse": public_abuse_policy_summary(),
         "creative_ip": public_ip_policy_summary(),
         "owner_blocked_terms_enabled": bool(_owner_blocked_terms()),
+        "automatic_legal_clearance": False,
         "note": (
-            "This local policy is a baseline, not a substitute for official platform moderation, copyright review or evolving platform rules. "
-            "Owner-managed blocked terms can extend it without source-code changes."
+            "This local policy is a strict creation baseline, not a substitute for official platform moderation, qualified legal review, "
+            "copyright review or evolving laws/platform rules. Owner-managed blocked terms can extend it without source-code changes."
         ),
     }
