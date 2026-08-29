@@ -196,11 +196,9 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
             }
         },
     )
-    try:
-        store.add_directive(directive)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
 
+    # Resource admission must succeed before the directive becomes durable. Otherwise a
+    # rejected render can leave a manifest directive that falsely implies work was accepted.
     try:
         reservation = creative_render_resource_store.reserve(
             user_id=user_id,
@@ -216,6 +214,24 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         raise HTTPException(429, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, "Creative renderer resource policy is misconfigured") from exc
+
+    try:
+        store.add_directive(directive)
+    except ValueError as exc:
+        try:
+            creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        except Exception:
+            # Preserve the manifest validation failure; the reservation remains auditable
+            # if cleanup itself is unavailable and can be reconciled independently.
+            pass
+        raise HTTPException(400, str(exc)) from exc
+    except Exception:
+        try:
+            creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        except Exception:
+            # Never mask the persistence failure with a secondary cleanup failure.
+            pass
+        raise
 
     charge: CreationCoinCharge | None = None
     try:
