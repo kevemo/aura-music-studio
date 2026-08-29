@@ -31,33 +31,11 @@ router = APIRouter(tags=["commercial-entitlements"])
 
 
 _REPLACED_BASE_ROUTES = {
-    ("POST", "/creative/projects/{project_name}/directives/{directive_id}/render"),
-    ("GET", "/creative/projects/{project_name}/elements/{element_id}/media"),
+    ("POST", "/creative/projects/{project_name}/directives/{directive_id}/render"):
+        base_creative_project_router,
+    ("GET", "/creative/projects/{project_name}/elements/{element_id}/media"):
+        base_creative_media_router,
 }
-
-
-def _install_authoritative_commercial_route_replacements() -> None:
-    """Remove only the base routes that this commercial overlay authoritatively replaces.
-
-    The overlay still delegates to the underlying Python functions after enforcing server-side
-    Creation Coin and download entitlements. Leaving both APIRoute objects mounted would make
-    behavior depend on router order and expose ambiguous duplicate method/path operations to
-    FastAPI/OpenAPI. Removing the superseded route objects keeps one public handler per endpoint
-    without weakening or duplicating the underlying creative implementation.
-    """
-
-    for base_router in (base_creative_project_router, base_creative_media_router):
-        base_router.routes[:] = [
-            route
-            for route in base_router.routes
-            if not any(
-                (method, getattr(route, "path", "")) in _REPLACED_BASE_ROUTES
-                for method in (getattr(route, "methods", None) or set())
-            )
-        ]
-
-
-_install_authoritative_commercial_route_replacements()
 
 
 def _member(request: Request):
@@ -348,6 +326,54 @@ def media_with_commercial_entitlements(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
     return base_creative_element_media(project_name, element_id, request, download=download)
+
+
+def _route_keys(route) -> set[tuple[str, str]]:
+    path = str(getattr(route, "path", "") or "")
+    return {(method, path) for method in (getattr(route, "methods", None) or set())}
+
+
+def _install_authoritative_commercial_route_replacements() -> None:
+    """Replace superseded base APIRoutes in place with the entitlement-enforcing handlers.
+
+    The Creative sub-routers retain their public route contracts for isolated use/tests, while the
+    assembled application receives exactly one handler for each replaced method/path. The
+    replacement APIRoutes still delegate to the same underlying renderer/media functions after
+    enforcing the server-authoritative commercial boundary.
+    """
+
+    replacements = []
+    for commercial_route in list(router.routes):
+        matching_keys = _route_keys(commercial_route).intersection(_REPLACED_BASE_ROUTES)
+        if not matching_keys:
+            continue
+        if len(matching_keys) != 1:
+            raise RuntimeError("Commercial entitlement route must replace exactly one base route")
+        key = next(iter(matching_keys))
+        base_router = _REPLACED_BASE_ROUTES[key]
+        matching_indexes = [
+            index
+            for index, base_route in enumerate(base_router.routes)
+            if key in _route_keys(base_route)
+        ]
+        if len(matching_indexes) != 1:
+            raise RuntimeError(
+                f"Expected exactly one base Creative route for commercial replacement: {key}"
+            )
+        base_router.routes[matching_indexes[0]] = commercial_route
+        replacements.append(commercial_route)
+
+    if len(replacements) != len(_REPLACED_BASE_ROUTES):
+        raise RuntimeError("Not all authoritative commercial route replacements were installed")
+
+    router.routes[:] = [
+        route
+        for route in router.routes
+        if all(route is not replacement for replacement in replacements)
+    ]
+
+
+_install_authoritative_commercial_route_replacements()
 
 
 __all__ = ["router"]
