@@ -128,11 +128,9 @@ def render_project_image_to_video(
             }
         },
     )
-    try:
-        store.add_directive(directive)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
 
+    # Reserve scarce render capacity before persisting the directive. A quota or policy denial
+    # therefore cannot leave an orphan project directive that was never eligible to render.
     try:
         reservation = creative_render_resource_store.reserve(
             user_id=user_id,
@@ -150,6 +148,12 @@ def render_project_image_to_video(
         raise HTTPException(503, "Creative renderer resource policy is misconfigured") from exc
 
     try:
+        store.add_directive(directive)
+    except ValueError as exc:
+        creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        raise HTTPException(400, str(exc)) from exc
+
+    try:
         renderer_input = renderer.upload_image_input(source)
     except Exception as exc:
         creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
@@ -165,6 +169,7 @@ def render_project_image_to_video(
         )
     except Exception:
         creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        store.update_directive(directive.id, status="failed")
         raise
 
     seed = body.seed if body.seed is not None else secrets.randbelow(2**31 - 1)
