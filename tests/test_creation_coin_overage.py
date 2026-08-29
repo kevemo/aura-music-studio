@@ -37,6 +37,10 @@ def request_for(member):
     return SimpleNamespace(state=SimpleNamespace(member=member))
 
 
+def _image_snapshot(*_args, **_kwargs):
+    return {"kind": "image", "status": "pending", "prompt_id": None}
+
+
 def test_coin_cost_is_never_invented_when_owner_has_not_configured_it(tmp_path, monkeypatch):
     member, _ = active_member(tmp_path, monkeypatch)
     monkeypatch.delenv("LSS_CREATION_COIN_COSTS_JSON", raising=False)
@@ -102,9 +106,13 @@ def test_included_allowance_does_not_spend_creation_coins(tmp_path, monkeypatch)
     wallet = CreditWalletStore(accounts.db_path)
     wallet.grant(member.user_id, 20, reason="test funds", actor="test")
 
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "image")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _image_snapshot)
     monkeypatch.setattr(routes, "require_image_poster_generation", lambda _member: {"remaining": 5})
-    monkeypatch.setattr(routes, "base_queue_creative_render", lambda *_args, **_kwargs: {"submission": {"id": "ok"}})
+    monkeypatch.setattr(
+        routes,
+        "base_queue_creative_render",
+        lambda *_args, **_kwargs: {"submission": {"prompt_id": "ok"}},
+    )
     monkeypatch.setattr(routes, "record_image_poster_generation", lambda *_args, **_kwargs: {"used": 1, "remaining": 4})
 
     response = routes.render_with_commercial_entitlements(
@@ -116,6 +124,7 @@ def test_included_allowance_does_not_spend_creation_coins(tmp_path, monkeypatch)
     assert wallet.balance(member.user_id) == 20
     assert response["commercial_entitlements"]["creation_coin_overage"]["charged"] is False
     assert response["commercial_entitlements"]["creation_coin_overage"]["charged_amount"] == 0
+    assert response["render_attempt"]["state"] == "queued"
 
 
 def test_exhausted_allowance_spends_configured_coins_only_after_server_policy(tmp_path, monkeypatch):
@@ -124,13 +133,17 @@ def test_exhausted_allowance_spends_configured_coins_only_after_server_policy(tm
     wallet = CreditWalletStore(accounts.db_path)
     wallet.grant(member.user_id, 20, reason="test funds", actor="test")
 
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "image")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _image_snapshot)
 
     def exhausted(_member):
         raise PermissionError("Daily image/poster creation allowance reached (5 per day on this plan)")
 
     monkeypatch.setattr(routes, "require_image_poster_generation", exhausted)
-    monkeypatch.setattr(routes, "base_queue_creative_render", lambda *_args, **_kwargs: {"submission": {"id": "accepted"}})
+    monkeypatch.setattr(
+        routes,
+        "base_queue_creative_render",
+        lambda *_args, **_kwargs: {"submission": {"prompt_id": "accepted"}},
+    )
     monkeypatch.setattr(routes, "record_image_poster_generation", lambda *_args, **_kwargs: {"used": 6, "remaining": 0})
 
     response = routes.render_with_commercial_entitlements(
@@ -146,6 +159,7 @@ def test_exhausted_allowance_spends_configured_coins_only_after_server_policy(tm
     assert coin_state["balance"] == 13
     assert coin_state["subscription_effect"] == "none"
     assert coin_state["esp_role_effect"] == "none"
+    assert response["render_attempt"]["state"] == "queued"
 
 
 def test_renderer_rejection_refunds_prepaid_overage(tmp_path, monkeypatch):
@@ -154,7 +168,7 @@ def test_renderer_rejection_refunds_prepaid_overage(tmp_path, monkeypatch):
     wallet = CreditWalletStore(accounts.db_path)
     wallet.grant(member.user_id, 20, reason="test funds", actor="test")
 
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "image")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _image_snapshot)
     monkeypatch.setattr(
         routes,
         "require_image_poster_generation",
@@ -183,7 +197,7 @@ def test_insufficient_coins_reject_before_renderer_submission(tmp_path, monkeypa
     monkeypatch.setenv("LSS_CREATION_COIN_COSTS_JSON", '{"image_poster_overage": 7}')
     called = {"renderer": False}
 
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "image")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _image_snapshot)
     monkeypatch.setattr(
         routes,
         "require_image_poster_generation",
@@ -211,7 +225,7 @@ def test_missing_overage_cost_preserves_daily_limit_and_does_not_render(tmp_path
     monkeypatch.delenv("LSS_CREATION_COIN_COSTS_JSON", raising=False)
     called = {"renderer": False}
 
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "image")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _image_snapshot)
     monkeypatch.setattr(
         routes,
         "require_image_poster_generation",
