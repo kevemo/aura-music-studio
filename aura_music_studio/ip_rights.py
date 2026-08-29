@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .owner_auth import owner_authorized
+from .owner_identity import owner_actor
 
 member_router = APIRouter(prefix="/member/ip-rights", tags=["Member IP Rights"])
 owner_router = APIRouter(prefix="/owner/ip-rights", tags=["Owner IP Rights Review"])
@@ -170,13 +171,16 @@ class IPRightsStore:
         previous_hash = str(previous["event_hash"]) if previous else "GENESIS"
         event_id = uuid4().hex
         occurred_at = _iso()
+        event_data = dict(data)
+        if actor_type == "owner":
+            event_data.setdefault("reviewer_actor", owner_actor())
         payload = {"id": event_id, "notice_id": notice_id, "actor_type": actor_type,
-                   "action": action, "occurred_at": occurred_at, "data": data,
+                   "action": action, "occurred_at": occurred_at, "data": event_data,
                    "previous_hash": previous_hash}
         event_hash = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
         con.execute(
             "INSERT INTO ip_rights_events(id,notice_id,actor_type,action,occurred_at,data_json,previous_hash,event_hash) VALUES (?,?,?,?,?,?,?,?)",
-            (event_id, notice_id, actor_type, action, occurred_at, _canonical_json(data), previous_hash, event_hash),
+            (event_id, notice_id, actor_type, action, occurred_at, _canonical_json(event_data), previous_hash, event_hash),
         )
 
     def submit_notice(self, *, claimant_user_id: str, payload: RightsNoticeInput) -> dict:
