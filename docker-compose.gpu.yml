@@ -33,6 +33,7 @@ services:
     restart: unless-stopped
     gpus: all
     environment:
+      CUDA_VISIBLE_DEVICES: ${AURA_ACESTEP_CUDA_VISIBLE_DEVICES:-0}
       ACESTEP_MODE: api
       ACESTEP_API_HOST: 0.0.0.0
       ACESTEP_API_PORT: 8001
@@ -57,7 +58,7 @@ services:
       timeout: 10s
       retries: 12
       start_period: 300s
-    # Deliberately no public host port. Only The Live Sound Studio services call this worker.
+    # Deliberately no public host port. Only Command Center services call this worker.
 
 volumes:
   ace_step_checkpoints:
