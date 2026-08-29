@@ -559,7 +559,7 @@ def event_contract(request: Request):
         "relay_authentication": "Bearer token returned only at rotation",
         "provider_connected": False,
         "provider_write_authority": False,
-        "production_connector_gate": "A trusted, maintainable, ESP-approved provider adapter must authenticate with its Aura relay token and normalize documented provider events into this bounded contract.",
+        "production_connector_gate": "A trusted, maintainable TikTok LIVE event adapter or other ESP-approved documented provider adapter must authenticate with its Aura relay token and normalize documented provider events into this bounded contract.",
     }
 
 
