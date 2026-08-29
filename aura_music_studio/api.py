@@ -360,7 +360,7 @@ def master_asset(
 
 @app.post("/projects/{project_name}/voice-profiles")
 async def new_voice_profile(
-    project_name: str = Form(...),
+    project_name: str,
     name: str = Form(...),
     owner_label: str = Form(...),
     consent_statement: str = Form(...),
