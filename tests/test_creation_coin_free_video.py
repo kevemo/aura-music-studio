@@ -17,6 +17,15 @@ def _request(plan_id: str = "free", user_id: str = "member-1"):
     return SimpleNamespace(state=SimpleNamespace(member=member))
 
 
+def _video_snapshot(*_args, **_kwargs):
+    return {"kind": "video", "status": "pending", "prompt_id": None}
+
+
+@pytest.fixture(autouse=True)
+def _isolated_render_attempt_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("LSS_DB_PATH", str(tmp_path / "state.sqlite3"))
+
+
 def test_creation_coin_costs_accept_free_video_owner_price(monkeypatch):
     monkeypatch.setenv(
         "LSS_CREATION_COIN_COSTS_JSON",
@@ -36,7 +45,7 @@ def test_creation_coin_costs_reject_boolean_video_price(monkeypatch):
 
 def test_free_video_without_config_fails_before_renderer(monkeypatch):
     called = {"renderer": False}
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "video")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _video_snapshot)
     monkeypatch.setattr(
         routes,
         "free_video_render_quote",
@@ -66,7 +75,7 @@ def test_free_video_without_config_fails_before_renderer(monkeypatch):
 
 def test_free_video_insufficient_coins_fails_before_renderer(monkeypatch):
     called = {"renderer": False}
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "video")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _video_snapshot)
     monkeypatch.setattr(
         routes,
         "free_video_render_quote",
@@ -95,7 +104,7 @@ def test_free_video_insufficient_coins_fails_before_renderer(monkeypatch):
 
 
 def test_basic_video_keeps_existing_subscription_behavior(monkeypatch):
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "video")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _video_snapshot)
 
     def quote_must_not_run(_user_id):
         raise AssertionError("Basic video must not enter Free-tier coin metering")
@@ -112,6 +121,7 @@ def test_basic_video_keeps_existing_subscription_behavior(monkeypatch):
     state = response["commercial_entitlements"]["video_generation"]["free_tier_creation_coin_purchase"]
     assert state["required"] is False
     assert state["reason"] == "included_subscription_behavior"
+    assert response["render_attempt"]["state"] == "queued"
 
 
 def test_free_video_charge_is_reported_after_renderer_accepts(monkeypatch):
@@ -120,7 +130,7 @@ def test_free_video_charge_is_reported_after_renderer_accepts(monkeypatch):
         transaction={"id": "tx-1", "balance_after": 380},
         refund_reference="refund-1",
     )
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "video")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _video_snapshot)
     monkeypatch.setattr(
         routes,
         "free_video_render_quote",
@@ -149,6 +159,7 @@ def test_free_video_charge_is_reported_after_renderer_accepts(monkeypatch):
     assert state["charge_transaction_id"] == "tx-1"
     assert state["subscription_effect"] == "none"
     assert state["esp_role_effect"] == "none"
+    assert response["render_attempt"]["state"] == "queued"
 
 
 def test_free_video_renderer_failure_refunds_prepaid_charge(monkeypatch):
@@ -158,7 +169,7 @@ def test_free_video_renderer_failure_refunds_prepaid_charge(monkeypatch):
         refund_reference="refund-1",
     )
     refunded = {"called": False}
-    monkeypatch.setattr(routes, "_directive_kind", lambda *_args, **_kwargs: "video")
+    monkeypatch.setattr(routes, "_directive_render_snapshot", _video_snapshot)
     monkeypatch.setattr(
         routes,
         "free_video_render_quote",

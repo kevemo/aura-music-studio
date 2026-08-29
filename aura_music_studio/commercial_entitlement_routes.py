@@ -25,6 +25,7 @@ from .creative_project import CreativeProjectStore
 from .creative_project_api import QueueRendererRequest
 from .creative_project_api import queue_creative_render as base_queue_creative_render
 from .creative_project_api import router as base_creative_project_router
+from .render_attempts import ActiveRenderAttemptError, RenderAttemptStore
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["commercial-entitlements"])
@@ -45,17 +46,37 @@ def _member(request: Request):
     return member
 
 
-def _directive_kind(project_name: str, directive_id: str) -> str | None:
+def _directive_render_snapshot(project_name: str, directive_id: str) -> dict:
     try:
         project = project_path(project_name, must_exist=True)
         manifest = CreativeProjectStore(project).load()
     except (FileNotFoundError, ValueError):
-        return None
+        return {"kind": None, "status": None, "prompt_id": None}
     directive = next((item for item in manifest.directives if item.id == directive_id), None)
-    return str(getattr(directive, "target_kind", "") or "") if directive else None
+    if directive is None:
+        return {"kind": None, "status": None, "prompt_id": None}
+    metadata = getattr(directive, "metadata", None)
+    render_meta = metadata.get("creative_renderer") if isinstance(metadata, dict) else None
+    prompt_id = render_meta.get("prompt_id") if isinstance(render_meta, dict) else None
+    return {
+        "kind": str(getattr(directive, "target_kind", "") or ""),
+        "status": str(getattr(directive, "status", "") or ""),
+        "prompt_id": str(prompt_id).strip() if prompt_id else None,
+    }
 
 
-def _overage_charge(member, *, project_name: str, directive_id: str) -> CreationCoinCharge | None:
+def _directive_kind(project_name: str, directive_id: str) -> str | None:
+    return _directive_render_snapshot(project_name, directive_id)["kind"]
+
+
+def _overage_charge(
+    member,
+    *,
+    project_name: str,
+    directive_id: str,
+    charge_reference: str | None = None,
+    refund_reference: str | None = None,
+) -> CreationCoinCharge | None:
     """Return a prepaid image/poster overage charge only after included allowance exhaustion."""
 
     try:
@@ -91,6 +112,8 @@ def _overage_charge(member, *, project_name: str, directive_id: str) -> Creation
             member.user_id,
             project_id=project_name,
             directive_id=directive_id,
+            charge_reference=charge_reference,
+            refund_reference=refund_reference,
         )
     except ValueError as exc:
         if "insufficient" in str(exc).lower():
@@ -106,7 +129,14 @@ def _overage_charge(member, *, project_name: str, directive_id: str) -> Creation
         raise HTTPException(503, str(exc)) from exc
 
 
-def _free_video_charge(member, *, project_name: str, directive_id: str) -> CreationCoinCharge | None:
+def _free_video_charge(
+    member,
+    *,
+    project_name: str,
+    directive_id: str,
+    charge_reference: str | None = None,
+    refund_reference: str | None = None,
+) -> CreationCoinCharge | None:
     """Meter expensive video renderer submissions for Free accounts only.
 
     Basic and Pro retain their existing subscription behavior. The Free plan has no video-create
@@ -141,6 +171,8 @@ def _free_video_charge(member, *, project_name: str, directive_id: str) -> Creat
             member.user_id,
             project_id=project_name,
             directive_id=directive_id,
+            charge_reference=charge_reference,
+            refund_reference=refund_reference,
         )
     except ValueError as exc:
         if "insufficient" in str(exc).lower():
@@ -154,6 +186,43 @@ def _free_video_charge(member, *, project_name: str, directive_id: str) -> Creat
         raise HTTPException(400, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(503, str(exc)) from exc
+
+
+def _refund_charge(member, charge_kind: str | None, charge: CreationCoinCharge) -> None:
+    if charge_kind == "free_video_render":
+        refund_free_video_render(
+            member.user_id,
+            charge,
+            reason="Creation Coin refund — video renderer did not accept the job",
+        )
+    else:
+        refund_image_poster_overage(
+            member.user_id,
+            charge,
+            reason="Creation Coin refund — image/poster renderer did not accept the job",
+        )
+
+
+def _reconcile_terminal_attempt(
+    attempts: RenderAttemptStore,
+    active,
+    snapshot: dict,
+) -> bool:
+    """Release only an attempt whose persisted provider id matches terminal directive evidence."""
+
+    if active.state not in {"queued", "running"}:
+        return False
+    status = str(snapshot.get("status") or "")
+    if status not in {"completed", "failed"}:
+        return False
+    prompt_id = snapshot.get("prompt_id")
+    if not active.provider_prompt_id or not prompt_id or active.provider_prompt_id != prompt_id:
+        return False
+    if status == "completed":
+        attempts.mark_completed(active.attempt_id)
+    else:
+        attempts.mark_failed(active.attempt_id)
+    return True
 
 
 @router.get("/creative/entitlements")
@@ -221,38 +290,130 @@ def render_with_commercial_entitlements(
     request: Request,
 ):
     member = _member(request)
-    kind = _directive_kind(project_name, directive_id)
+    snapshot = _directive_render_snapshot(project_name, directive_id)
+    kind = snapshot["kind"]
+
+    # The bridge itself owns validation for missing/non-renderable directives. Only valid image/video
+    # targets enter the durable admission ledger, avoiding junk reservations for rejected requests.
+    if kind not in {"image", "video"}:
+        return base_queue_creative_render(project_name, directive_id, body, request)
+
+    attempts = RenderAttemptStore()
+    active = attempts.active(member.user_id, project_name, directive_id)
+    if active is not None:
+        if _reconcile_terminal_attempt(attempts, active, snapshot):
+            active = None
+        else:
+            raise HTTPException(409, "A render is already in progress for this directive")
+
+    # Protect pre-ledger renderer jobs created before this migration. A queued/running directive
+    # without matching attempt evidence must not be submitted a second time.
+    if active is None and snapshot["status"] in {"queued", "running"}:
+        raise HTTPException(409, "A render is already in progress for this directive")
+
+    try:
+        attempt = attempts.reserve(member.user_id, project_name, directive_id)
+    except ActiveRenderAttemptError as exc:
+        raise HTTPException(409, "A render is already in progress for this directive") from exc
+
     charge: CreationCoinCharge | None = None
     charge_kind: str | None = None
-    if kind == "image":
-        charge = _overage_charge(member, project_name=project_name, directive_id=directive_id)
-        charge_kind = "image_poster_overage" if charge is not None else None
-    elif kind == "video":
-        charge = _free_video_charge(member, project_name=project_name, directive_id=directive_id)
-        charge_kind = "free_video_render" if charge is not None else None
+    try:
+        if kind == "image":
+            charge = _overage_charge(
+                member,
+                project_name=project_name,
+                directive_id=directive_id,
+                charge_reference=attempt.charge_reference,
+                refund_reference=attempt.refund_reference,
+            )
+            charge_kind = "image_poster_overage" if charge is not None else None
+        elif kind == "video":
+            charge = _free_video_charge(
+                member,
+                project_name=project_name,
+                directive_id=directive_id,
+                charge_reference=attempt.charge_reference,
+                refund_reference=attempt.refund_reference,
+            )
+            charge_kind = "free_video_render" if charge is not None else None
+    except Exception:
+        try:
+            attempts.mark_failed(attempt.attempt_id)
+        except Exception:
+            pass
+        raise
+
+    if charge is not None:
+        try:
+            attempts.mark_charged(
+                attempt.attempt_id,
+                charge.cost,
+                str(charge.transaction.get("id") or "") or None,
+            )
+        except Exception as exc:
+            # The provider has not been called yet. Return any successful debit using the stable
+            # refund reference. If reconciliation itself fails, leave the reservation active so a
+            # retry cannot create a second charge or provider submission.
+            refunded = False
+            try:
+                _refund_charge(member, charge_kind, charge)
+                refunded = True
+            except Exception:
+                pass
+            if refunded:
+                try:
+                    attempts.mark_failed(attempt.attempt_id)
+                except Exception:
+                    pass
+            raise HTTPException(
+                503,
+                "Render billing admission could not be persisted; no renderer job was submitted",
+            ) from exc
 
     try:
         response = base_queue_creative_render(project_name, directive_id, body, request)
     except Exception:
         if charge is not None:
             try:
-                if charge_kind == "free_video_render":
-                    refund_free_video_render(
-                        member.user_id,
-                        charge,
-                        reason="Creation Coin refund — video renderer did not accept the job",
-                    )
-                else:
-                    refund_image_poster_overage(
-                        member.user_id,
-                        charge,
-                        reason="Creation Coin refund — image/poster renderer did not accept the job",
-                    )
+                _refund_charge(member, charge_kind, charge)
             except Exception:
-                # Preserve the original renderer error. The append-only wallet/evidence trail
-                # remains available for owner reconciliation if a refund write itself fails.
+                # Preserve the original renderer error. Keeping the charged attempt active blocks
+                # unsafe replay until the append-only wallet evidence can be reconciled.
+                pass
+            else:
+                try:
+                    attempts.mark_refunded(attempt.attempt_id)
+                except Exception:
+                    # A successful stable-reference refund is safe even if the attempt transition
+                    # cannot be written; the still-active admission prevents duplicate submission.
+                    pass
+        else:
+            try:
+                attempts.mark_failed(attempt.attempt_id)
+            except Exception:
                 pass
         raise
+
+    submission = response.get("submission") if isinstance(response, dict) else None
+    prompt_id = submission.get("prompt_id") if isinstance(submission, dict) else None
+    prompt_id = str(prompt_id).strip() if prompt_id else None
+    if not prompt_id:
+        # The provider may already have accepted the job. Do not refund or reopen admission: keep
+        # the reservation active and fail closed until durable provider identity can be reconciled.
+        raise HTTPException(
+            503,
+            "Renderer accepted the job but durable provider identity was not returned; retry is blocked for safety",
+        )
+    try:
+        queued_attempt = attempts.mark_queued(attempt.attempt_id, prompt_id)
+    except Exception as exc:
+        # Provider acceptance already occurred. Never refund/re-submit automatically here because
+        # doing so could create duplicate external work. The active attempt remains the replay gate.
+        raise HTTPException(
+            503,
+            "Renderer accepted the job but render admission reconciliation is incomplete; retry is blocked for safety",
+        ) from exc
 
     if kind == "image" and isinstance(response, dict):
         usage = record_image_poster_generation(
@@ -302,6 +463,11 @@ def render_with_commercial_entitlements(
                     }
                 }
             }
+    if isinstance(response, dict):
+        response["render_attempt"] = {
+            "id": queued_attempt.attempt_id,
+            "state": queued_attempt.state,
+        }
     return response
 
 

@@ -78,14 +78,27 @@ def _charge(
     project_id: str,
     directive_id: str,
     reason: str,
+    charge_reference: str | None = None,
+    refund_reference: str | None = None,
 ) -> CreationCoinCharge:
     cost = creation_coin_costs().get(product_key)
     if cost is None:
         raise RuntimeError(f"Creation Coin {product_key.replace('_', ' ')} is not configured")
 
-    attempt_id = uuid4().hex
-    charge_reference = f"creation:{product_key}:{user_id}:{project_id}:{directive_id}:{attempt_id}"
-    refund_reference = f"creation:{product_key}_refund:{user_id}:{project_id}:{directive_id}:{attempt_id}"
+    if (charge_reference is None) != (refund_reference is None):
+        raise ValueError("Stable Creation Coin charge and refund references must be supplied together")
+    if charge_reference is None:
+        attempt_id = uuid4().hex
+        charge_reference = f"creation:{product_key}:{user_id}:{project_id}:{directive_id}:{attempt_id}"
+        refund_reference = f"creation:{product_key}_refund:{user_id}:{project_id}:{directive_id}:{attempt_id}"
+    else:
+        charge_reference = charge_reference.strip()
+        refund_reference = (refund_reference or "").strip()
+        if not charge_reference or not refund_reference:
+            raise ValueError("Stable Creation Coin references cannot be blank")
+        if len(charge_reference) > 180 or len(refund_reference) > 180:
+            raise ValueError("Stable Creation Coin references are too long")
+
     wallet = CreditWalletStore()
     transaction = wallet.spend(
         user_id,
@@ -121,6 +134,8 @@ def charge_image_poster_overage(
     *,
     project_id: str,
     directive_id: str,
+    charge_reference: str | None = None,
+    refund_reference: str | None = None,
 ) -> CreationCoinCharge:
     return _charge(
         user_id,
@@ -128,6 +143,8 @@ def charge_image_poster_overage(
         project_id=project_id,
         directive_id=directive_id,
         reason="Image/poster generation beyond the included daily allowance",
+        charge_reference=charge_reference,
+        refund_reference=refund_reference,
     )
 
 
@@ -150,6 +167,8 @@ def charge_free_video_render(
     *,
     project_id: str,
     directive_id: str,
+    charge_reference: str | None = None,
+    refund_reference: str | None = None,
 ) -> CreationCoinCharge:
     return _charge(
         user_id,
@@ -157,6 +176,8 @@ def charge_free_video_render(
         project_id=project_id,
         directive_id=directive_id,
         reason="Free-tier video render purchased with Creation Coins",
+        charge_reference=charge_reference,
+        refund_reference=refund_reference,
     )
 
 
