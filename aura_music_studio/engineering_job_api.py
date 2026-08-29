@@ -12,8 +12,10 @@ from .plans import (
     BASIC_AUTOTUNE,
     BASIC_MASTERING,
     BASIC_STEM_SPLITTER,
+    COVER_REMIX,
     PRIORITY_QUEUE,
     REFERENCE_MASTERING,
+    REGION_REPAINT,
     SPATIAL_AUDIO,
     STANDARD_AUTOTUNE,
     STEM_SPLITTER,
@@ -92,14 +94,23 @@ def _validate_entitlement(member, body: EngineeringJobRequest) -> None:
         _require(member, SPATIAL_AUDIO)
         return
 
+    if body.operation == "cover":
+        _require(member, COVER_REMIX)
+        return
+
+    if body.operation == "repaint":
+        _require(member, REGION_REPAINT)
+        return
+
     raise HTTPException(400, "Unsupported engineering operation")
 
 
 @router.post("/production/projects/{project_name}/engineering-jobs")
 def submit_engineering_job(project_name: str, body: EngineeringJobRequest, request: Request):
     member = _member(request)
-    project = _project(project_name)
+    # Entitlement is checked before tenant/project lookup so a denied tier cannot probe project existence.
     _validate_entitlement(member, body)
+    project = _project(project_name)
 
     library = AssetLibrary(project)
     try:
