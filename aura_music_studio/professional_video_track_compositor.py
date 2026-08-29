@@ -27,6 +27,7 @@ from .professional_video_compositor import (
     _keyframe_expr,
     _transform_default,
 )
+from .professional_video_effects_compositor import _SUPPORTED_VIDEO_EFFECTS, _video_effect_filter
 
 _SUPPORTED_VIDEO_TRACK_BLEND_MODES = set(_SUPPORTED_VIDEO_ITEM_BLEND_MODES)
 
@@ -75,13 +76,50 @@ def _append_full_frame_blend(
     )
 
 
+def _append_track_effects(
+    filters: list[str],
+    *,
+    input_label: str,
+    effects: list[dict[str, Any]],
+    track_index: int,
+) -> tuple[str, int]:
+    """Append an ordered, bounded whole-track effect chain while preserving RGBA group semantics."""
+    current = input_label
+    applied = 0
+    for effect_index, effect in enumerate(effects or [], start=1):
+        if not effect.get("enabled", True):
+            continue
+        effect_filter = _video_effect_filter(effect)
+        mix = max(0.0, min(1.0, _finite(effect.get("mix"), 1.0)))
+        if mix <= 0.0:
+            continue
+
+        applied += 1
+        out = f"track{track_index}fx{effect_index}"
+        if mix >= 1.0:
+            filters.append(f"[{current}]{effect_filter},format=rgba[{out}]")
+            current = out
+            continue
+
+        dry = f"track{track_index}fx{effect_index}dry"
+        wet = f"track{track_index}fx{effect_index}wet"
+        wet_fx = f"track{track_index}fx{effect_index}wetfx"
+        filters.append(f"[{current}]split=2[{dry}][{wet}]")
+        filters.append(f"[{wet}]{effect_filter},format=rgba[{wet_fx}]")
+        filters.append(
+            f"[{dry}][{wet_fx}]blend=all_expr='A*{1.0-mix:.8f}+B*{mix:.8f}',format=rgba[{out}]"
+        )
+        current = out
+    return current, applied
+
+
 class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
     """Professional FFmpeg compositor that treats every visual track as an isolated group.
 
-    Item-local state is rendered inside a transparent track canvas first. Track opacity is then
-    applied once to the completed group before the authored track blend mode is evaluated against
-    the sequence canvas. This is materially different from multiplying track opacity into every
-    overlapping item and is the prerequisite for later track effects/keyframes.
+    Item-local state is rendered inside a transparent track canvas first. Ordered whole-track
+    effects are then applied to that completed group, followed by track opacity and the authored
+    track blend mode against the sequence canvas. This keeps effects at the correct group stage
+    instead of faking them as repeated per-item effects.
     """
 
     def _validate_video_state(self, sequence: dict[str, Any], tracks: dict, items: dict) -> None:
@@ -89,8 +127,9 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
             track = tracks.get(track_id)
             if not track or not track.get("enabled", True):
                 continue
-            if track.get("effects"):
-                raise EditorRenderUnsupported("Video track effects require the next grouped-track effects stage")
+            for effect in track.get("effects") or []:
+                if effect.get("enabled", True):
+                    _video_effect_filter(effect)
             if track.get("keyframes"):
                 raise EditorRenderUnsupported("Video track keyframes require the next grouped-track automation stage")
             track_blend = str(track.get("blend_mode") or "normal").strip().lower()
@@ -199,6 +238,7 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
             filters: list[str] = ["[0:v]format=rgba[sequencebase0]"]
             sequence_current = "sequencebase0"
             layer_index = 0
+            track_effects_applied = 0
 
             for track_index, (track, entries) in enumerate(visual_tracks, start=1):
                 filters.append(
@@ -294,6 +334,14 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                             suffix=f"t{track_index}i{layer_index}",
                         )
                     track_current = item_out
+
+                track_current, applied_effects = _append_track_effects(
+                    filters,
+                    input_label=track_current,
+                    effects=list(track.get("effects") or []),
+                    track_index=track_index,
+                )
+                track_effects_applied += applied_effects
 
                 track_opacity = max(0.0, min(1.0, _finite(track.get("opacity"), 1.0)))
                 track_final = f"track{track_index}final"
@@ -401,8 +449,13 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                     "supports_speed_correct_audio": True,
                     "supports_item_blend_modes": sorted(_SUPPORTED_VIDEO_ITEM_BLEND_MODES),
                     "supports_track_blend_modes": sorted(_SUPPORTED_VIDEO_TRACK_BLEND_MODES),
+                    "supports_track_effects": sorted(_SUPPORTED_VIDEO_EFFECTS),
+                    "track_effects_applied": track_effects_applied,
+                    "track_effects_applied_before_opacity_and_blend": True,
                     "track_opacity_applied_after_item_composition": True,
-                    "track_effects_fail_closed": True,
+                    "track_opacity_applied_after_track_effects": True,
+                    "track_effects_fail_closed": False,
+                    "keyframed_track_effects_fail_closed": True,
                     "track_keyframes_fail_closed": True,
                     "source_media_mutated": False,
                     "unsupported_state_fails_closed": True,
@@ -419,4 +472,5 @@ __all__ = [
     "GroupedTrackVideoCompositor",
     "_SUPPORTED_VIDEO_TRACK_BLEND_MODES",
     "_append_full_frame_blend",
+    "_append_track_effects",
 ]
