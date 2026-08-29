@@ -22,13 +22,7 @@ router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Secur
 
 
 def normalize_item_patch_sources(project_dir: Path, changes: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of item patch changes with source_ref confined to the project.
-
-    The base professional-editor route historically accepted a generic patch dictionary.
-    Source creation/import is already confined, but a later patch must pass through the same
-    project-source boundary before any state mutation can occur.
-    """
-
+    """Return a copy of item patch changes with source_ref confined to the project."""
     normalized = deepcopy(changes)
     if "source_ref" in normalized:
         normalized["source_ref"] = normalize_project_source_ref(
@@ -76,14 +70,7 @@ def _install_routes_once(routes) -> None:
 
 
 def install_professional_editor_patch_guard() -> None:
-    """Install the guarded PATCH route plus the existing hardened render/export surface.
-
-    The render module is imported lazily so importing the package or this overlay remains
-    lightweight for production-readiness commands. The PATCH guard is prepended because it
-    must win route precedence; render routes are appended because they do not shadow legacy
-    editor endpoints.
-    """
-
+    """Install guarded editor mutation, direct render/export and queued render surfaces."""
     guarded_routes = list(router.routes)
     for guarded in reversed(guarded_routes):
         signature = (getattr(guarded, "path", None), frozenset(getattr(guarded, "methods", set())))
@@ -95,12 +82,11 @@ def install_professional_editor_patch_guard() -> None:
         if not already_installed:
             professional_editor_router.routes.insert(0, guarded)
 
-    # This render/export implementation already existed in the repository but was not mounted
-    # by the production app. Activate it only through the authenticated Professional Editor
-    # router so its Basic/Pro entitlement checks and project-scoped path confinement apply.
     from .professional_editor_render_api import router as render_router
+    from .professional_editor_render_jobs import router as render_jobs_router
 
     _install_routes_once(render_router.routes)
+    _install_routes_once(render_jobs_router.routes)
 
 
 __all__ = [
