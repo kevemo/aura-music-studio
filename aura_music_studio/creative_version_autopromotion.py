@@ -23,6 +23,7 @@ from .music_video_storyboard import router as music_video_storyboard_router
 from .owner_finance import router as owner_finance_router
 from .privacy_case_management import router as privacy_case_management_router
 from .privacy_consent import router as privacy_consent_router
+from .privacy_fulfilment import owner_router as owner_privacy_fulfilment_router
 from .privacy_rights import router as privacy_rights_router
 from .professional_editor_api import router as professional_editor_router
 from .professional_editor_inspector_overlay import router as professional_editor_workspace_router
@@ -55,6 +56,7 @@ router.include_router(esp_live_compliance_router)
 router.include_router(owner_esp_live_compliance_router)
 router.include_router(privacy_rights_router)
 router.include_router(privacy_case_management_router)
+router.include_router(owner_privacy_fulfilment_router)
 router.include_router(privacy_consent_router)
 router.include_router(member_safety_router)
 router.include_router(owner_safety_router)
