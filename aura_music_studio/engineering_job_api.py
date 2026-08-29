@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+import soundfile as sf
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 from .assets import AssetLibrary
+from .daw import load_session, public_session, save_session
 from .engineering_jobs import EngineeringJobRequest
 from .jobs import StudioJobQueue
 from .plans import (
@@ -13,6 +18,8 @@ from .plans import (
     BASIC_MASTERING,
     BASIC_STEM_SPLITTER,
     COVER_REMIX,
+    DEEP_REVISION_HISTORY,
+    MULTITRACK_DAW,
     PRIORITY_QUEUE,
     REFERENCE_MASTERING,
     REGION_REPAINT,
@@ -20,10 +27,26 @@ from .plans import (
     STANDARD_AUTOTUNE,
     STEM_SPLITTER,
 )
+from .revisions import create_revision
+from .session import Clip
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Background Engineering Jobs"])
 queue = StudioJobQueue()
+
+_AUDIO_ROLES = {
+    "vocals", "backing_vocals", "drums", "bass", "guitar", "piano", "keyboard", "strings",
+    "synth", "percussion", "brass", "woodwinds", "fx", "other",
+}
+
+
+class EngineeringAssetDAWImport(BaseModel):
+    asset_id: str = Field(min_length=1, max_length=128)
+    role: str = Field(default="other", max_length=40)
+
+
+class EngineeringAssetsDAWImportRequest(BaseModel):
+    assets: list[EngineeringAssetDAWImport] = Field(min_length=1, max_length=24)
 
 
 def _member(request: Request):
@@ -105,6 +128,41 @@ def _validate_entitlement(member, body: EngineeringJobRequest) -> None:
     raise HTTPException(400, "Unsupported engineering operation")
 
 
+def _validated_daw_assets(project: Path, body: EngineeringAssetsDAWImportRequest):
+    """Resolve every requested asset before any DAW session mutation occurs."""
+    library = AssetLibrary(project)
+    root = project.resolve()
+    seen: set[str] = set()
+    validated = []
+    for requested in body.assets:
+        if requested.asset_id in seen:
+            raise HTTPException(400, "Duplicate asset_id in DAW import request")
+        seen.add(requested.asset_id)
+        try:
+            record = library.get(requested.asset_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Engineering audio asset not found") from exc
+        if record.kind != "audio":
+            raise HTTPException(400, "The DAW can import audio engineering assets only")
+        source = (root / record.path).resolve()
+        try:
+            source.relative_to(root)
+        except ValueError as exc:
+            raise HTTPException(400, "Engineering asset resolves outside the member project") from exc
+        if not source.is_file():
+            raise HTTPException(400, "Engineering audio asset is unavailable")
+        try:
+            info = sf.info(source)
+            duration = float(info.frames / info.samplerate)
+        except Exception as exc:
+            raise HTTPException(400, "Engineering audio asset could not be inspected") from exc
+        if duration <= 0:
+            raise HTTPException(400, "Engineering audio asset has no usable duration")
+        role = requested.role if requested.role in _AUDIO_ROLES else "other"
+        validated.append((record, duration, role))
+    return validated
+
+
 @router.post("/production/projects/{project_name}/engineering-jobs")
 def submit_engineering_job(project_name: str, body: EngineeringJobRequest, request: Request):
     member = _member(request)
@@ -136,3 +194,76 @@ def submit_engineering_job(project_name: str, body: EngineeringJobRequest, reque
         payload=body.model_dump(mode="json"),
     )
     return _public(job)
+
+
+@router.post("/production/projects/{project_name}/engineering-assets/import-daw")
+def import_engineering_assets_to_daw(
+    project_name: str,
+    body: EngineeringAssetsDAWImportRequest,
+    request: Request,
+):
+    member = _member(request)
+    # A stem set is inherently multitrack. Gate before project lookup to avoid existence probing.
+    _require(member, MULTITRACK_DAW)
+    project = _project(project_name)
+
+    # Validate the complete batch before loading/mutating the editable session. A bad final stem
+    # must not leave the first stems partially imported.
+    validated = _validated_daw_assets(project, body)
+    session = load_session(project, create=True, name=project_name)
+    existing_asset_ids = {
+        str(clip.metadata.get("asset_id"))
+        for track in session.tracks
+        for clip in track.clips
+        if clip.metadata.get("asset_id")
+    }
+    pending = [item for item in validated if item[0].id not in existing_asset_ids]
+
+    if pending and (project / "aura_session.json").is_file():
+        keep = 200 if member.plan.has(DEEP_REVISION_HISTORY) else 40
+        try:
+            create_revision(
+                project,
+                label="Before importing engineering stem set",
+                reason="daw_edit",
+                actor="Studio member",
+                keep=keep,
+            )
+        except Exception:
+            pass
+
+    imported = []
+    for record, duration, role in pending:
+        track = session.add_track(Path(record.name).stem or role.replace("_", " ").title(), role)
+        clip = Clip(
+            name=record.name,
+            kind="audio",
+            source=Path(record.path).as_posix(),
+            start=0.0,
+            duration=duration,
+            metadata={
+                "asset_id": record.id,
+                "real_audio": True,
+                "imported_to_daw": True,
+                "engineering_asset": True,
+            },
+        )
+        track.clips.append(clip)
+        imported.append({
+            "asset_id": record.id,
+            "track_id": track.id,
+            "clip_id": clip.id,
+            "role": role,
+        })
+
+    if imported:
+        save_session(project, session)
+
+    return {
+        "imported": imported,
+        "imported_count": len(imported),
+        "already_present_asset_ids": sorted(existing_asset_ids.intersection({item[0].id for item in validated})),
+        "session": public_session(session),
+        "atomic_validation": True,
+        "source_paths_exposed": False,
+    }
