@@ -293,10 +293,15 @@ def connector_ingest(body: ConnectorEvent, request: Request):
 
     try:
         result = process_overlay_event(user_id, body.event_type, body.payload, synthetic=False)
-        _complete_event(user_id, body.event_id)
     except Exception:
+        # The engine did not complete, so the same provider event ID may be retried safely.
         _release_failed_claim(user_id, body.event_id)
         raise
+
+    # Once the engine has returned success, never release this claim. If completion bookkeeping
+    # fails, leaving the receipt in `processing` fails closed and prevents a retry from applying
+    # the same gift/like/follow/goal mutation twice.
+    _complete_event(user_id, body.event_id)
 
     result.update(
         {
