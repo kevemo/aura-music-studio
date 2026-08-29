@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from .esp_command_center import EspStore, esp
 from . import esp_niche as esp_niche_module
+from .owner_user_control import OwnerUserControl
 
 
 def _now() -> str:
@@ -62,10 +63,40 @@ class EspSocialAccessControlStore:
             "updated_at": "",
         }
 
+    @staticmethod
+    def _audit_snapshot(item: dict) -> dict:
+        return {
+            "user_id": item.get("user_id"),
+            "state": item.get("state") or "default",
+            "updated_by": item.get("updated_by") or "",
+            "updated_at": item.get("updated_at") or "",
+        }
+
+    def _record_owner_audit(self, *, action: str, actor: str, before: dict, after: dict) -> None:
+        if action not in {"esp_social_access_suspended", "esp_social_access_restored"}:
+            raise ValueError("Unsupported ESP Social Media Centre audit action")
+        owner_control = OwnerUserControl(self.esp.accounts, self.esp)
+        with owner_control._connect() as con:
+            owner_control._audit(
+                con,
+                action=action,
+                target_user_id=str(after.get("user_id") or before.get("user_id") or "") or None,
+                before=self._audit_snapshot(before),
+                after=self._audit_snapshot(after),
+                metadata={
+                    "access_surface": "esp_social_media_centre",
+                    "reason_present": bool(str(after.get("reason") or before.get("reason") or "").strip()),
+                    "esp_membership_changed": False,
+                    "subscription_changed": False,
+                },
+                actor=actor,
+            )
+
     def suspend(self, user_id: str, *, actor: str, reason: str = "") -> dict:
         membership = self.esp.membership(user_id)
         if not membership:
             raise ValueError("ESP membership not found")
+        before = self.get(user_id)
         with self._connect() as con:
             con.execute(
                 """INSERT INTO esp_social_access_controls(user_id,state,reason,updated_by,updated_at)
@@ -75,12 +106,20 @@ class EspSocialAccessControlStore:
                      updated_at=excluded.updated_at""",
                 (user_id, (reason or "Owner suspended Social Media Centre access")[:1000], actor[:120], _now()),
             )
-        return self.get(user_id)
+        after = self.get(user_id)
+        self._record_owner_audit(
+            action="esp_social_access_suspended",
+            actor=actor,
+            before=before,
+            after=after,
+        )
+        return after
 
     def restore(self, user_id: str, *, actor: str) -> dict:
         membership = self.esp.membership(user_id)
         if not membership:
             raise ValueError("ESP membership not found")
+        before = self.get(user_id)
         with self._connect() as con:
             con.execute(
                 """INSERT INTO esp_social_access_controls(user_id,state,reason,updated_by,updated_at)
@@ -89,7 +128,14 @@ class EspSocialAccessControlStore:
                      state='default',reason='',updated_by=excluded.updated_by,updated_at=excluded.updated_at""",
                 (user_id, actor[:120], _now()),
             )
-        return self.get(user_id)
+        after = self.get(user_id)
+        self._record_owner_audit(
+            action="esp_social_access_restored",
+            actor=actor,
+            before=before,
+            after=after,
+        )
+        return after
 
     def suspended(self, user_id: str) -> tuple[bool, str]:
         item = self.get(user_id)
