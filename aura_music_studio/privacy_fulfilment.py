@@ -8,9 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
+
+from .owner_auth import owner_authorized
+from .owner_identity import owner_actor
+
 PACKAGE_VERSION = "esp-privacy-fulfilment/v1"
 SUPPORTED_REQUEST_TYPES = {"access", "portability"}
 _REFERENCE_PREFIX = "privacy-package:"
+
+owner_router = APIRouter(prefix="/owner/privacy", tags=["Owner Privacy Fulfilment"])
 
 
 def _iso() -> str:
@@ -41,6 +49,12 @@ class PrivacyFulfilmentStore:
         con.execute("PRAGMA journal_mode=WAL")
         return con
 
+    @staticmethod
+    def _ensure_column(con: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+        existing = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
     def _init_schema(self) -> None:
         with self._connect() as con:
             con.executescript(
@@ -52,6 +66,7 @@ class PrivacyFulfilmentStore:
                     package_version TEXT NOT NULL,
                     prepared_at TEXT NOT NULL,
                     prepared_by TEXT NOT NULL,
+                    preparation_hash TEXT NOT NULL DEFAULT '',
                     delivered_at TEXT,
                     delivery_digest TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
@@ -59,6 +74,12 @@ class PrivacyFulfilmentStore:
                 CREATE INDEX IF NOT EXISTS idx_privacy_fulfilment_user
                     ON privacy_fulfilment_packages(user_id, prepared_at DESC);
                 """
+            )
+            self._ensure_column(
+                con,
+                "privacy_fulfilment_packages",
+                "preparation_hash",
+                "TEXT NOT NULL DEFAULT ''",
             )
 
     @staticmethod
@@ -71,21 +92,60 @@ class PrivacyFulfilmentStore:
         )
 
     @staticmethod
-    def _metadata(row: sqlite3.Row | None) -> dict | None:
+    def _preparation_payload(
+        *,
+        request_id: str,
+        user_id: str,
+        preparation_id: str,
+        package_version: str,
+        prepared_at: str,
+        prepared_by: str,
+    ) -> dict:
+        return {
+            "request_id": request_id,
+            "user_id": user_id,
+            "preparation_id": preparation_id,
+            "package_version": package_version,
+            "prepared_at": prepared_at,
+            "prepared_by": prepared_by,
+        }
+
+    @classmethod
+    def _preparation_hash(cls, **kwargs: str) -> str:
+        payload = cls._preparation_payload(**kwargs)
+        return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _preparation_valid(cls, row: sqlite3.Row) -> bool:
+        expected = cls._preparation_hash(
+            request_id=str(row["request_id"]),
+            user_id=str(row["user_id"]),
+            preparation_id=str(row["preparation_id"]),
+            package_version=str(row["package_version"]),
+            prepared_at=str(row["prepared_at"]),
+            prepared_by=str(row["prepared_by"]),
+        )
+        return bool(row["preparation_hash"] and str(row["preparation_hash"]) == expected)
+
+    @classmethod
+    def _metadata(cls, row: sqlite3.Row | None) -> dict | None:
         if not row:
             return None
         item = dict(row)
         item["fulfilment_reference"] = _REFERENCE_PREFIX + str(item["preparation_id"])
+        item["preparation_evidence_valid"] = cls._preparation_valid(row)
         item["package_contents_persisted"] = False
         return item
 
     def prepared_reference(self, request_id: str) -> str:
         with self._connect() as con:
             row = con.execute(
-                "SELECT preparation_id FROM privacy_fulfilment_packages WHERE request_id=?",
+                "SELECT * FROM privacy_fulfilment_packages WHERE request_id=?",
                 (request_id,),
             ).fetchone()
-        return _REFERENCE_PREFIX + str(row["preparation_id"]) if row else ""
+        if not row or not self._preparation_valid(row):
+            return ""
+        return _REFERENCE_PREFIX + str(row["preparation_id"])
 
     def prepare(self, request_id: str, *, prepared_by: str) -> dict:
         actor = str(prepared_by or "ESP Owner").strip()
@@ -123,6 +183,8 @@ class PrivacyFulfilmentStore:
                 (request_id,),
             ).fetchone()
             if existing:
+                if not self._preparation_valid(existing):
+                    raise RuntimeError("Stored privacy disclosure preparation evidence failed integrity verification")
                 if existing["delivered_at"]:
                     raise ValueError("This privacy request already has delivered fulfilment evidence")
                 item = self._metadata(existing) or {}
@@ -131,10 +193,19 @@ class PrivacyFulfilmentStore:
 
             now = _iso()
             preparation_id = uuid4().hex
+            preparation_hash = self._preparation_hash(
+                request_id=request_id,
+                user_id=str(request_row["user_id"]),
+                preparation_id=preparation_id,
+                package_version=PACKAGE_VERSION,
+                prepared_at=now,
+                prepared_by=actor,
+            )
             con.execute(
                 """INSERT INTO privacy_fulfilment_packages
-                   (request_id,user_id,preparation_id,package_version,prepared_at,prepared_by,updated_at)
-                   VALUES (?,?,?,?,?,?,?)""",
+                   (request_id,user_id,preparation_id,package_version,prepared_at,prepared_by,
+                    preparation_hash,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?)""",
                 (
                     request_id,
                     str(request_row["user_id"]),
@@ -142,6 +213,7 @@ class PrivacyFulfilmentStore:
                     PACKAGE_VERSION,
                     now,
                     actor,
+                    preparation_hash,
                     now,
                 ),
             )
@@ -268,6 +340,8 @@ class PrivacyFulfilmentStore:
             ).fetchone()
             if not control or not prepared:
                 raise ValueError("Prepared privacy disclosure evidence is unavailable")
+            if not self._preparation_valid(prepared):
+                raise RuntimeError("Prepared privacy disclosure evidence failed integrity verification")
 
             expected_reference = _REFERENCE_PREFIX + str(prepared["preparation_id"])
             if str(control["fulfilment_reference"] or "") != expected_reference:
@@ -298,6 +372,7 @@ class PrivacyFulfilmentStore:
             "evidence": {
                 "fulfilment_reference": expected_reference,
                 "package_version": PACKAGE_VERSION,
+                "preparation_hash": str(prepared["preparation_hash"]),
                 "sha256": digest,
                 "delivered_at": delivered_at,
                 "package_contents_persisted": False,
@@ -307,4 +382,38 @@ class PrivacyFulfilmentStore:
         }
 
 
-__all__ = ["PACKAGE_VERSION", "SUPPORTED_REQUEST_TYPES", "PrivacyFulfilmentStore"]
+def _require_owner(request: Request) -> None:
+    if not owner_authorized(request):
+        raise HTTPException(403, "Owner authorization required")
+
+
+@owner_router.post("/cases/{request_id}/prepare-disclosure", include_in_schema=False)
+def owner_prepare_privacy_disclosure(request_id: str, request: Request):
+    _require_owner(request)
+    try:
+        prepared = PrivacyFulfilmentStore().prepare(request_id, prepared_by=owner_actor())
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return JSONResponse(
+        {
+            "preparation": prepared,
+            "automatic_data_action_taken": False,
+            "package_contents_persisted": False,
+            "next_step": "Record the returned fulfilment_reference through the existing owner privacy case transition after final review. Member delivery remains unavailable until the case is fulfilled with that exact reference.",
+            "grants_esp_role_or_permission": False,
+            "changes_billing_or_membership": False,
+        },
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+__all__ = [
+    "PACKAGE_VERSION",
+    "SUPPORTED_REQUEST_TYPES",
+    "PrivacyFulfilmentStore",
+    "owner_router",
+]
