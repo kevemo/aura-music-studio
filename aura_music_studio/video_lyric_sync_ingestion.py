@@ -9,8 +9,10 @@ from .song_dna import SongDNAStore
 from .video_music_sync import SyncMarker, _read as read_sync, _validate_markers, _write as write_sync
 from .video_scene_render import _member_identity
 from .video_scene_timeline import _project_dir
+from .video_verified_captions import router as video_verified_captions_router
 
 router = APIRouter(prefix="/creative", tags=["video-music-sync"])
+router.include_router(video_verified_captions_router)
 
 _GENERATED_SOURCE = "song-dna-verified-lyrics"
 _ALLOWED_ALIGNMENT_STATES = {"verified", "forced_aligned"}
