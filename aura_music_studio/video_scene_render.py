@@ -3,6 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import Field
 
+from .creation_coin_metering import (
+    CreationCoinCharge,
+    charge_free_video_render,
+    free_video_render_quote,
+    refund_free_video_render,
+)
 from .creative_project import CreativeDirective, CreativeProjectStore
 from .creative_project_api import (
     QueueRendererRequest,
@@ -82,9 +88,81 @@ def _continuity_inputs(scene: dict, profiles: list[dict]) -> tuple[list[str], li
     return references, preserved
 
 
+def _free_scene_video_charge(member, *, project_name: str, directive_id: str) -> CreationCoinCharge | None:
+    """Apply the same server-authoritative Free video price to scene renders.
+
+    Scene rendering has its own convenience route and therefore must not bypass the generic
+    creative render commercial gate. Basic and Pro retain their subscription behavior.
+    """
+
+    if member.plan.id != "free":
+        return None
+    try:
+        quote = free_video_render_quote(member.user_id)
+    except ValueError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not quote["enabled"]:
+        raise HTTPException(
+            403,
+            {
+                "message": "Video generation is not included in the Free tier and no Creation Coin purchase price is configured",
+                "creation_coin_purchase": quote,
+            },
+        )
+    if not quote["affordable"]:
+        raise HTTPException(
+            402,
+            {
+                "message": "More Creation Coins are required for this Free-tier video render",
+                "creation_coin_purchase": quote,
+            },
+        )
+    try:
+        return charge_free_video_render(
+            member.user_id,
+            project_id=project_name,
+            directive_id=directive_id,
+        )
+    except ValueError as exc:
+        if "insufficient" in str(exc).lower():
+            raise HTTPException(
+                402,
+                {
+                    "message": "More Creation Coins are required for this Free-tier video render",
+                    "creation_coin_purchase": free_video_render_quote(member.user_id),
+                },
+            ) from exc
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+def _scene_coin_state(member, charge: CreationCoinCharge | None) -> dict:
+    if member.plan.id != "free":
+        return {
+            "required": False,
+            "reason": "included_subscription_behavior",
+            "charged": False,
+            "charged_amount": 0,
+            "membership_effect": "none",
+            "esp_role_effect": "none",
+        }
+    quote = free_video_render_quote(member.user_id)
+    return {
+        **quote,
+        "required": True,
+        "charged": charge is not None,
+        "charged_amount": charge.cost if charge is not None else 0,
+        "charge_transaction_id": charge.transaction.get("id") if charge is not None else None,
+        "membership_effect": "none",
+        "esp_role_effect": "none",
+    }
+
+
 @router.post("/projects/{project_name}/video-timeline/scenes/{scene_id}/render")
 def render_video_scene(project_name: str, scene_id: str, body: SceneRenderRequest, request: Request):
     user_id, plan_id = _member_identity(request)
+    member = request.state.member
     data, scene = _scene(project_name, scene_id)
     if scene.get("status") == "rendering":
         raise HTTPException(409, "This scene already has a render in progress")
@@ -139,10 +217,32 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
     except RuntimeError as exc:
         raise HTTPException(503, "Creative renderer resource policy is misconfigured") from exc
 
+    charge: CreationCoinCharge | None = None
+    try:
+        charge = _free_scene_video_charge(
+            member,
+            project_name=project_name,
+            directive_id=directive.id,
+        )
+    except Exception:
+        creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        raise
+
     try:
         response = queue_creative_render(project_name, directive.id, body, request)
     except Exception:
         creative_render_resource_store.cancel(reservation["reservation_id"], user_id=user_id)
+        if charge is not None:
+            try:
+                refund_free_video_render(
+                    user_id,
+                    charge,
+                    reason="Creation Coin refund — scene video renderer did not accept the job",
+                )
+            except Exception:
+                # Preserve the original renderer failure. Append-only charge evidence remains
+                # available for owner reconciliation if the refund write itself fails.
+                pass
         raise
 
     scene["status"] = "rendering"
@@ -159,6 +259,11 @@ def render_video_scene(project_name: str, scene_id: str, body: SceneRenderReques
         "directive": response["directive"],
         "submission": response["submission"],
         "resource_governance": reservation,
+        "commercial_entitlements": {
+            "video_generation": {
+                "free_tier_creation_coin_purchase": _scene_coin_state(member, charge),
+            }
+        },
         "continuity_profiles_applied": profile_ids,
         "grants_esp_role_or_permission": False,
         "alters_billing_or_membership": False,
@@ -214,4 +319,10 @@ def sync_video_scene_output(project_name: str, scene_id: str, request: Request):
     }
 
 
-__all__ = ["router", "render_video_scene", "video_scene_render_status", "sync_video_scene_output"]
+__all__ = [
+    "_free_scene_video_charge",
+    "router",
+    "render_video_scene",
+    "video_scene_render_status",
+    "sync_video_scene_output",
+]
