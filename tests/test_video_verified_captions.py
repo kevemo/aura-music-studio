@@ -144,8 +144,10 @@ def test_export_has_download_safety_headers(monkeypatch):
     assert b"00:00:01,000 --> 00:00:02,000" in response.body
 
 
-def test_route_requires_authentication_when_mounted_directly():
+def test_route_requires_authentication_through_production_sync_mount():
+    from aura_music_studio.video_lyric_sync_ingestion import router as production_router
+
     app = FastAPI()
-    app.include_router(subject.router)
+    app.include_router(production_router)
     response = TestClient(app).get("/creative/projects/example/video-captions/verified")
     assert response.status_code == 401
