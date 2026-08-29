@@ -54,6 +54,38 @@ def test_terminal_appeal_cannot_flip_to_opposite_decision(tmp_path):
         )
 
 
+def test_appeal_audit_event_preserves_verified_owner_actor_label(tmp_path):
+    store = SafetyReportStore(tmp_path / "safety.sqlite3")
+    report, appeal = _resolved_report_with_appeal(store)
+    review_appeal(
+        store,
+        appeal_id=appeal["id"],
+        status="upheld",
+        reason="Independent appeal review supports the original decision.",
+        resolution_reference="appeal:owner-attribution-1",
+        reviewer_actor="Mary · ESP Owner",
+    )
+    case = store.owner_get(report["id"])
+    event = [item for item in case["events"] if item["action"] == "appeal_review"][-1]
+    assert event["actor_type"] == "owner"
+    assert event["data"]["reviewer_actor"] == "Mary · ESP Owner"
+    assert event["data"]["automatic_moderation_action_taken"] is False
+    assert event["data"]["report_state_automatically_changed"] is False
+
+
+def test_reviewer_actor_label_is_bounded(tmp_path):
+    store = SafetyReportStore(tmp_path / "safety.sqlite3")
+    _, appeal = _resolved_report_with_appeal(store)
+    with pytest.raises(ValueError, match="Reviewer actor label"):
+        review_appeal(
+            store,
+            appeal_id=appeal["id"],
+            status="under_review",
+            reason="Review started.",
+            reviewer_actor="x" * 121,
+        )
+
+
 def test_hidden_owner_appeal_route_is_mounted_and_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setenv("LSS_DB_PATH", str(tmp_path / "safety.sqlite3"))
     from aura_music_studio.creative_version_autopromotion import router as integration_router

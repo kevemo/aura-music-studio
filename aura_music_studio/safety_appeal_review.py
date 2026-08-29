@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .owner_auth import owner_authorized
+from .owner_identity import owner_actor
 from .safety_reports import SafetyReportStore, _iso, _validate_ref
 
 router = APIRouter(prefix="/owner/safety", tags=["Owner Safety Appeal Review"])
@@ -22,9 +23,19 @@ def _require_owner(request: Request) -> None:
         raise HTTPException(403, "Owner authorization required")
 
 
-def review_appeal(store: SafetyReportStore, *, appeal_id: str, status: str, reason: str,
-                  resolution_reference: str = "") -> dict:
+def review_appeal(
+    store: SafetyReportStore,
+    *,
+    appeal_id: str,
+    status: str,
+    reason: str,
+    resolution_reference: str = "",
+    reviewer_actor: str = "ESP Owner",
+) -> dict:
     reason = str(reason or "").strip()
+    reviewer_actor = str(reviewer_actor or "ESP Owner").strip() or "ESP Owner"
+    if len(reviewer_actor) > 120:
+        raise ValueError("Reviewer actor label is too long")
     if status not in {"under_review", "upheld", "overturned"}:
         raise ValueError("Unsupported appeal review state")
     if not reason:
@@ -55,6 +66,7 @@ def review_appeal(store: SafetyReportStore, *, appeal_id: str, status: str, reas
                 "to": status,
                 "reason": reason,
                 "resolution_reference": resolution_reference,
+                "reviewer_actor": reviewer_actor,
                 "automatic_moderation_action_taken": False,
                 "report_state_automatically_changed": False,
             },
@@ -74,8 +86,12 @@ def owner_review_safety_appeal(appeal_id: str, request: Request, payload: OwnerA
     _require_owner(request)
     try:
         return review_appeal(
-            SafetyReportStore(), appeal_id=appeal_id, status=payload.status,
-            reason=payload.reason, resolution_reference=payload.resolution_reference,
+            SafetyReportStore(),
+            appeal_id=appeal_id,
+            status=payload.status,
+            reason=payload.reason,
+            resolution_reference=payload.resolution_reference,
+            reviewer_actor=owner_actor(),
         )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
