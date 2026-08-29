@@ -55,7 +55,10 @@ def _phrases(values: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
 
 
 def _categories(values: set[str] | frozenset[str] | list[str] | tuple[str, ...] | None) -> frozenset[str]:
-    selected = {str(value).strip() for value in (values or _ALLOWED_CATEGORIES)}
+    # None means use the safe default set on first creation. An explicitly empty collection means
+    # the creator disabled every optional category, so only mandatory high-risk protections remain.
+    source = _ALLOWED_CATEGORIES if values is None else values
+    selected = {str(value).strip() for value in source}
     unknown = selected - _ALLOWED_CATEGORIES
     if unknown:
         raise ValueError("unknown moderation category")
