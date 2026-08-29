@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import soundfile as sf
@@ -163,53 +164,7 @@ def _validated_daw_assets(project: Path, body: EngineeringAssetsDAWImportRequest
     return validated
 
 
-@router.post("/production/projects/{project_name}/engineering-jobs")
-def submit_engineering_job(project_name: str, body: EngineeringJobRequest, request: Request):
-    member = _member(request)
-    # Entitlement is checked before tenant/project lookup so a denied tier cannot probe project existence.
-    _validate_entitlement(member, body)
-    project = _project(project_name)
-
-    library = AssetLibrary(project)
-    try:
-        asset = library.get(body.asset_id)
-    except KeyError as exc:
-        raise HTTPException(404, "Audio asset not found") from exc
-    if asset.kind != "audio":
-        raise HTTPException(400, "Engineering jobs require an audio asset")
-    if body.reference_asset_id:
-        try:
-            reference = library.get(body.reference_asset_id)
-        except KeyError as exc:
-            raise HTTPException(404, "Reference asset not found") from exc
-        if reference.kind != "audio":
-            raise HTTPException(400, "Reference mastering requires an audio asset")
-
-    priority = 90 if member.plan.has(PRIORITY_QUEUE) else 15
-    job = queue.submit(
-        member.user_id,
-        project_name,
-        job_type=f"engineering:{body.operation}",
-        priority=priority,
-        payload=body.model_dump(mode="json"),
-    )
-    return _public(job)
-
-
-@router.post("/production/projects/{project_name}/engineering-assets/import-daw")
-def import_engineering_assets_to_daw(
-    project_name: str,
-    body: EngineeringAssetsDAWImportRequest,
-    request: Request,
-):
-    member = _member(request)
-    # A stem set is inherently multitrack. Gate before project lookup to avoid existence probing.
-    _require(member, MULTITRACK_DAW)
-    project = _project(project_name)
-
-    # Validate the complete batch before loading/mutating the editable session. A bad final stem
-    # must not leave the first stems partially imported.
-    validated = _validated_daw_assets(project, body)
+def _import_validated_daw_assets(project: Path, validated, member, project_name: str) -> dict:
     session = load_session(project, create=True, name=project_name)
     existing_asset_ids = {
         str(clip.metadata.get("asset_id"))
@@ -267,3 +222,104 @@ def import_engineering_assets_to_daw(
         "atomic_validation": True,
         "source_paths_exposed": False,
     }
+
+
+def _split_job_daw_request(job: dict) -> EngineeringAssetsDAWImportRequest:
+    if job.get("job_type") != "engineering:split":
+        raise HTTPException(400, "Only completed stem-split jobs can be imported directly into the DAW")
+    if job.get("status") != "completed":
+        raise HTTPException(409, "Stem-split job is not completed")
+    raw = job.get("result_json")
+    try:
+        result = json.loads(raw) if raw else None
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(409, "Completed stem-split job has no usable result") from exc
+    if not isinstance(result, dict) or result.get("operation") != "split":
+        raise HTTPException(409, "Completed stem-split job has no usable split result")
+    stem_assets = result.get("stem_assets")
+    if not isinstance(stem_assets, dict) or not stem_assets:
+        raise HTTPException(409, "Completed stem-split job has no reusable stem assets")
+    assets = []
+    for role, descriptor in stem_assets.items():
+        if not isinstance(descriptor, dict):
+            raise HTTPException(409, "Completed stem-split job contains an invalid stem asset")
+        asset_id = descriptor.get("asset_id")
+        if not isinstance(asset_id, str) or not asset_id.strip():
+            raise HTTPException(409, "Completed stem-split job contains an invalid stem asset")
+        assets.append(EngineeringAssetDAWImport(asset_id=asset_id.strip(), role=str(role)))
+    try:
+        return EngineeringAssetsDAWImportRequest(assets=assets)
+    except ValueError as exc:
+        raise HTTPException(409, "Completed stem-split job contains too many or invalid stem assets") from exc
+
+
+@router.post("/production/projects/{project_name}/engineering-jobs")
+def submit_engineering_job(project_name: str, body: EngineeringJobRequest, request: Request):
+    member = _member(request)
+    # Entitlement is checked before tenant/project lookup so a denied tier cannot probe project existence.
+    _validate_entitlement(member, body)
+    project = _project(project_name)
+
+    library = AssetLibrary(project)
+    try:
+        asset = library.get(body.asset_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Audio asset not found") from exc
+    if asset.kind != "audio":
+        raise HTTPException(400, "Engineering jobs require an audio asset")
+    if body.reference_asset_id:
+        try:
+            reference = library.get(body.reference_asset_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Reference asset not found") from exc
+        if reference.kind != "audio":
+            raise HTTPException(400, "Reference mastering requires an audio asset")
+
+    priority = 90 if member.plan.has(PRIORITY_QUEUE) else 15
+    job = queue.submit(
+        member.user_id,
+        project_name,
+        job_type=f"engineering:{body.operation}",
+        priority=priority,
+        payload=body.model_dump(mode="json"),
+    )
+    return _public(job)
+
+
+@router.post("/production/projects/{project_name}/engineering-assets/import-daw")
+def import_engineering_assets_to_daw(
+    project_name: str,
+    body: EngineeringAssetsDAWImportRequest,
+    request: Request,
+):
+    member = _member(request)
+    # A stem set is inherently multitrack. Gate before project lookup to avoid existence probing.
+    _require(member, MULTITRACK_DAW)
+    project = _project(project_name)
+
+    # Validate the complete batch before loading/mutating the editable session. A bad final stem
+    # must not leave the first stems partially imported.
+    validated = _validated_daw_assets(project, body)
+    return _import_validated_daw_assets(project, validated, member, project_name)
+
+
+@router.post("/production/projects/{project_name}/engineering-jobs/{job_id}/import-daw")
+def import_completed_split_job_to_daw(project_name: str, job_id: str, request: Request):
+    member = _member(request)
+    # Gate before job/project lookup so a denied tier cannot probe either resource.
+    _require(member, MULTITRACK_DAW)
+    job = queue.get(job_id, user_id=member.user_id)
+    if not job:
+        raise HTTPException(404, "Engineering job not found")
+    if job.get("project_name") != project_name:
+        raise HTTPException(404, "Engineering job not found")
+    body = _split_job_daw_request(job)
+    project = _project(project_name)
+    validated = _validated_daw_assets(project, body)
+    result = _import_validated_daw_assets(project, validated, member, project_name)
+    result.update({
+        "source_job_id": job_id,
+        "source_job_type": "engineering:split",
+        "job_result_paths_exposed": False,
+    })
+    return result
