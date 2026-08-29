@@ -151,6 +151,49 @@ def test_low_risk_command_cannot_smuggle_approval_id():
         )
 
 
+def test_security_command_enforces_exact_action_parameter_schema():
+    with pytest.raises(ValidationError):
+        SecurityCommand(
+            command_id=COMMAND,
+            device_id=DEVICE,
+            action=ActionType.RUN_FULL_SCAN,
+            risk=ActionRisk.LOW_RISK,
+            issued_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            policy_version="policy-1",
+            nonce=NONCE,
+            parameters={"shell": "powershell -enc example"},
+        )
+
+    with pytest.raises(ValidationError):
+        SecurityCommand(
+            command_id=COMMAND,
+            device_id=DEVICE,
+            action=ActionType.BLOCK_DOMAIN,
+            risk=ActionRisk.CONFIRMATION_REQUIRED,
+            issued_at=NOW,
+            expires_at=NOW + timedelta(minutes=5),
+            policy_version="policy-1",
+            nonce=NONCE,
+            approval_id=APPROVAL,
+            parameters={"domain": "https://example.com"},
+        )
+
+    command = SecurityCommand(
+        command_id=COMMAND,
+        device_id=DEVICE,
+        action=ActionType.QUARANTINE_OBJECT,
+        risk=ActionRisk.CONFIRMATION_REQUIRED,
+        issued_at=NOW,
+        expires_at=NOW + timedelta(minutes=5),
+        policy_version="policy-1",
+        nonce=NONCE,
+        approval_id=APPROVAL,
+        parameters={"object_id": "object-8d9a4f1c"},
+    )
+    assert command.parameters == {"object_id": "object-8d9a4f1c"}
+
+
 def test_approved_high_risk_command_has_bounded_lifetime():
     command = SecurityCommand(
         command_id=COMMAND,
