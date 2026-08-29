@@ -12,6 +12,8 @@ from .access_control import MembershipAccessMiddleware
 from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
+from .aura_live_guardian import router as aura_live_guardian_router
+from .aura_live_guardian_policy_ui import router as aura_live_guardian_policy_router
 from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
 from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
 from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
@@ -71,6 +73,8 @@ app.include_router(aura_live_overlay_advanced_router)
 app.include_router(aura_live_overlay_engine_router)
 app.include_router(aura_live_overlay_interactives_router)
 app.include_router(aura_live_prompter_router)
+app.include_router(aura_live_guardian_router)
+app.include_router(aura_live_guardian_policy_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
