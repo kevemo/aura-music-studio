@@ -49,7 +49,8 @@
       "feature/video-verified-caption-export": false,
       "feature/scene-video-coin-meter-refresh": false,
       "feature/project-image-to-video-refresh": false,
-      "feature/video-scene-image-source": false
+      "feature/video-scene-image-source": false,
+      "feature/provider-cost-governance": false
     }
   },
   "functions": {
