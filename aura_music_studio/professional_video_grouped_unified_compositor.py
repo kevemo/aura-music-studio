@@ -37,8 +37,9 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
             track = tracks.get(track_id)
             if not track or not track.get("enabled", True):
                 continue
-            if track.get("effects"):
-                raise EditorRenderUnsupported("Video track effects require the next grouped-track effects stage")
+            track_effects = [effect for effect in track.get("effects") or [] if effect.get("enabled", True)]
+            for effect in track_effects:
+                _video_effect_filter(effect)
             if track.get("keyframes"):
                 raise EditorRenderUnsupported("Video track keyframes require the next grouped-track automation stage")
             track_blend = str(track.get("blend_mode") or "normal").strip().lower()
@@ -147,8 +148,12 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
                 "mono_pan_stereo_normalization": True,
                 "supports_item_blend_modes": sorted(_SUPPORTED_VIDEO_ITEM_BLEND_MODES),
                 "supports_track_blend_modes": sorted(_SUPPORTED_VIDEO_TRACK_BLEND_MODES),
+                "supports_track_effects": sorted(_SUPPORTED_VIDEO_EFFECTS),
+                "track_effects_applied_before_opacity_and_blend": True,
                 "track_opacity_applied_after_item_composition": True,
-                "track_effects_fail_closed": True,
+                "track_opacity_applied_after_track_effects": True,
+                "track_effects_fail_closed": False,
+                "keyframed_track_effects_fail_closed": True,
                 "track_keyframes_fail_closed": True,
                 "source_media_mutated": False,
                 "unsupported_state_fails_closed": True,
