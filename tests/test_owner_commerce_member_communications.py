@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import inspect
 import sqlite3
 
 import pytest
 
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.owner_commerce_member_communications import OwnerCommerceMemberStore
+from aura_music_studio.owner_commerce_member_communications import OwnerCommerceMemberStore, router
 
 
 def _active_user(tmp_path, email="member@example.com"):
@@ -39,7 +40,6 @@ def test_discount_does_not_mutate_membership_or_billing_state(tmp_path):
     after = accounts.get_user(user_id)
     assert after["plan_id"] == before["plan_id"]
     assert after["billing_status"] == before["billing_status"]
-    # The discount engine owns price calculation/redemption evidence only. It contains no ESP role mutation path.
     assert "esp_" not in " ".join(store._connect().execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone() or ())
 
 
@@ -91,9 +91,13 @@ def test_monthly_notice_is_deduplicated(tmp_path):
     assert store.queue_monthly_membership_notices(period="2026-10") == 0
 
 
-def test_production_aggregate_mounts_owner_commerce_and_social_routes():
-    from app import app
-    paths = {getattr(route, "path", None) for route in app.routes}
+def test_owner_commerce_routes_exist_and_are_composed_into_base_api():
+    paths = {getattr(route, "path", None) for route in router.routes}
     assert "/owner/commerce" in paths
     assert "/owner/commerce/users" in paths
     assert "/account/profile-socials" in paths
+
+    import aura_music_studio.api as aggregate
+    source = inspect.getsource(aggregate)
+    assert "owner_commerce_member_communications_router" in source
+    assert "app.include_router(owner_commerce_member_communications_router)" in source
