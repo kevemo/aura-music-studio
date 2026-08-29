@@ -95,6 +95,10 @@ from aura_music_studio.production_portal import router as production_portal_rout
 from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.professional_editor_api import router as professional_editor_router
 from aura_music_studio.professional_editor_security_overlay import install_professional_editor_patch_guard
+from aura_music_studio.provider_cost_governance import (
+    install_provider_cost_governance,
+    router as provider_cost_governance_router,
+)
 from aura_music_studio.pulsar_player import PulsarPlayerMiddleware, router as pulsar_player_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
@@ -142,6 +146,9 @@ install_aura_context_extensions()
 install_aura_profiles()
 install_owner_authorization_migration()
 install_professional_editor_patch_guard()
+# Provider-cost governance wraps successful renderer submissions only for operational metering.
+# It never changes Creation Coins, subscriptions or ESP permissions.
+install_provider_cost_governance()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
 app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
@@ -202,6 +209,7 @@ app.include_router(owner_control_center_router)
 app.include_router(owner_user_intelligence_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
+app.include_router(provider_cost_governance_router)
 
 app.include_router(daw_router)
 app.include_router(daw_midi_router)
