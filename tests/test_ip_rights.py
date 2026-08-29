@@ -157,6 +157,38 @@ def test_counter_review_requires_evidence_and_never_restores_automatically(tmp_p
     assert result["legal_sufficiency_certified"] is False
 
 
+def test_owner_ip_review_events_record_reviewer_actor_without_touching_member_events(monkeypatch, tmp_path):
+    import aura_music_studio.ip_rights as ip_module
+
+    monkeypatch.setattr(ip_module, "owner_actor", lambda: "Mary · ESP Owner")
+    store = IPRightsStore(tmp_path / "ip.sqlite3")
+    notice = store.submit_notice(claimant_user_id="claimant", payload=notice_payload())["notice"]
+    store.owner_review_notice(
+        notice_id=notice["id"],
+        payload=OwnerNoticeReviewInput(
+            status="action_recommended",
+            reason="Owner review completed for counter-notice eligibility.",
+            counter_notice_eligible_user_id="affected-member",
+        ),
+    )
+    counter = store.submit_counter_notice(
+        notice_id=notice["id"], submitter_user_id="affected-member", payload=counter_payload()
+    )
+    result = store.owner_review_counter(
+        notice_id=notice["id"], counter_id=counter["id"],
+        payload=OwnerCounterReviewInput(status="under_review", reason="Counter-notice review started."),
+    )
+    submitted = [item for item in result["events"] if item["action"] == "rights_notice_submitted"][-1]
+    notice_review = [item for item in result["events"] if item["action"] == "notice_review"][-1]
+    counter_review = [item for item in result["events"] if item["action"] == "counter_notice_review"][-1]
+    assert "reviewer_actor" not in submitted["data"]
+    assert notice_review["actor_type"] == "owner"
+    assert notice_review["data"]["reviewer_actor"] == "Mary · ESP Owner"
+    assert counter_review["actor_type"] == "owner"
+    assert counter_review["data"]["reviewer_actor"] == "Mary · ESP Owner"
+    assert result["audit_chain_valid"] is True
+
+
 def test_ip_event_chain_detects_persisted_tampering(tmp_path):
     db = tmp_path / "ip.sqlite3"
     store = IPRightsStore(db)
