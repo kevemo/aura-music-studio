@@ -257,6 +257,14 @@ class AuraJobWorker:
             elif job_type.startswith("engineering:"):
                 from .engineering_jobs import run_engineering_job
                 result = run_engineering_job(project, self._payload(job))
+            elif job_type == "editor_render":
+                from .professional_editor_render_jobs import run_editor_render_job
+                result = run_editor_render_job(
+                    project,
+                    self._payload(job),
+                    user_id=job["user_id"],
+                    account_store=self.store,
+                )
             else:
                 raise ValueError(f"Unsupported job type: {job_type}")
 
