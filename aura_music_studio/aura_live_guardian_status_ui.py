@@ -6,6 +6,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from .aura_live_guardian_monitor import live_guardian_monitor
 from .aura_live_guardian_status import build_live_session_status
 
 
@@ -13,6 +14,9 @@ def live_guardian_status(request: Request):
     member = getattr(request.state, "member", None)
     if member is None:
         raise HTTPException(401, "Sign in required")
+
+    if request.query_params.get("view") == "monitor":
+        return live_guardian_monitor(request)
 
     database = Path(os.getenv("AURA_LIVE_MODERATOR_DB", "data/aura_live_moderator.sqlite3"))
     database.parent.mkdir(parents=True, exist_ok=True)
