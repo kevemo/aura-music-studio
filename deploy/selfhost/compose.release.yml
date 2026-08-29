@@ -1,0 +1,24 @@
+services:
+  live-sound-studio:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
+
+  aura-worker:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
+
+  aura-task-worker:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
+
+  esp-social-publish-worker:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
+
+  aura-backup-scheduler:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
+
+  aura-address-manager:
+    image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
+    pull_policy: always
