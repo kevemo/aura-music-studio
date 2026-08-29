@@ -44,12 +44,15 @@ def _policy(*, phrases=(), categories=frozenset({"spam", "harassment", "threat",
     )
 
 
-def test_blocked_phrase_strengthens_lower_risk_creator_rule():
+def test_blocked_phrase_strengthens_lower_risk_creator_rule_even_when_original_category_is_disabled():
     result = decide_with_creator_policy(
         authorization=_authorization(),
         capabilities=_capabilities(),
         signal=ModerationSignal(category="other", confidence=0.4, severity=0),
-        policy=_policy(phrases=("no drama",), categories=frozenset({"threat", "doxxing", "grooming_concern", "other"})),
+        policy=_policy(
+            phrases=("no drama",),
+            categories=frozenset({"threat", "doxxing", "grooming_concern"}),
+        ),
         message="Please keep the NO DRAMA comments out of here",
     )
     assert result.signal.category == "creator_defined"
@@ -57,6 +60,7 @@ def test_blocked_phrase_strengthens_lower_risk_creator_rule():
     assert result.signal.severity == 1
     assert result.matched_blocked_phrases == ("no drama",)
     assert result.decision.action is ModerationAction.WARN
+    assert result.category_suppressed_by_creator is False
 
 
 def test_creator_can_suppress_noncritical_category_but_never_create_write_authority():
