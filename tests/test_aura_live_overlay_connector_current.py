@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -38,6 +39,17 @@ def _seed_connector(connector, token: str = "relay-secret-token-for-tests-000000
     return token
 
 
+def _event(connector, event_id: str, event_type: str = "gift", payload=None, *, provider="test-provider", session_id="session-0001", occurred_at=None):
+    return connector.ConnectorEvent(
+        provider=provider,
+        session_id=session_id,
+        event_id=event_id,
+        event_type=event_type,
+        occurred_at=occurred_at,
+        payload=payload or {},
+    )
+
+
 def test_connector_routes_mount_once_through_existing_live_engine():
     from aura_music_studio import access_control, api as api_mod
     from aura_music_studio import aura_live_overlay_engine as engine
@@ -66,6 +78,7 @@ def test_rotate_returns_bearer_secret_once_without_putting_it_in_url(tmp_path, m
     assert payload["authorization_scheme"] == "Bearer"
     assert payload["token_returned_once"] is True
     assert payload["token_in_url"] is False
+    assert payload["schema_version"] == 2
     assert token not in payload["ingest_path"]
     assert response.headers["cache-control"] == "private, no-store"
     with connector._connect() as con:
@@ -76,7 +89,7 @@ def test_rotate_returns_bearer_secret_once_without_putting_it_in_url(tmp_path, m
 
 def test_ingest_requires_bearer_auth_and_unknown_tokens_fail_closed(tmp_path, monkeypatch):
     connector, _, _ = _configure(tmp_path, monkeypatch)
-    body = connector.ConnectorEvent(event_id="event-00000001", event_type="gift", payload={})
+    body = _event(connector, "event-00000001")
     with pytest.raises(HTTPException) as missing:
         connector.connector_ingest(body, RequestStub())
     assert missing.value.status_code == 401
@@ -89,35 +102,73 @@ def test_normalized_event_is_idempotent_and_updates_engine_once(tmp_path, monkey
     connector, engine, _ = _configure(tmp_path, monkeypatch)
     token = _seed_connector(connector)
     request = RequestStub(authorization=f"Bearer {token}")
-    body = connector.ConnectorEvent(
-        event_id="event-00000001",
-        event_type="gift",
+    body = _event(
+        connector,
+        "event-00000001",
         payload={"username": "Laura", "gift_name": "Rose", "coins": 1},
+        occurred_at="2026-08-29T23:00:00+00:00",
     )
     first = connector.connector_ingest(body, request)
     second = connector.connector_ingest(body, request)
     assert b'"duplicate":false' in first.body
     assert b'"normalized_relay":true' in first.body
+    assert b'"trust_level":"authenticated_normalized_relay"' in first.body
     assert b'"direct_tiktok_connection_claimed":false' in first.body
     assert b'"duplicate":true' in second.body
     with engine._connect() as con:
         count = con.execute(
             "SELECT COUNT(*) FROM live_overlay_events WHERE user_id='creator-1' AND event_type='gift'"
         ).fetchone()[0]
+        event = con.execute(
+            "SELECT payload_json FROM live_overlay_events WHERE user_id='creator-1' AND event_type='gift'"
+        ).fetchone()
     with connector._connect() as con:
         receipt = con.execute(
-            "SELECT state,completed_at FROM live_overlay_connector_receipts WHERE user_id='creator-1' AND event_id='event-00000001'"
+            """
+            SELECT provider,session_id,state,provider_timestamp,completed_at
+            FROM live_overlay_connector_receipts
+            WHERE user_id='creator-1' AND provider='test-provider' AND session_id='session-0001' AND event_id='event-00000001'
+            """
         ).fetchone()
     assert count == 1
+    assert json.loads(event["payload_json"])["source"] == "test-provider"
     assert receipt["state"] == "completed"
+    assert receipt["provider_timestamp"].startswith("2026-08-29T23:00:00")
     assert receipt["completed_at"]
+
+
+def test_provider_and_live_session_are_part_of_deduplication_identity(tmp_path, monkeypatch):
+    connector, engine, _ = _configure(tmp_path, monkeypatch)
+    token = _seed_connector(connector)
+    request = RequestStub(authorization=f"Bearer {token}")
+    for provider, session in (
+        ("provider-a", "session-0001"),
+        ("provider-b", "session-0001"),
+        ("provider-a", "session-0002"),
+    ):
+        response = connector.connector_ingest(
+            _event(
+                connector,
+                "shared-event-id",
+                payload={"username": provider, "gift_name": "Rose", "coins": 1},
+                provider=provider,
+                session_id=session,
+            ),
+            request,
+        )
+        assert response.status_code == 200
+    with engine._connect() as con:
+        applied = con.execute(
+            "SELECT COUNT(*) FROM live_overlay_events WHERE user_id='creator-1' AND event_type='gift'"
+        ).fetchone()[0]
+    assert applied == 3
 
 
 def test_failed_processing_releases_receipt_so_retry_is_not_lost(tmp_path, monkeypatch):
     connector, engine, _ = _configure(tmp_path, monkeypatch)
     token = _seed_connector(connector)
     request = RequestStub(authorization=f"Bearer {token}")
-    body = connector.ConnectorEvent(event_id="event-retry-0001", event_type="gift", payload={"username": "Dave", "coins": 5})
+    body = _event(connector, "event-retry-0001", payload={"username": "Dave", "coins": 5})
 
     def fail_once(*args, **kwargs):
         raise RuntimeError("synthetic processing failure")
@@ -127,7 +178,10 @@ def test_failed_processing_releases_receipt_so_retry_is_not_lost(tmp_path, monke
         connector.connector_ingest(body, request)
     with connector._connect() as con:
         count = con.execute(
-            "SELECT COUNT(*) FROM live_overlay_connector_receipts WHERE user_id='creator-1' AND event_id='event-retry-0001'"
+            """
+            SELECT COUNT(*) FROM live_overlay_connector_receipts
+            WHERE user_id='creator-1' AND provider='test-provider' AND session_id='session-0001' AND event_id='event-retry-0001'
+            """
         ).fetchone()[0]
     assert count == 0
 
@@ -141,9 +195,9 @@ def test_completion_failure_keeps_processing_claim_to_prevent_replay(tmp_path, m
     connector, engine, _ = _configure(tmp_path, monkeypatch)
     token = _seed_connector(connector)
     request = RequestStub(authorization=f"Bearer {token}")
-    body = connector.ConnectorEvent(
-        event_id="event-complete-fail-01",
-        event_type="gift",
+    body = _event(
+        connector,
+        "event-complete-fail-01",
         payload={"username": "Tuckz", "gift_name": "Rose", "coins": 1},
     )
 
@@ -160,7 +214,10 @@ def test_completion_failure_keeps_processing_claim_to_prevent_replay(tmp_path, m
         ).fetchone()[0]
     with connector._connect() as con:
         receipt = con.execute(
-            "SELECT state FROM live_overlay_connector_receipts WHERE user_id='creator-1' AND event_id='event-complete-fail-01'"
+            """
+            SELECT state FROM live_overlay_connector_receipts
+            WHERE user_id='creator-1' AND provider='test-provider' AND session_id='session-0001' AND event_id='event-complete-fail-01'
+            """
         ).fetchone()
     assert applied == 1
     assert receipt["state"] == "processing"
@@ -180,11 +237,15 @@ def test_concurrent_processing_receipt_returns_retryable_conflict(tmp_path, monk
     now = connector._now()
     with connector._connect() as con:
         con.execute(
-            "INSERT INTO live_overlay_connector_receipts(user_id,event_id,event_type,state,received_at) VALUES(?,?,?,'processing',?)",
-            ("creator-1", "event-processing-01", "gift", now),
+            """
+            INSERT INTO live_overlay_connector_receipts(
+                user_id,provider,session_id,event_id,event_type,state,provider_timestamp,received_at
+            ) VALUES(?,?,?,?,?,'processing',NULL,?)
+            """,
+            ("creator-1", "test-provider", "session-0001", "event-processing-01", "gift", now),
         )
     response = connector.connector_ingest(
-        connector.ConnectorEvent(event_id="event-processing-01", event_type="gift", payload={}),
+        _event(connector, "event-processing-01"),
         RequestStub(authorization=f"Bearer {token}"),
     )
     assert response.status_code == 409
@@ -197,19 +258,28 @@ def test_connector_rejects_unknown_event_and_oversize_payload(tmp_path, monkeypa
     token = _seed_connector(connector)
     request = RequestStub(authorization=f"Bearer {token}")
     with pytest.raises(HTTPException) as unsupported:
-        connector.connector_ingest(
-            connector.ConnectorEvent(event_id="event-unknown-01", event_type="not-a-live-event", payload={}),
-            request,
-        )
+        connector.connector_ingest(_event(connector, "event-unknown-01", event_type="not-a-live-event"), request)
     assert unsupported.value.status_code == 400
 
     monkeypatch.setattr(connector, "MAX_PAYLOAD_BYTES", 32)
     with pytest.raises(HTTPException) as oversized:
         connector.connector_ingest(
-            connector.ConnectorEvent(event_id="event-large-0001", event_type="comment", payload={"message": "x" * 100}),
+            _event(connector, "event-large-0001", event_type="comment", payload={"message": "x" * 100}),
             request,
         )
     assert oversized.value.status_code == 413
+
+
+def test_naive_provider_timestamp_is_rejected(tmp_path, monkeypatch):
+    connector, _, _ = _configure(tmp_path, monkeypatch)
+    token = _seed_connector(connector)
+    request = RequestStub(authorization=f"Bearer {token}")
+    with pytest.raises(HTTPException) as exc:
+        connector.connector_ingest(
+            _event(connector, "event-time-0001", occurred_at=datetime(2026, 8, 29, 23, 0, 0)),
+            request,
+        )
+    assert exc.value.status_code == 400
 
 
 def test_rate_limit_is_durable_in_sqlite_not_process_memory(tmp_path, monkeypatch):
@@ -232,10 +302,13 @@ def test_rate_limit_is_durable_in_sqlite_not_process_memory(tmp_path, monkeypatc
 def test_status_never_claims_direct_tiktok_or_moderation_authority(tmp_path, monkeypatch):
     connector, _, _ = _configure(tmp_path, monkeypatch)
     response = connector.connector_status(RequestStub(member=SimpleNamespace(user_id="creator-1")))
+    assert response["schema_version"] == 2
     assert response["provider_connection_state"] == "external_dependency"
     assert response["direct_tiktok_connection_claimed"] is False
     assert response["provider_moderation_authority_claimed"] is False
     assert response["transport"] == "bearer_token_normalized_relay"
+    assert response["trust_level"] == "authenticated_normalized_relay"
+    assert "adapter's responsibility" in response["trust_note"]
 
 
 def test_legacy_stale_pr_receipt_schema_migrates_without_replay(tmp_path, monkeypatch):
@@ -261,7 +334,12 @@ def test_legacy_stale_pr_receipt_schema_migrates_without_replay(tmp_path, monkey
     with connector._connect() as con:
         columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts)").fetchall()}
         migrated = con.execute(
-            "SELECT state FROM live_overlay_connector_receipts WHERE user_id='creator-1' AND event_id='legacy-event-01'"
+            """
+            SELECT provider,session_id,state FROM live_overlay_connector_receipts
+            WHERE user_id='creator-1' AND event_id='legacy-event-01'
+            """
         ).fetchone()
-    assert {"state", "completed_at"}.issubset(columns)
+    assert {"provider", "session_id", "state", "provider_timestamp", "completed_at"}.issubset(columns)
+    assert migrated["provider"] == "legacy"
+    assert migrated["session_id"] == "legacy"
     assert migrated["state"] == "completed"
