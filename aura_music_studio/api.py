@@ -21,6 +21,7 @@ from .job_api import router as job_api_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
 from .mixer import render_session
+from .owner_commerce_member_communications import router as owner_commerce_member_communications_router
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .revisions import create_revision
@@ -53,6 +54,7 @@ app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
+app.include_router(owner_commerce_member_communications_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
