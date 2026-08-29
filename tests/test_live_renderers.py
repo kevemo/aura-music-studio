@@ -125,9 +125,15 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
     monkeypatch.setenv("AURA_YUE_MAX_SEGMENTS", "2")
 
     class Response:
-        def __init__(self, payload=None, content=b""):
+        def __init__(self, payload=None, content=b"", *, status_code=200, headers=None):
             self._payload = payload
             self._content = content
+            self.status_code = status_code
+            self.headers = dict(headers or {})
+            self.closed = False
+
+        def close(self):
+            self.closed = True
 
         def raise_for_status(self):
             return None
@@ -142,19 +148,23 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
             return self
 
         def __exit__(self, *_args):
+            self.close()
             return False
 
     submitted = {}
+    download_kwargs = {}
 
     def post(url, **kwargs):
         submitted.update(kwargs.get("json") or {})
         return Response({"job_id": "job1", "status": "queued"})
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         if url.endswith("/v1/jobs/job1"):
             return Response({"job_id": "job1", "status": "completed", "audio_url": "/v1/audio/job1"})
         if url.endswith("/v1/audio/job1"):
-            return Response(content=source.read_bytes())
+            download_kwargs.update(kwargs)
+            payload = source.read_bytes()
+            return Response(content=payload, headers={"content-length": str(len(payload))})
         raise AssertionError(url)
 
     monkeypatch.setattr(yue_remote_command.requests, "post", post)
@@ -162,5 +172,6 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
     assert yue_remote_command.main() == 0
     assert submitted["segments"] == 2
     assert submitted["stage1_model"].startswith("m-a-p/YuE-s1")
+    assert download_kwargs["allow_redirects"] is False
     assert output.is_file()
     assert probe_real_audio(output).valid is True
