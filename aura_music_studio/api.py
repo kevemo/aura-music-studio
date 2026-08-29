@@ -12,15 +12,19 @@ from .access_control import MembershipAccessMiddleware
 from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
+from .aura_support_center import router as aura_support_center_router
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .engineering_api import router as engineering_router
+from .esp_public_network import router as esp_public_network_router
 from .job_api import router as job_api_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
 from .mixer import render_session
+from .owner_commerce_member_communications import router as owner_commerce_member_communications_router
+from .owner_feature_workshop import router as owner_feature_workshop_router
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .revisions import create_revision
@@ -53,6 +57,10 @@ app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
+app.include_router(owner_commerce_member_communications_router)
+app.include_router(esp_public_network_router)
+app.include_router(aura_support_center_router)
+app.include_router(owner_feature_workshop_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
