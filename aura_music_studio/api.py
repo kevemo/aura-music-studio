@@ -15,6 +15,7 @@ from .assets import AssetLibrary
 from .aura_live_guardian import router as aura_live_guardian_router
 from .aura_live_guardian_policy_ui import router as aura_live_guardian_policy_router
 from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
+from .aura_live_overlay_connector import router as aura_live_overlay_connector_router
 from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
 from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
 from .aura_live_overlay_studio import router as aura_live_overlay_studio_router
@@ -70,6 +71,7 @@ app.include_router(aura_support_center_router)
 app.include_router(owner_feature_workshop_router)
 app.include_router(aura_live_overlay_studio_router)
 app.include_router(aura_live_overlay_advanced_router)
+app.include_router(aura_live_overlay_connector_router)
 app.include_router(aura_live_overlay_engine_router)
 app.include_router(aura_live_overlay_interactives_router)
 app.include_router(aura_live_prompter_router)
