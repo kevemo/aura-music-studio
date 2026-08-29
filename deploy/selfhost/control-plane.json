@@ -12,7 +12,9 @@
     "command_center_writer_hosts": 1,
     "horizontal_web_scaling": false,
     "gpu_renderer": "private-ace-step-service",
-    "public_renderer_ports": false
+    "aura_reasoning": "private-vllm-openai-compatible-local-weights",
+    "public_renderer_ports": false,
+    "public_aura_inference_ports": false
   },
   "target_platform": {
     "orchestrator": "kubernetes-ha",
@@ -22,6 +24,8 @@
     "tls_automation": "cert-manager",
     "gpu_management": "nvidia-gpu-operator",
     "autoscaling": "keda-plus-kubernetes-hpa",
+    "aura_inference": "vllm-openai-compatible-private-esp-model-storage",
+    "aura_gpu_pool": "dedicated-reasoning-nodes",
     "database": "cloudnativepg-postgresql-ha",
     "cache_queue_target": "valkey-ha",
     "distributed_storage_target": "rook-ceph",
@@ -32,7 +36,8 @@
     "image_signing": "cosign",
     "image_build_provenance": "buildkit-sbom-and-slsa-provenance",
     "secret_management": "openbao-ha-or-reviewed-compatible",
-    "runtime_dependency_on_vercel": false
+    "runtime_dependency_on_vercel": false,
+    "runtime_dependency_on_external_llm_api": false
   },
   "scale_gates": [
     {
@@ -52,6 +57,12 @@
       "required": true,
       "status": "blocked",
       "reason": "Horizontal worker/GPU scaling requires durable shared queue semantics and idempotent job ownership."
+    },
+    {
+      "id": "aura-selfhost-llm-live-e2e",
+      "required": true,
+      "status": "blocked",
+      "reason": "A real ESP GPU host must load the approved local model, answer Aura chat, execute structured tool-routing tests and survive restart/failover before production inference is claimed live."
     },
     {
       "id": "registry-ha-and-vulnerability-policy",
