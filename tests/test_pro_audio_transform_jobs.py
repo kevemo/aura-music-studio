@@ -126,8 +126,8 @@ def test_cover_worker_returns_only_project_relative_output(monkeypatch, tmp_path
     assert result["operation"] == "cover"
     assert result["source_asset_id"] == "asset-1"
     assert result["output_ref"].startswith("output/transformations/asset-1/cover_")
-    assert result["asset"]["id"] == "generated-cover-1"
-    assert result["asset"]["ref"] == "input/assets/generated-cover.wav"
+    assert result["asset"]["asset_id"] == "generated-cover-1"
+    assert result["asset"]["asset_ref"] == "input/assets/generated-cover.wav"
     assert not Path(result["output_ref"]).is_absolute()
     assert "output" not in result
     assert "path" not in result
