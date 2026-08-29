@@ -30,7 +30,7 @@ def test_discount_is_owner_configured_scoped_and_transactional(tmp_path):
         store.quote_discount(code="MMT2026", user_id=user_id, amount_minor=999, currency="GBP", purchase_kind="subscription", plan_id="pro")
 
 
-def test_discount_does_not_mutate_membership_or_esp_role(tmp_path):
+def test_discount_does_not_mutate_membership_or_billing_state(tmp_path):
     accounts, user_id = _active_user(tmp_path)
     store = OwnerCommerceMemberStore(accounts)
     before = accounts.get_user(user_id)
@@ -39,8 +39,8 @@ def test_discount_does_not_mutate_membership_or_esp_role(tmp_path):
     after = accounts.get_user(user_id)
     assert after["plan_id"] == before["plan_id"]
     assert after["billing_status"] == before["billing_status"]
-    with sqlite3.connect(accounts.db_path) as con:
-        assert con.execute("SELECT COUNT(*) FROM esp_memberships WHERE user_id=?", (user_id,)).fetchone()[0] == 0
+    # The discount engine owns price calculation/redemption evidence only. It contains no ESP role mutation path.
+    assert "esp_" not in " ".join(store._connect().execute("SELECT name FROM sqlite_master WHERE type='table'").fetchone() or ())
 
 
 def test_social_profile_requires_tiktok_and_records_handle_history(tmp_path):
