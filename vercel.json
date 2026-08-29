@@ -48,7 +48,8 @@
       "feature/video-verified-lyric-sync-ingestion-refresh": false,
       "feature/video-verified-caption-export": false,
       "feature/scene-video-coin-meter-refresh": false,
-      "feature/project-image-to-video-refresh": false
+      "feature/project-image-to-video-refresh": false,
+      "feature/video-scene-image-source": false
     }
   },
   "functions": {
