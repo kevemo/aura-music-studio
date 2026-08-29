@@ -13,13 +13,23 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .aura_live_overlay_engine import EVENT_TYPES, process_overlay_event
-
 router = APIRouter(tags=["Aura LIVE Event Connector"])
 DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3"))
 TOKEN_BYTES = 32
 MAX_EVENTS_PER_MINUTE = max(1, min(int(os.getenv("AURA_LIVE_CONNECTOR_EVENTS_PER_MINUTE", "1200")), 100_000))
 MAX_PAYLOAD_BYTES = max(1024, min(int(os.getenv("AURA_LIVE_CONNECTOR_MAX_PAYLOAD_BYTES", "32768")), 262_144))
+
+
+def _event_types() -> set[str]:
+    from .aura_live_overlay_engine import EVENT_TYPES
+
+    return EVENT_TYPES
+
+
+def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synthetic: bool = False) -> dict:
+    from .aura_live_overlay_engine import process_overlay_event as engine_process_overlay_event
+
+    return engine_process_overlay_event(user_id, event_type, payload, synthetic=synthetic)
 
 
 def _now() -> str:
@@ -204,7 +214,7 @@ def connector_status(request: Request):
     return {
         "configured": bool(row),
         "connector": dict(row) if row else None,
-        "supported_events": sorted(EVENT_TYPES),
+        "supported_events": sorted(_event_types()),
         "provider_connection_state": "external_dependency",
         "direct_tiktok_connection_claimed": False,
         "provider_moderation_authority_claimed": False,
@@ -262,7 +272,7 @@ def connector_ingest(body: ConnectorEvent, request: Request):
     row = _resolve(token)
     token_hash = str(row["token_hash"])
     _rate_limit(token_hash)
-    if body.event_type not in EVENT_TYPES:
+    if body.event_type not in _event_types():
         raise HTTPException(400, "Unsupported normalized LIVE event type")
     if _payload_size(body.payload) > MAX_PAYLOAD_BYTES:
         raise HTTPException(413, "LIVE connector payload too large")
