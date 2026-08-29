@@ -1,3 +1,4 @@
+from importlib import reload
 from types import SimpleNamespace
 
 import pytest
@@ -63,8 +64,11 @@ def test_prompter_response_is_no_store_and_no_referrer():
     assert response.headers["x-robots-tag"] == "noindex, nofollow"
 
 
-def test_production_api_mounts_prompter_route():
-    from aura_music_studio.api import app
+def test_production_api_mounts_prompter_route_from_fresh_assembly():
+    # Other integration tests may mutate the shared FastAPI app object. Reloading the API module
+    # verifies the production assembly itself mounts the prompter without depending on test order.
+    import aura_music_studio.api as api_module
 
-    paths = [getattr(route, "path", "") for route in app.routes]
+    fresh_api = reload(api_module)
+    paths = [getattr(route, "path", "") for route in fresh_api.app.routes]
     assert "/live-overlay-studio/prompter" in paths
