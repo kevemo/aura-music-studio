@@ -25,7 +25,15 @@ MAX_STRING_CHARS = 2000
 TRUST_LEVEL = "authenticated_normalized_relay"
 ZERO_SHA256 = "0" * 64
 _PAYLOAD_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
-_RESERVED_PAYLOAD_KEYS = {"source", "provider", "session_id", "event_id", "trust_level", "provider_timestamp"}
+_RESERVED_PAYLOAD_KEYS = {
+    "source",
+    "provider",
+    "session_id",
+    "event_id",
+    "trust_level",
+    "provider_timestamp",
+    "synthetic",
+}
 
 
 def _event_types() -> set[str]:
@@ -146,7 +154,7 @@ def _init_schema() -> None:
                 INSERT OR IGNORE INTO live_overlay_connector_receipts(
                     user_id,provider,session_id,event_id,event_type,payload_sha256,state,
                     provider_timestamp,received_at,completed_at,last_error_code
-                ) VALUES(?,?,?,?,?,?,'completed',?,?,?,?,NULL)
+                ) VALUES(?,?,?,?,?,?,'completed',?,?,?,NULL)
                 """,
                 (
                     str(row.get("user_id") or "legacy"),
