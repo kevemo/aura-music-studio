@@ -5,13 +5,25 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from .video_lyric_sync_ingestion import _GENERATED_SOURCE, _require_pro_video_sync
+from .plans import VIDEO_SYNC
 from .video_music_sync import _read as read_sync
+from .video_scene_render import _member_identity
 
-router = APIRouter(prefix="/creative", tags=["video-captions"])
+router = APIRouter(tags=["video-captions"])
 
 CaptionFormat = Literal["srt", "vtt"]
+_GENERATED_SOURCE = "song-dna-verified-lyrics"
 _MAX_CAPTION_CUES = 5000
+
+
+def _require_pro_video_sync(request: Request):
+    _member_identity(request)
+    member = getattr(request.state, "member", None)
+    if member is None:
+        raise HTTPException(401, "Membership context unavailable")
+    if not member.plan.has(VIDEO_SYNC):
+        raise HTTPException(403, "Verified video captions require Pro")
+    return member
 
 
 def _caption_text(value: object) -> str:
