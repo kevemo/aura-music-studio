@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -18,7 +20,12 @@ DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3
 TOKEN_BYTES = 32
 MAX_EVENTS_PER_MINUTE = max(1, min(int(os.getenv("AURA_LIVE_CONNECTOR_EVENTS_PER_MINUTE", "1200")), 100_000))
 MAX_PAYLOAD_BYTES = max(1024, min(int(os.getenv("AURA_LIVE_CONNECTOR_MAX_PAYLOAD_BYTES", "32768")), 262_144))
+MAX_PAYLOAD_KEYS = 64
+MAX_STRING_CHARS = 2000
 TRUST_LEVEL = "authenticated_normalized_relay"
+ZERO_SHA256 = "0" * 64
+_PAYLOAD_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
+_RESERVED_PAYLOAD_KEYS = {"source", "provider", "session_id", "event_id", "trust_level", "provider_timestamp"}
 
 
 def _event_types() -> set[str]:
@@ -51,7 +58,7 @@ def _hash(token: str) -> str:
 
 
 def _create_receipts_table(con: sqlite3.Connection) -> None:
-    con.execute(
+    con.executescript(
         """
         CREATE TABLE IF NOT EXISTS live_overlay_connector_receipts (
             user_id TEXT NOT NULL,
@@ -59,12 +66,16 @@ def _create_receipts_table(con: sqlite3.Connection) -> None:
             session_id TEXT NOT NULL,
             event_id TEXT NOT NULL,
             event_type TEXT NOT NULL,
-            state TEXT NOT NULL CHECK(state IN ('processing','completed')),
+            payload_sha256 TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('processing','completed','failed')),
             provider_timestamp TEXT,
             received_at TEXT NOT NULL,
             completed_at TEXT,
+            last_error_code TEXT,
             PRIMARY KEY(user_id,provider,session_id,event_id)
-        )
+        );
+        CREATE INDEX IF NOT EXISTS idx_live_overlay_connector_receipts_user_state
+            ON live_overlay_connector_receipts(user_id,state,received_at);
         """
     )
 
@@ -98,27 +109,57 @@ def _init_schema() -> None:
             return
 
         columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts)").fetchall()}
-        required = {"user_id", "provider", "session_id", "event_id", "event_type", "state", "provider_timestamp", "received_at", "completed_at"}
+        required = {
+            "user_id",
+            "provider",
+            "session_id",
+            "event_id",
+            "event_type",
+            "payload_sha256",
+            "state",
+            "provider_timestamp",
+            "received_at",
+            "completed_at",
+            "last_error_code",
+        }
         if required.issubset(columns):
+            con.execute(
+                "CREATE INDEX IF NOT EXISTS idx_live_overlay_connector_receipts_user_state ON live_overlay_connector_receipts(user_id,state,received_at)"
+            )
             return
 
-        # Development databases may contain the stale #226 or an earlier Chat 2 relay schema.
-        # Rebuild the receipt table transactionally and mark historical rows completed so schema
-        # evolution can never replay a provider event that may already have affected LIVE state.
+        # Development databases may contain stale #226 or earlier Chat 2 relay schemas. Rebuild
+        # transactionally and mark every historical receipt completed: an old row may already have
+        # changed LIVE state, so replaying it during schema evolution would be less safe than
+        # preserving it as consumed.
+        legacy_rows = [dict(row) for row in con.execute("SELECT * FROM live_overlay_connector_receipts").fetchall()]
         con.execute("ALTER TABLE live_overlay_connector_receipts RENAME TO live_overlay_connector_receipts_legacy")
         _create_receipts_table(con)
-        legacy_columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts_legacy)").fetchall()}
-        state_expr = "state" if "state" in legacy_columns else "'completed'"
-        completed_expr = "completed_at" if "completed_at" in legacy_columns else "NULL"
-        con.execute(
-            f"""
-            INSERT OR IGNORE INTO live_overlay_connector_receipts(
-                user_id,provider,session_id,event_id,event_type,state,provider_timestamp,received_at,completed_at
+        for row in legacy_rows:
+            received_at = str(row.get("received_at") or _now())
+            completed_at = str(row.get("completed_at") or row.get("processed_at") or received_at)
+            payload_sha = str(row.get("payload_sha256") or ZERO_SHA256)
+            if len(payload_sha) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in payload_sha):
+                payload_sha = ZERO_SHA256
+            con.execute(
+                """
+                INSERT OR IGNORE INTO live_overlay_connector_receipts(
+                    user_id,provider,session_id,event_id,event_type,payload_sha256,state,
+                    provider_timestamp,received_at,completed_at,last_error_code
+                ) VALUES(?,?,?,?,?,?,'completed',?,?,?,?,NULL)
+                """,
+                (
+                    str(row.get("user_id") or "legacy"),
+                    str(row.get("provider") or "legacy"),
+                    str(row.get("session_id") or "legacy"),
+                    str(row.get("event_id") or "legacy-event"),
+                    str(row.get("event_type") or "custom"),
+                    payload_sha.lower(),
+                    row.get("provider_timestamp"),
+                    received_at,
+                    completed_at,
+                ),
             )
-            SELECT user_id,'legacy','legacy',event_id,event_type,{state_expr},NULL,received_at,{completed_expr}
-            FROM live_overlay_connector_receipts_legacy
-            """
-        )
         con.execute("DROP TABLE live_overlay_connector_receipts_legacy")
 
 
@@ -176,8 +217,39 @@ def _rate_limit(token_hash: str) -> None:
         con.execute("DELETE FROM live_overlay_connector_rate WHERE minute_bucket<?", (bucket - 2,))
 
 
-def _payload_size(payload: dict) -> int:
-    return len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+def _validated_payload(payload: dict) -> tuple[dict, str]:
+    if len(payload) > MAX_PAYLOAD_KEYS:
+        raise HTTPException(413, "LIVE connector payload has too many fields")
+    normalized: dict = {}
+    for key, value in payload.items():
+        if not isinstance(key, str) or not _PAYLOAD_KEY.fullmatch(key):
+            raise HTTPException(422, "LIVE connector payload contains an invalid field name")
+        if key in _RESERVED_PAYLOAD_KEYS:
+            raise HTTPException(422, f"LIVE connector payload field is reserved: {key}")
+        if isinstance(value, str):
+            if len(value) > MAX_STRING_CHARS:
+                raise HTTPException(413, "LIVE connector payload string is too large")
+        elif isinstance(value, bool) or value is None or isinstance(value, int):
+            pass
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                raise HTTPException(422, "LIVE connector payload numbers must be finite")
+        else:
+            raise HTTPException(422, "LIVE connector payload values must be normalized scalar values")
+        normalized[key] = value
+    try:
+        encoded = json.dumps(
+            normalized,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "LIVE connector payload is not valid normalized JSON") from exc
+    if len(encoded) > MAX_PAYLOAD_BYTES:
+        raise HTTPException(413, "LIVE connector payload too large")
+    return normalized, hashlib.sha256(encoded).hexdigest()
 
 
 def _provider_timestamp(value: datetime | None) -> str | None:
@@ -194,38 +266,67 @@ def _claim_event(
     session_id: str,
     event_id: str,
     event_type: str,
+    payload_sha256: str,
     provider_timestamp: str | None,
 ) -> str:
+    received_at = _now()
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         existing = con.execute(
             """
-            SELECT state FROM live_overlay_connector_receipts
+            SELECT event_type,payload_sha256,state,provider_timestamp
+            FROM live_overlay_connector_receipts
             WHERE user_id=? AND provider=? AND session_id=? AND event_id=?
             """,
             (user_id, provider, session_id, event_id),
         ).fetchone()
         if existing:
-            return str(existing["state"])
+            if str(existing["event_type"]) != event_type or str(existing["payload_sha256"]) != payload_sha256:
+                raise HTTPException(409, "LIVE event ID was already used for different event data")
+            if existing["provider_timestamp"] != provider_timestamp:
+                raise HTTPException(409, "LIVE event ID was already used with a different provider timestamp")
+            state = str(existing["state"])
+            if state == "failed":
+                con.execute(
+                    """
+                    UPDATE live_overlay_connector_receipts
+                    SET state='processing',received_at=?,completed_at=NULL,last_error_code=NULL
+                    WHERE user_id=? AND provider=? AND session_id=? AND event_id=? AND state='failed'
+                    """,
+                    (received_at, user_id, provider, session_id, event_id),
+                )
+                return "claimed"
+            return state
         con.execute(
             """
             INSERT INTO live_overlay_connector_receipts(
-                user_id,provider,session_id,event_id,event_type,state,provider_timestamp,received_at
-            ) VALUES(?,?,?,?,?,'processing',?,?)
+                user_id,provider,session_id,event_id,event_type,payload_sha256,state,
+                provider_timestamp,received_at,completed_at,last_error_code
+            ) VALUES(?,?,?,?,?,?,'processing',?,?,NULL,NULL)
             """,
-            (user_id, provider, session_id, event_id, event_type, provider_timestamp, _now()),
+            (
+                user_id,
+                provider,
+                session_id,
+                event_id,
+                event_type,
+                payload_sha256,
+                provider_timestamp,
+                received_at,
+            ),
         )
     return "claimed"
 
 
-def _release_failed_claim(user_id: str, provider: str, session_id: str, event_id: str) -> None:
+def _mark_failed(user_id: str, provider: str, session_id: str, event_id: str, exc: Exception) -> None:
     with _connect() as con:
         con.execute(
             """
-            DELETE FROM live_overlay_connector_receipts
+            UPDATE live_overlay_connector_receipts
+            SET state='failed',last_error_code=?
             WHERE user_id=? AND provider=? AND session_id=? AND event_id=? AND state='processing'
             """,
-            (user_id, provider, session_id, event_id),
+            (type(exc).__name__[:80], user_id, provider, session_id, event_id),
         )
 
 
@@ -236,7 +337,7 @@ def _complete_event(user_id: str, provider: str, session_id: str, event_id: str)
         updated = con.execute(
             """
             UPDATE live_overlay_connector_receipts
-            SET state='completed',completed_at=?
+            SET state='completed',completed_at=?,last_error_code=NULL
             WHERE user_id=? AND provider=? AND session_id=? AND event_id=? AND state='processing'
             """,
             (completed_at, user_id, provider, session_id, event_id),
@@ -270,19 +371,22 @@ def connector_status(request: Request):
             "SELECT enabled,label,created_at,updated_at,last_event_at FROM live_overlay_connectors WHERE user_id=?",
             (member.user_id,),
         ).fetchone()
-    return {
-        "configured": bool(row),
-        "connector": dict(row) if row else None,
-        "schema_version": 2,
-        "supported_events": sorted(_event_types()),
-        "provider_connection_state": "external_dependency",
-        "direct_tiktok_connection_claimed": False,
-        "provider_moderation_authority_claimed": False,
-        "transport": "bearer_token_normalized_relay",
-        "trust_level": TRUST_LEVEL,
-        "trust_note": "Aura authenticates the approved relay credential; provider-event authenticity remains the adapter's responsibility.",
-        "purpose": "Use only with an ESP-approved, policy-compliant provider adapter that normalizes LIVE events into Aura's bounded event contract.",
-    }
+    return JSONResponse(
+        {
+            "configured": bool(row),
+            "connector": dict(row) if row else None,
+            "schema_version": 2,
+            "supported_events": sorted(_event_types()),
+            "provider_connection_state": "external_dependency",
+            "direct_tiktok_connection_claimed": False,
+            "provider_moderation_authority_claimed": False,
+            "transport": "bearer_token_normalized_relay",
+            "trust_level": TRUST_LEVEL,
+            "trust_note": "Aura authenticates the approved relay credential; provider-event authenticity remains the adapter's responsibility.",
+            "purpose": "Use only with an ESP-approved, policy-compliant provider adapter that normalizes LIVE events into Aura's bounded event contract.",
+        },
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 @router.post("/api/live-overlays/connector/rotate")
@@ -294,13 +398,14 @@ def rotate_connector(body: ConnectorRotate, request: Request):
         con.execute("BEGIN IMMEDIATE")
         con.execute(
             """
-            INSERT INTO live_overlay_connectors(user_id,token_hash,enabled,label,created_at,updated_at)
-            VALUES(?,?,1,?,?,?)
+            INSERT INTO live_overlay_connectors(user_id,token_hash,enabled,label,created_at,updated_at,last_event_at)
+            VALUES(?,?,1,?,?,?,NULL)
             ON CONFLICT(user_id) DO UPDATE SET
               token_hash=excluded.token_hash,
               enabled=1,
               label=excluded.label,
-              updated_at=excluded.updated_at
+              updated_at=excluded.updated_at,
+              last_event_at=NULL
             """,
             (member.user_id, _hash(raw), body.label, now, now),
         )
@@ -326,7 +431,10 @@ def disable_connector(request: Request):
             "UPDATE live_overlay_connectors SET enabled=0,updated_at=? WHERE user_id=?",
             (_now(), member.user_id),
         )
-    return {"disabled": True}
+    return JSONResponse(
+        {"disabled": True, "provider_moderation_authority_claimed": False},
+        headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 @router.post("/live-overlay/source/relay/ingest", include_in_schema=False)
@@ -337,17 +445,17 @@ def connector_ingest(body: ConnectorEvent, request: Request):
     _rate_limit(token_hash)
     if body.event_type not in _event_types():
         raise HTTPException(400, "Unsupported normalized LIVE event type")
-    if _payload_size(body.payload) > MAX_PAYLOAD_BYTES:
-        raise HTTPException(413, "LIVE connector payload too large")
+    payload, payload_sha256 = _validated_payload(body.payload)
+    provider_timestamp = _provider_timestamp(body.occurred_at)
 
     user_id = str(row["user_id"])
-    provider_timestamp = _provider_timestamp(body.occurred_at)
     claim = _claim_event(
         user_id,
         body.provider,
         body.session_id,
         body.event_id,
         body.event_type,
+        payload_sha256,
         provider_timestamp,
     )
     if claim == "completed":
@@ -358,39 +466,42 @@ def connector_ingest(body: ConnectorEvent, request: Request):
                 "provider": body.provider,
                 "session_id": body.session_id,
                 "event_id": body.event_id,
+                "state": "completed",
             },
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
     if claim == "processing":
         return JSONResponse(
             {
                 "accepted": False,
-                "duplicate": False,
+                "duplicate": True,
                 "processing": True,
+                "retryable": True,
                 "provider": body.provider,
                 "session_id": body.session_id,
                 "event_id": body.event_id,
+                "state": "processing",
             },
             status_code=409,
-            headers={"Cache-Control": "no-store", "Retry-After": "1"},
+            headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Retry-After": "1"},
         )
 
-    normalized_payload = dict(body.payload)
+    normalized_payload = dict(payload)
     normalized_payload["source"] = body.provider
     try:
         result = process_overlay_event(user_id, body.event_type, normalized_payload, synthetic=False)
-    except Exception:
-        # The engine did not complete, so the same provider event ID may be retried safely.
-        _release_failed_claim(user_id, body.provider, body.session_id, body.event_id)
-        raise
+    except Exception as exc:
+        _mark_failed(user_id, body.provider, body.session_id, body.event_id, exc)
+        raise HTTPException(503, "LIVE event processing failed; retry with the same normalized event") from exc
 
-    # Once the engine has returned success, never release this claim. If completion bookkeeping
-    # fails, leaving the receipt in `processing` fails closed and prevents a retry from applying
-    # the same gift/like/follow/goal mutation twice.
+    # Once the engine has returned success, never change this receipt back to `failed` or delete it.
+    # If completion bookkeeping fails, leaving it in `processing` prevents a retry from applying the
+    # same gift/like/follow/goal mutation twice.
     _complete_event(user_id, body.provider, body.session_id, body.event_id)
 
     result.update(
         {
+            "accepted": True,
             "duplicate": False,
             "provider": body.provider,
             "session_id": body.session_id,
@@ -399,6 +510,10 @@ def connector_ingest(body: ConnectorEvent, request: Request):
             "trust_level": TRUST_LEVEL,
             "provider_timestamp": provider_timestamp,
             "direct_tiktok_connection_claimed": False,
+            "provider_moderation_authority_claimed": False,
         }
     )
-    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+    return JSONResponse(
+        result,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
