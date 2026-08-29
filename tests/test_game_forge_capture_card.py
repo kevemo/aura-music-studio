@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import inspect
 
-from aura_music_studio.game_forge_capture_card import capture_card_capabilities
+from aura_music_studio.game_forge_capture_card import capture_card_capabilities, router
 
 
 def test_capture_card_capability_contract_is_truthful():
@@ -37,11 +37,19 @@ def test_capture_portal_requires_game_playtest_entitlement():
 
 
 def test_game_forge_composition_mounts_capture_card_routes():
-    from app import app
-
-    routes = {(getattr(route, "path", None), frozenset(getattr(route, "methods", set()) or set())) for route in app.routes}
+    routes = {(getattr(route, "path", None), frozenset(getattr(route, "methods", set()) or set())) for route in router.routes}
     assert any(path == "/game-creation/capture-card/{game_id}" and "GET" in methods for path, methods in routes)
     assert any(path == "/api/game-forge/capture-card/capabilities" and "GET" in methods for path, methods in routes)
+
+    from aura_music_studio import game_forge_export_portal as export_portal
+    source = inspect.getsource(export_portal)
+    assert "capture_card_router" in source
+    assert "router.include_router(capture_card_router)" in source
+
+    from aura_music_studio import game_forge_world_api as world_api
+    world_source = inspect.getsource(world_api)
+    assert "game_export_portal_router" in world_source
+    assert "router.include_router(game_export_portal_router)" in world_source
 
 
 def test_export_studio_links_to_capture_card():
