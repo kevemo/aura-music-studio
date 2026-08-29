@@ -17,6 +17,12 @@ def test_high_risk_categories_cannot_be_disabled(tmp_path):
     assert "spam" in policy.enabled_categories
 
 
+def test_explicit_empty_optional_categories_keep_only_mandatory_protections(tmp_path):
+    store = AuraLiveGuardianPolicyStore(tmp_path / "guardian.sqlite3")
+    policy = store.save(user_id="creator-1", blocked_phrases=[], enabled_categories=set(), actor="member:creator-1")
+    assert policy.enabled_categories == frozenset({"threat", "doxxing", "grooming_concern"})
+
+
 def test_unknown_category_and_invalid_sensitivity_fail_closed(tmp_path):
     store = AuraLiveGuardianPolicyStore(tmp_path / "guardian.sqlite3")
     with pytest.raises(ValueError, match="unknown moderation category"):
