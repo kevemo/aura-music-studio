@@ -89,6 +89,29 @@ def _init_schema() -> None:
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY(user_id, username)
             );
+            CREATE TABLE IF NOT EXISTS live_overlay_challenges (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                gift_name TEXT,
+                target REAL NOT NULL,
+                current REAL NOT NULL DEFAULT 0,
+                reward_text TEXT,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS live_overlay_auction (
+                user_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT 'LIVE Auction',
+                active INTEGER NOT NULL DEFAULT 0,
+                minimum_bid REAL NOT NULL DEFAULT 0,
+                leader_username TEXT,
+                leader_value REAL NOT NULL DEFAULT 0,
+                ends_at TEXT,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         cols = {r[1] for r in con.execute("PRAGMA table_info(live_overlay_session_stats)").fetchall()}
@@ -157,6 +180,23 @@ def _goal_delta(metric: str, event_type: str, payload: dict) -> float:
     return 0.0
 
 
+def _challenge_delta(row: sqlite3.Row, event_type: str, payload: dict) -> float:
+    if str(row["event_type"]) != event_type:
+        return 0.0
+    if event_type == "gift":
+        wanted = str(row["gift_name"] or "").strip().casefold()
+        if wanted and str(payload.get("gift_name") or "").strip().casefold() != wanted:
+            return 0.0
+        return float(payload.get("gift_count") or 1)
+    if event_type == "like":
+        return float(payload.get("likes") or 1)
+    if event_type == "share":
+        return float(payload.get("shares") or 1)
+    if event_type in {"follow", "subscribe"}:
+        return 1.0
+    return 0.0
+
+
 def _update_stats(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> None:
     username = str(payload.get("username") or payload.get("display_name") or "").strip()[:80]
     if not username:
@@ -186,6 +226,47 @@ def _update_stats(con: sqlite3.Connection, user_id: str, event_type: str, payloa
     )
 
 
+def _update_challenges(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> list[dict]:
+    updates: list[dict] = []
+    rows = con.execute("SELECT * FROM live_overlay_challenges WHERE user_id=? AND enabled=1", (user_id,)).fetchall()
+    for row in rows:
+        delta = _challenge_delta(row, event_type, payload)
+        if delta <= 0:
+            continue
+        before = float(row["current"])
+        target = float(row["target"])
+        after = min(target, before + delta)
+        con.execute("UPDATE live_overlay_challenges SET current=?,updated_at=? WHERE id=? AND user_id=?", (after, _now(), row["id"], user_id))
+        updates.append({"challenge_id": row["id"], "current": after, "target": target, "completed": before < target <= after, "reward_text": row["reward_text"]})
+    return updates
+
+
+def _update_auction(con: sqlite3.Connection, user_id: str, event_type: str, payload: dict) -> dict | None:
+    if event_type != "gift":
+        return None
+    row = con.execute("SELECT * FROM live_overlay_auction WHERE user_id=? AND active=1", (user_id,)).fetchone()
+    if not row:
+        return None
+    ends_at = row["ends_at"]
+    if ends_at:
+        try:
+            if datetime.fromisoformat(str(ends_at)) <= datetime.now(timezone.utc):
+                con.execute("UPDATE live_overlay_auction SET active=0,updated_at=? WHERE user_id=?", (_now(), user_id))
+                return {"active": False, "ended": True}
+        except ValueError:
+            return None
+    value = float(payload.get("coins") or payload.get("diamonds") or 0)
+    if value <= 0:
+        return None
+    username = str(payload.get("username") or payload.get("display_name") or "Viewer").strip()[:80]
+    minimum = float(row["minimum_bid"] or 0)
+    current = float(row["leader_value"] or 0)
+    if value < minimum or value <= current:
+        return {"active": True, "leader_changed": False, "leader_value": current}
+    con.execute("UPDATE live_overlay_auction SET leader_username=?,leader_value=?,updated_at=? WHERE user_id=?", (username, value, _now(), user_id))
+    return {"active": True, "leader_changed": True, "leader_username": username, "leader_value": value, "unit": "normalized_gift_value", "payment_processed": False}
+
+
 def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synthetic: bool = False) -> dict:
     if event_type not in EVENT_TYPES:
         raise ValueError("Unsupported LIVE event type")
@@ -193,6 +274,8 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
     clean["synthetic"] = bool(synthetic)
     fired: list[dict] = []
     goal_updates: list[dict] = []
+    challenge_updates: list[dict] = []
+    auction_update: dict | None = None
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         con.execute(
@@ -208,6 +291,8 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
             new_value = float(goal["current"]) + delta
             con.execute("UPDATE live_overlay_goals SET current=?,updated_at=? WHERE id=? AND user_id=?", (new_value, _now(), goal["id"], user_id))
             goal_updates.append({"goal_id": goal["id"], "current": new_value, "target": float(goal["target"])})
+        challenge_updates = _update_challenges(con, user_id, event_type, clean)
+        auction_update = _update_auction(con, user_id, event_type, clean)
         rules = con.execute("SELECT * FROM live_overlay_rules WHERE user_id=? AND event_type=? AND enabled=1 ORDER BY updated_at DESC", (user_id, event_type)).fetchall()
         now_mono = time.monotonic()
         for row in rules:
@@ -243,11 +328,30 @@ def process_overlay_event(user_id: str, event_type: str, payload: dict, *, synth
                 (user_id, "custom", json.dumps(automation_payload, separators=(",", ":")), _now()),
             )
             fired.append({"rule_id": row["id"], "name": row["name"], "actions": safe})
+        for challenge in challenge_updates:
+            if challenge.get("completed"):
+                con.execute(
+                    "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+                    (user_id, "custom", json.dumps({"label": "challenge_completed", "title": "Challenge complete", "message": str(challenge.get("reward_text") or "Challenge completed!")[:500], "source": "aura_challenge_engine", "synthetic": bool(synthetic)}, separators=(",", ":")), _now()),
+                )
+        if auction_update and auction_update.get("leader_changed"):
+            con.execute(
+                "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+                (user_id, "custom", json.dumps({"label": "auction_leader", "title": "New auction leader", "message": f"{auction_update['leader_username']} leads with {auction_update['leader_value']:g} gift value", "source": "aura_auction_engine", "synthetic": bool(synthetic)}, separators=(",", ":")), _now()),
+            )
         con.execute(
             "DELETE FROM live_overlay_events WHERE user_id=? AND id NOT IN (SELECT id FROM live_overlay_events WHERE user_id=? ORDER BY id DESC LIMIT ?)",
             (user_id, user_id, EVENT_LIMIT),
         )
-    return {"accepted": True, "event_type": event_type, "synthetic": bool(synthetic), "rules_fired": fired, "goals_updated": goal_updates}
+    return {
+        "accepted": True,
+        "event_type": event_type,
+        "synthetic": bool(synthetic),
+        "rules_fired": fired,
+        "goals_updated": goal_updates,
+        "challenges_updated": challenge_updates,
+        "auction_update": auction_update,
+    }
 
 
 class EngineEvent(BaseModel):
@@ -291,4 +395,6 @@ def reset_session_stats(request: Request):
         for row in rows:
             if row["reset_mode"] == "per_live":
                 con.execute("UPDATE live_overlay_goals SET current=0,updated_at=? WHERE id=? AND user_id=?", (_now(), row["id"], member.user_id))
+        con.execute("UPDATE live_overlay_challenges SET current=0,updated_at=? WHERE user_id=?", (_now(), member.user_id))
+        con.execute("UPDATE live_overlay_auction SET leader_username=NULL,leader_value=0,updated_at=? WHERE user_id=?", (_now(), member.user_id))
     return {"reset": True, "session_id": secrets.token_urlsafe(10)}
