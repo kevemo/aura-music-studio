@@ -55,8 +55,34 @@ def patch_item_source_guard(
     return {"item": item.model_dump(mode="json"), "editor": _state(store)}
 
 
+def _install_routes_once(routes) -> None:
+    existing = {
+        (
+            getattr(current, "path", None),
+            frozenset(getattr(current, "methods", set())),
+            getattr(current, "endpoint", None),
+        )
+        for current in professional_editor_router.routes
+    }
+    for candidate in routes:
+        signature = (
+            getattr(candidate, "path", None),
+            frozenset(getattr(candidate, "methods", set())),
+            getattr(candidate, "endpoint", None),
+        )
+        if signature not in existing:
+            professional_editor_router.routes.append(candidate)
+            existing.add(signature)
+
+
 def install_professional_editor_patch_guard() -> None:
-    """Prepend the guarded PATCH route so FastAPI cannot reach the legacy generic route first."""
+    """Install the guarded PATCH route plus the existing hardened render/export surface.
+
+    The render module is imported lazily so importing the package or this overlay remains
+    lightweight for production-readiness commands. The PATCH guard is prepended because it
+    must win route precedence; render routes are appended because they do not shadow legacy
+    editor endpoints.
+    """
 
     guarded_routes = list(router.routes)
     for guarded in reversed(guarded_routes):
@@ -68,6 +94,13 @@ def install_professional_editor_patch_guard() -> None:
         )
         if not already_installed:
             professional_editor_router.routes.insert(0, guarded)
+
+    # This render/export implementation already existed in the repository but was not mounted
+    # by the production app. Activate it only through the authenticated Professional Editor
+    # router so its Basic/Pro entitlement checks and project-scoped path confinement apply.
+    from .professional_editor_render_api import router as render_router
+
+    _install_routes_once(render_router.routes)
 
 
 __all__ = [
