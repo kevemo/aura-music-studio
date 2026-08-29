@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from aura_music_studio.api import app
 from aura_music_studio.aura_live_prompter import live_auto_cue_prompter, router
 
 
@@ -15,10 +16,12 @@ def _member():
     return SimpleNamespace(user_id="creator-1", display_name="Creator")
 
 
-def test_prompter_route_is_creator_only_and_not_public_overlay_source():
-    paths = [route.path for route in router.routes]
-    assert "/live-overlay-studio/prompter" in paths
-    assert not any("source" in path for path in paths)
+def test_prompter_route_is_mounted_and_not_public_overlay_source():
+    local_paths = [route.path for route in router.routes]
+    app_paths = [getattr(route, "path", "") for route in app.routes]
+    assert "/live-overlay-studio/prompter" in local_paths
+    assert "/live-overlay-studio/prompter" in app_paths
+    assert not any("source" in path for path in local_paths)
 
 
 def test_prompter_requires_authenticated_member():
