@@ -7,8 +7,14 @@ from pathlib import Path
 
 from .creative_abuse_policy import enforce_creation_abuse_policy, public_abuse_policy_summary
 from .creative_ip_policy import enforce_creation_ip_policy, public_ip_policy_summary
+from .safeguarding_runtime import assert_self_hosted_core_ready
 
 POLICY_VERSION = "esp-professional-creation-v2-2026-08-29"
+
+# The creation-safety module is imported during normal application assembly. Keep the core
+# safeguarding boundary fail-closed: a future change that makes a critical safeguard remote-only
+# or permits external evidence to override a local Aura block must prevent startup/release.
+assert_self_hosted_core_ready()
 
 # These are intent patterns, not an exhaustive moderation system. Production deployments
 # can add owner-managed blocked terms (including slurs) without committing them to source.
