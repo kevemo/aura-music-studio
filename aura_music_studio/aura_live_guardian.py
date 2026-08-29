@@ -8,7 +8,12 @@ from pathlib import Path
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from .aura_live_guardian_review_ui import router as aura_live_guardian_review_router
+from .aura_live_guardian_review_ui import (
+    acknowledge_guardian_escalation,
+    confirm_guardian_review,
+    dismiss_guardian_review,
+    guardian_review_page,
+)
 from .aura_live_moderator import (
     AURA_LIVE_MODERATOR_HANDLE,
     AURA_LIVE_MODERATOR_PROFILE_URL,
@@ -19,7 +24,33 @@ from .aura_live_moderator_store import AuraLiveModeratorStore
 from .branding import PRODUCT_FULL_NAME
 
 router = APIRouter(tags=["Aura LIVE Guardian"])
-router.include_router(aura_live_guardian_review_router)
+# Keep the production Guardian router flat. Register the review handlers directly rather than
+# nesting another APIRouter so route composition remains stable across FastAPI versions.
+router.add_api_route(
+    "/live-guardian/review",
+    guardian_review_page,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/live-guardian/review/{review_id}/confirm",
+    confirm_guardian_review,
+    methods=["POST"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/live-guardian/review/{review_id}/dismiss",
+    dismiss_guardian_review,
+    methods=["POST"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/live-guardian/review/{review_id}/acknowledge",
+    acknowledge_guardian_escalation,
+    methods=["POST"],
+    include_in_schema=False,
+)
 
 
 def _member(request: Request):
