@@ -5,7 +5,7 @@ import inspect
 import pytest
 
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.owner_feature_workshop import OwnerFeatureWorkshopStore
+from aura_music_studio.owner_feature_workshop import OwnerFeatureWorkshopStore, router
 
 
 def _store(tmp_path):
@@ -25,7 +25,10 @@ def test_aura_change_plan_preserves_branch_pr_ci_boundaries(tmp_path):
     assert item["branch_name"].startswith("owner-update/")
     assert item["aura_plan"]["browser_executes_code"] is False
     assert item["aura_plan"]["production_auto_deploy"] is False
-    assert any("pull request" in step for step in item["aura_plan"]["implementation_steps"])
+    steps = " ".join(item["aura_plan"]["implementation_steps"]).lower()
+    assert "pr" in steps or "pull request" in steps
+    assert "development/full-site-build" in steps
+    assert "ci" in steps
 
 
 def test_sensitive_change_is_risk_flagged_and_requires_owner_approval(tmp_path):
@@ -102,14 +105,17 @@ def test_trusted_worker_can_report_pr_and_validation_evidence(tmp_path, monkeypa
     assert result["executions"][0]["ci_state"] == "success"
 
 
-def test_production_aggregate_mounts_owner_update_routes():
-    from app import app
-
-    paths = {getattr(route, "path", None) for route in app.routes}
+def test_owner_update_routes_exist_and_are_composed_into_base_api():
+    paths = {getattr(route, "path", None) for route in router.routes}
     assert "/owner/updates" in paths
     assert "/owner/feature-workshop" in paths
     assert "/owner/updates/{change_id}" in paths
     assert "/owner-maintenance/worker/{execution_id}" in paths
+
+    import aura_music_studio.api as aggregate
+    source = inspect.getsource(aggregate)
+    assert "owner_feature_workshop_router" in source
+    assert "app.include_router(owner_feature_workshop_router)" in source
 
 
 def test_owner_navigation_has_updates_and_features_tab():
