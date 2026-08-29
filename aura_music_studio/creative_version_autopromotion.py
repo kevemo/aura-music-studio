@@ -39,6 +39,7 @@ from .video_audio_analysis_ingestion import router as video_audio_analysis_route
 from .video_image_to_video import router as video_image_to_video_router
 from .video_lyric_sync_ingestion import router as video_lyric_sync_ingestion_router
 from .video_music_sync import router as video_music_sync_router
+from .video_scene_image_to_video import router as video_scene_image_to_video_router
 from .video_scene_local_revision import router as video_scene_local_revision_router
 from .video_scene_render import router as video_scene_render_router
 from .video_scene_timeline import router as video_scene_timeline_router
@@ -70,6 +71,7 @@ router.include_router(deep_daw_automation_router)
 router.include_router(video_scene_timeline_router)
 router.include_router(video_visual_continuity_router)
 router.include_router(video_scene_render_router)
+router.include_router(video_scene_image_to_video_router)
 router.include_router(video_scene_local_revision_router)
 router.include_router(video_image_to_video_router)
 # These duplicate-path wrappers must precede the base video/music sync routers. Starlette resolves
