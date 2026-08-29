@@ -124,6 +124,18 @@ def _validate_timeline(scenes: list[dict]) -> None:
         prior_end = end
 
 
+def _validate_source_image_element(project_name: str, element_id: str | None) -> None:
+    if not element_id:
+        return
+    project = _project_dir(project_name)
+    manifest = CreativeProjectStore(project).load()
+    element = next((item for item in manifest.elements if item.id == element_id), None)
+    if element is None:
+        raise HTTPException(404, "Scene source image element not found")
+    if element.kind != "image":
+        raise HTTPException(400, "Scene source_image_element_id must reference a project image element")
+
+
 class SceneCreateRequest(BaseModel):
     id: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     label: str = Field(min_length=1, max_length=200)
@@ -136,6 +148,7 @@ class SceneCreateRequest(BaseModel):
     continuity_profile_ids: list[str] = Field(default_factory=list, max_length=50)
     preserve_element_ids: list[str] = Field(default_factory=list, max_length=100)
     reference_ids: list[str] = Field(default_factory=list, max_length=100)
+    source_image_element_id: str | None = Field(default=None, min_length=1, max_length=96)
     output_element_id: str | None = Field(default=None, max_length=96)
     status: Literal["planned", "ready", "rendering", "rendered", "approved"] = "planned"
 
@@ -159,6 +172,7 @@ class SceneUpdateRequest(BaseModel):
     continuity_profile_ids: list[str] | None = Field(default=None, max_length=50)
     preserve_element_ids: list[str] | None = Field(default=None, max_length=100)
     reference_ids: list[str] | None = Field(default=None, max_length=100)
+    source_image_element_id: str | None = Field(default=None, min_length=1, max_length=96)
     output_element_id: str | None = Field(default=None, max_length=96)
     status: Literal["planned", "ready", "rendering", "rendered", "approved"] | None = None
 
@@ -182,6 +196,7 @@ def get_video_timeline(project_name: str, request: Request):
 @router.post("/projects/{project_name}/video-timeline/scenes")
 def add_video_scene(project_name: str, body: SceneCreateRequest, request: Request):
     _member(request)
+    _validate_source_image_element(project_name, body.source_image_element_id)
     data = _read(project_name)
     if any(scene["id"] == body.id for scene in data["scenes"]):
         raise HTTPException(409, "Scene ID already exists")
@@ -197,11 +212,13 @@ def add_video_scene(project_name: str, body: SceneCreateRequest, request: Reques
 @router.patch("/projects/{project_name}/video-timeline/scenes/{scene_id}")
 def update_video_scene(project_name: str, scene_id: str, body: SceneUpdateRequest, request: Request):
     _member(request)
+    updates = body.model_dump(exclude_unset=True, mode="json")
+    if "source_image_element_id" in updates:
+        _validate_source_image_element(project_name, updates.get("source_image_element_id"))
     data = _read(project_name)
     scene = next((item for item in data["scenes"] if item["id"] == scene_id), None)
     if scene is None:
         raise HTTPException(404, "Video scene not found")
-    updates = body.model_dump(exclude_unset=True, mode="json")
     scene.update(updates)
     scene["updated_at"] = _now()
     _validate_timeline(data["scenes"])
