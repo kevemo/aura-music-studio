@@ -71,6 +71,28 @@ def test_terminal_review_requires_resolution_evidence_and_appeal_is_member_bound
         store.appeal(report_id=report["id"], appellant_user_id="member-b", reason="Spoofed appeal.", evidence_references=[])
 
 
+def test_owner_review_audit_event_records_bounded_reviewer_actor(tmp_path):
+    store = SafetyReportStore(tmp_path / "safety.sqlite3")
+    report = store.submit(
+        reporter_user_id="member-a", category="harassment", target_type="message",
+        target_reference="message:owner-review", detail="Owner review attribution case.",
+        evidence_references=[], immediate_danger=False,
+    )["report"]
+    result = store.owner_review(
+        report_id=report["id"], status="under_review", reason="Mary started review.",
+        reviewer_actor="Mary · ESP Owner",
+    )
+    event = [item for item in result["events"] if item["action"] == "owner_review"][-1]
+    assert event["actor_type"] == "owner"
+    assert event["data"]["reviewer_actor"] == "Mary · ESP Owner"
+    assert event["data"]["automatic_moderation_action_taken"] is False
+    with pytest.raises(ValueError, match="Reviewer actor label"):
+        store.owner_review(
+            report_id=report["id"], status="under_review", reason="Invalid reviewer label.",
+            reviewer_actor="x" * 121,
+        )
+
+
 def test_appeal_before_terminal_decision_fails_closed(tmp_path):
     store = SafetyReportStore(tmp_path / "safety.sqlite3")
     report = store.submit(
