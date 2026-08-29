@@ -61,9 +61,10 @@ _IMPERSONATION = re.compile(
     re.I | re.S,
 )
 _FINANCIAL_OR_CREDENTIAL_OBJECTIVE = re.compile(
-    r"\b(?:bank transfer|wire transfer|payment|send money|transfer money|invoice|gift card|crypto(?:currency)?|"
-    r"account number|bank details|card details|credit card|debit card|password|passcode|one[- ]time (?:passcode|code)|"
-    r"otp|login|credential|security code|authentication code|financial account|authori[sz]e (?:a )?payment)\b",
+    r"\b(?:bank transfer|wire transfer|payment|send(?:ing)? money|transfer(?:ring)? money|invoice|gift card|"
+    r"crypto(?:currency)?|account number|bank details|card details|credit card|debit card|password|passcode|"
+    r"one[- ]time (?:passcode|code)|otp|login|credential|security code|authentication code|financial account|"
+    r"authori[sz](?:e|ing) (?:a )?payment)\b",
     re.I,
 )
 _DECEPTIVE_OBJECTIVE = re.compile(
@@ -94,20 +95,20 @@ def evaluate_abuse_text(text: str | None) -> AbuseDecision:
             )
 
     intimate_synthesis = bool(_INTIMATE_SYNTHETIC.search(value))
-    if intimate_synthesis and (_REAL_PERSON_SIGNAL.search(value) or _NONCONSENT_SIGNAL.search(value)):
-        return AbuseDecision(
-            False,
-            "nonconsensual_or_unverified_intimate_synthetic_person",
-            "The request appears to create or alter intimate synthetic media of a real person without an approved consent pathway.",
-            "Use a fictional adult or non-intimate transformation. Real-person intimate synthesis is not available through the ordinary creation workflow.",
-        )
-
     if intimate_synthesis and _EXTORTION.search(value):
         return AbuseDecision(
             False,
             "synthetic_intimate_extortion",
             "The request combines synthetic intimate media with blackmail, extortion or a threat to distribute it.",
             "Create lawful non-coercive content instead. Safety reporting tools should be used for actual threats or abuse.",
+        )
+
+    if intimate_synthesis and (_REAL_PERSON_SIGNAL.search(value) or _NONCONSENT_SIGNAL.search(value)):
+        return AbuseDecision(
+            False,
+            "nonconsensual_or_unverified_intimate_synthetic_person",
+            "The request appears to create or alter intimate synthetic media of a real person without an approved consent pathway.",
+            "Use a fictional adult or non-intimate transformation. Real-person intimate synthesis is not available through the ordinary creation workflow.",
         )
 
     if (
