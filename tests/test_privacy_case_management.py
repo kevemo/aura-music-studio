@@ -19,7 +19,23 @@ def _privacy_request(db, *, user_id="member-a", request_type="deletion"):
     )
 
 
-def test_case_requires_identity_context_and_no_holds_before_fulfilment(tmp_path):
+def _prepare_for_fulfilment(store: PrivacyCaseStore, request_id: str) -> None:
+    store.set_context(
+        request_id,
+        jurisdiction="United Kingdom",
+        legal_basis="Owner-reviewed applicable privacy request basis",
+        due_at="2026-09-26T17:00:00+00:00",
+    )
+    store.set_identity(
+        request_id,
+        status="verified",
+        method="authenticated-account plus reviewed evidence",
+        evidence_reference="identity-evidence:opaque-123",
+    )
+    store.transition(request_id, status="ready_for_fulfilment")
+
+
+def test_case_requires_identity_context_holds_and_execution_evidence_before_deletion_fulfilment(tmp_path):
     db = tmp_path / "privacy.sqlite3"
     request_row = _privacy_request(db)
     store = PrivacyCaseStore(db)
@@ -54,12 +70,90 @@ def test_case_requires_identity_context_and_no_holds_before_fulfilment(tmp_path)
     with pytest.raises(ValueError, match="evidence reference"):
         store.transition(request_row["id"], status="fulfilled")
 
+    with pytest.raises(ValueError, match="execution evidence"):
+        store.transition(
+            request_row["id"], status="fulfilled", fulfilment_reference="fulfilment:reviewed-output-456"
+        )
+
+    execution = store.record_deletion_execution(
+        request_row["id"],
+        execution_kind="anonymised",
+        evidence_reference="deletion-executor:job-789",
+        note="Completion evidence supplied by the responsible data subsystem.",
+    )
+    assert execution["control"]["deletion_execution_kind"] == "anonymised"
+    assert execution["control"]["deletion_execution_reference"] == "deletion-executor:job-789"
+    assert execution["control"]["deletion_executed_at"]
+    execution_events = [event for event in execution["events"] if event["action"] == "deletion_execution_recorded"]
+    assert execution_events[-1]["data"]["operation_performed_by_case_management"] is False
+
     finished = store.transition(
         request_row["id"], status="fulfilled", fulfilment_reference="fulfilment:reviewed-output-456"
     )
     assert finished["request"]["status"] == "fulfilled"
     assert finished["control"]["fulfilment_reference"] == "fulfilment:reviewed-output-456"
     assert finished["automatic_data_action_taken"] is False
+
+
+def test_deletion_execution_requires_ready_deletion_case_and_retained_exception_reference_for_mixed_result(tmp_path):
+    db = tmp_path / "privacy.sqlite3"
+    deletion = _privacy_request(db)
+    access = _privacy_request(db, user_id="member-b", request_type="access")
+    store = PrivacyCaseStore(db)
+
+    with pytest.raises(ValueError, match="ready for fulfilment"):
+        store.record_deletion_execution(
+            deletion["id"], execution_kind="deleted", evidence_reference="executor:too-early"
+        )
+
+    _prepare_for_fulfilment(store, deletion["id"])
+    with pytest.raises(ValueError, match="retained-exception reference"):
+        store.record_deletion_execution(
+            deletion["id"], execution_kind="mixed", evidence_reference="executor:mixed-1"
+        )
+
+    recorded = store.record_deletion_execution(
+        deletion["id"],
+        execution_kind="mixed",
+        evidence_reference="executor:mixed-2",
+        retained_exception_reference="retention-exception:case-4",
+    )
+    assert recorded["control"]["retained_exception_reference"] == "retention-exception:case-4"
+
+    with pytest.raises(ValueError, match="only be recorded for deletion requests"):
+        store.record_deletion_execution(
+            access["id"], execution_kind="deleted", evidence_reference="executor:not-deletion"
+        )
+
+
+def test_existing_privacy_case_database_is_migrated_with_execution_columns(tmp_path):
+    db = tmp_path / "privacy.sqlite3"
+    with sqlite3.connect(db) as con:
+        con.execute(
+            """CREATE TABLE privacy_case_controls (
+                request_id TEXT PRIMARY KEY,
+                jurisdiction TEXT NOT NULL DEFAULT '',
+                legal_basis TEXT NOT NULL DEFAULT '',
+                due_at TEXT,
+                identity_status TEXT NOT NULL DEFAULT 'unverified',
+                identity_method TEXT NOT NULL DEFAULT '',
+                identity_evidence_reference TEXT NOT NULL DEFAULT '',
+                legal_hold INTEGER NOT NULL DEFAULT 0,
+                retention_hold INTEGER NOT NULL DEFAULT 0,
+                fulfilment_reference TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL
+            )"""
+        )
+
+    PrivacyCaseStore(db)
+    with sqlite3.connect(db) as con:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(privacy_case_controls)").fetchall()}
+    assert {
+        "deletion_execution_kind",
+        "deletion_execution_reference",
+        "deletion_executed_at",
+        "retained_exception_reference",
+    }.issubset(columns)
 
 
 def test_verified_identity_requires_reference_and_never_stores_raw_document(tmp_path):
@@ -110,11 +204,15 @@ def test_terminal_case_cannot_be_reopened(tmp_path):
 
 def test_owner_routes_fail_closed_without_owner_session(monkeypatch, tmp_path):
     monkeypatch.setenv("LSS_DB_PATH", str(tmp_path / "privacy.sqlite3"))
-    _privacy_request(tmp_path / "privacy.sqlite3")
+    request_row = _privacy_request(tmp_path / "privacy.sqlite3")
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
     assert client.get("/owner/privacy/cases").status_code == 403
+    assert client.post(
+        f"/owner/privacy/cases/{request_row['id']}/deletion-execution",
+        json={"execution_kind": "deleted", "evidence_reference": "executor:forbidden"},
+    ).status_code == 403
 
 
 def test_owner_routes_use_existing_owner_authorization_and_do_not_execute_data_actions(monkeypatch, tmp_path):

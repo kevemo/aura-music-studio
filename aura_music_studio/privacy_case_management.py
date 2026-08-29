@@ -20,6 +20,7 @@ router = APIRouter(prefix="/owner/privacy", tags=["Owner Privacy Case Management
 IDENTITY_STATES = ("unverified", "pending", "verified", "failed")
 CASE_STATES = ("submitted", "under_review", "awaiting_identity", "ready_for_fulfilment", "fulfilled", "denied", "withdrawn")
 TERMINAL_STATES = {"fulfilled", "denied", "withdrawn"}
+DELETION_EXECUTION_KINDS = ("deleted", "anonymised", "mixed")
 
 
 def _iso() -> str:
@@ -58,11 +59,20 @@ class CaseTransitionInput(BaseModel):
     reason: str = Field(default="", max_length=1000)
 
 
+class DeletionExecutionInput(BaseModel):
+    execution_kind: Literal["deleted", "anonymised", "mixed"]
+    evidence_reference: str = Field(min_length=2, max_length=240)
+    retained_exception_reference: str = Field(default="", max_length=240)
+    note: str = Field(default="", max_length=1000)
+
+
 class PrivacyCaseStore:
     """Owner-only review controls layered over authenticated member privacy requests.
 
     This module stores review evidence and workflow state. It never performs disclosure,
-    export, correction, deletion, account mutation, or ESP role mutation itself.
+    export, correction, deletion, account mutation, or ESP role mutation itself. A deletion
+    may only reach ``fulfilled`` after a separate execution-confirmation record references
+    the actual deletion/anonymisation operation performed by the responsible subsystem.
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -76,6 +86,12 @@ class PrivacyCaseStore:
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA journal_mode=WAL")
         return con
+
+    @staticmethod
+    def _ensure_column(con: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+        existing = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+        if column not in existing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
     def _init_schema(self) -> None:
         with self._connect() as con:
@@ -92,6 +108,10 @@ class PrivacyCaseStore:
                     legal_hold INTEGER NOT NULL DEFAULT 0,
                     retention_hold INTEGER NOT NULL DEFAULT 0,
                     fulfilment_reference TEXT NOT NULL DEFAULT '',
+                    deletion_execution_kind TEXT NOT NULL DEFAULT '',
+                    deletion_execution_reference TEXT NOT NULL DEFAULT '',
+                    deletion_executed_at TEXT,
+                    retained_exception_reference TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS privacy_case_events (
@@ -108,6 +128,11 @@ class PrivacyCaseStore:
                     ON privacy_case_events(request_id, occurred_at ASC, id ASC);
                 """
             )
+            # Existing installations predate deletion execution evidence. Add columns in place.
+            self._ensure_column(con, "privacy_case_controls", "deletion_execution_kind", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(con, "privacy_case_controls", "deletion_execution_reference", "TEXT NOT NULL DEFAULT ''")
+            self._ensure_column(con, "privacy_case_controls", "deletion_executed_at", "TEXT")
+            self._ensure_column(con, "privacy_case_controls", "retained_exception_reference", "TEXT NOT NULL DEFAULT ''")
 
     def _request_row(self, con: sqlite3.Connection, request_id: str) -> sqlite3.Row:
         row = con.execute("SELECT * FROM privacy_rights_requests WHERE id=?", (request_id,)).fetchone()
@@ -217,6 +242,68 @@ class PrivacyCaseStore:
             )
         return self.get_case(request_id)
 
+    def record_deletion_execution(
+        self,
+        request_id: str,
+        *,
+        execution_kind: str,
+        evidence_reference: str,
+        retained_exception_reference: str = "",
+        note: str = "",
+    ) -> dict:
+        if execution_kind not in DELETION_EXECUTION_KINDS:
+            raise ValueError("Unsupported deletion execution kind")
+        evidence_reference = evidence_reference.strip()
+        retained_exception_reference = retained_exception_reference.strip()
+        note = note.strip()
+        if not evidence_reference:
+            raise ValueError("Deletion execution requires an evidence reference")
+        if execution_kind == "mixed" and not retained_exception_reference:
+            raise ValueError("Mixed deletion/anonymisation requires a retained-exception reference")
+
+        with self._connect() as con:
+            request_row = self._request_row(con, request_id)
+            control = self._ensure_control(con, request_id)
+            if str(request_row["request_type"]) != "deletion":
+                raise ValueError("Deletion execution evidence can only be recorded for deletion requests")
+            if str(request_row["status"]) != "ready_for_fulfilment":
+                raise ValueError("Deletion request must be ready for fulfilment before execution evidence is recorded")
+            if str(control["identity_status"]) != "verified":
+                raise ValueError("Verified identity is required before deletion execution is recorded")
+            if bool(control["legal_hold"]) or bool(control["retention_hold"]):
+                raise ValueError("Active legal or retention hold blocks deletion execution confirmation")
+            if not str(control["jurisdiction"] or "").strip() or not str(control["legal_basis"] or "").strip():
+                raise ValueError("Jurisdiction and legal basis review are required before deletion execution is recorded")
+
+            executed_at = _iso()
+            con.execute(
+                """UPDATE privacy_case_controls
+                   SET deletion_execution_kind=?,deletion_execution_reference=?,deletion_executed_at=?,
+                       retained_exception_reference=?,updated_at=? WHERE request_id=?""",
+                (
+                    execution_kind,
+                    evidence_reference,
+                    executed_at,
+                    retained_exception_reference,
+                    executed_at,
+                    request_id,
+                ),
+            )
+            self._append_event(
+                con,
+                request_id=request_id,
+                action="deletion_execution_recorded",
+                data={
+                    "execution_kind": execution_kind,
+                    "evidence_reference": evidence_reference,
+                    "executed_at": executed_at,
+                    "retained_exception_reference": retained_exception_reference,
+                    "note": note,
+                    "operation_performed_by_case_management": False,
+                },
+            )
+        return self.get_case(request_id)
+
     def transition(self, request_id: str, *, status: str, fulfilment_reference: str = "", reason: str = "") -> dict:
         if status not in CASE_STATES:
             raise ValueError("Unsupported case state")
@@ -235,6 +322,13 @@ class PrivacyCaseStore:
                     raise ValueError("Jurisdiction and legal basis review are required before fulfilment")
             if status == "fulfilled" and not fulfilment_reference.strip():
                 raise ValueError("Fulfilment requires an evidence reference")
+            if status == "fulfilled" and str(request_row["request_type"]) == "deletion":
+                if not (
+                    str(control["deletion_execution_kind"] or "").strip()
+                    and str(control["deletion_execution_reference"] or "").strip()
+                    and str(control["deletion_executed_at"] or "").strip()
+                ):
+                    raise ValueError("Deletion cannot be marked fulfilled until execution evidence is recorded")
             now = _iso()
             con.execute(
                 "UPDATE privacy_rights_requests SET status=?,updated_at=? WHERE id=?",
@@ -301,7 +395,8 @@ class PrivacyCaseStore:
         with self._connect() as con:
             rows = con.execute(
                 """SELECT r.id,r.user_id,r.request_type,r.status,r.locale,r.submitted_at,r.updated_at,
-                          c.jurisdiction,c.due_at,c.identity_status,c.legal_hold,c.retention_hold
+                          c.jurisdiction,c.due_at,c.identity_status,c.legal_hold,c.retention_hold,
+                          c.deletion_execution_kind,c.deletion_executed_at
                    FROM privacy_rights_requests r
                    LEFT JOIN privacy_case_controls c ON c.request_id=r.id
                    ORDER BY r.submitted_at ASC,r.id ASC LIMIT ?""",
@@ -313,6 +408,7 @@ class PrivacyCaseStore:
                 "legal_hold": bool(row["legal_hold"] or 0),
                 "retention_hold": bool(row["retention_hold"] or 0),
                 "identity_status": row["identity_status"] or "unverified",
+                "deletion_execution_kind": row["deletion_execution_kind"] or "",
             }
             for row in rows
         ]
@@ -398,6 +494,23 @@ def owner_privacy_case_holds(request_id: str, request: Request, payload: HoldInp
         raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/cases/{request_id}/deletion-execution", include_in_schema=False)
+def owner_privacy_deletion_execution(request_id: str, request: Request, payload: DeletionExecutionInput):
+    _require_owner(request)
+    try:
+        return PrivacyCaseStore().record_deletion_execution(
+            request_id,
+            execution_kind=payload.execution_kind,
+            evidence_reference=payload.evidence_reference,
+            retained_exception_reference=payload.retained_exception_reference,
+            note=payload.note,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
 @router.post("/cases/{request_id}/transition", include_in_schema=False)
 def owner_privacy_case_transition(request_id: str, request: Request, payload: CaseTransitionInput):
     _require_owner(request)
@@ -414,4 +527,4 @@ def owner_privacy_case_transition(request_id: str, request: Request, payload: Ca
         raise HTTPException(400, str(exc)) from exc
 
 
-__all__ = ["CASE_STATES", "IDENTITY_STATES", "PrivacyCaseStore", "router"]
+__all__ = ["CASE_STATES", "DELETION_EXECUTION_KINDS", "IDENTITY_STATES", "PrivacyCaseStore", "router"]
