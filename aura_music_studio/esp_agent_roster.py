@@ -72,6 +72,42 @@ class AgentRosterStore:
                     ON esp_agent_followups(agent_user_id,status,due_at);
                 CREATE INDEX IF NOT EXISTS idx_agent_followups_creator
                     ON esp_agent_followups(creator_user_id,status);
+
+                -- Assignment rows are durable audit records, but their active state must never
+                -- outlive the current server-authoritative ESP role/status on either side.
+                -- These triggers make that invariant apply to every assignment consumer, not
+                -- just this roster service.
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_creator_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('creator','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE creator_user_id=NEW.user_id
+                       AND status='active';
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_agent_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('agent','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE agent_user_id=NEW.user_id
+                       AND status='active';
+                END;
                 """
             )
 
@@ -260,7 +296,7 @@ CSS = r"""
 """
 
 SCRIPT = r"""
-const API='/command-center/api/agent', $=id=>document.getElementById(id);let rows=[];function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}function note(m,b=false){const n=$('notice');n.textContent=m;n.className='notice show';n.style.borderColor=b?'#ff90a455':''}async function req(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt});let d={};try{d=await r.json()}catch(_){}if(!r.ok)throw new Error(d.detail||`Request failed (${r.status})`);return d}function render(){ $('roster').innerHTML=rows.length?rows.map(r=>`<article class="card"><div class="row"><div><div class="eyebrow">${esc(r.niche||'Creator')} · ${esc(r.region||'')}</div><h2>${esc(r.display_name||r.tiktok_handle||'Assigned creator')}</h2><div class="muted">@${esc(r.tiktok_handle||'')} · ${esc(r.sub_niche||'')}</div></div><button class="btn" onclick="follow('${esc(r.creator_user_id)}','${esc(r.display_name||r.tiktok_handle||'creator')}')">Add follow-up</button></div><div class="metrics"><div class="metric"><span class="muted">Training</span><b>${r.training_average}%</b></div><div class="metric"><span class="muted">Progress uploads</span><b>${r.progress_submissions}</b></div><div class="metric"><span class="muted">My Plan</span><b>${r.plan?.completion_percent||0}%</b></div><div class="metric"><span class="muted">Open follow-ups</span><b>${r.open_followups}</b></div></div>${r.plan?.objective?`<p class="muted"><b>Objective:</b> ${esc(r.plan.objective)}</p>`:''}${r.next_followup_due?`<p class="muted">Next follow-up due: ${esc(r.next_followup_due)}</p>`:''}</article>`).join(''):'<div class="card muted">No creators are currently assigned to this Agent account. Assignments are owner-controlled.</div>'}async function load(){try{rows=(await req(API+'/roster')).creators||[];render()}catch(e){note(e.message,true)}}async function follow(creator,name){const title=prompt(`Follow-up for ${name}:`,'Creator check-in')||'';if(!title.trim())return;const noteText=prompt('Optional private follow-up note:')||'';try{await req(API+'/followups',{method:'POST',body:JSON.stringify({creator_user_id:creator,title,note:noteText,due_at:null})});note('Follow-up added.');await load()}catch(e){note(e.message,true)}}load();
+const API='/command-center/api/agent', $=id=>document.getElementById(id);let rows=[];function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[c]))}function note(m,b=false){const n=$('notice');n.textContent=m;n.className='notice show';n.style.borderColor=b?'#ff90a455':''}async function req(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt});let d={};try{d=await r.json()}catch(_){}if(!r.ok)throw new Error(d.detail||`Request failed (${r.status})`);return d}function render(){ $('roster').innerHTML=rows.length?rows.map(r=>`<article class="card"><div class="row"><div><div class="eyebrow">${esc(r.niche||'Creator')} · ${esc(r.region||'')}</div><h2>${esc(r.display_name||r.tiktok_handle||'Assigned creator')}</h2><div class="muted">@${esc(r.tiktok_handle||'')} · ${esc(r.sub_niche||'')}</div></div><button class="btn" onclick="follow('${esc(r.creator_user_id)}','${esc(r.display_name||r.tiktok_handle||'creator')}')">Add follow-up</button></div><div class="metrics"><div class="metric"><span class="muted">Training</span><b>${r.training_average}%</b></div><div class="metric"><span class="muted">Progress uploads</span><b>${r.progress_submissions}</b></div><div class="metric"><span class="muted">My Plan</span><b>${r.plan?.completion_percent||0}%</b></div><div class="metric"><span class="muted">Open follow-ups</span><b>${r.open_followups}</b></div></div>${r.plan?.objective?`<p class="muted"><b>Objective:</b> ${esc(r.plan.objective)}</p>`:''}${r.next_followup_due?`<p class="muted">Next follow-up due: ${esc(r.next_followup_due)}</p>`:''}</article>`).join(''):'<div class="card muted">No creators are currently assigned to this Agent account. Assignments are owner-controlled.</div>'}async function load(){try{rows=(await req(API+'/roster')).creators||[];render()}catch(e){note(e.message,true)}}async function follow(creator,name){const title=prompt(`Follow-up for ${name}:`,'Creator check-in')||'';if(!title.trim())return;const noteText=prompt('Optional private follow-up note:')||'';try{await req(API+'/followups',{method:'POST',body:JSON.stringify({creator_user_id:creator,title,note:noteText,due_at:null})});note('Follow-up added.');await load()}catch(e){note(e.message,true)}}load();
 """
 
 
