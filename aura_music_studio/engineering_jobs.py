@@ -83,7 +83,12 @@ def _public_output_ref(project: Path, output: Path) -> str:
         raise ValueError("Provider output resolves outside the member project") from exc
 
 
+def _public_stem_refs(project: Path, paths: dict[str, Path]) -> dict[str, str]:
+    return {role: _public_output_ref(project, path) for role, path in paths.items()}
+
+
 def run_engineering_job(project: Path, payload: dict) -> dict:
+    project = project.resolve()
     request = EngineeringJobRequest.model_validate(payload)
     library, record, source = _audio(project, request.asset_id)
     stem = Path(record.name).stem
@@ -92,7 +97,12 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         if request.split_mode not in {"two_stems", "four_stems", "six_stems", "detailed"}:
             raise ValueError("Invalid split mode")
         paths = StemSeparator(project / "work" / "separation" / record.id).separate(source, mode=request.split_mode)
-        return {"operation": "split", "mode": request.split_mode, "stems": {role: str(path) for role, path in paths.items()}, "source_asset_id": record.id}
+        return {
+            "operation": "split",
+            "mode": request.split_mode,
+            "stems": _public_stem_refs(project, paths),
+            "source_asset_id": record.id,
+        }
 
     if request.operation == "master":
         reference = None
@@ -100,20 +110,59 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
             ref = library.get(request.reference_asset_id)
             if ref.kind != "audio":
                 raise ValueError("Reference mastering requires an audio asset")
-            reference = project / ref.path
+            reference = (project / ref.path).resolve()
+            try:
+                reference.relative_to(project)
+            except ValueError as exc:
+                raise ValueError("Reference mastering asset resolves outside the member project") from exc
+            if not reference.is_file():
+                raise FileNotFoundError(reference)
         output = project / "output" / "masters" / f"{stem}_{request.master_preset}_AuraMaster.wav"
-        mastered, report = master(source, output, preset=request.master_preset, reference=reference, intensity=request.intensity, low_db=request.low_db, mid_db=request.mid_db, high_db=request.high_db, stereo_width=request.stereo_width, target_lufs=request.target_lufs)
-        return {"operation": "master", "output": str(mastered), "report": report, "translation": translation_report(mastered), "source_asset_id": record.id}
+        mastered, report = master(
+            source,
+            output,
+            preset=request.master_preset,
+            reference=reference,
+            intensity=request.intensity,
+            low_db=request.low_db,
+            mid_db=request.mid_db,
+            high_db=request.high_db,
+            stereo_width=request.stereo_width,
+            target_lufs=request.target_lufs,
+        )
+        return {
+            "operation": "master",
+            "output_ref": _public_output_ref(project, mastered),
+            "report": report,
+            "translation": translation_report(mastered),
+            "source_asset_id": record.id,
+        }
 
     if request.operation == "autotune":
         output = project / "output" / "vocals" / f"{stem}_AuraTune_{request.tune_settings.mode}.wav"
         rendered, report = tune_vocal(source, output, request.tune_settings)
-        return {"operation": "autotune", "output": str(rendered), "report": report, "source_asset_id": record.id}
+        return {
+            "operation": "autotune",
+            "output_ref": _public_output_ref(project, rendered),
+            "report": report,
+            "source_asset_id": record.id,
+        }
 
     if request.operation == "restore":
         output = project / "output" / "restoration" / f"{stem}_clean.wav"
-        rendered, report = AudioRestorer().clean(source, output, hum_hz=request.hum_hz, highpass_hz=request.highpass_hz, neural=request.neural_restore)
-        return {"operation": "restore", "output": str(rendered), "report": report, "source_asset_id": record.id}
+        rendered, report = AudioRestorer().clean(
+            source,
+            output,
+            hum_hz=request.hum_hz,
+            highpass_hz=request.highpass_hz,
+            neural=request.neural_restore,
+        )
+        return {
+            "operation": "restore",
+            "output_ref": _public_output_ref(project, rendered),
+            "report": report,
+            "source_asset_id": record.id,
+        }
 
     if request.operation == "spatial":
         output = project / "output" / "spatial" / f"{stem}_{request.spatial_mode}.wav"
@@ -121,16 +170,46 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         if request.spatial_mode == "stereo":
             rendered, report = renderer.stereo_position(source, output, pan=request.pan, width=request.width)
         else:
-            rendered, report = renderer.immersive(source, output, mode=request.spatial_mode, azimuth_deg=request.azimuth_deg, elevation_deg=request.elevation_deg, distance_m=request.distance_m)
-        return {"operation": "spatial", "output": str(rendered), "report": report, "source_asset_id": record.id}
+            rendered, report = renderer.immersive(
+                source,
+                output,
+                mode=request.spatial_mode,
+                azimuth_deg=request.azimuth_deg,
+                elevation_deg=request.elevation_deg,
+                distance_m=request.distance_m,
+            )
+        return {
+            "operation": "spatial",
+            "output_ref": _public_output_ref(project, rendered),
+            "report": report,
+            "source_asset_id": record.id,
+        }
 
     if request.operation in {"cover", "repaint"}:
         output_dir = project / "output" / "transformations" / record.id / f"{request.operation}_{uuid4().hex[:12]}"
         client = AceStepClient()
         if request.operation == "cover":
-            rendered = client.cover(source, output_dir, prompt=request.transform_prompt.strip(), strength=request.transform_strength)
+            rendered = client.cover(
+                source,
+                output_dir,
+                prompt=request.transform_prompt.strip(),
+                strength=request.transform_strength,
+            )
         else:
-            rendered = client.repaint(source, output_dir, prompt=request.transform_prompt.strip(), start=request.repaint_start, end=float(request.repaint_end), strength=request.transform_strength)
-        return {"operation": request.operation, "source_asset_id": record.id, "output_ref": _public_output_ref(project, rendered), "provider": "ace_step", "audio_origin": "ai_transformation"}
+            rendered = client.repaint(
+                source,
+                output_dir,
+                prompt=request.transform_prompt.strip(),
+                start=request.repaint_start,
+                end=float(request.repaint_end),
+                strength=request.transform_strength,
+            )
+        return {
+            "operation": request.operation,
+            "source_asset_id": record.id,
+            "output_ref": _public_output_ref(project, rendered),
+            "provider": "ace_step",
+            "audio_origin": "ai_transformation",
+        }
 
     raise ValueError(f"Unsupported engineering operation: {request.operation}")
