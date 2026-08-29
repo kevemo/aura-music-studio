@@ -31,6 +31,7 @@ from .professional_editor_inspector_overlay import router as professional_editor
 from .professional_editor_lifecycle_api import router as professional_editor_lifecycle_router
 from .professional_editor_render_api import router as professional_editor_render_router
 from .professional_editor_visual_entitlements import router as professional_editor_visual_entitlement_router
+from .safeguarding_runtime import owner_router as owner_safeguarding_runtime_router
 from .safety_appeal_review import router as owner_safety_appeal_router
 from .safety_reports import member_router as member_safety_router, owner_router as owner_safety_router
 from .stripe_billing import router as stripe_billing_router
@@ -56,6 +57,7 @@ router.include_router(commercial_entitlement_router)
 router.include_router(global_compliance_router)
 router.include_router(compliance_applicability_router)
 router.include_router(owner_compliance_applicability_router)
+router.include_router(owner_safeguarding_runtime_router)
 router.include_router(esp_live_compliance_router)
 router.include_router(owner_esp_live_compliance_router)
 router.include_router(privacy_rights_router)
