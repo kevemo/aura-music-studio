@@ -44,9 +44,9 @@ def decide_with_creator_policy(
 ) -> GuardianModerationResult:
     """Apply creator preferences before the final provider-write authorization boundary.
 
-    Creator configuration may add a room-specific blocked-phrase signal or suppress a non-critical
-    category recommendation. It can never suppress threat, doxxing, or grooming escalation, and it
-    cannot grant provider authority. The existing AuraLiveModerator remains the final write gate.
+    Critical safety signals stay strongest. A creator-authored blocked phrase then takes precedence
+    over lower-risk category suppression because it is an explicit room rule. Creator configuration
+    can never grant provider authority; AuraLiveModerator remains the final provider-write gate.
     """
 
     engine = moderator or AuraLiveModerator()
@@ -55,6 +55,22 @@ def decide_with_creator_policy(
 
     if signal.category in _CRITICAL_CATEGORIES:
         # Critical categories always pass through unchanged so creator policy cannot weaken them.
+        return GuardianModerationResult(
+            signal=effective,
+            decision=engine.decide(authorization, effective, capabilities),
+            matched_blocked_phrases=matches,
+            creator_policy_applied=policy is not None,
+        )
+
+    if matches:
+        # A creator-authored blocked phrase is a deterministic room rule. It can strengthen a
+        # lower-risk recommendation even if the original classifier category is otherwise disabled.
+        effective = ModerationSignal(
+            category="creator_defined",
+            confidence=max(signal.confidence, 0.99),
+            severity=max(signal.severity, 1),
+            evidence="Creator-defined blocked phrase matched.",
+        )
         return GuardianModerationResult(
             signal=effective,
             decision=engine.decide(authorization, effective, capabilities),
@@ -74,25 +90,15 @@ def decide_with_creator_policy(
                 requires_human_confirmation=True,
                 reason="Creator moderation policy disables automated handling for this non-critical category.",
             ),
-            matched_blocked_phrases=matches,
+            matched_blocked_phrases=(),
             creator_policy_applied=True,
             category_suppressed_by_creator=True,
-        )
-
-    if matches:
-        # A creator-authored blocked phrase is a deterministic room rule. It can strengthen a
-        # lower-risk recommendation but never overrides critical signals (handled above).
-        effective = ModerationSignal(
-            category="creator_defined",
-            confidence=max(signal.confidence, 0.99),
-            severity=max(signal.severity, 1),
-            evidence="Creator-defined blocked phrase matched.",
         )
 
     return GuardianModerationResult(
         signal=effective,
         decision=engine.decide(authorization, effective, capabilities),
-        matched_blocked_phrases=matches,
+        matched_blocked_phrases=(),
         creator_policy_applied=policy is not None,
     )
 
