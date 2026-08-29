@@ -63,6 +63,13 @@ def test_review_routes_are_private_and_no_public_source_route():
     assert not any("source" in path for path in paths)
 
 
+def test_review_router_is_mounted_through_production_guardian_router():
+    from aura_music_studio.aura_live_guardian import router as guardian_router
+    paths = [route.path for route in guardian_router.routes]
+    assert "/live-guardian/review" in paths
+    assert "/live-guardian/review/{review_id}/confirm" in paths
+
+
 def test_review_page_requires_authenticated_member(monkeypatch, tmp_path):
     monkeypatch.setenv("AURA_LIVE_MODERATOR_DB", str(tmp_path / "guardian.sqlite3"))
     with pytest.raises(HTTPException) as exc:
