@@ -9,9 +9,11 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .global_compliance import POLICY_VERSION, canonical_locale
+from .privacy_fulfilment import PrivacyFulfilmentStore
 
 router = APIRouter(prefix="/member/privacy", tags=["Member Privacy Rights"])
 
@@ -208,7 +210,7 @@ def member_privacy_rights(request: Request):
         **PrivacyEvidenceStore().snapshot(user_id),
         "automatic_action_taken": False,
         "grants_esp_role_or_permission": False,
-        "notice": "Submitting a request records authenticated evidence for review. Availability and handling timelines depend on applicable law and verified identity; this endpoint does not automatically delete, export, correct, or disclose account data.",
+        "notice": "Submitting a request records authenticated evidence for review. Availability and handling timelines depend on applicable law and verified identity; access or portability data becomes available only after the separate owner-reviewed fulfilment workflow completes, and this submission endpoint does not itself delete, export, correct, or disclose account data.",
     }
 
 
@@ -228,6 +230,24 @@ def submit_privacy_right(request: Request, payload: PrivacyRequestInput):
         "identity_or_legal_review_may_be_required": True,
         "grants_esp_role_or_permission": False,
     }
+
+
+@router.get("/rights/requests/{request_id}/fulfilment")
+def privacy_right_fulfilment(request_id: str, request: Request):
+    user_id = _member_user_id(request)
+    try:
+        result = PrivacyFulfilmentStore().deliver(request_id, user_id=user_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return JSONResponse(
+        result,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'attachment; filename="privacy-{request_id}.json"',
+        },
+    )
 
 
 @router.post("/policy-decisions")
