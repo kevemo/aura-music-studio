@@ -17,6 +17,7 @@ from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .engineering_api import router as engineering_router
+from .esp_public_network import router as esp_public_network_router
 from .job_api import router as job_api_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
@@ -55,6 +56,7 @@ app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
 app.include_router(owner_commerce_member_communications_router)
+app.include_router(esp_public_network_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
