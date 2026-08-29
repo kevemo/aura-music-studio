@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import os
+import inspect
 
 import pytest
 
@@ -110,3 +110,11 @@ def test_production_aggregate_mounts_owner_update_routes():
     assert "/owner/feature-workshop" in paths
     assert "/owner/updates/{change_id}" in paths
     assert "/owner-maintenance/worker/{execution_id}" in paths
+
+
+def test_owner_navigation_has_updates_and_features_tab():
+    from aura_music_studio.owner_control_center import _page
+
+    source = inspect.getsource(_page)
+    assert "href='/owner/updates'" in source
+    assert "Updates & Features" in source
