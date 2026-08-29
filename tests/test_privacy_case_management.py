@@ -175,6 +175,31 @@ def test_verified_identity_requires_reference_and_never_stores_raw_document(tmp_
     assert identity_events[-1]["data"]["evidence_reference"] == "verify:opaque-abc"
 
 
+def test_privacy_case_events_preserve_owner_session_actor_and_record_reviewer(monkeypatch, tmp_path):
+    db = tmp_path / "privacy.sqlite3"
+    request_row = _privacy_request(db, request_type="access")
+    monkeypatch.setattr("aura_music_studio.privacy_case_management.owner_actor", lambda: "Kev · ESP Owner")
+    store = PrivacyCaseStore(db)
+
+    case = store.set_context(
+        request_row["id"],
+        jurisdiction="United Kingdom",
+        legal_basis="Owner-reviewed applicable privacy request basis",
+        due_at=None,
+        note="Attribution test",
+    )
+    event = [item for item in case["events"] if item["action"] == "context_reviewed"][-1]
+    assert event["actor"] == "owner_session"
+    assert event["data"]["reviewer_actor"] == "Kev · ESP Owner"
+    assert case["audit_chain_valid"] is True
+
+    case = store.set_identity(request_row["id"], status="pending", method="account review")
+    event = [item for item in case["events"] if item["action"] == "identity_reviewed"][-1]
+    assert event["actor"] == "owner_session"
+    assert event["data"]["reviewer_actor"] == "Kev · ESP Owner"
+    assert case["audit_chain_valid"] is True
+
+
 def test_audit_chain_detects_tampering(tmp_path):
     db = tmp_path / "privacy.sqlite3"
     request_row = _privacy_request(db)

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .owner_auth import owner_authorized
+from .owner_identity import owner_actor
 
 router = APIRouter(prefix="/owner/privacy", tags=["Owner Privacy Case Management"])
 
@@ -159,13 +160,15 @@ class PrivacyCaseStore:
         previous_hash = str(previous["event_hash"]) if previous else "GENESIS"
         occurred_at = _iso()
         event_id = uuid4().hex
+        event_data = dict(data)
+        event_data.setdefault("reviewer_actor", owner_actor())
         payload = {
             "id": event_id,
             "request_id": request_id,
             "actor": "owner_session",
             "action": action,
             "occurred_at": occurred_at,
-            "data": data,
+            "data": event_data,
             "previous_hash": previous_hash,
         }
         event_hash = hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
@@ -173,7 +176,7 @@ class PrivacyCaseStore:
             """INSERT INTO privacy_case_events
                (id,request_id,actor,action,occurred_at,data_json,previous_hash,event_hash)
                VALUES (?,?,?,?,?,?,?,?)""",
-            (event_id, request_id, "owner_session", action, occurred_at, _canonical_json(data), previous_hash, event_hash),
+            (event_id, request_id, "owner_session", action, occurred_at, _canonical_json(event_data), previous_hash, event_hash),
         )
         return {**payload, "event_hash": event_hash}
 
