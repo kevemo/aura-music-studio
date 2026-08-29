@@ -46,8 +46,9 @@ PUBLIC_EXACT = {
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
     # Browser/link sources and the normalized LIVE relay do not share the member's site session.
-    # These routes are public only at the middleware layer; every request is authenticated by a
-    # high-entropy, rotatable source/relay token stored only as a SHA-256 digest server-side.
+    # The existing browser source keeps its high-entropy, rotatable source token contract; the
+    # relay likewise uses a separate high-entropy rotatable credential. Both are stored only as
+    # SHA-256 digests and authenticated inside their own routes, not by this middleware allowlist.
     "/live-overlay/source/",
     "/live-overlay/connector/",
     # Stripe checkout must also work for owner-approved accounts that are not active yet,
