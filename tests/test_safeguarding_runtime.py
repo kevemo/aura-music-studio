@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -91,14 +89,17 @@ def test_owner_runtime_route_is_private_and_fail_closed(monkeypatch):
     assert "/owner/safeguarding/runtime" not in app.openapi()["paths"]
 
 
-def test_runtime_route_is_mounted_in_governance_integration():
+def test_runtime_route_is_mounted_in_governance_integration_via_dispatch():
     from aura_music_studio.creative_version_autopromotion import router as integration_router
 
-    assert any(
-        getattr(route, "path", "") == "/owner/safeguarding/runtime"
-        and "GET" in set(getattr(route, "methods", set()) or set())
-        for route in integration_router.routes
-    )
+    app = FastAPI()
+    app.include_router(integration_router)
+    client = TestClient(app)
+
+    # Hidden owner governance routes do not appear in public OpenAPI. Prove the route is
+    # genuinely composed by ASGI dispatch: the existing owner gate must answer 403, not 404.
+    assert "/owner/safeguarding/runtime" not in app.openapi()["paths"]
+    assert client.get("/owner/safeguarding/runtime").status_code == 403
 
 
 def test_creation_safety_import_exposes_same_self_hosted_invariant():
