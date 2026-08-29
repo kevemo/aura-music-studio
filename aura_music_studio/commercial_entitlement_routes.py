@@ -20,12 +20,44 @@ from .creation_coin_metering import (
 )
 from .creative_media_preview import creative_element_media as base_creative_element_media
 from .creative_media_preview import resolve_element_media
+from .creative_media_preview import router as base_creative_media_router
 from .creative_project import CreativeProjectStore
 from .creative_project_api import QueueRendererRequest
 from .creative_project_api import queue_creative_render as base_queue_creative_render
+from .creative_project_api import router as base_creative_project_router
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["commercial-entitlements"])
+
+
+_REPLACED_BASE_ROUTES = {
+    ("POST", "/creative/projects/{project_name}/directives/{directive_id}/render"),
+    ("GET", "/creative/projects/{project_name}/elements/{element_id}/media"),
+}
+
+
+def _install_authoritative_commercial_route_replacements() -> None:
+    """Remove only the base routes that this commercial overlay authoritatively replaces.
+
+    The overlay still delegates to the underlying Python functions after enforcing server-side
+    Creation Coin and download entitlements. Leaving both APIRoute objects mounted would make
+    behavior depend on router order and expose ambiguous duplicate method/path operations to
+    FastAPI/OpenAPI. Removing the superseded route objects keeps one public handler per endpoint
+    without weakening or duplicating the underlying creative implementation.
+    """
+
+    for base_router in (base_creative_project_router, base_creative_media_router):
+        base_router.routes[:] = [
+            route
+            for route in base_router.routes
+            if not any(
+                (method, getattr(route, "path", "")) in _REPLACED_BASE_ROUTES
+                for method in (getattr(route, "methods", None) or set())
+            )
+        ]
+
+
+_install_authoritative_commercial_route_replacements()
 
 
 def _member(request: Request):
