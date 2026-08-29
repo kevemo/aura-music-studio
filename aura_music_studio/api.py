@@ -12,6 +12,10 @@ from .access_control import MembershipAccessMiddleware
 from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
+from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
+from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
+from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
+from .aura_live_overlay_studio import router as aura_live_overlay_studio_router
 from .aura_support_center import router as aura_support_center_router
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .creation import CreateSongRequest, build_song_project
@@ -61,6 +65,10 @@ app.include_router(owner_commerce_member_communications_router)
 app.include_router(esp_public_network_router)
 app.include_router(aura_support_center_router)
 app.include_router(owner_feature_workshop_router)
+app.include_router(aura_live_overlay_studio_router)
+app.include_router(aura_live_overlay_advanced_router)
+app.include_router(aura_live_overlay_engine_router)
+app.include_router(aura_live_overlay_interactives_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
