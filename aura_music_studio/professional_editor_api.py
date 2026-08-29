@@ -16,6 +16,10 @@ from .professional_editor import (
     EditorTrackKind,
     ProfessionalEditorStore,
 )
+from .professional_editor_source_security import (
+    normalize_project_source_ref,
+    normalized_manifest_for_editor,
+)
 from .tenant_storage import project_path
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor"])
@@ -174,12 +178,21 @@ def _state(store: ProfessionalEditorStore) -> dict[str, Any]:
 @router.post("/projects/{project_name}/editor/initialize")
 def initialize_editor(project_name: str, body: InitializeEditorRequest, request: Request):
     member = _member(request)
-    store = _store(project_name, initialize=True)
-    sync = {"imported": 0, "imported_element_ids": []}
+    project = _project(project_name)
+    normalized_manifest = None
     if body.sync_creative_manifest:
-        creative = CreativeProjectStore(_project(project_name))
+        creative = CreativeProjectStore(project)
         if creative.exists():
-            sync = _execute(lambda: store.sync_creative_manifest(creative.load(), actor=_actor(member)))
+            normalized_manifest = _execute(
+                lambda: normalized_manifest_for_editor(project, creative.load())
+            )
+    store = ProfessionalEditorStore(project)
+    store.initialize(project_name)
+    sync = {"imported": 0, "imported_element_ids": []}
+    if normalized_manifest is not None:
+        sync = _execute(
+            lambda: store.sync_creative_manifest(normalized_manifest, actor=_actor(member))
+        )
     return {"editor": _state(store), "manifest_sync": sync}
 
 
@@ -193,10 +206,12 @@ def editor_state(project_name: str, request: Request):
 def sync_manifest(project_name: str, request: Request):
     member = _member(request)
     store = _store(project_name)
-    creative = CreativeProjectStore(_project(project_name))
+    project = store.project_dir
+    creative = CreativeProjectStore(project)
     if not creative.exists():
         raise HTTPException(404, "Creative manifest is not initialized for this project")
-    result = _execute(lambda: store.sync_creative_manifest(creative.load(), actor=_actor(member)))
+    manifest = _execute(lambda: normalized_manifest_for_editor(project, creative.load()))
+    result = _execute(lambda: store.sync_creative_manifest(manifest, actor=_actor(member)))
     return {"sync": result, "editor": _state(store)}
 
 
@@ -250,12 +265,13 @@ def patch_track(project_name: str, track_id: str, body: PatchRequest, request: R
 def create_item(project_name: str, track_id: str, body: ItemRequest, request: Request):
     member = _member(request)
     store = _store(project_name)
+    source_ref = _execute(lambda: normalize_project_source_ref(store.project_dir, body.source_ref))
     item = _execute(lambda: store.create_item(
         track_id,
         kind=body.kind,
         name=body.name,
         source_element_id=body.source_element_id,
-        source_ref=body.source_ref,
+        source_ref=source_ref,
         start=body.start,
         duration=body.duration,
         source_in=body.source_in,
