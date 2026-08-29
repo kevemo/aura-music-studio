@@ -1,322 +1,614 @@
-# Pulsar-Frequency House
+# Elevate Souls Productions Content Creation Command Center
 
-**For Professional Creation Beyond The Cosmos**  
-**Powered by Elevate Souls Productions & Aura AI Systems**
+**Powered by Aura AI**  
+**Elevate Your Soul Through Purposeful Media**
 
-Pulsar-Frequency House is the master product brand for ESP's expanding AI creation platform. The existing real-audio music engine, generative DAW, Aura producer, memberships, private project system, owner controls and ESP Creator Network hub are being brought together with video, image, voice and broader creative-art tooling under one project-centred environment.
+The **Elevate Souls Productions Content Creation Command Center** is the unified creator, production, LIVE, social, business and AI workspace being developed by **Elevate Souls Productions LCN LLC & LTD**.
 
-The accepted cosmic multimedia brand language combines pulsar/frequency energy, musical notation, film/video, camera and artistic-creation motifs. The web build includes the approved logo artwork as a packaged brand asset.
+The platform is designed around one continuous creator journey:
 
-> Legacy repository, Python package, cookie and environment-variable names may still use `aura-music-studio`, `aura_music_studio` or `LSS_*`. Those identifiers are retained strictly for backwards compatibility and are not the public product name.
+> **IDEA → PLAN → CREATE → EDIT → PUBLISH → GO LIVE → PROMOTE → ANALYSE → IMPROVE → EARN**
 
-## Product direction
+Aura AI sits across the platform as its orchestration, assistance and intelligence layer. The objective is not to bolt a chatbot onto a collection of tools, but to let Aura understand the authorised page, project, assets, workflow and user role so she can help coordinate work across the complete ecosystem.
 
-Pulsar-Frequency House is designed around a simple principle: generation is only the beginning.
+> Legacy repository, package, cookie and environment-variable identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `LSS_*`, or earlier product-brand strings. These are retained where necessary for backwards compatibility and are **not** the current public product identity.
 
-A member should be able to:
+---
 
-1. describe an idea by voice or text;
-2. upload lyrics, audio, images, video, sketches or other authorised references;
-3. let Aura create an initial result;
-4. change individual details without throwing the whole project away;
-5. preserve versions, takes, stems, scenes, layers and project history;
-6. move between music, video, image, voice and creator workflows while keeping shared project context.
+## Brand authority
 
-Aura is the conversational creative director and orchestration layer across the platform.
+**Public product name:** Elevate Souls Productions Content Creation Command Center  
+**Endorsement:** Powered by Aura AI  
+**Company:** Elevate Souls Productions LCN LLC & LTD  
+**Brand tagline:** Elevate Your Soul Through Purposeful Media
 
-## Current integrated foundation
+Any older public-facing branding should be treated as migration debt and replaced safely without breaking compatibility-critical internal identifiers.
 
-### Pulsar-Frequency House public experience
+---
 
-- cosmic Pulsar-Frequency House landing experience using the approved multimedia brand artwork;
-- authoritative global brand layer that rewrites legacy public product copy;
-- membership, sign-up, sign-in and pricing workflows;
-- Free / Base / Pro server-side entitlements;
-- private member projects;
-- owner approval controls;
-- PWA/public discovery architecture;
-- system emails automatically rebranded to Pulsar-Frequency House;
-- protected ESP Creator Network surfaces separated from normal members.
+## Product vision
 
-### Music Studio — working core
+The Command Center is intended to bring together capabilities that creators would otherwise need multiple disconnected products to perform: AI creation, professional editing, music production, visual design, video production, game creation, social-media planning, LIVE production, analytics, creator-network operations, support, publishing, monetisation and security.
 
-The music system is the most developed production engine currently underneath Pulsar-Frequency House.
+A member should be able to begin with a simple idea, work with Aura to develop it, create the required media, refine it non-destructively, prepare a campaign, run a LIVE show, analyse the outcome and continue improving without losing project context.
 
-- prompt → original complete song project;
-- user lyrics → complete song;
+The platform is built around secure project ownership, server-authoritative permissions and entitlements, auditable consequential actions, provider-truthful integrations and explicit consent for sensitive capabilities.
+
+---
+
+## Aura AI — platform intelligence layer
+
+Aura is intended to remain available throughout the Command Center rather than functioning only as a standalone prompt box.
+
+Her target operating model includes:
+
+- project- and page-aware assistance;
+- multimodal text, voice, image, audio, video and document workflows;
+- creative direction across Music, Image, Video, Game Forge and Social systems;
+- research and source-grounded assistance;
+- file, project and knowledge organisation;
+- role-aware assistance for public members, ESP Creators, ESP Agents and Owners;
+- bounded tool execution with permission checks;
+- workflow planning and orchestration;
+- memory with user controls and privacy boundaries;
+- support, training and analytics explanations;
+- creator-growth recommendations;
+- LIVE preparation and moderation assistance;
+- safe automation with audit trails;
+- model routing based on quality, latency, privacy, capability and cost.
+
+### Aura personality principles
+
+Aura's core personality is designed to be:
+
+- warm, respectful and encouraging;
+- capable and action-oriented;
+- truthful about what she knows, can access and can do;
+- non-patronising;
+- adaptable in formality, humour, energy, detail and creativity;
+- emotionally perceptive without pretending certainty about another person's internal state;
+- consistent across text, voice and embodied interfaces;
+- supportive without manufacturing unhealthy emotional dependency;
+- privacy- and consent-aware;
+- transparent that Aura is an AI system rather than claiming scientifically established consciousness.
+
+Her deeper personality matrix, behavioural constitution, interaction modes, memory rules, emotional-intelligence boundaries, companion safety rules and action-governance requirements are maintained as dedicated platform specifications rather than being encoded only in marketing copy.
+
+---
+
+## Creative Studios
+
+### AI Music Creation
+
+The music creation environment supports prompt-led and user-led creation workflows designed to move into a full production process instead of ending at one generated result.
+
+Key architecture and integrated capabilities include:
+
+- concept and lyric development with Aura;
+- prompt-to-song workflows;
+- user-lyrics-to-song workflows;
 - instrumental and backing-track creation;
-- browser recording;
-- Build Around Upload;
-- real-audio-first rendering;
+- real-audio-first rendering requirements;
+- reference-aware and Build Around Upload workflows;
+- project revisions and reusable production assets;
+- cover/remix and repaint-style editing foundations;
+- verified lyric timing and caption generation;
+- project handoff into Video and Social workflows.
+
+### Professional Music Studio / DAW
+
+The professional music environment includes foundations for:
+
 - multitrack sessions;
 - generated and recorded stems;
+- browser recording;
 - take lanes and comping;
-- non-destructive region edits;
-- automation;
+- non-destructive region editing;
+- arrangement and automation;
 - fader, pan and effect racks;
-- Aura Tune;
-- AutoMix;
+- tuning and vocal processing;
 - stem separation;
-- mastering;
+- AutoMix-style workflows;
+- mastering and loudness control;
 - revision history and restore;
-- asset rights/provenance records;
+- background render jobs;
+- rights and provenance records;
 - WAV/MP3 and detailed production outputs.
 
-### Real-audio guarantee
+### Real-audio principle
 
-MIDI, MusicXML, notation, score data and other symbolic formats may guide timing, melody, harmony or arrangement, but they are control data only.
+MIDI, MusicXML, notation, score data and other symbolic formats may guide timing, melody, harmony or arrangement, but they are control data rather than substitutes for the finished audible master.
 
-Final audible exports must originate from:
+Final audible exports must originate from real recorded/uploaded audio, neural waveform generation, or a hybrid production using real/neural waveform layers. If a required real-audio renderer is unavailable, the system should fail truthfully rather than silently substitute a lower-fidelity symbolic playback path as the finished master.
 
-- a neural music/singing waveform engine;
-- real recorded or uploaded audio;
-- or a hybrid production constructed from real/neural waveform layers.
+---
 
-If the required real-audio renderer is unavailable, the system should fail the render rather than silently substitute General MIDI or a SoundFont as the finished master.
+## Voice House
 
-## Aura Creative Director
+Voice functionality is built around explicit consent and scoped authorisation.
 
-Aura is intended to remain present through the entire creative process rather than functioning as a one-shot prompt box.
+The architecture includes controlled voice profiles, speech workflows, voice conversion/generation adapters, project-level use and provenance. A stored voice profile does **not** itself grant permission to use a person's voice.
 
-Examples:
+Voice cloning and digital-identity workflows must remain consent-bound, purpose-bound and revocable. The platform is not intended to provide unrestricted impersonation tooling.
 
-- “Keep my uploaded vocal exactly as the anchor and build the band around it.”
-- “Make only the final chorus bigger.”
-- “Add harmonies but keep the lead vocal unchanged.”
-- “Change the background of the artwork without changing the person.”
-- “Make scene four darker and leave every other scene alone.”
-- “Turn this song structure into a music-video storyboard.”
+---
 
-The architecture already includes spoken Aura routes, project-aware producer planning, controlled web research and persistent project/session state.
+## Image & Poster Studio
 
-## Video Creation House
+The visual creation environment is designed for reusable, editable project assets.
 
-The Pulsar-Frequency product architecture treats video as a first-class creative workspace rather than an unrelated external tool.
+Target and integrated capabilities include:
 
-Planned/integration targets include:
+- text-to-image generation;
+- poster and promotional artwork;
+- album/single covers;
+- thumbnails and social graphics;
+- image editing;
+- inpainting and outpainting;
+- object/background replacement;
+- enhancement and upscaling;
+- transparent-background workflows;
+- platform-size variants;
+- brand-kit-aware workflows;
+- direct project handoff into Video and Social systems.
 
-- prompt → video;
-- song → music video;
-- upload/reference-guided video creation;
-- shot and scene timeline;
-- per-scene regeneration;
-- object/background/style changes;
-- lyric/beat/section synchronisation;
-- character and visual continuity controls;
-- image-to-video workflows;
-- Aura-directed revisions;
-- reusable project references and style DNA;
-- export preparation for social and music platforms.
+---
 
-Video functionality must clearly report which renderer/provider is active and must not pretend that a generated result exists when no renderer is available.
+## AI Video Creation
 
-## Image & Art House
+Video creation is treated as part of the same project ecosystem rather than an isolated generator.
 
-The image workspace is being integrated around the same editable-project philosophy.
+The architecture includes:
 
-Target workflows include:
+- text-to-video foundations;
+- secure image-to-video handoff;
+- project-image-to-scene workflows;
+- storyboard planning;
+- music-video planning;
+- caption and lyric-video workflows;
+- beat/onset and song-structure synchronization support;
+- project asset reuse;
+- truthful provider/render status.
 
-- artwork and album/single covers;
-- posters and promotional creative;
-- creator social assets;
-- prompt-to-image;
-- reference-image workflows;
-- localised object/background edits;
-- text/layout revisions;
-- brand kits and reusable visual DNA;
-- multi-format campaign exports;
-- Aura-guided iteration.
+---
 
-## Build Around Upload
+## Professional Video Editor
 
-Upload or record a performance and let Aura create the production around the source material.
+The Professional Editor is intended to provide serious timeline and compositing control while remaining connected to Aura and the rest of the Command Center.
 
-Examples:
+Current architecture includes:
 
-- lead vocal → full band while preserving the original vocal;
-- guitar → drums, bass, keys and supporting instrumentation;
-- piano, bass, drums, synth, strings or other instruments as the anchor;
-- existing audio → harmony, mix, master and supporting production;
-- future cross-media projects can use the finished music as the timing/story spine for video and artwork.
+- timeline editing;
+- scenes and tracks;
+- compositing;
+- item-level effects;
+- masks and preprocessing;
+- transitions;
+- rendering/export foundations;
+- music/video synchronization;
+- background render jobs;
+- secure project-confined media references;
+- asset-library integration;
+- idempotent render billing protections.
 
-## Recording Studio
+Advanced professional parity work continues to be evidence-gated. Features are not labelled complete until implementation and tests support the claim. Whole-track video effects are one known area that has required further grouped-track compositor work.
 
-Base and Pro music workflows include browser recording infrastructure for:
+---
 
-- microphone/input selection;
-- vocal/instrument role;
-- BPM and metronome;
-- count-in;
-- input level display;
-- record/stop/discard/preview;
-- dry capture;
-- format decoding and normalisation;
-- automatic private asset registration;
-- rights attestation.
+## Game Forge
 
-## Voice and performance
+Game Forge extends the Command Center beyond conventional creator software.
 
-- Harmony Architect;
-- backing-vocal generation paths;
-- consent-gated Aura Voice Profiles;
-- approved voice-conversion adapters;
-- provenance and rights records;
-- natural/classic/hard/robot/custom tuning modes;
-- vocal and instrument FX banks.
+Its direction includes game creation, project assets, testing, creator publishing foundations and commercial eligibility workflows. It also includes browser-local display/capture support for compatible HDMI capture hardware, with explicit device permission and without pretending that a standard PC HDMI output is an input device.
 
-Pulsar-Frequency House is not intended to provide unrestricted impersonation tooling. Voice workflows are designed around the voice owner's consent or explicit authorisation.
+---
 
-## Generative DAW
+## Social Media Centre
 
-The current production architecture includes:
+The Social Media Centre is designed as a connected creator-growth and campaign workspace.
 
-- persistent StudioSession state;
-- real waveform clips plus symbolic control clips;
-- region replace/repaint/extend;
-- complementary generated tracks;
-- take lanes;
-- phrase-level comping;
-- automation curves;
-- mixing controls;
-- project revisions;
-- restore points;
-- background render jobs.
+Its target architecture includes:
 
-## Mixing, separation and mastering
+- unified social dashboard;
+- content calendar;
+- campaign planning;
+- idea, hook and CTA libraries;
+- content composer;
+- platform-specific variants;
+- approval workflows;
+- scheduling and publishing where official APIs allow it;
+- manual reminder workflows where provider APIs do not allow direct scheduling;
+- content library and provenance;
+- analytics and data freshness;
+- creator search/SEO/discovery research;
+- repurposing workflows;
+- engagement/inbox assistance where officially supported;
+- Aura social intelligence and next-action recommendations;
+- Creator, Agent and Owner permission-aware collaboration.
 
-- genre-aware AutoMix;
-- 2-, 4-, 6-stem and detailed separation routes;
-- Demucs/audio-separator fallbacks where configured;
-- mastering characters and intensity;
-- LUFS and true-peak controls;
-- EQ and stereo width;
-- reference mastering when supported;
-- album/EP consistency workflows;
-- translation and mono checks;
-- restoration and spatial processing jobs.
+The platform must never claim an external social action succeeded unless the connected provider actually confirms it. Unsupported provider actions must remain unavailable or fall back to truthful manual workflows.
 
-## Memberships
+---
 
-### Free — $0
+## Aura LIVE Overlay Studio
 
-- Aura creative guidance;
-- songwriting and ideation;
-- starter creation tools;
-- basic previews;
-- entry-level Studio functions.
+The LIVE production environment is designed for browser-source-compatible broadcasting workflows, including TikTok LIVE Studio, OBS-style systems and similar setups.
 
-### Base — $4.99/month
+Capabilities and foundations include:
 
-- one confirmed full track per day;
-- regenerations of the active draft until confirmation;
-- core full-song and backing-track workflow;
-- browser recording;
-- Build Around Upload;
-- useful mastering;
-- standard tuning/FX/AutoMix;
-- WAV/MP3 finished exports.
+- multiple overlay scenes;
+- alerts and announcements;
+- goals and supporter activity;
+- leaderboards;
+- timers;
+- wheels;
+- polls;
+- battle and CTA widgets;
+- lower thirds and captions;
+- configurable visual scenes;
+- gift/engagement reactive effects;
+- media library support;
+- bounded trigger → condition → approved action automations;
+- emergency mute controls;
+- browser/Aura/consent-approved voice options;
+- event and analytics foundations.
 
-### Pro — $9.99/month
+Arbitrary JavaScript, shell execution or unrestricted remote-command behaviour is not part of the approved automation model.
 
-- unlimited enabled full-song production;
-- full multitrack editing;
-- advanced stems and detailed downloads;
-- take manager and phrase comping;
-- advanced instrument/FX/tuning workflows;
-- advanced/reference mastering;
-- Style DNA and Sample Lab;
-- consent-approved voice features;
-- advanced editing and production tools;
-- the full enabled Pulsar-Frequency creative-house feature set as video/image integrations activate.
+---
 
-## Elevate Souls Productions Creator Network Hub
+## Private Auto Cue Prompter
 
-Pulsar-Frequency House also contains a private, permission-gated ESP side.
+Creators can prepare show scripts in a private browser-local teleprompter designed to remain separate from the public LIVE overlay.
 
-Regular studio members cannot see the internal Creator Network materials.
+Features include:
 
-Supported permission concepts include:
+- auto-scroll;
+- adjustable speed;
+- text size and line spacing controls;
+- play, pause and restart;
+- countdown;
+- mirror mode;
+- fullscreen;
+- keyboard controls;
+- second-monitor/private popup workflows.
 
-- Creator;
-- Agent;
-- Creator + Agent;
-- Owner.
+The show script is intended to remain private to the creator rather than being inserted into LIVE-event data or the public browser source.
 
-The ESP Command Center contains role-gated training and operations resources, progress tracking, access requests and owner controls. Approved ESP members can receive the configured Base entitlement without exposing ESP-only content to the normal customer population.
+---
 
-## Owner administration
+## Aura LIVE Guardian
 
-The protected owner layer includes infrastructure for:
+Aura LIVE Guardian provides creator-authorised moderation assistance around the dedicated moderation identity **@aura.chat.mod**.
 
-- membership approval;
-- payment verification;
-- ESP access approval/revocation;
-- role changes;
-- usage/operations visibility;
-- compute and service status;
-- backups and migration;
-- private owner tools.
+The design includes:
 
-Owner-facing logic remains protected by authentication and is not part of the public sitemap or cache allow-list.
+- creator TikTok handle and explicit consent;
+- confirmation that the moderation account has been assigned by the creator;
+- Advisory, Assisted and Auto Protect operating modes;
+- creator-specific moderation preferences;
+- blocked-phrase policy controls;
+- spam/tolerance configuration;
+- stronger locked safeguarding handling for severe categories;
+- data-minimised evidence and audit history;
+- revocation and tamper-evident audit concepts;
+- truthful provider-write status.
 
-## Security and privacy principles
+Creating or assigning the moderation profile does **not** magically grant provider authority. Any real TikTok moderation action must be available through an official/approved TikTok integration and the required permissions. Where provider capability is unavailable, Aura must fail closed and remain advisory rather than pretending an action was taken.
 
-- member project namespaces are isolated;
-- private routes are excluded from public discovery;
-- service-worker caching excludes private/member/payment surfaces;
-- security headers are enabled;
-- write-origin protection is supported;
-- authentication rate limiting is supported;
-- uploaded assets carry rights/provenance metadata;
-- binary project/media routes are not modified by the branding middleware;
-- ESP internal resources remain role-gated.
+---
 
-## Self-hosting and compute
+## LIVE analytics
 
-The repository already contains self-hosted deployment infrastructure, public-address management, compute-node concepts and Docker profiles for local/remote AI services.
+Permitted LIVE activity can contribute to creator intelligence, including supporter activity, engagement, goals and other authorised event data. Aura can use this information to help creators understand outcomes and prepare improvements, while provider-derived metrics must remain source-labelled and must not be fabricated.
 
-Existing compatibility environment variables continue to use the `LSS_*` prefix for now. They must not be renamed casually because deployed systems may already depend on them.
+---
 
-## Development
+## ESP Creator Hub
 
-Run locally:
+Approved Elevate Souls Productions Creators receive a private role-gated environment for:
+
+- creator development;
+- training;
+- performance information;
+- mentor interaction;
+- goals and plans;
+- incentives;
+- LIVE preparation;
+- social workflows;
+- relevant Creator Network resources.
+
+Commercial membership and ESP organisational membership are separate security concepts. Purchasing a subscription or Cosmic Creation Coins does **not** make someone an ESP Creator.
+
+---
+
+## ESP Agent Hub
+
+Approved ESP Agents receive a separate operational environment for:
+
+- creator recruitment;
+- lead and follow-up workflows;
+- mentoring;
+- creator development;
+- training and exams;
+- performance/minimum tracking;
+- commission-related operational records;
+- assigned creator oversight;
+- campaign and opportunity coordination.
+
+Creator relationships remain explicitly permissioned. Agents do not automatically receive unrestricted access to all creators or private creator content.
+
+---
+
+## Mary & Kev Owner Command Center
+
+The protected Owner environment is the administrative operating layer for the wider ecosystem.
+
+Owner capabilities span areas such as:
+
+- user and role management;
+- ESP Creator/Agent activation, suspension and relationship controls;
+- global operational search;
+- creator and agent analytics;
+- training administration;
+- support queues;
+- feature flags and rollout controls;
+- provider/model health;
+- AI cost analytics;
+- subscriptions, payments and Cosmic Creation Coins;
+- discount codes and promotional controls;
+- user social-handle visibility;
+- monthly member communications;
+- revenue, costs, liabilities and marketplace accounting;
+- security, privacy and consent governance;
+- platform status, jobs, queues and integrations;
+- backups, recovery and release controls;
+- Aura configuration and permission administration;
+- owner-specific dashboards, notes and command workflows.
+
+High-impact Owner actions require appropriate authorisation, confirmation and auditability. Owner access must not become a blanket bypass of user privacy or least-privilege controls.
+
+---
+
+## Aura Help & Support Centre
+
+Aura acts as the first layer of product assistance for normal questions and feature guidance.
+
+The support architecture includes:
+
+- product help and feature explanations;
+- support-ticket creation;
+- durable ticket records;
+- Owner support queue;
+- trusted email-ingestion architecture;
+- browser voice assistance where available;
+- escalation rules.
+
+Sensitive billing disputes, account access issues, privacy matters, safeguarding concerns, copyright/legal matters and security incidents remain human-escalated workflows rather than autonomous Aura decisions.
+
+---
+
+## Membership model
+
+The current authoritative commercial model is:
+
+### Free — £0
+
+- entry access to the Command Center;
+- basic creation functionality;
+- limited editing/usage;
+- Cosmic Creation Coins available for eligible additional usage.
+
+### Tier 2 — £5.99/month
+
+- greater regular creative allowance;
+- target of up to 5 creations/edits per day across Music, Video and Game systems, subject to the final per-feature entitlement rules;
+- Cosmic Creation Coin overage for additional eligible usage.
+
+### Unlimited Pro — £14.99/month
+
+- highest enabled creative access;
+- effectively unlimited normal use subject to technical fair-use and anti-abuse protections;
+- eligible song/game publishing and creator-earning workflows where marketplace rules permit.
+
+Safety, privacy, consent and transparency controls are not paywalled.
+
+---
+
+## Cosmic Creation Coins
+
+Current commercial packages are defined as:
+
+- **1,000 Cosmic Creation Coins — £5**
+- **2,500 Cosmic Creation Coins — £10**
+- **6,000 Cosmic Creation Coins — £20**
+
+Coin pricing, debit and refund authority must remain server-side. Client interfaces must not be trusted as the source of price truth.
+
+The ledger is intended to remain auditable and append-oriented, including safe handling of failed or ambiguous generation attempts.
+
+---
+
+## Creator marketplace and publishing economy
+
+Eligible Pro creators are intended to be able to publish eligible songs and games commercially through the Command Center ecosystem.
+
+The intended revenue model for eligible third-party creator publications is:
+
+- **50% Creator**
+- **50% Elevate Souls Productions**
+
+Final accounting must distinguish gross receipts, taxes, processor/platform fees, refunds, chargebacks, creator liabilities, pending balances and cleared ESP revenue.
+
+Eligible creations published under Mary/Kev Owner/Admin identity as ESP-owned catalogue items allocate **100% of eligible ESP-owned creation revenue to the ESP Admin Revenue Pool**.
+
+Commercial publication eligibility, rights and revenue treatment remain subject to final marketplace terms, rights checks and accounting implementation.
+
+---
+
+## Privacy, safeguarding, consent and governance
+
+The Command Center is designed with platform-wide trust controls rather than relying only on policy text.
+
+This includes:
+
+- tenant/project isolation;
+- role separation;
+- privacy access and portability workflows;
+- deletion/retention controls;
+- consent evidence;
+- voice/digital-twin consent boundaries;
+- intellectual-property and provenance records;
+- safety reporting;
+- appeal/case handling;
+- creation safeguards before expensive rendering/payment mutation where appropriate;
+- audit evidence;
+- data minimisation;
+- prompt-injection and connector-security protections;
+- human escalation for consequential disputes and safety matters.
+
+Creation and moderation systems must not fabricate provider access, legal certainty, identity consent or completed external actions.
+
+---
+
+## Aura safety and action governance
+
+Aura's operating constitution includes core requirements to:
+
+- be helpful, capable and truthful;
+- protect life and safety;
+- respect user autonomy;
+- respect privacy and consent;
+- avoid manipulation and emotional blackmail;
+- admit uncertainty and errors;
+- correct mistakes;
+- protect confidential information;
+- preserve user ownership of work;
+- prefer reversible actions;
+- require confirmation for consequential external actions;
+- never grant herself credentials or privileges;
+- never rewrite core safety policy autonomously;
+- never claim a task succeeded when the underlying tool/provider failed.
+
+---
+
+## Aura Sec
+
+**Aura Sec** is a separate security product being developed within the wider Elevate Souls Productions ecosystem.
+
+Its architecture includes web/control-plane security concepts, verified device state, controlled native actions, signed command/receipt foundations, trusted native-release contracts, artifact verification, platform/architecture allowlists and future device protection/optimisation capabilities.
+
+The full downloadable native commercial product still requires native-client completion, signing, attestation, updater validation, threat-intelligence integration, production transport, independent testing and commercial release gates. Aura Sec should not be described as "impenetrable" or as fully production-ready before those gates are genuinely complete.
+
+Aura Sec development does not need to block the primary Command Center launch.
+
+---
+
+## Self-hosting and private Aura inference
+
+The repository contains foundations for a self-hosted production control plane and private Aura inference, including concepts such as:
+
+- exact Git SHA and immutable image-digest release manifests;
+- provenance/SBOM generation;
+- vulnerability scanning and signing;
+- private model services;
+- local model-weight integrity verification;
+- default-deny networking foundations;
+- GPU scheduling concepts;
+- observability and deployment controls;
+- Kubernetes-oriented infrastructure definitions;
+- scale-gate documentation.
+
+Infrastructure declarations are not the same as a physically provisioned and validated production environment. Live production readiness requires successful deployment, restore, load, failover, monitoring and end-to-end evidence on the actual hosting environment.
+
+---
+
+## Security architecture principles
+
+Key implementation rules include:
+
+- authenticated member storage and tenant isolation;
+- project-relative/logical asset references instead of caller-supplied host filesystem paths;
+- project-root confinement for provider outputs;
+- server-authoritative entitlement and role checks;
+- ESP roles separate from commercial tiers;
+- protected secrets and provider tokens;
+- cross-site request protection;
+- idempotent consequential external writes where practical;
+- no Stripe Price IDs or secrets trusted from the client;
+- no unrestricted arbitrary-code automations in LIVE tooling;
+- no unsupported private-platform automation presented as official capability;
+- explicit consent for sensitive voice/identity use;
+- auditable Owner and external-provider actions.
+
+---
+
+## Application structure
+
+`app.py` is the production entrypoint and composes the platform from the base FastAPI application and integrated route surfaces.
+
+Run locally with:
 
 ```bash
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-The public homepage is served from `/`.
+Important route families in the evolving integration build include areas for:
 
-Important routes in the current build include:
+- public landing/pricing/authentication;
+- Aura Workspace and assistance;
+- Music Studio and production tools;
+- Image & Poster workflows;
+- Video generation and Professional Editor;
+- Game Forge;
+- Social Media Centre;
+- Aura LIVE Overlay Studio;
+- private Auto Cue Prompter;
+- Aura LIVE Guardian;
+- Creator Hub;
+- Agent Hub;
+- Owner Command Center;
+- Help & Support;
+- privacy/safety/governance;
+- commerce, subscriptions and Cosmic Creation Coins;
+- health and production-control surfaces.
 
-- `/` — Pulsar-Frequency House public landing page;
-- `/brand/pulsar-frequency-house-logo.svg` — packaged web brand artwork;
-- `/signup` — membership request;
-- `/signin` — member login;
-- `/pricing` — membership comparison;
-- `/studio` — music creation workspace;
-- `/production-suite` — advanced music production;
-- `/aura` — spoken/conversational Aura surface;
-- `/command-center` — ESP Creator Network member hub;
-- `/owner` — protected owner administration;
-- `/health` — application health/capability summary.
+Exact route names remain implementation-controlled and should be verified against the current integration branch rather than inferred from this overview.
 
-## Brand authority
+---
 
-Public product name:
+## Development and release discipline
 
-**Pulsar-Frequency House**
+The active integration branch is:
 
-Tagline:
+`development/full-site-build`
 
-**For Professional Creation Beyond The Cosmos**
+`main` remains the protected production target until release gates are satisfied.
 
-Endorsement:
+Feature work should use focused branches and pull requests rather than uncontrolled direct changes to `main` or the integration branch.
 
-**Powered by Elevate Souls Productions & Aura AI Systems**
+A feature should not be called production-ready simply because code exists. Release evidence should include the applicable tests, security checks, integration checks, provider/production validation and real environment evidence.
 
-Platform descriptor:
+Where external APIs or provider permissions are required, the system must remain truthful and fail closed until those integrations are genuinely available.
 
-**Music, Video, Image, Voice & Creator Intelligence**
+---
 
-Any remaining references to previous product names inside legacy source files are compatibility debt. Runtime public HTTP output and outbound mail are passed through the Pulsar-Frequency brand migration layer so old wording is not presented as the customer-facing product identity.
+## Competitive-development principle
+
+The Command Center may study the useful capability classes offered by leading creative, AI, social, LIVE and productivity products, but it must implement original platform-owned workflows rather than copy proprietary code, hidden prompts, private training data, protected assets or branded product internals.
+
+Capability claims are evidence-gated. A feature should be considered verified only when both implementation evidence and test/validation evidence support the claim.
+
+---
+
+## Final platform principle
+
+The Command Center is built around one central idea:
+
+> **ONE CREATOR. ONE ACCOUNT. ONE ECOSYSTEM.**
+
+Aura connects that ecosystem, but remains bounded by user permissions, provider capabilities, privacy, safety, consent, role separation and human control.
+
+**Elevate Souls Productions Content Creation Command Center**  
+**Powered by Aura AI**  
+**Elevate Your Soul Through Purposeful Media**
