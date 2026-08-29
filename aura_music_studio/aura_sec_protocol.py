@@ -166,6 +166,19 @@ class SecurityCommand(StrictModel):
         for key in self.parameters:
             if not isinstance(key, str) or not 1 <= len(key) <= 80:
                 raise ValueError("invalid command parameter key")
+
+        # Defense in depth: the protocol object itself enforces the exact action schema.
+        # This prevents a future caller from bypassing the parameter-firewall helper and
+        # smuggling arbitrary shell, path, URL, command-line or executable fields into a
+        # privileged native command.
+        from .aura_sec_action_parameters import validated_command_parameters
+
+        canonical = validated_command_parameters(
+            self.action,
+            {"command_parameters": self.parameters},
+        )
+        if canonical != self.parameters:
+            raise ValueError("command parameters must already use the canonical Aura Sec action schema")
         return self
 
 
