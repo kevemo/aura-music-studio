@@ -137,6 +137,43 @@ def test_failed_processing_releases_receipt_so_retry_is_not_lost(tmp_path, monke
     assert b'"duplicate":false' in retry.body
 
 
+def test_completion_failure_keeps_processing_claim_to_prevent_replay(tmp_path, monkeypatch):
+    connector, engine, _ = _configure(tmp_path, monkeypatch)
+    token = _seed_connector(connector)
+    request = RequestStub(authorization=f"Bearer {token}")
+    body = connector.ConnectorEvent(
+        event_id="event-complete-fail-01",
+        event_type="gift",
+        payload={"username": "Tuckz", "gift_name": "Rose", "coins": 1},
+    )
+
+    def completion_failure(*args, **kwargs):
+        raise RuntimeError("receipt completion failure")
+
+    monkeypatch.setattr(connector, "_complete_event", completion_failure)
+    with pytest.raises(RuntimeError, match="receipt completion failure"):
+        connector.connector_ingest(body, request)
+
+    with engine._connect() as con:
+        applied = con.execute(
+            "SELECT COUNT(*) FROM live_overlay_events WHERE user_id='creator-1' AND event_type='gift'"
+        ).fetchone()[0]
+    with connector._connect() as con:
+        receipt = con.execute(
+            "SELECT state FROM live_overlay_connector_receipts WHERE user_id='creator-1' AND event_id='event-complete-fail-01'"
+        ).fetchone()
+    assert applied == 1
+    assert receipt["state"] == "processing"
+
+    retry = connector.connector_ingest(body, request)
+    assert retry.status_code == 409
+    with engine._connect() as con:
+        applied_after_retry = con.execute(
+            "SELECT COUNT(*) FROM live_overlay_events WHERE user_id='creator-1' AND event_type='gift'"
+        ).fetchone()[0]
+    assert applied_after_retry == 1
+
+
 def test_concurrent_processing_receipt_returns_retryable_conflict(tmp_path, monkeypatch):
     connector, _, _ = _configure(tmp_path, monkeypatch)
     token = _seed_connector(connector)
