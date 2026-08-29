@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .owner_auth import owner_authorized
+from .owner_identity import owner_actor
 
 member_router = APIRouter(prefix="/member/safety", tags=["Member Safety Reports"])
 owner_router = APIRouter(prefix="/owner/safety", tags=["Owner Safety Review"])
@@ -250,10 +251,14 @@ class SafetyReportStore:
             ).fetchall()
         return [{**dict(row), "immediate_danger": bool(row["immediate_danger"])} for row in rows]
 
-    def owner_review(self, *, report_id: str, status: str, reason: str, resolution_reference: str = "") -> dict:
+    def owner_review(self, *, report_id: str, status: str, reason: str, resolution_reference: str = "",
+                     reviewer_actor: str = "ESP Owner") -> dict:
         if status not in REPORT_STATES or status == "submitted":
             raise ValueError("Unsupported owner review state")
         reason = str(reason or "").strip()
+        reviewer_actor = str(reviewer_actor or "ESP Owner").strip() or "ESP Owner"
+        if len(reviewer_actor) > 120:
+            raise ValueError("Reviewer actor label is too long")
         if not reason:
             raise ValueError("Review reason is required")
         resolution_reference = _validate_ref(resolution_reference, field_name="Resolution reference", required=False)
@@ -274,7 +279,8 @@ class SafetyReportStore:
             self._append_event(
                 con, report_id=report_id, actor_type="owner", action="owner_review",
                 data={"from": current, "to": status, "reason": reason,
-                      "resolution_reference": resolution_reference, "automatic_moderation_action_taken": False},
+                      "resolution_reference": resolution_reference, "reviewer_actor": reviewer_actor,
+                      "automatic_moderation_action_taken": False},
             )
         return self.owner_get(report_id)
 
@@ -390,8 +396,13 @@ def owner_safety_report(report_id: str, request: Request):
 def owner_review_safety_report(report_id: str, request: Request, payload: OwnerReviewInput):
     _require_owner(request)
     try:
-        return SafetyReportStore().owner_review(report_id=report_id, status=payload.status,
-                                                reason=payload.reason, resolution_reference=payload.resolution_reference)
+        return SafetyReportStore().owner_review(
+            report_id=report_id,
+            status=payload.status,
+            reason=payload.reason,
+            resolution_reference=payload.resolution_reference,
+            reviewer_actor=owner_actor(),
+        )
     except KeyError as exc:
         raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
