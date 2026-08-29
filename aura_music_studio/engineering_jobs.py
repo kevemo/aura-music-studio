@@ -87,6 +87,58 @@ def _public_stem_refs(project: Path, paths: dict[str, Path]) -> dict[str, str]:
     return {role: _public_output_ref(project, path) for role, path in paths.items()}
 
 
+def _register_audio_asset(
+    project: Path,
+    library: AssetLibrary,
+    output: Path,
+    *,
+    operation: str,
+    source_asset_id: str,
+    role: str | None = None,
+) -> dict[str, str]:
+    """Register a confined engineering output as a reusable project audio asset."""
+
+    _public_output_ref(project, output)
+    tags = ["engineering-output", f"operation:{operation}"]
+    if role:
+        tags.append(f"stem:{role}")
+    record = library.ingest(
+        output,
+        kind="audio",
+        rights_basis="project_generated_derivative",
+        attestation=(
+            "Generated inside this project from an existing project asset; "
+            "all downstream use remains subject to the source asset rights."
+        ),
+        tags=tags,
+        notes=f"Derived by {operation} from source asset {source_asset_id}.",
+    )
+    return {
+        "asset_id": record.id,
+        "asset_ref": _public_output_ref(project, project / record.path),
+    }
+
+
+def _register_stem_assets(
+    project: Path,
+    library: AssetLibrary,
+    paths: dict[str, Path],
+    *,
+    source_asset_id: str,
+) -> dict[str, dict[str, str]]:
+    return {
+        role: _register_audio_asset(
+            project,
+            library,
+            path,
+            operation="split",
+            source_asset_id=source_asset_id,
+            role=role,
+        )
+        for role, path in paths.items()
+    }
+
+
 def run_engineering_job(project: Path, payload: dict) -> dict:
     project = project.resolve()
     request = EngineeringJobRequest.model_validate(payload)
@@ -101,6 +153,12 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
             "operation": "split",
             "mode": request.split_mode,
             "stems": _public_stem_refs(project, paths),
+            "stem_assets": _register_stem_assets(
+                project,
+                library,
+                paths,
+                source_asset_id=record.id,
+            ),
             "source_asset_id": record.id,
         }
 
@@ -133,6 +191,13 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         return {
             "operation": "master",
             "output_ref": _public_output_ref(project, mastered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                mastered,
+                operation="master",
+                source_asset_id=record.id,
+            ),
             "report": report,
             "translation": translation_report(mastered),
             "source_asset_id": record.id,
@@ -144,6 +209,13 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         return {
             "operation": "autotune",
             "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation="autotune",
+                source_asset_id=record.id,
+            ),
             "report": report,
             "source_asset_id": record.id,
         }
@@ -160,6 +232,13 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         return {
             "operation": "restore",
             "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation="restore",
+                source_asset_id=record.id,
+            ),
             "report": report,
             "source_asset_id": record.id,
         }
@@ -181,6 +260,13 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
         return {
             "operation": "spatial",
             "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation="spatial",
+                source_asset_id=record.id,
+            ),
             "report": report,
             "source_asset_id": record.id,
         }
@@ -208,6 +294,13 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
             "operation": request.operation,
             "source_asset_id": record.id,
             "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation=request.operation,
+                source_asset_id=record.id,
+            ),
             "provider": "ace_step",
             "audio_origin": "ai_transformation",
         }
