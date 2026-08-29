@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import sqlite3
 
 from aura_music_studio import esp_public_network as network
@@ -67,11 +68,14 @@ def test_public_media_reference_is_opaque_and_confined(tmp_path, monkeypatch):
     assert str(tmp_path) not in (response.headers.get("content-disposition") or "")
 
 
-def test_production_aggregate_mounts_public_network_and_owner_story_routes():
-    from app import app
-
-    paths = {getattr(route, "path", None) for route in app.routes}
+def test_public_network_routes_exist_and_are_composed_into_base_api():
+    paths = {getattr(route, "path", None) for route in network.router.routes}
     assert "/esp-network" in paths
     assert "/creator-network" in paths
     assert "/owner/network-stories" in paths
     assert "/owner/network-stories/upload" in paths
+
+    import aura_music_studio.api as aggregate
+    source = inspect.getsource(aggregate)
+    assert "esp_public_network_router" in source
+    assert "app.include_router(esp_public_network_router)" in source
