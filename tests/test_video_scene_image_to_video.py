@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from aura_music_studio import video_scene_image_to_video as subject
 from aura_music_studio import video_scene_timeline as timeline
@@ -127,5 +128,13 @@ def test_scene_image_to_video_route_is_mounted_in_production_aggregate():
 
     app = FastAPI()
     app.include_router(router)
-    paths = {route.path for route in app.routes}
-    assert "/creative/projects/{project_name}/video-timeline/scenes/{scene_id}/render-image-to-video" in paths
+    client = TestClient(app)
+
+    response = client.post(
+        "/creative/projects/project-a/video-timeline/scenes/scene-a/render-image-to-video",
+        json={"rights_confirmed": False},
+    )
+
+    # A mounted route reaches its fail-closed rights gate. An unmounted route would return 404.
+    assert response.status_code == 400
+    assert "Confirm" in response.json()["detail"]
