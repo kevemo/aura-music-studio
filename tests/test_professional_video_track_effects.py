@@ -9,7 +9,7 @@ import subprocess
 import pytest
 from PIL import Image
 
-from aura_music_studio.professional_editor import ProfessionalEditorStore
+from aura_music_studio.professional_editor import EditorEffect, ProfessionalEditorStore
 from aura_music_studio.professional_editor_renderer import EditorRenderUnsupported
 from aura_music_studio.professional_video_effects_compositor import _SUPPORTED_VIDEO_EFFECTS
 from aura_music_studio.professional_video_grouped_unified_compositor import GroupedUnifiedAdvancedVideoCompositor
@@ -77,6 +77,10 @@ def _effect(effect_type: str, *, mix: float = 1.0, enabled: bool = True, paramet
         "keyframes": keyframes or {},
         "metadata": {},
     }
+
+
+def _editor_effect(effect_type: str, **kwargs) -> EditorEffect:
+    return EditorEffect.model_validate(_effect(effect_type, **kwargs))
 
 
 def test_track_effect_chain_preserves_authored_order():
@@ -162,7 +166,7 @@ def test_grouped_unified_renderer_applies_real_track_effect_and_records_truthful
         start=0.0,
         duration=1.0,
     )
-    store.patch_track(track.id, {"effects": [_effect("grayscale")]})
+    store.add_effect("track", track.id, _editor_effect("grayscale"))
 
     result = GroupedUnifiedAdvancedVideoCompositor(project).render_video_advanced(sequence.id)
     pixel = _extract_frame(project / result.output_ref, tmp_path / "track_effect_frame.png")
@@ -216,13 +220,8 @@ def test_track_effect_runs_before_whole_track_blend(tmp_path):
         start=0.0,
         duration=1.0,
     )
-    store.patch_track(
-        top.id,
-        {
-            "effects": [_effect("grayscale")],
-            "blend_mode": "multiply",
-        },
-    )
+    store.add_effect("track", top.id, _editor_effect("grayscale"))
+    store.patch_track(top.id, {"blend_mode": "multiply"})
 
     result = GroupedTrackVideoCompositor(project).render_video_advanced(sequence.id)
     pixel = _extract_frame(project / result.output_ref, tmp_path / "effect_before_blend.png")
