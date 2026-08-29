@@ -44,6 +44,10 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    # Browser/link sources in TikTok LIVE Studio and OBS do not share the member's site session.
+    # These routes are public only at the middleware layer; every request is authenticated by a
+    # high-entropy, rotatable source token stored only as a SHA-256 digest server-side.
+    "/live-overlay/source/",
     # Stripe checkout must also work for owner-approved accounts that are not active yet,
     # and Stripe webhooks have no member session. Every state-changing Stripe route therefore
     # performs its own session or cryptographic webhook verification before mutating state.
