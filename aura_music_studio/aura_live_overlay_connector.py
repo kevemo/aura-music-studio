@@ -13,10 +13,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .aura_live_overlay_engine import EVENT_TYPES, process_overlay_event
+from .aura_live_overlay_personalization import router as personalization_router
 from .aura_live_overlay_wizard import router as setup_wizard_router
 
 router = APIRouter(tags=["Aura LIVE Event Connector"])
 router.include_router(setup_wizard_router)
+router.include_router(personalization_router)
 DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3"))
 TOKEN_BYTES = 32
 MAX_EVENTS_PER_MINUTE = int(os.getenv("AURA_LIVE_CONNECTOR_EVENTS_PER_MINUTE", "1200"))
