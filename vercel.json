@@ -45,7 +45,8 @@
       "feature/stripe-creation-coins-storefront-refresh": false,
       "feature/creation-coin-image-overage": false,
       "feature/creation-coin-free-video-render": false,
-      "feature/video-verified-lyric-sync-ingestion-refresh": false
+      "feature/video-verified-lyric-sync-ingestion-refresh": false,
+      "feature/project-image-to-video-handoff": false
     }
   },
   "functions": {
