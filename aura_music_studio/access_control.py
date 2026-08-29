@@ -45,10 +45,12 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
-    # Browser/link sources in TikTok LIVE Studio and OBS do not share the member's site session.
-    # These routes are public only at the middleware layer; every request is authenticated by a
-    # high-entropy, rotatable source token stored only as a SHA-256 digest server-side.
+    # Browser/link sources and an ESP-approved normalized LIVE relay do not share the member's
+    # site session. These paths are public only at the middleware layer; each route separately
+    # authenticates a high-entropy token stored server-side only as a SHA-256 digest.
     "/live-overlay/source/",
+    "/live-overlay/advanced/",
+    "/live-overlay/connector/",
     # Stripe checkout must also work for owner-approved accounts that are not active yet,
     # and Stripe webhooks have no member session. Every state-changing Stripe route therefore
     # performs its own session or cryptographic webhook verification before mutating state.
@@ -173,8 +175,6 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
             user_id = _user_for_source(unquote(raw_token))
             profile = _profile(user_id)
         except Exception:
-            # Preserve the source route's own token/not-found response without turning this
-            # entitlement guard into a second source-authentication implementation.
             return None
 
         user = self.store.get_user(user_id)
@@ -182,30 +182,13 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
             return JSONResponse({"detail": "Overlay source owner not found"}, status_code=404)
         current_user = self.memberships.subscriptions.enforce(user)
         if current_user.get("status") != "active":
-            return JSONResponse(
-                {"detail": "Active membership is required for server LIVE speech"},
-                status_code=403,
-            )
+            return JSONResponse({"detail": "Active membership is required for server LIVE speech"}, status_code=403)
         plan = get_plan(current_user.get("plan_id") or "free")
         mode = str(profile.get("voice_mode") or "browser").lower()
         if mode == "aura" and plan.id not in {"base", "pro"}:
-            return JSONResponse(
-                {
-                    "detail": "Aura overlay voice requires a current Basic or Pro membership",
-                    "plan": plan.id,
-                    "upgrade_required": True,
-                },
-                status_code=403,
-            )
+            return JSONResponse({"detail": "Aura overlay voice requires a current Basic or Pro membership", "plan": plan.id, "upgrade_required": True}, status_code=403)
         if mode == "clone" and (plan.id != "pro" or not plan.has(APPROVED_VOICE_DUPLICATION)):
-            return JSONResponse(
-                {
-                    "detail": "Consent-approved cloned LIVE voice requires a current Pro membership",
-                    "plan": plan.id,
-                    "upgrade_required": True,
-                },
-                status_code=403,
-            )
+            return JSONResponse({"detail": "Consent-approved cloned LIVE voice requires a current Pro membership", "plan": plan.id, "upgrade_required": True}, status_code=403)
         return None
 
     async def dispatch(self, request: Request, call_next):
@@ -227,25 +210,10 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
         try:
             feature = _required_feature(path, request.method)
             if feature and not member.plan.has(feature):
-                return JSONResponse(
-                    {
-                        "detail": f"{feature} is not included in the {member.plan.name} tier",
-                        "plan": member.plan.id,
-                        "upgrade_required": True,
-                    },
-                    status_code=403,
-                )
+                return JSONResponse({"detail": f"{feature} is not included in the {member.plan.name} tier", "plan": member.plan.id, "upgrade_required": True}, status_code=403)
 
             if not member.plan.has(MULTITRACK_DAW) and _base_daw_project_requires_pro(path):
-                return JSONResponse(
-                    {
-                        "detail": "This project contains Pro multitrack, take-lane, automation, routing or frozen-track state. Upgrade to Pro to reopen its advanced DAW session.",
-                        "plan": member.plan.id,
-                        "upgrade_required": True,
-                        "project_preserved": True,
-                    },
-                    status_code=403,
-                )
+                return JSONResponse({"detail": "This project contains Pro multitrack, take-lane, automation, routing or frozen-track state. Upgrade to Pro to reopen its advanced DAW session.", "plan": member.plan.id, "upgrade_required": True, "project_preserved": True}, status_code=403)
 
             if path.endswith("/download"):
                 requested = (request.query_params.get("path") or "").lower()
@@ -256,10 +224,7 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                 else:
                     needed = STEM_SPLITTER
                 if not member.plan.has(needed):
-                    return JSONResponse(
-                        {"detail": "This download requires a higher membership tier", "upgrade_required": True},
-                        status_code=403,
-                    )
+                    return JSONResponse({"detail": "This download requires a higher membership tier", "upgrade_required": True}, status_code=403)
 
             project_id = None
             base_slot = None
@@ -270,21 +235,13 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
                     project_id = None
                 if project_id and member.plan.confirmed_songs_per_day is not None:
                     try:
-                        base_slot = self.store.start_song_slot(
-                            member.user_id,
-                            project_id,
-                            datetime.now(timezone.utc).date().isoformat(),
-                        )
+                        base_slot = self.store.start_song_slot(member.user_id, project_id, datetime.now(timezone.utc).date().isoformat())
                     except (PermissionError, ValueError) as exc:
                         return JSONResponse({"detail": str(exc)}, status_code=403)
                     if base_slot.get("state") == "confirmed":
-                        return JSONResponse(
-                            {"detail": "This track has already been confirmed. Start a new daily project to create another finished song."},
-                            status_code=403,
-                        )
+                        return JSONResponse({"detail": "This track has already been confirmed. Start a new daily project to create another finished song."}, status_code=403)
 
             response = await call_next(request)
-
             if project_id and base_slot and 200 <= response.status_code < 300:
                 try:
                     self.store.record_regeneration(member.user_id, project_id)
