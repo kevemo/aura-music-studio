@@ -10,7 +10,7 @@ import librosa
 import numpy as np
 
 from .cloud_providers import MurekaClient
-from .rights import RightsLedger, VoiceProfile
+from .rights import RightsLedger, VoiceProfile, authorize_voice_profile
 
 
 def analyze_voice_sample(path: Path) -> dict:
@@ -63,13 +63,15 @@ def create_voice_profile(
 
 def convert_singing_voice(
     source_vocal: Path,
-    profile: VoiceProfile,
     output: Path,
     *,
+    rights_root: Path,
+    voice_profile_id: str,
     similarity: float = 0.8,
     pitch_shift: int = 0,
 ) -> Path:
-    profile.assert_usable("voice_conversion")
+    """Run singing conversion only after a fresh authoritative consent lookup."""
+    profile = authorize_voice_profile(rights_root, voice_profile_id, "voice_conversion")
     if not profile.reference_files:
         raise RuntimeError("Voice Profile has no reference audio")
     target = Path(profile.reference_files[0])
@@ -96,12 +98,13 @@ def convert_singing_voice(
     return output
 
 
-def create_mureka_vocal_id(profile: VoiceProfile) -> str:
-    """Create a cloud vocal ID only after Aura's consent check passes."""
-    profile.assert_usable("singing")
+def create_mureka_vocal_id(*, rights_root: Path, voice_profile_id: str) -> str:
+    """Create a cloud vocal ID only after a fresh authoritative consent check."""
+    profile = authorize_voice_profile(rights_root, voice_profile_id, "singing")
     if not profile.reference_files:
         raise RuntimeError("Voice Profile has no reference audio")
     source = Path(profile.reference_files[0])
+    if not source.exists():
+        raise FileNotFoundError(source)
     client = MurekaClient()
-    vocal_id = client.clone_vocal(source, f"Aura Voice Profile: {profile.name}; owner: {profile.owner_label}")
-    return vocal_id
+    return client.clone_vocal(source, f"Aura Voice Profile: {profile.name}; owner: {profile.owner_label}")
