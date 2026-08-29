@@ -101,6 +101,15 @@ def test_cover_worker_returns_only_project_relative_output(monkeypatch, tmp_path
     class FakeLibrary:
         def __init__(self, root): self.root = root
         def get(self, asset_id): return record
+        def ingest(self, output, **kwargs):
+            assert Path(output).is_file()
+            assert kwargs["kind"] == "audio"
+            return SimpleNamespace(
+                id="generated-cover-1",
+                name=Path(output).name,
+                kind="audio",
+                path="input/assets/generated-cover.wav",
+            )
 
     class FakeAceStepClient:
         def cover(self, source_path, output_dir, *, prompt, strength):
@@ -117,6 +126,8 @@ def test_cover_worker_returns_only_project_relative_output(monkeypatch, tmp_path
     assert result["operation"] == "cover"
     assert result["source_asset_id"] == "asset-1"
     assert result["output_ref"].startswith("output/transformations/asset-1/cover_")
+    assert result["asset"]["id"] == "generated-cover-1"
+    assert result["asset"]["ref"] == "input/assets/generated-cover.wav"
     assert not Path(result["output_ref"]).is_absolute()
     assert "output" not in result
     assert "path" not in result
