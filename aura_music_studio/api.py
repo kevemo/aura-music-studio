@@ -13,6 +13,7 @@ from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
 from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
+from .aura_live_overlay_connector import router as aura_live_overlay_connector_router
 from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
 from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
 from .aura_live_overlay_pro_source import router as aura_live_overlay_pro_source_router
@@ -71,6 +72,7 @@ app.include_router(aura_live_overlay_advanced_router)
 app.include_router(aura_live_overlay_engine_router)
 app.include_router(aura_live_overlay_interactives_router)
 app.include_router(aura_live_overlay_pro_source_router)
+app.include_router(aura_live_overlay_connector_router)
 app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
@@ -358,7 +360,7 @@ def master_asset(
 
 @app.post("/projects/{project_name}/voice-profiles")
 async def new_voice_profile(
-    project_name: str,
+    project_name: str = Form(...),
     name: str = Form(...),
     owner_label: str = Form(...),
     consent_statement: str = Form(...),
