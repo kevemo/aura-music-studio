@@ -47,7 +47,8 @@
       "feature/creation-coin-free-video-render": false,
       "feature/video-verified-lyric-sync-ingestion-refresh": false,
       "feature/video-verified-caption-export": false,
-      "feature/scene-video-coin-meter-refresh": false
+      "feature/scene-video-coin-meter-refresh": false,
+      "feature/project-image-to-video-refresh": false
     }
   },
   "functions": {
