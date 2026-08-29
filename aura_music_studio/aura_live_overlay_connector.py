@@ -18,6 +18,7 @@ DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3
 TOKEN_BYTES = 32
 MAX_EVENTS_PER_MINUTE = max(1, min(int(os.getenv("AURA_LIVE_CONNECTOR_EVENTS_PER_MINUTE", "1200")), 100_000))
 MAX_PAYLOAD_BYTES = max(1024, min(int(os.getenv("AURA_LIVE_CONNECTOR_MAX_PAYLOAD_BYTES", "32768")), 262_144))
+TRUST_LEVEL = "authenticated_normalized_relay"
 
 
 def _event_types() -> set[str]:
@@ -49,6 +50,25 @@ def _hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def _create_receipts_table(con: sqlite3.Connection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS live_overlay_connector_receipts (
+            user_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('processing','completed')),
+            provider_timestamp TEXT,
+            received_at TEXT NOT NULL,
+            completed_at TEXT,
+            PRIMARY KEY(user_id,provider,session_id,event_id)
+        )
+        """
+    )
+
+
 def _init_schema() -> None:
     with _connect() as con:
         con.executescript(
@@ -62,15 +82,6 @@ def _init_schema() -> None:
                 updated_at TEXT NOT NULL,
                 last_event_at TEXT
             );
-            CREATE TABLE IF NOT EXISTS live_overlay_connector_receipts (
-                user_id TEXT NOT NULL,
-                event_id TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                state TEXT NOT NULL CHECK(state IN ('processing','completed')),
-                received_at TEXT NOT NULL,
-                completed_at TEXT,
-                PRIMARY KEY(user_id,event_id)
-            );
             CREATE TABLE IF NOT EXISTS live_overlay_connector_rate (
                 token_hash TEXT NOT NULL,
                 minute_bucket INTEGER NOT NULL,
@@ -79,13 +90,36 @@ def _init_schema() -> None:
             );
             """
         )
-        receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts)").fetchall()}
-        if "state" not in receipt_columns:
-            # Stale #226 development databases recorded a row only after accepting an event.
-            # Preserve those rows as completed so a schema upgrade cannot replay historical events.
-            con.execute("ALTER TABLE live_overlay_connector_receipts ADD COLUMN state TEXT NOT NULL DEFAULT 'completed'")
-        if "completed_at" not in receipt_columns:
-            con.execute("ALTER TABLE live_overlay_connector_receipts ADD COLUMN completed_at TEXT")
+        table = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='live_overlay_connector_receipts'"
+        ).fetchone()
+        if not table:
+            _create_receipts_table(con)
+            return
+
+        columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts)").fetchall()}
+        required = {"user_id", "provider", "session_id", "event_id", "event_type", "state", "provider_timestamp", "received_at", "completed_at"}
+        if required.issubset(columns):
+            return
+
+        # Development databases may contain the stale #226 or an earlier Chat 2 relay schema.
+        # Rebuild the receipt table transactionally and mark historical rows completed so schema
+        # evolution can never replay a provider event that may already have affected LIVE state.
+        con.execute("ALTER TABLE live_overlay_connector_receipts RENAME TO live_overlay_connector_receipts_legacy")
+        _create_receipts_table(con)
+        legacy_columns = {row[1] for row in con.execute("PRAGMA table_info(live_overlay_connector_receipts_legacy)").fetchall()}
+        state_expr = "state" if "state" in legacy_columns else "'completed'"
+        completed_expr = "completed_at" if "completed_at" in legacy_columns else "NULL"
+        con.execute(
+            f"""
+            INSERT OR IGNORE INTO live_overlay_connector_receipts(
+                user_id,provider,session_id,event_id,event_type,state,provider_timestamp,received_at,completed_at
+            )
+            SELECT user_id,'legacy','legacy',event_id,event_type,{state_expr},NULL,received_at,{completed_expr}
+            FROM live_overlay_connector_receipts_legacy
+            """
+        )
+        con.execute("DROP TABLE live_overlay_connector_receipts_legacy")
 
 
 _init_schema()
@@ -146,34 +180,56 @@ def _payload_size(payload: dict) -> int:
     return len(json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
-def _claim_event(user_id: str, event_id: str, event_type: str) -> str:
+def _provider_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise HTTPException(400, "LIVE provider timestamp must include a timezone")
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _claim_event(
+    user_id: str,
+    provider: str,
+    session_id: str,
+    event_id: str,
+    event_type: str,
+    provider_timestamp: str | None,
+) -> str:
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         existing = con.execute(
-            "SELECT state FROM live_overlay_connector_receipts WHERE user_id=? AND event_id=?",
-            (user_id, event_id),
+            """
+            SELECT state FROM live_overlay_connector_receipts
+            WHERE user_id=? AND provider=? AND session_id=? AND event_id=?
+            """,
+            (user_id, provider, session_id, event_id),
         ).fetchone()
         if existing:
             return str(existing["state"])
         con.execute(
             """
-            INSERT INTO live_overlay_connector_receipts(user_id,event_id,event_type,state,received_at)
-            VALUES(?,?,?,'processing',?)
+            INSERT INTO live_overlay_connector_receipts(
+                user_id,provider,session_id,event_id,event_type,state,provider_timestamp,received_at
+            ) VALUES(?,?,?,?,?,'processing',?,?)
             """,
-            (user_id, event_id, event_type, _now()),
+            (user_id, provider, session_id, event_id, event_type, provider_timestamp, _now()),
         )
     return "claimed"
 
 
-def _release_failed_claim(user_id: str, event_id: str) -> None:
+def _release_failed_claim(user_id: str, provider: str, session_id: str, event_id: str) -> None:
     with _connect() as con:
         con.execute(
-            "DELETE FROM live_overlay_connector_receipts WHERE user_id=? AND event_id=? AND state='processing'",
-            (user_id, event_id),
+            """
+            DELETE FROM live_overlay_connector_receipts
+            WHERE user_id=? AND provider=? AND session_id=? AND event_id=? AND state='processing'
+            """,
+            (user_id, provider, session_id, event_id),
         )
 
 
-def _complete_event(user_id: str, event_id: str) -> None:
+def _complete_event(user_id: str, provider: str, session_id: str, event_id: str) -> None:
     completed_at = _now()
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
@@ -181,9 +237,9 @@ def _complete_event(user_id: str, event_id: str) -> None:
             """
             UPDATE live_overlay_connector_receipts
             SET state='completed',completed_at=?
-            WHERE user_id=? AND event_id=? AND state='processing'
+            WHERE user_id=? AND provider=? AND session_id=? AND event_id=? AND state='processing'
             """,
-            (completed_at, user_id, event_id),
+            (completed_at, user_id, provider, session_id, event_id),
         )
         if updated.rowcount != 1:
             raise RuntimeError("LIVE connector receipt state changed before completion")
@@ -198,8 +254,11 @@ class ConnectorRotate(BaseModel):
 
 
 class ConnectorEvent(BaseModel):
+    provider: str = Field(min_length=2, max_length=40, pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    session_id: str = Field(min_length=8, max_length=120, pattern=r"^[A-Za-z0-9._:-]+$")
     event_id: str = Field(min_length=8, max_length=160, pattern=r"^[A-Za-z0-9._:-]+$")
     event_type: str = Field(min_length=1, max_length=80)
+    occurred_at: datetime | None = None
     payload: dict = Field(default_factory=dict)
 
 
@@ -214,11 +273,14 @@ def connector_status(request: Request):
     return {
         "configured": bool(row),
         "connector": dict(row) if row else None,
+        "schema_version": 2,
         "supported_events": sorted(_event_types()),
         "provider_connection_state": "external_dependency",
         "direct_tiktok_connection_claimed": False,
         "provider_moderation_authority_claimed": False,
         "transport": "bearer_token_normalized_relay",
+        "trust_level": TRUST_LEVEL,
+        "trust_note": "Aura authenticates the approved relay credential; provider-event authenticity remains the adapter's responsibility.",
         "purpose": "Use only with an ESP-approved, policy-compliant provider adapter that normalizes LIVE events into Aura's bounded event contract.",
     }
 
@@ -249,6 +311,7 @@ def rotate_connector(body: ConnectorRotate, request: Request):
             "token": raw,
             "token_returned_once": True,
             "token_in_url": False,
+            "schema_version": 2,
             "warning": "Treat this bearer token like a password. Rotating it invalidates the previous relay immediately.",
         },
         headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"},
@@ -278,36 +341,63 @@ def connector_ingest(body: ConnectorEvent, request: Request):
         raise HTTPException(413, "LIVE connector payload too large")
 
     user_id = str(row["user_id"])
-    claim = _claim_event(user_id, body.event_id, body.event_type)
+    provider_timestamp = _provider_timestamp(body.occurred_at)
+    claim = _claim_event(
+        user_id,
+        body.provider,
+        body.session_id,
+        body.event_id,
+        body.event_type,
+        provider_timestamp,
+    )
     if claim == "completed":
         return JSONResponse(
-            {"accepted": True, "duplicate": True, "event_id": body.event_id},
+            {
+                "accepted": True,
+                "duplicate": True,
+                "provider": body.provider,
+                "session_id": body.session_id,
+                "event_id": body.event_id,
+            },
             headers={"Cache-Control": "no-store"},
         )
     if claim == "processing":
         return JSONResponse(
-            {"accepted": False, "duplicate": False, "processing": True, "event_id": body.event_id},
+            {
+                "accepted": False,
+                "duplicate": False,
+                "processing": True,
+                "provider": body.provider,
+                "session_id": body.session_id,
+                "event_id": body.event_id,
+            },
             status_code=409,
             headers={"Cache-Control": "no-store", "Retry-After": "1"},
         )
 
+    normalized_payload = dict(body.payload)
+    normalized_payload["source"] = body.provider
     try:
-        result = process_overlay_event(user_id, body.event_type, body.payload, synthetic=False)
+        result = process_overlay_event(user_id, body.event_type, normalized_payload, synthetic=False)
     except Exception:
         # The engine did not complete, so the same provider event ID may be retried safely.
-        _release_failed_claim(user_id, body.event_id)
+        _release_failed_claim(user_id, body.provider, body.session_id, body.event_id)
         raise
 
     # Once the engine has returned success, never release this claim. If completion bookkeeping
     # fails, leaving the receipt in `processing` fails closed and prevents a retry from applying
     # the same gift/like/follow/goal mutation twice.
-    _complete_event(user_id, body.event_id)
+    _complete_event(user_id, body.provider, body.session_id, body.event_id)
 
     result.update(
         {
             "duplicate": False,
+            "provider": body.provider,
+            "session_id": body.session_id,
             "event_id": body.event_id,
             "normalized_relay": True,
+            "trust_level": TRUST_LEVEL,
+            "provider_timestamp": provider_timestamp,
             "direct_tiktok_connection_claimed": False,
         }
     )
