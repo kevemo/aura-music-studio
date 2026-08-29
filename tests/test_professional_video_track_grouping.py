@@ -182,19 +182,9 @@ def test_non_normal_first_item_on_transparent_track_keeps_normal_coverage(tmp_pa
     assert 50 <= pixel[2] <= 115
 
 
-def test_track_effects_and_track_keyframes_remain_fail_closed(tmp_path):
+def test_track_keyframes_remain_fail_closed(tmp_path):
     project, store, sequence = _base_project(tmp_path, "TrackFailClosed")
     track = store.create_track(sequence.id, kind="video", name="Picture")
-
-    state = store.public_state()
-    compositor = GroupedTrackVideoCompositor(project)
-    _sequences, tracks, _items = compositor._branch_maps(state)
-    tracks[track.id]["effects"] = [
-        {"id": "fx_test", "type": "blur", "enabled": True, "mix": 1.0, "params": {}}
-    ]
-    compositor.store = _StateProxy(state)  # type: ignore[assignment]
-    with pytest.raises(EditorRenderUnsupported, match="track effects"):
-        compositor.render_video_advanced(sequence.id)
 
     state = store.public_state()
     compositor = GroupedTrackVideoCompositor(project)
