@@ -292,3 +292,10 @@ def reset_session_stats(request: Request):
             if row["reset_mode"] == "per_live":
                 con.execute("UPDATE live_overlay_goals SET current=0,updated_at=? WHERE id=? AND user_id=?", (_now(), row["id"], member.user_id))
     return {"reset": True, "session_id": secrets.token_urlsafe(10)}
+
+
+# Late import keeps the normalized relay in the existing production-mounted LIVE event router
+# without expanding the central API composition surface or duplicating route registration.
+from .aura_live_overlay_connector import router as aura_live_overlay_connector_router  # noqa: E402
+
+router.include_router(aura_live_overlay_connector_router)
