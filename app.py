@@ -94,6 +94,7 @@ from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
 from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.professional_editor_api import router as professional_editor_router
+from aura_music_studio.professional_editor_security_overlay import install_professional_editor_patch_guard
 from aura_music_studio.pulsar_player import PulsarPlayerMiddleware, router as pulsar_player_router
 from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
@@ -140,6 +141,7 @@ install_aura_chat_hardening()
 install_aura_context_extensions()
 install_aura_profiles()
 install_owner_authorization_migration()
+install_professional_editor_patch_guard()
 
 _REPLACED_ROUTES = {"/", "/dashboard", "/owner", "/owner/login", "/owner/logout", "/owner/dashboard"}
 app.router.routes[:] = [route for route in app.router.routes if getattr(route, "path", None) not in _REPLACED_ROUTES]
