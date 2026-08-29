@@ -70,9 +70,6 @@ def install_professional_editor_patch_guard() -> None:
             professional_editor_router.routes.insert(0, guarded)
 
 
-install_professional_editor_patch_guard()
-
-
 __all__ = [
     "router",
     "normalize_item_patch_sources",
