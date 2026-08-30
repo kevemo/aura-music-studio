@@ -12,6 +12,11 @@ from gradio_client import Client, handle_file
 
 from .acestep_api import AceStepClient, AceStepRequest
 from .cloud_providers import ElevenMusicClient, MurekaClient
+from .creative_runtime_readiness import (
+    RuntimeReadinessError,
+    creative_runtime_workload_ready,
+    load_creative_runtime_evidence,
+)
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
 from .rights import authorize_voice_profile
@@ -351,15 +356,58 @@ class AceStepSpaceRenderer(BaseRenderer):
 
 
 class ExternalCommandRenderer(BaseRenderer):
-    def __init__(self, name: str, env_var: str, output_name: str):
+    def __init__(self, name: str, env_var: str, output_name: str, readiness_env_var: str):
         self.name = name
         self.env_var = env_var
         self.output_name = output_name
+        self.readiness_env_var = readiness_env_var
 
-    def available(self) -> bool:
+    def configured(self) -> bool:
         return bool(os.getenv(self.env_var))
 
+    def _command_tokens(self) -> list[str]:
+        command = os.getenv(self.env_var, "")
+        if not command:
+            raise RuntimeReadinessError(f"{self.name} runtime command is not configured.")
+        try:
+            tokens = shlex.split(command)
+        except ValueError as exc:
+            raise RuntimeReadinessError(f"{self.name} runtime command is malformed.") from exc
+        if not tokens:
+            raise RuntimeReadinessError(f"{self.name} runtime command is empty.")
+        executable = Path(tokens[0])
+        if executable.is_absolute():
+            if not executable.is_file() or not os.access(executable, os.X_OK):
+                raise RuntimeReadinessError(f"{self.name} runtime executable is unavailable or not executable.")
+        elif shutil.which(tokens[0]) is None:
+            raise RuntimeReadinessError(f"{self.name} runtime executable is not available on PATH.")
+        return tokens
+
+    def _load_readiness(self):
+        path = os.getenv(self.readiness_env_var, "").strip()
+        if not path:
+            raise RuntimeReadinessError(
+                f"{self.name} is configured but has no workload-readiness evidence ({self.readiness_env_var})."
+            )
+        return load_creative_runtime_evidence(path, expected_engine=self.name)
+
+    def available(self) -> bool:
+        if not self.configured():
+            return False
+        try:
+            self._command_tokens()
+        except RuntimeReadinessError:
+            return False
+        path = os.getenv(self.readiness_env_var, "").strip()
+        return bool(path) and creative_runtime_workload_ready(path, expected_engine=self.name)
+
     def render(self, workspace, manifest, plan):
+        # Re-read executable and attestation immediately before execution. A renderer that
+        # passed availability earlier must still fail closed if health/capacity/model state
+        # changed while the job was queued.
+        command_tokens = self._command_tokens()
+        readiness = self._load_readiness()
+
         out = workspace.work_dir / self.output_name
         source = _source_or_guide(workspace, manifest)
         lyrics_path = workspace.resolve_asset(manifest.lyrics_file)
@@ -376,11 +424,19 @@ class ExternalCommandRenderer(BaseRenderer):
             "AURA_METER": plan.meter,
             "AURA_DURATION": str(_target_duration(workspace, manifest, plan)),
             "AURA_OUTPUT": str(out),
+            "AURA_RUNTIME_MODEL_ID": readiness.model_id,
+            "AURA_RUNTIME_MODEL_DIGEST": readiness.model_digest,
+            "AURA_RUNTIME_ID": readiness.runtime_id,
+            "AURA_RUNTIME_DIGEST": readiness.runtime_digest,
         })
-        subprocess.run(shlex.split(os.environ[self.env_var]), cwd=workspace.root, env=env, check=True)
+        subprocess.run(command_tokens, cwd=workspace.root, env=env, check=True)
         if not out.exists():
             raise RuntimeError(f"{self.name} command completed but did not create {out}")
-        return RenderResult(renderer=self.name, audio_path=out)
+        return RenderResult(
+            renderer=self.name,
+            audio_path=out,
+            metadata=readiness.provenance_metadata(),
+        )
 
 
 def _source_or_guide(workspace: ProjectWorkspace, manifest: ProjectManifest) -> Path | None:
@@ -416,9 +472,24 @@ def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest,
         "eleven_music": ElevenMusicRenderer(),
         "mureka": MurekaRenderer(),
         "acestep_space": AceStepSpaceRenderer(),
-        "local_acestep": ExternalCommandRenderer("local_acestep", "AURA_LOCAL_RENDER_CMD", "neural_master_local.wav"),
-        "muser": ExternalCommandRenderer("muser", "AURA_MUSER_CMD", "neural_master_muser.wav"),
-        "yue": ExternalCommandRenderer("yue", "AURA_YUE_CMD", "neural_master_yue.wav"),
+        "local_acestep": ExternalCommandRenderer(
+            "local_acestep",
+            "AURA_LOCAL_RENDER_CMD",
+            "neural_master_local.wav",
+            "AURA_LOCAL_RENDER_READINESS_FILE",
+        ),
+        "muser": ExternalCommandRenderer(
+            "muser",
+            "AURA_MUSER_CMD",
+            "neural_master_muser.wav",
+            "AURA_MUSER_READINESS_FILE",
+        ),
+        "yue": ExternalCommandRenderer(
+            "yue",
+            "AURA_YUE_CMD",
+            "neural_master_yue.wav",
+            "AURA_YUE_READINESS_FILE",
+        ),
     }
     requested = list(manifest.renderer.preferred)
 
