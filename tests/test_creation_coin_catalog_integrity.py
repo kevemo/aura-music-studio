@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
 from aura_music_studio.creation_coin_catalog import (
@@ -32,6 +33,10 @@ def _canonical_packs():
     }
 
 
+def _authenticated(monkeypatch):
+    monkeypatch.setattr(hardening, "_require_signed_in_user", lambda request: {"id": "member-1", "status": "active"})
+
+
 def test_master_creation_coin_catalog_is_exact_and_immutable():
     assert CANONICAL_CREATION_COIN_PACKS == {
         (1_000, 500, "GBP"),
@@ -57,6 +62,7 @@ def test_catalog_rejects_value_drift_missing_and_duplicate_packs(packs):
 
 
 def test_hardened_public_catalog_fails_closed_before_legacy_handler(monkeypatch):
+    _authenticated(monkeypatch)
     monkeypatch.setattr(hardening, "credit_packs", lambda: {"bad": _pack("bad", 9_999, 1)})
     monkeypatch.setattr(
         hardening,
@@ -71,6 +77,7 @@ def test_hardened_public_catalog_fails_closed_before_legacy_handler(monkeypatch)
 
 
 def test_hardened_credit_checkout_fails_before_stripe_submission(monkeypatch):
+    _authenticated(monkeypatch)
     monkeypatch.setattr(hardening, "credit_packs", lambda: {"bad": _pack("bad", 1_000, 1)})
     monkeypatch.setattr(
         hardening,
@@ -85,23 +92,46 @@ def test_hardened_credit_checkout_fails_before_stripe_submission(monkeypatch):
     assert exc.value.status_code == 503
 
 
-def test_hardened_routes_precede_legacy_creation_coin_routes():
+def test_hardened_routes_precede_legacy_creation_coin_routes(monkeypatch):
+    _authenticated(monkeypatch)
+    monkeypatch.setattr(hardening, "credit_packs", _canonical_packs)
+    monkeypatch.setattr(
+        hardening,
+        "base_creation_coin_catalog",
+        lambda request: {
+            "packs": [
+                {"creation_coins": 1_000, "amount_minor": 500, "currency": "GBP"},
+                {"creation_coins": 2_500, "amount_minor": 1_000, "currency": "GBP"},
+                {"creation_coins": 6_000, "amount_minor": 2_000, "currency": "GBP"},
+            ],
+            "source": "hardened",
+        },
+    )
+    monkeypatch.setattr(
+        hardening,
+        "base_creation_coin_storefront",
+        lambda request: HTMLResponse("hardened-storefront"),
+    )
+    monkeypatch.setattr(
+        hardening,
+        "base_create_credit_checkout",
+        lambda body, request: {"source": "hardened", "pack_id": body.pack_id},
+    )
+
     app = FastAPI()
     app.include_router(hardening.router)
+    client = TestClient(app)
 
-    expected = {
-        ("/billing/creation-coins/catalog", "GET"): "hardened_creation_coin_catalog",
-        ("/billing/creation-coins", "GET"): "hardened_creation_coin_storefront",
-        ("/billing/stripe/checkout/credits", "POST"): "hardened_credit_checkout",
-    }
-    first_matches = {}
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        for method in getattr(route, "methods", set()):
-            first_matches.setdefault((path, method), getattr(getattr(route, "endpoint", None), "__name__", ""))
+    catalog = client.get("/billing/creation-coins/catalog")
+    storefront = client.get("/billing/creation-coins")
+    checkout = client.post("/billing/stripe/checkout/credits", json={"pack_id": "small"})
 
-    for key, endpoint_name in expected.items():
-        assert first_matches[key] == endpoint_name
+    assert catalog.status_code == 200
+    assert catalog.json()["source"] == "hardened"
+    assert storefront.status_code == 200
+    assert storefront.text == "hardened-storefront"
+    assert checkout.status_code == 200
+    assert checkout.json() == {"source": "hardened", "pack_id": "small"}
 
 
 def test_credit_topup_webhook_rejects_noncanonical_catalog_before_wallet_processor(monkeypatch):
