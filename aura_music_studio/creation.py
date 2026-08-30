@@ -85,7 +85,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
         source_project_name = (request.voice_profile_project or "").strip()
         if not profile_id or not source_project_name:
             raise ValueError(
-                "Approved-voice creation requires both an active Aura Voice Profile and its source project"
+                "Approved-voice creation requires a consent-approved Aura Voice Profile and its source project"
             )
         if not user_lyrics_provided and not request.generate_lyrics:
             raise ValueError("Approved-voice song creation requires lyrics or generate_lyrics=true")
