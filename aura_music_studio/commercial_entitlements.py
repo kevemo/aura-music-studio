@@ -78,7 +78,7 @@ def require_media_download(member, kind: str) -> None:
         return
     normalized = str(kind or "").strip().lower()
     if normalized in {"audio", "music", "video"}:
-        raise PermissionError("Music and video downloads are available from the £4.99 Basic tier and above")
+        raise PermissionError("Music and video downloads are available from the £5.99 Tier 2 plan and above")
     if normalized == "image":
         raise PermissionError("Image/poster download is not included in this membership tier")
     raise PermissionError("This media type is not downloadable")
