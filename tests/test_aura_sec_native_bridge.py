@@ -7,8 +7,14 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from aura_music_studio.accounts import AccountStore
+from aura_music_studio.aura_sec_command_signing import (
+    SelfHostedEd25519CommandSigner,
+    SignedSecurityCommand,
+    verify_signed_security_command,
+)
 from aura_music_studio.aura_sec_command_store import AuraSecCommandStore
 from aura_music_studio.aura_sec_native_bridge import (
     AuraSecNativeBridge,
@@ -20,9 +26,13 @@ from aura_music_studio.aura_sec_store import AuraSecStore
 
 
 _TEST_SIGNING_SECRET = b"aura-sec-native-poll-test-secret-v1"
+_SERVER_SIGNER = SelfHostedEd25519CommandSigner(
+    Ed25519PrivateKey.generate(),
+    key_id="test-server-command-2026",
+)
 
 
-def _setup(tmp_path, *, details=None):
+def _setup(tmp_path, *, details=None, command_signer=_SERVER_SIGNER):
     accounts = AccountStore(tmp_path / "aura-sec-native-bridge.sqlite3")
     signup = accounts.signup(
         "native.bridge@example.test",
@@ -60,7 +70,12 @@ def _setup(tmp_path, *, details=None):
     )
     security.approve_action(signup.user_id, action["id"])
     commands = AuraSecCommandStore(accounts, security)
-    bridge = AuraSecNativeBridge(accounts, security, commands)
+    bridge = AuraSecNativeBridge(
+        accounts,
+        security,
+        commands,
+        command_signer=command_signer,
+    )
     return signup.user_id, security, device, action, bridge
 
 
@@ -179,7 +194,7 @@ def test_signature_is_bound_to_poll_policy_sequence_nonce_and_timestamps(tmp_pat
         _poll_command(bridge, user_id, changed, signature=signature)
 
 
-def test_verified_poll_issues_one_preapproved_bounded_command(tmp_path):
+def test_verified_poll_issues_one_preapproved_bounded_and_server_signed_command(tmp_path):
     user_id, _security, device, action, bridge = _setup(tmp_path)
     poll = _poll(device["id"])
     result = _poll_command(bridge, user_id, poll)
@@ -188,12 +203,40 @@ def test_verified_poll_issues_one_preapproved_bounded_command(tmp_path):
     assert command["approval_id"] == action["id"]
     assert command["parameters"] == {"object_id": "object-verified-001"}
     assert "summary" not in command["parameters"]
+    assert command["key_algorithm"] == "ed25519"
+    assert command["signer_key_id"] == "test-server-command-2026"
+    assert len(command["public_key_fingerprint"]) == 64
+    assert len(command["payload_digest"]) == 64
+    assert command["signature_b64"]
+
+    signed = SignedSecurityCommand.model_validate(command)
+    proof = verify_signed_security_command(
+        signed,
+        trusted_public_keys={_SERVER_SIGNER.key_id: _SERVER_SIGNER.public_key_raw()},
+        expected_device_id=device["id"],
+    )
+    assert proof.signer_key_id == _SERVER_SIGNER.key_id
+    assert proof.evidence_digest == command["payload_digest"]
+
     assert result["member_browser_route_exposed"] is False
     assert result["verification"]["verifier_id"] == "test-native-poll-verifier"
     assert result["verification"]["key_algorithm"] == "p256"
     assert result["verification"]["evidence_digest"] == hashlib.sha256(poll.signed_payload()).hexdigest()
     assert "signature" not in result["verification"]
     assert "public_key_fingerprint" not in result["verification"]
+
+
+def test_bridge_refuses_to_issue_unsigned_server_command(tmp_path):
+    user_id, _security, device, _action, bridge = _setup(tmp_path, command_signer=None)
+    with pytest.raises(PermissionError, match="server command signer is required"):
+        _poll_command(bridge, user_id, _poll(device["id"]))
+
+    # The unsigned path failed before command persistence. After an operator configures the
+    # signer, a later authenticated sequence can still issue the original approved action.
+    bridge.command_signer = _SERVER_SIGNER
+    second = _poll(device["id"], sequence=2, nonce="native-poll-nonce-0002")
+    result = _poll_command(bridge, user_id, second)
+    assert result["command"]["signature_b64"]
 
 
 def test_native_poll_sequence_replay_is_rejected(tmp_path):

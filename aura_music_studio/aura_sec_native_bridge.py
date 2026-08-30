@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .accounts import AccountStore
 from .aura_sec_action_parameters import validated_command_parameters
+from .aura_sec_command_signing import ServerCommandSigner
 from .aura_sec_command_store import AuraSecCommandStore
 from .aura_sec_store import AuraSecStore
 
@@ -92,13 +93,14 @@ NativePollSignatureVerifier = Callable[[str, bytes, bytes], VerifiedNativePollSi
 
 
 class AuraSecNativeBridge:
-    """Trusted gateway between signed native sessions and the bounded command store.
+    """Trusted gateway between signed native sessions and bounded, server-signed commands.
 
     This class is not mounted as a member/browser API. It has no boolean signature bypass.
     A trusted verifier adapter must validate the canonical poll payload against the enrolled
     device identity. Replay state advances only after that proof succeeds. The bridge issues
-    at most one previously-approved action per verified poll and applies the strict parameter
-    firewall before a native command is created.
+    at most one previously-approved action per verified poll, applies the strict parameter
+    firewall, and refuses to deliver any native command unless a server signing authority
+    cryptographically authenticates the exact bounded command payload.
     """
 
     def __init__(
@@ -106,10 +108,12 @@ class AuraSecNativeBridge:
         accounts: AccountStore | None = None,
         security: AuraSecStore | None = None,
         commands: AuraSecCommandStore | None = None,
+        command_signer: ServerCommandSigner | None = None,
     ):
         self.accounts = accounts or AccountStore()
         self.security = security or AuraSecStore(self.accounts)
         self.commands = commands or AuraSecCommandStore(self.accounts, self.security)
+        self.command_signer = command_signer
         self._init_schema()
 
     def _connect(self):
@@ -281,7 +285,7 @@ class AuraSecNativeBridge:
         signature_verifier: NativePollSignatureVerifier | None,
         now: datetime | None = None,
     ) -> dict:
-        """Return at most one freshly-issued bounded command to a verified native client."""
+        """Return at most one freshly-issued, server-signed command to a verified native client."""
         verified_at = self._validate_poll_context(user_id, poll, now=now)
         verification = self._verify_poll_signature(
             user_id,
@@ -305,6 +309,11 @@ class AuraSecNativeBridge:
                 "truth": "No previously-approved bounded action is waiting for this verified device session.",
             }
 
+        # Fail before command persistence if the deployment has not configured an explicit
+        # server signing authority. Aura Sec never falls back to an unsigned native command.
+        if self.command_signer is None:
+            raise PermissionError("Aura Sec server command signer is required before native command issuance")
+
         action = self.security.get_action(user_id, action_id)
         parameters = validated_command_parameters(action["action_type"], action.get("details") or {})
         command = self.commands.issue_approved_action(
@@ -315,8 +324,18 @@ class AuraSecNativeBridge:
             parameters=parameters,
             ttl_seconds=300,
         )
+        try:
+            signed_command = self.command_signer.sign_command(command)
+        except Exception as exc:
+            # The command has not been returned to a device, so fail closed. A later hardening
+            # slice will add durable signed-command redelivery/rollback semantics for remote
+            # HSM failures and post-sign network loss; do not silently emit an unsigned command.
+            raise PermissionError("Aura Sec server command signing failed closed") from exc
+        if signed_command.unsigned_command().model_dump(mode="json") != command.model_dump(mode="json"):
+            raise PermissionError("Aura Sec server command signer altered the bounded command payload")
+
         return {
-            "command": command.model_dump(mode="json"),
+            "command": signed_command.model_dump(mode="json"),
             "poll_sequence": poll.sequence,
             "verification": {
                 "verifier_id": verification.verifier_id,
@@ -326,7 +345,7 @@ class AuraSecNativeBridge:
             "member_browser_route_exposed": False,
             "truth": (
                 "The command was issued only after verifier-backed enrolled-device signature proof, replay protection, "
-                "prior action approval and strict per-action parameter validation."
+                "prior action approval, strict per-action parameter validation and Ed25519 server authentication."
             ),
         }
 
