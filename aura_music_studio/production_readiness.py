@@ -88,6 +88,43 @@ def _storage_details(env: Mapping[str, str]) -> tuple[bool, dict, list[str]]:
     }, messages
 
 
+def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool) -> tuple[bool, list[str], dict]:
+    names = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_BASE_PRICE_ID", "STRIPE_PRO_PRICE_ID")
+    secret = _value(env, "STRIPE_SECRET_KEY")
+    webhook = _value(env, "STRIPE_WEBHOOK_SECRET")
+    base_price = _value(env, "STRIPE_BASE_PRICE_ID")
+    pro_price = _value(env, "STRIPE_PRO_PRICE_ID")
+
+    configured = {
+        "STRIPE_SECRET_KEY": _secret_configured(env, "STRIPE_SECRET_KEY") and secret.startswith(("sk_live_", "sk_test_")),
+        "STRIPE_WEBHOOK_SECRET": _secret_configured(env, "STRIPE_WEBHOOK_SECRET") and webhook.startswith("whsec_"),
+        "STRIPE_BASE_PRICE_ID": _secret_configured(env, "STRIPE_BASE_PRICE_ID") and base_price.startswith("price_"),
+        "STRIPE_PRO_PRICE_ID": _secret_configured(env, "STRIPE_PRO_PRICE_ID") and pro_price.startswith("price_"),
+    }
+    missing = [name for name in names if not configured[name]]
+    messages: list[str] = []
+    if missing:
+        messages.append("Stripe credentials or server-authoritative subscription price IDs are incomplete, malformed or placeholders.")
+    if production and configured["STRIPE_SECRET_KEY"] and not secret.startswith("sk_live_"):
+        messages.append("Production Stripe must use a live secret key.")
+    if staging and configured["STRIPE_SECRET_KEY"] and not secret.startswith("sk_test_"):
+        messages.append("Staging must use a Stripe test secret key; live payment credentials are blocked.")
+
+    environment_ok = (not production or secret.startswith("sk_live_")) and (not staging or secret.startswith("sk_test_"))
+    ok = not missing and environment_ok
+    return ok, messages, {
+        "provider": "stripe",
+        "mode": "signed_stripe_webhook",
+        "stripe_environment": "live" if secret.startswith("sk_live_") else "test" if secret.startswith("sk_test_") else "invalid",
+        "verification_credentials_configured": configured["STRIPE_WEBHOOK_SECRET"],
+        "subscription_price_ids_configured": configured["STRIPE_BASE_PRICE_ID"] and configured["STRIPE_PRO_PRICE_ID"],
+        "missing_credential_names": missing,
+        "browser_return_is_payment_proof": False,
+        "automatic_activation": True,
+        "secret_values_exposed": False,
+    }
+
+
 def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     """Build a secret-free deployment readiness report without third-party network I/O."""
     env = environ or os.environ
@@ -104,28 +141,25 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     paypal_names = ("LSS_PAYPAL_CLIENT_ID", "LSS_PAYPAL_CLIENT_SECRET", "LSS_PAYPAL_WEBHOOK_ID")
     paypal_creds_ok, paypal_missing = _secret_group(env, paypal_names)
     verified_mode = payment_mode in {"verified_paypal_invoice", "verified_paypal_webhook"}
-    payment_messages: list[str] = []
-    if provider != "paypal":
-        payment_messages.append("The production billing implementation currently supports PayPal only.")
-    if production and paypal_environment != "live":
-        payment_messages.append("Production PayPal must use the live environment.")
-    if staging and paypal_environment != "sandbox":
-        payment_messages.append("Staging must use PayPal sandbox credentials; live payment credentials are blocked.")
-    if (production or verified_mode or any(_value(env, name) for name in paypal_names)) and not paypal_creds_ok:
-        payment_messages.append("Verified PayPal credentials are incomplete or placeholder values.")
-    if production and not verified_mode:
-        payment_messages.append("Production payment mode must require verified PayPal webhook evidence.")
-    payment_ok = (
-        provider == "paypal"
-        and (not verified_mode or paypal_creds_ok)
-        and (not production or (paypal_environment == "live" and paypal_creds_ok and verified_mode))
-        and (not staging or paypal_environment == "sandbox")
-    )
-    categories["payments"] = _category(
-        ok=payment_ok,
-        required=production or staging,
-        messages=payment_messages,
-        details={
+
+    if provider == "stripe":
+        payment_ok, payment_messages, payment_details = _stripe_readiness(env, production=production, staging=staging)
+    elif provider == "paypal":
+        payment_messages = []
+        if production and paypal_environment != "live":
+            payment_messages.append("Production PayPal must use the live environment.")
+        if staging and paypal_environment != "sandbox":
+            payment_messages.append("Staging must use PayPal sandbox credentials; live payment credentials are blocked.")
+        if (production or verified_mode or any(_value(env, name) for name in paypal_names)) and not paypal_creds_ok:
+            payment_messages.append("Verified PayPal credentials are incomplete or placeholder values.")
+        if production and not verified_mode:
+            payment_messages.append("Production payment mode must require verified PayPal webhook evidence.")
+        payment_ok = (
+            (not verified_mode or paypal_creds_ok)
+            and (not production or (paypal_environment == "live" and paypal_creds_ok and verified_mode))
+            and (not staging or paypal_environment == "sandbox")
+        )
+        payment_details = {
             "provider": provider,
             "mode": payment_mode,
             "paypal_environment": paypal_environment,
@@ -133,7 +167,26 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
             "missing_credential_names": paypal_missing,
             "browser_return_is_payment_proof": False,
             "automatic_activation": False,
-        },
+            "secret_values_exposed": False,
+        }
+    else:
+        payment_ok = False
+        payment_messages = ["Unsupported payment provider. Configure PayPal or Stripe."]
+        payment_details = {
+            "provider": provider,
+            "mode": payment_mode,
+            "verification_credentials_configured": False,
+            "missing_credential_names": [],
+            "browser_return_is_payment_proof": False,
+            "automatic_activation": False,
+            "secret_values_exposed": False,
+        }
+
+    categories["payments"] = _category(
+        ok=payment_ok,
+        required=production or staging,
+        messages=payment_messages,
+        details=payment_details,
     )
 
     required_provider_secrets = _csv_names(env, "AURA_PRODUCTION_REQUIRED_PROVIDER_SECRETS")
@@ -266,12 +319,17 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     storage_ok, storage_details, storage_messages = _storage_details(env)
     categories["storage"] = _category(ok=storage_ok, required=True, messages=storage_messages, details=storage_details)
 
+    stripe_secret = _value(env, "STRIPE_SECRET_KEY")
     deployment_ok = deployment != "invalid"
     categories["deployment"] = _category(
         ok=deployment_ok,
         required=True,
         messages=[] if deployment_ok else ["AURA_DEPLOYMENT_ENV must be development, staging or production."],
-        details={"environment": deployment, "staging_uses_live_paypal": staging and paypal_environment == "live"},
+        details={
+            "environment": deployment,
+            "staging_uses_live_paypal": staging and provider == "paypal" and paypal_environment == "live",
+            "staging_uses_live_stripe": staging and provider == "stripe" and stripe_secret.startswith("sk_live_"),
+        },
     )
 
     blocking = [name for name, item in categories.items() if item["required"] and not item["ok"]]

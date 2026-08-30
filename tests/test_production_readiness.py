@@ -42,6 +42,20 @@ def _production_env() -> dict[str, str]:
     }
 
 
+def _stripe_production_env() -> dict[str, str]:
+    env = _production_env()
+    env.update(
+        {
+            "LSS_PAYMENT_PROVIDER": "stripe",
+            "STRIPE_SECRET_KEY": "sk_live_testfixture_0123456789",
+            "STRIPE_WEBHOOK_SECRET": "whsec_testfixture_0123456789",
+            "STRIPE_BASE_PRICE_ID": "price_tier2_testfixture_0123456789",
+            "STRIPE_PRO_PRICE_ID": "price_pro_testfixture_0123456789",
+        }
+    )
+    return env
+
+
 def test_complete_production_configuration_passes_without_network_probes():
     env = _production_env()
     report = build_readiness_report(env)
@@ -62,6 +76,65 @@ def test_complete_production_configuration_passes_without_network_probes():
         "LSS_ADMIN_KEY",
     ):
         assert env[name] not in serialized
+
+
+def test_complete_stripe_production_configuration_passes_without_exposing_secrets():
+    env = _stripe_production_env()
+    report = build_readiness_report(env)
+    payment = report["categories"]["payments"]
+    assert report["ok"] is True
+    assert report["production_ready"] is True
+    assert payment["ok"] is True
+    assert payment["details"]["provider"] == "stripe"
+    assert payment["details"]["mode"] == "signed_stripe_webhook"
+    assert payment["details"]["stripe_environment"] == "live"
+    assert payment["details"]["browser_return_is_payment_proof"] is False
+    assert payment["details"]["verification_credentials_configured"] is True
+    assert payment["details"]["subscription_price_ids_configured"] is True
+    serialized = json.dumps(report)
+    assert env["STRIPE_SECRET_KEY"] not in serialized
+    assert env["STRIPE_WEBHOOK_SECRET"] not in serialized
+
+
+def test_stripe_production_fails_closed_on_missing_or_test_credentials():
+    env = _stripe_production_env()
+    env["STRIPE_SECRET_KEY"] = "sk_test_testfixture_0123456789"
+    env.pop("STRIPE_WEBHOOK_SECRET")
+    report = build_readiness_report(env)
+    payment = report["categories"]["payments"]
+    assert report["ok"] is False
+    assert "payments" in report["blocking_categories"]
+    assert payment["ok"] is False
+    assert "STRIPE_WEBHOOK_SECRET" in payment["details"]["missing_credential_names"]
+    assert any("live secret key" in message for message in payment["messages"])
+
+
+def test_staging_rejects_live_stripe_credentials():
+    env = _stripe_production_env()
+    env["AURA_DEPLOYMENT_ENV"] = "staging"
+    report = build_readiness_report(env)
+    assert report["ok"] is False
+    assert "payments" in report["blocking_categories"]
+    assert report["categories"]["deployment"]["details"]["staging_uses_live_stripe"] is True
+
+
+def test_staging_accepts_stripe_test_credentials():
+    env = _stripe_production_env()
+    env["AURA_DEPLOYMENT_ENV"] = "staging"
+    env["STRIPE_SECRET_KEY"] = "sk_test_testfixture_0123456789"
+    env["LSS_PAYPAL_ENVIRONMENT"] = "live"
+    report = build_readiness_report(env)
+    assert report["categories"]["payments"]["ok"] is True
+    assert report["categories"]["deployment"]["details"]["staging_uses_live_paypal"] is False
+
+
+def test_unsupported_payment_provider_fails_closed():
+    env = _production_env()
+    env["LSS_PAYMENT_PROVIDER"] = "unknown-provider"
+    report = build_readiness_report(env)
+    assert report["ok"] is False
+    assert "payments" in report["blocking_categories"]
+    assert report["categories"]["payments"]["ok"] is False
 
 
 def test_production_fails_closed_on_manual_payment_or_placeholder_secrets():
@@ -99,7 +172,7 @@ def test_required_provider_secret_names_are_reported_but_values_never_are():
 
 
 def _client(monkeypatch, env: dict[str, str]) -> TestClient:
-    for key in list(_production_env()):
+    for key in list({**_production_env(), **_stripe_production_env()}):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
