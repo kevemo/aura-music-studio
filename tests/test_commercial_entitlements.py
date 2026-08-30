@@ -63,9 +63,9 @@ def test_free_image_quota_is_five_and_music_video_downloads_are_blocked(tmp_path
     assert status["remaining"] == 0
     with pytest.raises(PermissionError, match="5 per day"):
         require_image_poster_generation(member)
-    with pytest.raises(PermissionError, match="£4.99"):
+    with pytest.raises(PermissionError, match="£5.99 Tier 2"):
         require_media_download(member, "music")
-    with pytest.raises(PermissionError, match="£4.99"):
+    with pytest.raises(PermissionError, match="£5.99 Tier 2"):
         require_media_download(member, "video")
 
 
