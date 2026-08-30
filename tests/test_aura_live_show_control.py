@@ -23,6 +23,8 @@ def _request(user_id: str = "u1"):
 
 
 def _json(response):
+    if isinstance(response, dict):
+        return response
     return json.loads(response.body.decode("utf-8"))
 
 
