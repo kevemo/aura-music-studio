@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import TypeVar
+from uuid import uuid4
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from . import game_forge_api as foundation_game_api
 from .aura_adventure_tools import install_aura_adventure_tools
 from .aura_gameplay_tools import install_aura_gameplay_tools
 from .aura_state_machine_tools import install_aura_state_machine_tools
@@ -39,6 +44,8 @@ from .game_forge_world_logic import router as game_world_logic_router
 from .game_forge_world_logic_portal import router as game_world_logic_portal_router
 from .plans import GAME_CREATE, GAME_PLAYTEST
 from .production_readiness import router as production_readiness_router
+from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
+from .tier2_provider_guard import Tier2ProviderGuard
 
 # This module is imported before the central install_aura_game_tools() call in app.py. These
 # dedicated wrappers become lower layers in AuraToolRegistry's chain; existing game/media tools
@@ -51,6 +58,8 @@ install_aura_world_events_tools()
 install_aura_state_machine_tools()
 
 router = APIRouter(tags=["Aura Game World"])
+tier2_guard = Tier2ProviderGuard()
+T = TypeVar("T")
 # Binding/cinematic/gameplay/Adventure/World Logic/World Event/State Machine/export routes and
 # global operations readiness are composed here so consumers mounting Game Forge get the complete
 # subsystem without relying on application import order.
@@ -98,6 +107,100 @@ def _game(game_id: str):
         return load_game(game_id)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Game not found") from exc
+
+
+def _game_operation_request_key(request: Request, operation: str) -> str:
+    """Resolve one bounded retry key without breaking clients that pre-date idempotency headers."""
+    supplied = request.headers.get("Idempotency-Key") or request.headers.get("X-Request-ID")
+    if supplied is not None:
+        value = supplied.strip()
+        if not value or len(value) > 180:
+            raise HTTPException(400, "A bounded idempotency request key is required")
+        return value
+    return f"{operation}-{uuid4().hex}"
+
+
+def _execute_game_operation(
+    member,
+    request: Request,
+    *,
+    operation: str,
+    provider_call: Callable[[], T],
+) -> T:
+    """Meter eligible paid Game Forge mutations immediately around their real storage mutation."""
+    plan_id = str(getattr(member.plan, "id", "") or "").strip().lower()
+    if plan_id not in {TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID}:
+        # Free/legacy memberships retain their separately-authorized entitlement path.
+        return provider_call()
+    user_id = str(getattr(member, "user_id", "") or "").strip()
+    if not user_id:
+        raise HTTPException(401, "Authenticated member identity unavailable")
+    result, _admission = tier2_guard.execute(
+        user_id=user_id,
+        plan_id=plan_id,
+        operation=operation,
+        request_key=_game_operation_request_key(request, operation),
+        provider_call=provider_call,
+    )
+    return result
+
+
+# These authoritative create/edit routes are mounted before the foundation Game Forge router in
+# app.py. They preserve the existing native Game DNA implementation while adding the shared Tier 2
+# cross-Studio admission boundary. Safety/authorization validation still runs before paid admission.
+@router.post("/api/game-forge/games")
+def create_game_with_tier2_admission(body: foundation_game_api.CreateGameRequest, request: Request):
+    member = _creator(request)
+    try:
+        return foundation_game_api._public_game(
+            _execute_game_operation(
+                member,
+                request,
+                operation="game_create",
+                provider_call=lambda: foundation_game_api.create_game_for_member(member, body),
+            )
+        )
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(403 if isinstance(exc, PermissionError) else 400, str(exc)) from exc
+
+
+@router.patch("/api/game-forge/games/{game_id}")
+def update_game_with_tier2_admission(
+    game_id: str,
+    body: foundation_game_api.UpdateGameRequest,
+    request: Request,
+):
+    member = _creator(request)
+    game = _game(game_id)
+    if not game.actively_editable:
+        raise HTTPException(409, "This finished/public game is locked. Reopen it before editing; reopening removes its public test snapshot.")
+    updates = body.model_dump(exclude_unset=True)
+    next_engine = updates.get("engine_target", game.engine_target)
+    try:
+        foundation_game_api._validate_target(game.dimension, next_engine)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    def persist_edit():
+        for key, value in updates.items():
+            setattr(game, key, value)
+        foundation_game_api.enforce_creation_policy(game.title, game.prompt, game.synopsis, context="game edit")
+        foundation_game_api._invalidate_after_edit(game)
+        save_game(game)
+        return game
+
+    try:
+        edited = _execute_game_operation(
+            member,
+            request,
+            operation="game_edit",
+            provider_call=persist_edit,
+        )
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return foundation_game_api._public_game(edited)
 
 
 def _invalidate_game_after_world_change(game) -> None:
