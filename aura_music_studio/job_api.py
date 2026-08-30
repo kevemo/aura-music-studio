@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -9,10 +10,13 @@ from .accounts import AccountStore
 from .jobs import StudioJobQueue
 from .plans import PRIORITY_QUEUE
 from .tenant_storage import project_path
+from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
+from .tier2_provider_guard import Tier2ProviderGuard
 
 router = APIRouter(tags=["Aura Production Jobs"])
 store = AccountStore()
 queue = StudioJobQueue(store)
+tier2_guard = Tier2ProviderGuard()
 
 
 def _member(request: Request):
@@ -49,6 +53,19 @@ def start_full_song_slot(member, project_name: str) -> dict:
     return slot
 
 
+def _render_request_key(request: Request) -> str:
+    """Return a bounded idempotency key without requiring legacy clients to send one."""
+    supplied = request.headers.get("Idempotency-Key") or request.headers.get("X-Request-ID")
+    if supplied is not None:
+        value = supplied.strip()
+        if not value or len(value) > 180:
+            raise HTTPException(400, "A bounded idempotency request key is required")
+        return value
+    # Older clients did not send idempotency headers. A unique server key preserves their
+    # behaviour while newer clients can make retries deterministic with Idempotency-Key.
+    return f"music-render-{uuid4().hex}"
+
+
 @router.post("/projects/{project_name}/render-jobs")
 def submit_render(project_name: str, request: Request):
     member = _member(request)
@@ -57,9 +74,33 @@ def submit_render(project_name: str, request: Request):
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Project not found") from exc
 
-    # Every full-song project gets a slot. Base enforces one confirmation/day; Pro's allowance is unlimited.
-    start_full_song_slot(member, project_name)
+    plan_id = str(getattr(member.plan, "id", "") or "").strip().lower()
     priority = 100 if member.plan.has(PRIORITY_QUEUE) else 20
+
+    if plan_id in {TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID}:
+        request_key = _render_request_key(request)
+        try:
+            job, _admission = tier2_guard.execute(
+                user_id=member.user_id,
+                plan_id=plan_id,
+                operation="music_create",
+                request_key=request_key,
+                provider_call=lambda: queue.submit(
+                    member.user_id,
+                    project_name,
+                    job_type="produce",
+                    priority=priority,
+                ),
+            )
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return _public(job)
+
+    # Free and any legacy/non-paid membership stay on their existing entitlement path. The
+    # Tier 2 cross-Studio allowance must not grant those accounts paid production capacity.
+    start_full_song_slot(member, project_name)
     job = queue.submit(member.user_id, project_name, job_type="produce", priority=priority)
     return _public(job)
 
