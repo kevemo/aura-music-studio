@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .accounts import AccountStore
+from .aura_live_show_control import emergency_mode_from_connection
 from .membership import MembershipService
 
 router = APIRouter(tags=["Aura LIVE Overlay Event Engine"])
@@ -279,6 +280,9 @@ def process_overlay_event(
         clean["source"] = identity[0]
     fired: list[dict] = []
     goal_updates: list[dict] = []
+    fired_keys: list[tuple[str, str]] = []
+    now_mono = time.monotonic()
+    emergency_mode = "normal"
     with _connect() as con:
         con.execute("BEGIN IMMEDIATE")
         if identity:
@@ -302,6 +306,7 @@ def process_overlay_event(
                 prior["source_deduplicated"] = True
                 return prior
 
+        emergency_mode = emergency_mode_from_connection(con, user_id)
         con.execute(
             "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
             (user_id, event_type, json.dumps(clean, separators=(",", ":")), _now()),
@@ -315,42 +320,43 @@ def process_overlay_event(
             new_value = float(goal["current"]) + delta
             con.execute("UPDATE live_overlay_goals SET current=?,updated_at=? WHERE id=? AND user_id=?", (new_value, _now(), goal["id"], user_id))
             goal_updates.append({"goal_id": goal["id"], "current": new_value, "target": float(goal["target"])})
-        rules = con.execute("SELECT * FROM live_overlay_rules WHERE user_id=? AND event_type=? AND enabled=1 ORDER BY updated_at DESC", (user_id, event_type)).fetchall()
-        now_mono = time.monotonic()
-        fired_keys: list[tuple[str, str]] = []
-        for row in rules:
-            try:
-                conditions = json.loads(row["condition_json"])
-                actions = json.loads(row["actions_json"])
-            except Exception:
-                continue
-            if not _matches(conditions if isinstance(conditions, dict) else {}, clean):
-                continue
-            cooldown = max(0, int(row["cooldown_seconds"] or 0))
-            key = (user_id, str(row["id"]))
-            if cooldown and now_mono - _rule_last_fired.get(key, -1e12) < cooldown:
-                continue
-            safe = []
-            for action in actions if isinstance(actions, list) else []:
-                if not isinstance(action, dict) or action.get("action") not in SAFE_ACTIONS:
+
+        if emergency_mode == "normal":
+            rules = con.execute("SELECT * FROM live_overlay_rules WHERE user_id=? AND event_type=? AND enabled=1 ORDER BY updated_at DESC", (user_id, event_type)).fetchall()
+            for row in rules:
+                try:
+                    conditions = json.loads(row["condition_json"])
+                    actions = json.loads(row["actions_json"])
+                except Exception:
                     continue
-                params = action.get("params") if isinstance(action.get("params"), dict) else {}
-                safe.append({"action": action["action"], "params": params})
-            if not safe:
-                continue
-            fired_keys.append(key)
-            automation_payload = {
-                "title": str(row["name"])[:100],
-                "label": "automation",
-                "message": json.dumps(safe, separators=(",", ":"))[:500],
-                "source": "aura_rule_engine",
-                "synthetic": bool(synthetic),
-            }
-            con.execute(
-                "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
-                (user_id, "custom", json.dumps(automation_payload, separators=(",", ":")), _now()),
-            )
-            fired.append({"rule_id": row["id"], "name": row["name"], "actions": safe})
+                if not _matches(conditions if isinstance(conditions, dict) else {}, clean):
+                    continue
+                cooldown = max(0, int(row["cooldown_seconds"] or 0))
+                key = (user_id, str(row["id"]))
+                if cooldown and now_mono - _rule_last_fired.get(key, -1e12) < cooldown:
+                    continue
+                safe = []
+                for action in actions if isinstance(actions, list) else []:
+                    if not isinstance(action, dict) or action.get("action") not in SAFE_ACTIONS:
+                        continue
+                    params = action.get("params") if isinstance(action.get("params"), dict) else {}
+                    safe.append({"action": action["action"], "params": params})
+                if not safe:
+                    continue
+                fired_keys.append(key)
+                automation_payload = {
+                    "title": str(row["name"])[:100],
+                    "label": "automation",
+                    "message": json.dumps(safe, separators=(",", ":"))[:500],
+                    "source": "aura_rule_engine",
+                    "synthetic": bool(synthetic),
+                }
+                con.execute(
+                    "INSERT INTO live_overlay_events(user_id,event_type,payload_json,created_at) VALUES(?,?,?,?)",
+                    (user_id, "custom", json.dumps(automation_payload, separators=(",", ":")), _now()),
+                )
+                fired.append({"rule_id": row["id"], "name": row["name"], "actions": safe})
+
         con.execute(
             "DELETE FROM live_overlay_events WHERE user_id=? AND id NOT IN (SELECT id FROM live_overlay_events WHERE user_id=? ORDER BY id DESC LIMIT ?)",
             (user_id, user_id, EVENT_LIMIT),
@@ -362,6 +368,9 @@ def process_overlay_event(
             "rules_fired": fired,
             "goals_updated": goal_updates,
             "duplicate": False,
+            "emergency_mode": emergency_mode,
+            "automations_suppressed": emergency_mode in {"automation_pause", "safe_hold"},
+            "overlay_safe_hold": emergency_mode == "safe_hold",
         }
         if identity:
             source_value, event_value, digest_value = identity
