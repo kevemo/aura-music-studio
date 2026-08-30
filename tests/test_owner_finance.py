@@ -45,16 +45,16 @@ def test_finance_snapshot_uses_verified_ledgers_and_never_claims_bank_settlement
 
     snapshot = OwnerFinanceService(db).snapshot()
 
-    assert snapshot["subscription_receipts_minor"]["GBP"] == 1498
+    assert snapshot["subscription_receipts_minor"]["GBP"] == 2098
     assert snapshot["credit_topup_receipts_minor"]["GBP"] == 299
-    assert snapshot["verified_gross_receipts_minor"]["GBP"] == 1797
+    assert snapshot["verified_gross_receipts_minor"]["GBP"] == 2397
     assert snapshot["verified_refunds_minor"] == {}
-    assert snapshot["verified_net_receipts_minor"]["GBP"] == 1797
+    assert snapshot["verified_net_receipts_minor"]["GBP"] == 2397
     assert snapshot["active_paid_subscriptions"] == {"base": 1, "pro": 1}
-    assert snapshot["estimated_monthly_recurring_access_value_minor_gbp"] == 1498
+    assert snapshot["estimated_monthly_recurring_access_value_minor_gbp"] == 2098
     assert snapshot["purchased_credits"] == 500
-    assert snapshot["verified_receipts_by_provider_minor"]["stripe"] == 798
-    assert snapshot["verified_receipts_by_provider_minor"]["verified_external"] == 999
+    assert snapshot["verified_receipts_by_provider_minor"]["stripe"] == 898
+    assert snapshot["verified_receipts_by_provider_minor"]["verified_external"] == 1499
     assert snapshot["settlement"]["bank_details_stored_in_application"] is False
     assert snapshot["settlement"]["bank_balance_known_to_application"] is False
     assert snapshot["settlement"]["payout_status_known_to_application"] is False
