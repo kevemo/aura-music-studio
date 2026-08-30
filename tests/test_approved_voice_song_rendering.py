@@ -134,7 +134,7 @@ def test_creation_requires_profile_and_source_binding(
         voice_profile_id=voice_profile_id,
         voice_profile_project=voice_profile_project,
     )
-    with pytest.raises(ValueError, match="both an active Aura Voice Profile and its source project"):
+    with pytest.raises(ValueError, match="consent-approved Aura Voice Profile and its source project"):
         build_song_project(request, projects_root)
 
 
