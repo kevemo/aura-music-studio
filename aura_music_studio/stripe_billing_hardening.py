@@ -13,6 +13,7 @@ from .stripe_billing import (
     CreditCheckoutRequest,
     StripeConfig,
     _billing_reason,
+    _session_user,
     _subscription_id,
     create_credit_checkout as base_create_credit_checkout,
     credit_packs,
@@ -68,8 +69,19 @@ def _validated_creation_coin_packs():
         raise HTTPException(503, "Creation Coin catalogue is not safely configured") from exc
 
 
+def _require_signed_in_user(request: Request) -> dict[str, Any]:
+    """Preserve the existing authentication boundary before configuration disclosure.
+
+    Missing/invalid member sessions must continue to receive the established 401 response even
+    when the private Creation Coin deployment configuration is absent or invalid. This prevents
+    unauthenticated callers from probing billing-readiness state through storefront endpoints.
+    """
+    return _session_user(request)
+
+
 @router.get("/billing/creation-coins/catalog")
 def hardened_creation_coin_catalog(request: Request):
+    _require_signed_in_user(request)
     _validated_creation_coin_packs()
     response = base_creation_coin_catalog(request)
     if isinstance(response, dict):
@@ -82,14 +94,16 @@ def hardened_creation_coin_catalog(request: Request):
 
 @router.get("/billing/creation-coins", response_class=HTMLResponse)
 def hardened_creation_coin_storefront(request: Request):
+    _require_signed_in_user(request)
     _validated_creation_coin_packs()
     return base_creation_coin_storefront(request)
 
 
 @router.post("/billing/stripe/checkout/credits")
 def hardened_credit_checkout(body: CreditCheckoutRequest, request: Request):
-    # The browser supplies only a pack ID. The money/Coins pair must remain the immutable
-    # master catalogue before the base Stripe checkout is allowed to resolve the private Price ID.
+    # Keep authentication ahead of catalogue validation so unauthenticated callers cannot use
+    # checkout as a billing-configuration oracle. The browser still supplies only a pack ID.
+    _require_signed_in_user(request)
     _validated_creation_coin_packs()
     return base_create_credit_checkout(body, request)
 
