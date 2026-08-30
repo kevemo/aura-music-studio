@@ -73,7 +73,8 @@ def list_voice_profiles(project_name: str):
 def voice_convert(project_name: str, request: VoiceConvertRequest):
     project = _project(project_name)
     source = _audio_asset(project, request.source_asset_id)
-    ledger = RightsLedger(project / ".aura_rights")
+    rights_root = project / ".aura_rights"
+    ledger = RightsLedger(rights_root)
     try:
         profile = ledger.get_voice(request.voice_profile_id)
     except KeyError as exc:
@@ -87,11 +88,15 @@ def voice_convert(project_name: str, request: VoiceConvertRequest):
     try:
         path = convert_singing_voice(
             project / source.path,
-            profile,
             output,
+            rights_root=rights_root,
+            voice_profile_id=profile.id,
             similarity=request.similarity,
             pitch_shift=request.pitch_shift,
         )
+    except PermissionError as exc:
+        # Consent may be withdrawn after request admission but before synthesis begins.
+        raise HTTPException(403, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(503, f"Voice conversion unavailable: {type(exc).__name__}: {exc}") from exc
     return {
@@ -99,6 +104,7 @@ def voice_convert(project_name: str, request: VoiceConvertRequest):
         "voice_profile_id": profile.id,
         "voice_owner": profile.owner_label,
         "consent_checked": True,
+        "consent_checked_at_execution": True,
         "audio_origin": "consent_gated_voice_conversion",
     }
 
@@ -138,13 +144,12 @@ def harmonies(project_name: str, request: HarmonyRequest):
     if not lyrics.exists():
         raise HTTPException(400, "Scored harmony rendering requires project lyrics in input/lyrics.txt")
 
-    profile_json = ""
+    rights_root = project / ".aura_rights"
     if request.voice_profile_id:
-        ledger = RightsLedger(project / ".aura_rights")
+        ledger = RightsLedger(rights_root)
         try:
             profile = ledger.get_voice(request.voice_profile_id)
             profile.assert_usable("backing_harmony")
-            profile_json = profile.model_dump_json()
         except KeyError as exc:
             raise HTTPException(404, "Aura Voice Profile not found") from exc
         except PermissionError as exc:
@@ -163,8 +168,17 @@ def harmonies(project_name: str, request: HarmonyRequest):
         for role, midi in midi_parts.items():
             target = project / "output" / "harmonies" / f"harmony_{role}.wav"
             stems[role] = str(
-                render_harmony_voice(midi, lyrics, target, voice_profile_json=profile_json)
+                render_harmony_voice(
+                    midi,
+                    lyrics,
+                    target,
+                    rights_root=rights_root if request.voice_profile_id else None,
+                    voice_profile_id=request.voice_profile_id,
+                )
             )
+    except PermissionError as exc:
+        # Re-check each synthesis invocation so revoke-after-admission fails closed.
+        raise HTTPException(403, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(503, f"Scored harmony rendering unavailable: {type(exc).__name__}: {exc}") from exc
 
@@ -175,4 +189,5 @@ def harmonies(project_name: str, request: HarmonyRequest):
         "control_midi_is_final_audio": False,
         "audio_origin": "rendered_singing_synthesis",
         "consent_checked": bool(request.voice_profile_id),
+        "consent_checked_at_execution": bool(request.voice_profile_id),
     }

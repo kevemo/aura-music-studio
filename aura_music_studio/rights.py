@@ -150,3 +150,17 @@ class RightsLedger:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp.replace(path)
+
+
+def authorize_voice_profile(rights_root: Path, profile_id: str, purpose: str) -> VoiceProfile:
+    """Reload and authorize a Voice Profile at the final execution boundary.
+
+    Callers must pass the authoritative project `.aura_rights` directory rather than
+    relying on a profile object serialized or loaded earlier in a queued workflow.
+    """
+    try:
+        profile = RightsLedger(Path(rights_root)).get_voice(profile_id)
+    except KeyError as exc:
+        raise PermissionError("Voice Profile is unavailable and cannot be used.") from exc
+    profile.assert_usable(purpose)
+    return profile
