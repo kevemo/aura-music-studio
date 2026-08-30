@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Callable
+from typing import Literal, TypeVar
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
@@ -17,8 +19,12 @@ from .professional_editor_renderer import (
 from .professional_image_compositor import AdvancedImageCompositor
 from .professional_video_grouped_unified_compositor import GroupedUnifiedAdvancedVideoCompositor
 from .tenant_storage import project_path
+from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
+from .tier2_provider_guard import Tier2ProviderGuard
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor Rendering"])
+tier2_guard = Tier2ProviderGuard()
+T = TypeVar("T")
 
 
 class EditorRenderRequest(BaseModel):
@@ -53,6 +59,33 @@ def _renderer(project_name: str) -> ProfessionalEditorRenderer:
     if not store.exists():
         raise HTTPException(404, "Professional editor is not initialized for this project")
     return ProfessionalEditorRenderer(project)
+
+
+def _video_render_request_key(request: Request) -> str:
+    """Return a bounded retry key while preserving clients that pre-date idempotency headers."""
+    supplied = request.headers.get("Idempotency-Key") or request.headers.get("X-Request-ID")
+    if supplied is not None:
+        value = supplied.strip()
+        if not value or len(value) > 180:
+            raise HTTPException(400, "A bounded idempotency request key is required")
+        return value
+    return f"video-edit-render-{uuid4().hex}"
+
+
+def _execute_video_render(member, request: Request, provider_call: Callable[[], T]) -> T:
+    """Meter paid video editing immediately around the self-hosted compositor execution."""
+    plan_id = str(getattr(member.plan, "id", "") or "").strip().lower()
+    if plan_id not in {TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID}:
+        # Free/legacy accounts retain their existing, separately-authorized entitlement path.
+        return provider_call()
+    result, _admission = tier2_guard.execute(
+        user_id=member.user_id,
+        plan_id=plan_id,
+        operation="video_edit",
+        request_key=_video_render_request_key(request),
+        provider_call=provider_call,
+    )
+    return result
 
 
 def _sequence_has_non_normal_item_blend(state: dict, sequence_id: str) -> bool:
@@ -119,8 +152,13 @@ def render_editor_sequence(
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
             video_renderer = GroupedUnifiedAdvancedVideoCompositor(_project(project_name))
-            result = video_renderer.render_video_advanced(sequence_id)
+            result = _execute_video_render(
+                member,
+                request,
+                lambda: video_renderer.render_video_advanced(sequence_id),
+            )
         else:
+            # Image exports are not one of the cross-Studio Tier 2 eligible operation classes.
             image_renderer = AdvancedImageCompositor(_project(project_name))
             result = image_renderer.render_image_advanced(
                 sequence_id,
@@ -209,4 +247,10 @@ def download_editor_export(project_name: str, filename: str, request: Request):
     )
 
 
-__all__ = ["router", "EditorRenderRequest", "_sequence_has_non_normal_item_blend"]
+__all__ = [
+    "router",
+    "EditorRenderRequest",
+    "_execute_video_render",
+    "_sequence_has_non_normal_item_blend",
+    "_video_render_request_key",
+]
