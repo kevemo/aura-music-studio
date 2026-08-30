@@ -140,6 +140,7 @@ def test_same_action_cannot_be_issued_twice(tmp_path):
         action["id"],
         policy_version="policy-1",
         nonce="nonce-1234567890abcdef",
+        parameters={"object_id": "quarantine-object-1"},
     )
     with pytest.raises(ValueError, match="already issued|replayed"):
         commands.issue_approved_action(
@@ -147,6 +148,7 @@ def test_same_action_cannot_be_issued_twice(tmp_path):
             action["id"],
             policy_version="policy-1",
             nonce="nonce-2234567890abcdef",
+            parameters={"object_id": "quarantine-object-1"},
         )
 
 
@@ -157,6 +159,7 @@ def test_receipt_requires_real_verifier_not_boolean_trust(tmp_path):
         action["id"],
         policy_version="policy-1",
         nonce="nonce-1234567890abcdef",
+        parameters={"object_id": "quarantine-object-1"},
     )
     receipt = CommandReceipt(
         command_id=command.command_id,
@@ -182,6 +185,7 @@ def test_receipt_rejects_wrong_device_key_and_wrong_payload_digest(tmp_path):
         action["id"],
         policy_version="policy-1",
         nonce="nonce-1234567890abcdef",
+        parameters={"object_id": "quarantine-object-1"},
     )
     receipt = CommandReceipt(
         command_id=command.command_id,
@@ -214,6 +218,7 @@ def test_receipt_lifecycle_requires_verified_signatures_state_transitions_and_ev
         action["id"],
         policy_version="policy-1",
         nonce="nonce-1234567890abcdef",
+        parameters={"object_id": "quarantine-object-1"},
     )
     now = datetime.now(timezone.utc)
     received = CommandReceipt(
@@ -261,6 +266,7 @@ def test_revoked_device_cannot_submit_signed_receipt(tmp_path):
         action["id"],
         policy_version="policy-1",
         nonce="nonce-1234567890abcdef",
+        parameters={"object_id": "quarantine-object-1"},
     )
     security.revoke_device(user_id, device["id"])
     receipt = CommandReceipt(
