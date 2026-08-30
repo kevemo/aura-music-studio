@@ -25,7 +25,7 @@ class Plan:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £4.99 / £9.99. Keep the attribute temporarily so parallel feature branches and
+        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
         persisted integrations do not break while new code uses monthly_price + currency.
         """
         return self.monthly_price
@@ -139,7 +139,7 @@ FREE_FEATURES = frozenset({
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
-# compatibility. Customer-facing copy calls this tier "Basic".
+# compatibility. Customer-facing copy calls this tier "Tier 2".
 BASE_FEATURES = FREE_FEATURES | frozenset({
     FULL_TRACK,
     BUILD_AROUND_UPLOAD,
@@ -182,6 +182,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     DEEP_REVISION_HISTORY,
     SAMPLE_LAB,
     STYLE_DNA,
+    HARMONY_ARCHITECT,
     APPROVED_VOICE_DUPLICATION,
     AUDIO_TO_MIDI_CONTROL,
     NEURAL_AMP,
@@ -202,8 +203,8 @@ PLANS: dict[str, Plan] = {
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
             "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
-            "also play and test Game Forge builds that have passed Pulsar's public playtest safety/rating preflight. "
-            "Music/video downloads and game creation unlock on Basic."
+            "also play and test Game Forge builds that have passed the platform's public playtest safety/rating preflight. "
+            "Music/video downloads and game creation unlock on Tier 2."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -212,15 +213,16 @@ PLANS: dict[str, Plan] = {
     ),
     "base": Plan(
         id="base",
-        name="Basic",
-        monthly_price=Decimal("4.99"),
+        name="Tier 2",
+        monthly_price=Decimal("5.99"),
         currency="GBP",
         description=(
-            "£4.99 tier: one confirmed full track every day with unlimited regenerations until confirmation, up to "
-            "10 generated images/posters per day, image/poster saving and downloads, plus music and video downloads. "
-            "Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura Tune, AutoMix, "
-            "useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project revision history, "
-            "basic waveform timeline editing, and Game Forge creation/editing for one active game workspace at a time."
+            "£5.99 tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
+            "The authoritative cross-studio daily allowance and any Cosmic Creation Coin overage are enforced separately "
+            "by server-side usage/admission controls; this plan object defines feature entitlement rather than inventing "
+            "a second usage counter. Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura "
+            "Tune, AutoMix, useful stem splitting, mastering, cleanup, backing-track creation, harmony tools, project "
+            "revision history, basic waveform timeline editing, and enabled Game Forge creation/editing."
         ),
         confirmed_songs_per_day=1,
         regeneration_until_confirmed=True,
@@ -229,18 +231,19 @@ PLANS: dict[str, Plan] = {
     ),
     "pro": Plan(
         id="pro",
-        name="Pro",
-        monthly_price=Decimal("9.99"),
+        name="Unlimited Pro",
+        monthly_price=Decimal("14.99"),
         currency="GBP",
         description=(
-            "£9.99 tier: unlimited image/poster creation, image/poster saving and downloads, music/video downloads and "
-            "unlimited full-track creation, plus the complete enabled Pulsar-Frequency House production stack: expanded "
-            "instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
-            "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack "
-            "DAW, take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, "
-            "covers/remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, immersive "
-            "spatial audio, video/music sync, all enabled export formats, and unlimited active Game Forge project workspaces. "
-            "External model/GPU jobs remain subject to configured queues, provider availability and fair-use resource controls."
+            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
+            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
+            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
+            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
+            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
+            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
+            "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
+            "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
+            "subject to marketplace entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
@@ -260,7 +263,7 @@ def get_plan(plan_id: str) -> Plan:
 def require_feature(plan_id: str, feature: str) -> None:
     plan = get_plan(plan_id)
     if not plan.has(feature):
-        raise PermissionError(f"{feature} requires a higher Pulsar-Frequency House membership tier")
+        raise PermissionError(f"{feature} requires a higher Command Center membership tier")
 
 
 def public_plans() -> list[dict]:
@@ -268,8 +271,8 @@ def public_plans() -> list[dict]:
 
 
 OWNERSHIP_NOTICE = (
-    "Pulsar-Frequency House and Elevate Souls Productions do not claim ownership of a member's original "
-    "inputs or eligible generated outputs. Rights in AI-assisted outputs remain subject to applicable law, "
-    "the licences of underlying open models, and any third-party/source-material rights. Members must have "
-    "the rights required for material they upload or ask the Studio to transform."
+    "Elevate Souls Productions Content Creation Command Center and Elevate Souls Productions do not claim ownership of a "
+    "member's original inputs or eligible generated outputs. Rights in AI-assisted outputs remain subject to applicable "
+    "law, the licences of underlying open models, and any third-party/source-material rights. Members must have the rights "
+    "required for material they upload or ask the Studio to transform."
 )
