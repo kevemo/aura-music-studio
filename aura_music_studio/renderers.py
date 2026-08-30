@@ -14,6 +14,7 @@ from .acestep_api import AceStepClient, AceStepRequest
 from .cloud_providers import ElevenMusicClient, MurekaClient
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
+from .rights import authorize_voice_profile
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
@@ -47,6 +48,53 @@ def _lyrics(workspace: ProjectWorkspace, manifest: ProjectManifest) -> str:
     if path and path.exists():
         return path.read_text(encoding="utf-8").strip()
     return ""
+
+
+def _approved_voice_binding(manifest: ProjectManifest) -> tuple[str, str] | None:
+    dna = manifest.project_dna if isinstance(manifest.project_dna, dict) else {}
+    if str(dna.get("vocal_mode") or "") != "approved_voice":
+        return None
+    source_project = str(dna.get("voice_profile_project") or "").strip()
+    profile_id = str(dna.get("voice_profile_id") or "").strip()
+    if not source_project or not profile_id:
+        raise PermissionError(
+            "Approved-voice project is missing its authoritative Voice House source binding and cannot render."
+        )
+    return source_project, profile_id
+
+
+def _resolve_voice_source_project(workspace: ProjectWorkspace, source_project_name: str) -> Path:
+    name = source_project_name or ""
+    if (
+        not name
+        or name.strip() != name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or Path(name).is_absolute()
+    ):
+        raise PermissionError("Approved-voice source project reference is invalid.")
+    current = workspace.root.resolve()
+    tenant_root = current.parent
+    candidate = (tenant_root / name).resolve()
+    if candidate.parent != tenant_root or not candidate.is_dir():
+        raise PermissionError("Approved-voice source project is unavailable in the current member workspace.")
+    return candidate
+
+
+def _project_confined_voice_reference(source_project: Path, reference_files: list[str]) -> Path:
+    root = source_project.resolve()
+    for value in reference_files:
+        try:
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            candidate = candidate.resolve()
+        except Exception:
+            continue
+        if candidate.is_file() and root in candidate.parents:
+            return candidate
+    raise PermissionError("Approved Voice Profile has no valid project-confined reference audio.")
 
 
 class BaseRenderer:
@@ -194,8 +242,53 @@ class MurekaRenderer(BaseRenderer):
         return bool(os.getenv("MUREKA_API_KEY"))
 
     def render(self, workspace, manifest, plan):
-        client = MurekaClient()
         lyrics = _lyrics(workspace, manifest)
+        approved_binding = _approved_voice_binding(manifest)
+
+        if approved_binding is not None:
+            if not lyrics:
+                raise RuntimeError("Approved-voice rendering requires non-empty lyrics.")
+            source_project_name, profile_id = approved_binding
+            source_project = _resolve_voice_source_project(workspace, source_project_name)
+            rights_root = source_project / ".aura_rights"
+
+            # Authorize immediately before sending any protected voice reference to a provider.
+            admitted_profile = authorize_voice_profile(rights_root, profile_id, "singing")
+            reference = _project_confined_voice_reference(source_project, admitted_profile.reference_files)
+            client = MurekaClient()
+            vocal_id = client.clone_vocal(
+                reference,
+                f"Aura Voice Profile: {admitted_profile.name}; owner: {admitted_profile.owner_label}",
+            )
+            if not vocal_id:
+                raise RuntimeError("Voice provider did not return a vocal identifier.")
+
+            # Consent may be withdrawn while the clone call is in flight. Re-read the
+            # authoritative source ledger again immediately before actual song generation.
+            authorize_voice_profile(rights_root, profile_id, "singing")
+            out = workspace.work_dir / "neural_master_mureka_approved_voice.mp3"
+            client.lyrics_to_song(
+                out,
+                lyrics=lyrics[:5000],
+                prompt=plan.render_prompt[:1024],
+                model=os.getenv("MUREKA_MODEL", "auto"),
+                vocal_id=vocal_id,
+            )
+            return RenderResult(
+                renderer=self.name,
+                audio_path=out,
+                metadata={
+                    "model": os.getenv("MUREKA_MODEL", "auto"),
+                    "approved_voice": True,
+                    "voice_profile_id": profile_id,
+                    "voice_profile_project": source_project_name,
+                    "consent_checked_before_clone": True,
+                    "consent_checked_before_generation": True,
+                    "generic_vocal_fallback_allowed": False,
+                },
+            )
+
+        client = MurekaClient()
         if lyrics:
             out = workspace.work_dir / "neural_master_mureka.mp3"
             client.lyrics_to_song(
@@ -328,7 +421,17 @@ def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest,
         "yue": ExternalCommandRenderer("yue", "AURA_YUE_CMD", "neural_master_yue.wav"),
     }
     requested = list(manifest.renderer.preferred)
-    if manifest.mode in {"cover", "remix", "backing_track"}:
+
+    # Today Mureka is the only whole-song adapter in this renderer layer that accepts a
+    # consent-bound voice identifier. Never silently turn an approved-voice request into a
+    # generic singer by failing over to an engine that cannot honor that identity/consent.
+    if _approved_voice_binding(manifest) is not None:
+        if "mureka" not in requested:
+            raise RuntimeError(
+                "Approved-voice rendering requires a configured voice-capable renderer; generic vocal fallback is disabled."
+            )
+        requested = ["mureka"]
+    elif manifest.mode in {"cover", "remix", "backing_track"}:
         guide_first = ["acestep_api", "local_acestep", "muser", "acestep_space", "deapi", "mureka", "eleven_music", "yue"]
         requested = [x for x in guide_first if x in requested] + [x for x in requested if x not in guide_first]
 
