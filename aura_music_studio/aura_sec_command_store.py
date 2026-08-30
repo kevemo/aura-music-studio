@@ -110,6 +110,7 @@ class AuraSecCommandStore:
                     evidence_digest TEXT,
                     last_receipt_verifier TEXT,
                     last_receipt_key_algorithm TEXT,
+                    last_receipt_payload_digest TEXT,
                     last_receipt_signature_digest TEXT,
                     updated_at TEXT NOT NULL,
                     UNIQUE(device_id, nonce_hash),
@@ -128,6 +129,7 @@ class AuraSecCommandStore:
             migrations = {
                 "last_receipt_verifier": "TEXT",
                 "last_receipt_key_algorithm": "TEXT",
+                "last_receipt_payload_digest": "TEXT",
                 "last_receipt_signature_digest": "TEXT",
             }
             for column, sql_type in migrations.items():
@@ -308,69 +310,109 @@ class AuraSecCommandStore:
             raise PermissionError("Aura Sec command receipt predates command issuance")
         if occurred > current + timedelta(seconds=120):
             raise PermissionError("Aura Sec command receipt timestamp is too far in the future")
-        if (current > expiry or occurred > expiry) and receipt.status not in {"failed", "rejected"}:
-            raise PermissionError("Expired Aura Sec command cannot report a new successful state")
 
-        old_status = command["status"]
-        if receipt.status not in _ALLOWED_RECEIPT_TRANSITIONS.get(old_status, set()):
-            raise ValueError(f"Invalid Aura Sec command transition {old_status} -> {receipt.status}")
+        # Verify every retry cryptographically. Idempotency is based on the exact canonical
+        # signed payload digest, never on transport identity, signature bytes or status alone.
         verification = self._verify_receipt_signature(
             user_id,
             receipt,
             signature_b64=signature_b64,
             signature_verifier=signature_verifier,
         )
+        receipt_payload_digest = verification.evidence_digest
+        receipt_signature_digest = hashlib.sha256(
+            self._decode_signature(signature_b64)
+        ).hexdigest()
 
+        duplicate = False
         with self._connect() as con:
-            updated = con.execute(
-                """UPDATE aura_sec_commands
-                   SET status=?,last_receipt_at=?,result_code=?,evidence_digest=?,
-                       last_receipt_verifier=?,last_receipt_key_algorithm=?,
-                       last_receipt_signature_digest=?,updated_at=?
-                   WHERE user_id=? AND id=? AND status=?""",
-                (
-                    receipt.status,
-                    occurred.isoformat(),
-                    receipt.result_code,
-                    receipt.evidence_digest.lower() if receipt.evidence_digest else None,
-                    verification.verifier_id,
-                    verification.key_algorithm,
-                    verification.evidence_digest,
-                    _iso(current),
-                    user_id,
-                    receipt.command_id,
-                    old_status,
-                ),
-            )
-            if updated.rowcount != 1:
-                raise PermissionError("Aura Sec command receipt state changed concurrently")
+            latest = con.execute(
+                "SELECT * FROM aura_sec_commands WHERE user_id=? AND id=?",
+                (user_id, receipt.command_id),
+            ).fetchone()
+            if not latest:
+                raise ValueError("Aura Sec command not found")
+            latest_status = str(latest["status"])
 
-            if receipt.status == "executed":
-                action_update = con.execute(
-                    """UPDATE aura_sec_actions SET status='executed',executed_at=?
-                       WHERE user_id=? AND id=? AND status='approved'""",
-                    (occurred.isoformat(), user_id, command["action_id"]),
+            if receipt.status == latest_status:
+                stored_payload_digest = str(latest["last_receipt_payload_digest"] or "").strip().lower()
+                if stored_payload_digest and secrets.compare_digest(
+                    stored_payload_digest, receipt_payload_digest
+                ):
+                    # Exact signed-payload retransmission: no command/action mutation, no timestamp
+                    # rewrite, and no duplicate side effect. This remains valid after command expiry
+                    # because it is not a new successful state transition.
+                    duplicate = True
+                else:
+                    raise ValueError(
+                        "Conflicting Aura Sec command receipt for the current lifecycle state"
+                    )
+            else:
+                if receipt.status not in _ALLOWED_RECEIPT_TRANSITIONS.get(latest_status, set()):
+                    raise ValueError(
+                        f"Invalid Aura Sec command transition {latest_status} -> {receipt.status}"
+                    )
+                if (current > expiry or occurred > expiry) and receipt.status not in {
+                    "failed",
+                    "rejected",
+                }:
+                    raise PermissionError(
+                        "Expired Aura Sec command cannot report a new successful state"
+                    )
+
+                updated = con.execute(
+                    """UPDATE aura_sec_commands
+                       SET status=?,last_receipt_at=?,result_code=?,evidence_digest=?,
+                           last_receipt_verifier=?,last_receipt_key_algorithm=?,
+                           last_receipt_payload_digest=?,last_receipt_signature_digest=?,updated_at=?
+                       WHERE user_id=? AND id=? AND status=?""",
+                    (
+                        receipt.status,
+                        occurred.isoformat(),
+                        receipt.result_code,
+                        receipt.evidence_digest.lower() if receipt.evidence_digest else None,
+                        verification.verifier_id,
+                        verification.key_algorithm,
+                        receipt_payload_digest,
+                        receipt_signature_digest,
+                        _iso(current),
+                        user_id,
+                        receipt.command_id,
+                        latest_status,
+                    ),
                 )
-                if action_update.rowcount != 1:
-                    raise PermissionError("Aura Sec action state changed before execution receipt")
-            elif receipt.status == "verified":
-                action_update = con.execute(
-                    """UPDATE aura_sec_actions SET status='verified',verified_at=?
-                       WHERE user_id=? AND id=? AND status='executed'""",
-                    (occurred.isoformat(), user_id, command["action_id"]),
-                )
-                if action_update.rowcount != 1:
-                    raise PermissionError("Aura Sec action state changed before verification receipt")
-            elif receipt.status in {"failed", "rejected"}:
-                allowed_action_states = ("approved", "executed")
-                placeholders = ",".join("?" for _ in allowed_action_states)
-                action_update = con.execute(
-                    f"""UPDATE aura_sec_actions SET status=?
-                        WHERE user_id=? AND id=? AND status IN ({placeholders})""",
-                    (receipt.status, user_id, command["action_id"], *allowed_action_states),
-                )
-                if action_update.rowcount != 1:
-                    raise PermissionError("Aura Sec action state changed before failure receipt")
+                if updated.rowcount != 1:
+                    raise PermissionError("Aura Sec command receipt state changed concurrently")
+
+                if receipt.status == "executed":
+                    action_update = con.execute(
+                        """UPDATE aura_sec_actions SET status='executed',executed_at=?
+                           WHERE user_id=? AND id=? AND status='approved'""",
+                        (occurred.isoformat(), user_id, command["action_id"]),
+                    )
+                    if action_update.rowcount != 1:
+                        raise PermissionError("Aura Sec action state changed before execution receipt")
+                elif receipt.status == "verified":
+                    action_update = con.execute(
+                        """UPDATE aura_sec_actions SET status='verified',verified_at=?
+                           WHERE user_id=? AND id=? AND status='executed'""",
+                        (occurred.isoformat(), user_id, command["action_id"]),
+                    )
+                    if action_update.rowcount != 1:
+                        raise PermissionError("Aura Sec action state changed before verification receipt")
+                elif receipt.status in {"failed", "rejected"}:
+                    allowed_action_states = ("approved", "executed")
+                    placeholders = ",".join("?" for _ in allowed_action_states)
+                    action_update = con.execute(
+                        f"""UPDATE aura_sec_actions SET status=?
+                            WHERE user_id=? AND id=? AND status IN ({placeholders})""",
+                        (receipt.status, user_id, command["action_id"], *allowed_action_states),
+                    )
+                    if action_update.rowcount != 1:
+                        raise PermissionError("Aura Sec action state changed before failure receipt")
+
+        # A duplicate deliberately returns the exact persisted state. `get()` also guarantees
+        # callers receive the same representation as a first successful submission.
         return self.get(user_id, receipt.command_id)
 
 
