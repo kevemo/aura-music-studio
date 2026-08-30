@@ -200,7 +200,9 @@ def list_projects():
 @app.post("/songs")
 def create_song(request: CreateSongRequest):
     project = build_song_project(request, projects_root())
-    return {"project": project.name, "path": str(project)}
+    # Keep the legacy `path` response key for compatibility, but expose only the logical
+    # tenant-scoped project reference. Public API responses must never reveal host paths.
+    return {"project": project.name, "path": project.name}
 
 
 @app.post("/projects/{project_name}/producer")
