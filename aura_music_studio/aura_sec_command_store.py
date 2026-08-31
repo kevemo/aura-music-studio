@@ -18,6 +18,7 @@ from .aura_sec_store import AuraSecStore
 
 _HEX_256 = re.compile(r"^[0-9a-f]{64}$")
 _ALLOWED_KEY_ALGORITHMS = {"ed25519", "p256", "rsa-pss-sha256"}
+_MAX_SEQUENCE = 9_223_372_036_854_775_807
 
 
 def _now() -> datetime:
@@ -104,6 +105,7 @@ class AuraSecCommandStore:
                     action_id TEXT NOT NULL UNIQUE,
                     user_id TEXT NOT NULL,
                     device_id TEXT NOT NULL,
+                    command_sequence INTEGER NOT NULL,
                     action_type TEXT NOT NULL,
                     risk_class TEXT NOT NULL,
                     policy_version TEXT NOT NULL,
@@ -121,12 +123,22 @@ class AuraSecCommandStore:
                     last_receipt_signature_digest TEXT,
                     updated_at TEXT NOT NULL,
                     UNIQUE(device_id, nonce_hash),
+                    UNIQUE(device_id, command_sequence),
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
                     FOREIGN KEY(device_id) REFERENCES aura_sec_devices(id) ON DELETE CASCADE,
                     FOREIGN KEY(action_id) REFERENCES aura_sec_actions(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_commands_device_status
                 ON aura_sec_commands(device_id, status, expires_at);
+
+                CREATE TABLE IF NOT EXISTS aura_sec_command_sequence_state (
+                    device_id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    last_sequence INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+                    FOREIGN KEY(device_id) REFERENCES aura_sec_devices(id) ON DELETE CASCADE
+                );
                 """
             )
             existing = {
@@ -134,6 +146,7 @@ class AuraSecCommandStore:
                 for row in con.execute("PRAGMA table_info(aura_sec_commands)").fetchall()
             }
             migrations = {
+                "command_sequence": "INTEGER",
                 "last_receipt_verifier": "TEXT",
                 "last_receipt_key_algorithm": "TEXT",
                 "last_receipt_payload_digest": "TEXT",
@@ -142,6 +155,57 @@ class AuraSecCommandStore:
             for column, sql_type in migrations.items():
                 if column not in existing:
                     con.execute(f"ALTER TABLE aura_sec_commands ADD COLUMN {column} {sql_type}")
+            con.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_aura_sec_commands_device_sequence
+                   ON aura_sec_commands(device_id, command_sequence)"""
+            )
+
+    @staticmethod
+    def _reserve_next_sequence(
+        con: sqlite3.Connection,
+        *,
+        user_id: str,
+        device_id: str,
+        updated_at: datetime,
+    ) -> int:
+        row = con.execute(
+            """SELECT last_sequence FROM aura_sec_command_sequence_state
+               WHERE user_id=? AND device_id=?""",
+            (user_id, device_id),
+        ).fetchone()
+        if row is None:
+            existing = con.execute(
+                """SELECT COALESCE(MAX(command_sequence),0) AS max_sequence
+                   FROM aura_sec_commands WHERE user_id=? AND device_id=?""",
+                (user_id, device_id),
+            ).fetchone()
+            current = int(existing["max_sequence"] or 0)
+            if current >= _MAX_SEQUENCE:
+                raise PermissionError("Aura Sec command sequence space is exhausted for this device")
+            next_sequence = current + 1
+            try:
+                con.execute(
+                    """INSERT INTO aura_sec_command_sequence_state
+                       (device_id,user_id,last_sequence,updated_at) VALUES (?,?,?,?)""",
+                    (device_id, user_id, next_sequence, _iso(updated_at)),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise PermissionError("Aura Sec command sequence state changed concurrently") from exc
+            return next_sequence
+
+        current = int(row["last_sequence"])
+        if current >= _MAX_SEQUENCE:
+            raise PermissionError("Aura Sec command sequence space is exhausted for this device")
+        next_sequence = current + 1
+        updated = con.execute(
+            """UPDATE aura_sec_command_sequence_state
+               SET last_sequence=?,updated_at=?
+               WHERE user_id=? AND device_id=? AND last_sequence=?""",
+            (next_sequence, _iso(updated_at), user_id, device_id, current),
+        )
+        if updated.rowcount != 1:
+            raise PermissionError("Aura Sec command sequence state changed concurrently")
+        return next_sequence
 
     def _device_identity(self, user_id: str, device_id: str) -> dict:
         with self._connect() as con:
@@ -259,30 +323,40 @@ class AuraSecCommandStore:
             ActionRisk.CONFIRMATION_REQUIRED,
             ActionRisk.STRONG_REAUTH_REQUIRED,
         } else None
-        command = SecurityCommand(
-            command_id=uuid4().hex,
-            device_id=action["device_id"],
-            action=action_type,
-            risk=risk,
-            issued_at=issued,
-            expires_at=command_expiry,
-            policy_version=(policy_version or "").strip(),
-            nonce=(nonce or "").strip(),
-            approval_id=approval_id,
-            parameters=parameters or {},
-        )
+
         with self._connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            sequence = self._reserve_next_sequence(
+                con,
+                user_id=user_id,
+                device_id=action["device_id"],
+                updated_at=issued,
+            )
+            command = SecurityCommand(
+                command_id=uuid4().hex,
+                device_id=action["device_id"],
+                sequence=sequence,
+                action=action_type,
+                risk=risk,
+                issued_at=issued,
+                expires_at=command_expiry,
+                policy_version=(policy_version or "").strip(),
+                nonce=(nonce or "").strip(),
+                approval_id=approval_id,
+                parameters=parameters or {},
+            )
             try:
                 con.execute(
                     """INSERT INTO aura_sec_commands
-                       (id,action_id,user_id,device_id,action_type,risk_class,policy_version,nonce_hash,
-                        parameters_json,status,issued_at,expires_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,'issued',?,?,?)""",
+                       (id,action_id,user_id,device_id,command_sequence,action_type,risk_class,
+                        policy_version,nonce_hash,parameters_json,status,issued_at,expires_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,'issued',?,?,?)""",
                     (
                         command.command_id,
                         action_id,
                         user_id,
                         command.device_id,
+                        command.sequence,
                         command.action.value,
                         command.risk.value,
                         command.policy_version,
@@ -294,7 +368,7 @@ class AuraSecCommandStore:
                     ),
                 )
             except sqlite3.IntegrityError as exc:
-                raise ValueError("Aura Sec action was already issued or nonce was replayed") from exc
+                raise ValueError("Aura Sec action was already issued, sequence conflicted, or nonce was replayed") from exc
         return command
 
     def get(self, user_id: str, command_id: str) -> dict:
@@ -310,6 +384,7 @@ class AuraSecCommandStore:
             item["parameters"] = json.loads(item.pop("parameters_json") or "{}")
         except json.JSONDecodeError:
             item["parameters"] = {}
+        item["sequence"] = item.pop("command_sequence", None)
         item.pop("nonce_hash", None)
         return item
 
@@ -346,7 +421,6 @@ class AuraSecCommandStore:
             self._decode_signature(signature_b64)
         ).hexdigest()
 
-        duplicate = False
         with self._connect() as con:
             latest = con.execute(
                 "SELECT * FROM aura_sec_commands WHERE user_id=? AND id=?",
@@ -358,11 +432,10 @@ class AuraSecCommandStore:
 
             if receipt.status == latest_status:
                 stored_payload_digest = str(latest["last_receipt_payload_digest"] or "").strip().lower()
-                if stored_payload_digest and secrets.compare_digest(
-                    stored_payload_digest, receipt_payload_digest
+                if not (
+                    stored_payload_digest
+                    and secrets.compare_digest(stored_payload_digest, receipt_payload_digest)
                 ):
-                    duplicate = True
-                else:
                     raise ValueError(
                         "Conflicting Aura Sec command receipt for the current lifecycle state"
                     )
