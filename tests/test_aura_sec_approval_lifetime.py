@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +16,60 @@ from aura_music_studio.aura_sec_approval_lifetime import (
 from aura_music_studio.aura_sec_command_store import AuraSecCommandStore
 from aura_music_studio.aura_sec_protocol import ActionRisk, ActionType
 from aura_music_studio.aura_sec_store import AuraSecStore
+from aura_music_studio.aura_sec_strong_reauth import (
+    StrongReauthAssertion,
+    VerifiedStrongReauthEvidence,
+)
+
+_STRONG_SECRET = b"aura-sec-approval-lifetime-strong-reauth-v1"
+_SESSION_BINDING = "a" * 64
+
+
+def _strong_assertion(user_id: str, action_id: str, device_id: str, *, nonce: str):
+    now = datetime.now(timezone.utc)
+    return StrongReauthAssertion(
+        user_id=user_id,
+        action_id=action_id,
+        device_id=device_id,
+        issued_at=now,
+        expires_at=now + timedelta(seconds=120),
+        challenge_nonce=nonce,
+        session_binding_digest=_SESSION_BINDING,
+        authentication_context="webauthn",
+    )
+
+
+def _strong_proof(assertion: StrongReauthAssertion) -> str:
+    raw = hashlib.sha256(_STRONG_SECRET + assertion.canonical_payload()).digest()
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _strong_verifier(assertion: StrongReauthAssertion, proof: bytes):
+    expected = hashlib.sha256(_STRONG_SECRET + assertion.canonical_payload()).digest()
+    if not secrets.compare_digest(proof, expected):
+        return None
+    return VerifiedStrongReauthEvidence(
+        subject_user_id=assertion.user_id,
+        action_id=assertion.action_id,
+        device_id=assertion.device_id,
+        session_binding_digest=assertion.session_binding_digest,
+        verifier_id="approval-lifetime-test-verifier",
+        authentication_method=assertion.authentication_context,
+        assurance_level="aal2",
+        credential_fingerprint="b" * 64,
+        evidence_digest=hashlib.sha256(assertion.canonical_payload()).hexdigest(),
+    )
+
+
+def _approve_strong(security, user_id: str, action_id: str, device_id: str, *, nonce: str):
+    assertion = _strong_assertion(user_id, action_id, device_id, nonce=nonce)
+    return security.approve_action_with_verified_reauth(
+        user_id,
+        action_id,
+        assertion,
+        proof_b64=_strong_proof(assertion),
+        evidence_verifier=_strong_verifier,
+    )
 
 
 def _setup(
@@ -55,11 +112,16 @@ def _setup(
         risk_class=risk.value,
         details=details,
     )
-    approved = security.approve_action(
-        signup.user_id,
-        action["id"],
-        strong_reauth_verified=risk is ActionRisk.STRONG_REAUTH_REQUIRED,
-    )
+    if risk is ActionRisk.STRONG_REAUTH_REQUIRED:
+        approved = _approve_strong(
+            security,
+            signup.user_id,
+            action["id"],
+            device["id"],
+            nonce="approval-lifetime-strong-0001",
+        )
+    else:
+        approved = security.approve_action(signup.user_id, action["id"])
     policy = AuraSecApprovalLifetime(accounts, security)
     commands = AuraSecCommandStore(accounts, security, policy)
     return accounts, security, policy, commands, signup.user_id, device, approved
@@ -148,7 +210,7 @@ def test_near_expiry_approval_cannot_create_tiny_last_second_command(tmp_path):
 
 
 def test_strong_reauth_action_must_be_explicitly_reauthorized_and_reapproved(tmp_path):
-    _accounts, security, policy, _commands, user_id, _device, approved = _setup(
+    _accounts, security, policy, _commands, user_id, device, approved = _setup(
         tmp_path,
         action_type=ActionType.REMOTE_WIPE,
         risk=ActionRisk.STRONG_REAUTH_REQUIRED,
@@ -163,19 +225,29 @@ def test_strong_reauth_action_must_be_explicitly_reauthorized_and_reapproved(tmp
     assert proposed_again["status"] == "proposed"
     assert proposed_again["approved_at"] is None
 
-    with pytest.raises(PermissionError, match="Strong re-authentication"):
+    with pytest.raises(PermissionError, match="Verifier-backed strong re-authentication evidence"):
         security.approve_action(
             user_id,
             approved["id"],
             strong_reauth_verified=False,
         )
-    approved_again = security.approve_action(
+    with pytest.raises(PermissionError, match="Boolean strong re-authentication flags are not trusted"):
+        security.approve_action(
+            user_id,
+            approved["id"],
+            strong_reauth_verified=True,
+        )
+
+    approved_again = _approve_strong(
+        security,
         user_id,
         approved["id"],
-        strong_reauth_verified=True,
+        device["id"],
+        nonce="approval-lifetime-strong-0002",
     )
     assert approved_again["status"] == "approved"
     assert approved_again["approved_at"]
+    assert approved_again["strong_reauth_verifier"] == "approval-lifetime-test-verifier"
 
 
 def test_only_expired_never_executed_actions_can_enter_reauthorization_flow(tmp_path):

@@ -560,14 +560,66 @@ class AuraSecStore:
         action = self.get_action(user_id, action_id)
         if action["status"] != "proposed":
             raise ValueError("Only proposed actions can be approved")
-        if action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value and not strong_reauth_verified:
-            raise PermissionError("Strong re-authentication is required for this action")
+        if strong_reauth_verified:
+            raise PermissionError(
+                "Boolean strong re-authentication flags are not trusted; verifier-backed evidence is required"
+            )
+        if action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value:
+            raise PermissionError(
+                "Verifier-backed strong re-authentication evidence is required for this action"
+            )
         with self._connect() as con:
-            con.execute(
-                "UPDATE aura_sec_actions SET status='approved',approved_at=? WHERE user_id=? AND id=?",
+            updated = con.execute(
+                """UPDATE aura_sec_actions SET status='approved',approved_at=?
+                   WHERE user_id=? AND id=? AND status='proposed'""",
                 (_iso(), user_id, action_id),
             )
+            if updated.rowcount != 1:
+                raise PermissionError("Aura Sec action state changed before approval")
         return self.get_action(user_id, action_id)
+
+    def approve_action_with_verified_reauth(
+        self,
+        user_id: str,
+        action_id: str,
+        assertion,
+        *,
+        proof_b64: str,
+        evidence_verifier,
+        now: datetime | None = None,
+    ) -> dict:
+        """Approve a strong-risk action only after verifier-backed bound proof is consumed."""
+        action = self.get_action(user_id, action_id)
+        if action["status"] != "proposed":
+            raise ValueError("Only proposed actions can be approved")
+        if action["risk_class"] != ActionRisk.STRONG_REAUTH_REQUIRED.value:
+            raise ValueError("This Aura Sec action does not require strong re-authentication")
+
+        from .aura_sec_strong_reauth import AuraSecStrongReauthGate
+
+        gate = AuraSecStrongReauthGate(self.accounts, self)
+        accepted = gate.verify_for_action(
+            user_id,
+            action_id,
+            assertion,
+            proof_b64=proof_b64,
+            evidence_verifier=evidence_verifier,
+            now=now,
+        )
+        with self._connect() as con:
+            updated = con.execute(
+                """UPDATE aura_sec_actions SET status='approved',approved_at=?
+                   WHERE user_id=? AND id=? AND status='proposed'""",
+                (accepted.verified_at.isoformat(), user_id, action_id),
+            )
+            if updated.rowcount != 1:
+                raise PermissionError("Aura Sec action state changed after strong re-authentication")
+        result = self.get_action(user_id, action_id)
+        result["strong_reauth_acceptance_id"] = accepted.acceptance_id
+        result["strong_reauth_verifier"] = accepted.verifier_id
+        result["strong_reauth_method"] = accepted.authentication_method
+        result["strong_reauth_assurance"] = accepted.assurance_level
+        return result
 
     def get_action(self, user_id: str, action_id: str) -> dict:
         with self._connect() as con:
