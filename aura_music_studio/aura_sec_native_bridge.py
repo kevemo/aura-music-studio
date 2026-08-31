@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .accounts import AccountStore
 from .aura_sec_action_parameters import validated_command_parameters
+from .aura_sec_approval_grants import is_action_authorization_current
 from .aura_sec_command_delivery import AuraSecCommandDeliveryStore
 from .aura_sec_command_signing import ServerCommandSigner, SignedSecurityCommand
 from .aura_sec_command_store import AuraSecCommandStore
@@ -264,18 +265,27 @@ class AuraSecNativeBridge:
                 except sqlite3.IntegrityError as exc:
                     raise PermissionError("Aura Sec native poll state changed concurrently") from exc
 
-    def _next_approved_action_id(self, user_id: str, device_id: str) -> str | None:
+    def _next_approved_action_id(
+        self,
+        user_id: str,
+        device_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> str | None:
+        current = (now or _now()).astimezone(timezone.utc)
         with self._connect() as con:
-            row = con.execute(
-                """SELECT a.id
+            rows = con.execute(
+                """SELECT a.id,a.risk_class,a.approved_at
                    FROM aura_sec_actions a
                    LEFT JOIN aura_sec_commands c ON c.action_id=a.id
                    WHERE a.user_id=? AND a.device_id=? AND a.status='approved' AND c.id IS NULL
-                   ORDER BY COALESCE(a.approved_at,a.requested_at) ASC
-                   LIMIT 1""",
+                   ORDER BY COALESCE(a.approved_at,a.requested_at) ASC""",
                 (user_id, device_id),
-            ).fetchone()
-        return str(row["id"]) if row else None
+            ).fetchall()
+        for row in rows:
+            if is_action_authorization_current(dict(row), now=current):
+                return str(row["id"])
+        return None
 
     @staticmethod
     def _response(
@@ -332,13 +342,17 @@ class AuraSecNativeBridge:
                 ),
             )
 
-        action_id = self._next_approved_action_id(user_id, poll.device_id)
+        action_id = self._next_approved_action_id(
+            user_id,
+            poll.device_id,
+            now=verified_at,
+        )
         if not action_id:
             return self._response(
                 command=None,
                 poll=poll,
                 verification=verification,
-                truth="No previously-approved bounded action is waiting for this verified device session.",
+                truth="No currently-authorized bounded action is waiting for this verified device session.",
             )
 
         if self.command_signer is None:
@@ -384,8 +398,8 @@ class AuraSecNativeBridge:
             verification=verification,
             truth=(
                 "The command was issued only after verifier-backed enrolled-device signature proof, replay protection, "
-                "prior action approval, strict per-action parameter validation, Ed25519 server authentication and "
-                "durable pre-transport persistence for exact retry delivery."
+                "a still-valid bounded approval grant, strict per-action parameter validation, Ed25519 server "
+                "authentication and durable pre-transport persistence for exact retry delivery."
             ),
         )
 
