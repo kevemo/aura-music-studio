@@ -269,7 +269,7 @@ def test_store_rejects_risk_downgrade_for_destructive_action(tmp_path):
         )
 
 
-def test_incident_and_high_risk_action_require_explicit_approval(tmp_path):
+def test_incident_and_high_risk_action_reject_boolean_strong_reauth_shortcut(tmp_path):
     _accounts, security, user_id = _stores(tmp_path)
     device = _licensed_device(security, user_id, reference="verified-payment-004", fingerprint="f")
     incident = security.create_incident(
@@ -293,9 +293,8 @@ def test_incident_and_high_risk_action_require_explicit_approval(tmp_path):
     assert action["action_type"] == "remote_wipe"
     assert action["risk_class"] == "strong_reauth_required"
 
-    with pytest.raises(PermissionError, match="Strong re-authentication"):
+    with pytest.raises(PermissionError, match="Verifier-backed strong re-authentication evidence"):
         security.approve_action(user_id, action["id"], strong_reauth_verified=False)
-
-    approved = security.approve_action(user_id, action["id"], strong_reauth_verified=True)
-    assert approved["status"] == "approved"
-    assert approved["approved_at"]
+    with pytest.raises(PermissionError, match="Boolean strong re-authentication flags are not trusted"):
+        security.approve_action(user_id, action["id"], strong_reauth_verified=True)
+    assert security.get_action(user_id, action["id"])["status"] == "proposed"
