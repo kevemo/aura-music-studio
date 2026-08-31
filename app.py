@@ -113,6 +113,7 @@ from aura_music_studio.song_dna_execution_overlay import router as song_dna_exec
 from aura_music_studio.song_dna_execution_portal import router as song_dna_execution_portal_router
 from aura_music_studio.song_dna_portal import router as song_dna_portal_router
 from aura_music_studio.source_detection_api import router as source_detection_router
+from aura_music_studio.stripe_billing_hardening import router as stripe_billing_hardening_router
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
@@ -211,6 +212,9 @@ app.include_router(owner_user_intelligence_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
 app.include_router(provider_cost_governance_router)
+# Hardened Stripe subscription, Creation Coin and marketplace routes must be mounted once at the
+# production entrypoint so payment effects can only flow through provider-evidence controls.
+app.include_router(stripe_billing_hardening_router)
 
 app.include_router(daw_router)
 app.include_router(daw_midi_router)
