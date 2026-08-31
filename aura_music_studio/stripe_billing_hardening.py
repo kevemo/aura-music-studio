@@ -33,6 +33,7 @@ from .stripe_marketplace_commerce import (
 )
 
 router = APIRouter(tags=["Stripe Billing Security"])
+_REFUND_EVENT_TYPES = frozenset({"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"})
 
 
 def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[str, Any]) -> None:
@@ -84,6 +85,26 @@ def _require_signed_in_user(request: Request) -> dict[str, Any]:
     return _session_user(request)
 
 
+def _begin_marketplace_event(event: dict[str, Any], raw: bytes) -> dict[str, Any]:
+    try:
+        return evidence_store.begin_event(event, raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+def _terminal_duplicate_response(evidence: dict[str, Any], event_id: str) -> dict[str, Any] | None:
+    prior_status = str(evidence.get("processing_status") or "")
+    if evidence.get("duplicate") and prior_status in {"processed", "ignored"}:
+        return {
+            "received": True,
+            "duplicate": True,
+            "event_id": event_id,
+            "status": prior_status,
+            "marketplace": True,
+        }
+    return None
+
+
 @router.get("/billing/creation-coins/catalog")
 def hardened_creation_coin_catalog(request: Request):
     _require_signed_in_user(request)
@@ -133,6 +154,8 @@ async def hardened_stripe_webhook(request: Request):
     Marketplace payment/refund events are audited in the same Stripe evidence store but are not
     delegated to the legacy subscription/Coin processor. Their commercial facts are reconstructed
     from immutable local orders plus canonical Stripe provider objects before settlement mutation.
+    Refund classification also tolerates webhook reordering by resolving a Refund PaymentIntent
+    back to a locally bound Checkout Session through Stripe when fee evidence is not yet present.
     """
     config = StripeConfig.from_env()
     if not config.webhook_configured:
@@ -150,21 +173,27 @@ async def hardened_stripe_webhook(request: Request):
     event_type = str(event.get("type") or "")
     obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
 
-    if isinstance(obj, dict) and is_marketplace_stripe_event(event_type, obj):
+    marketplace_event = False
+    if isinstance(obj, dict):
         try:
-            marketplace_evidence = evidence_store.begin_event(event, raw)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+            marketplace_event = is_marketplace_stripe_event(event_type, obj, config=config)
+        except RuntimeError as exc:
+            # Refund events can require a provider lookup to resolve out-of-order delivery. Persist
+            # that transient failure so the same signed event can be retried instead of being lost.
+            if event_type not in _REFUND_EVENT_TYPES:
+                raise HTTPException(502, str(exc)) from exc
+            failed_evidence = _begin_marketplace_event(event, raw)
+            duplicate = _terminal_duplicate_response(failed_evidence, event_id)
+            if duplicate is not None:
+                return duplicate
+            evidence_store.finish_event(event_id, "failed", str(exc))
+            raise HTTPException(502, str(exc)) from exc
 
-        prior_status = str(marketplace_evidence.get("processing_status") or "")
-        if marketplace_evidence.get("duplicate") and prior_status in {"processed", "ignored"}:
-            return {
-                "received": True,
-                "duplicate": True,
-                "event_id": event_id,
-                "status": prior_status,
-                "marketplace": True,
-            }
+    if marketplace_event:
+        marketplace_evidence = _begin_marketplace_event(event, raw)
+        duplicate = _terminal_duplicate_response(marketplace_evidence, event_id)
+        if duplicate is not None:
+            return duplicate
 
         try:
             result = process_verified_marketplace_stripe_event(
