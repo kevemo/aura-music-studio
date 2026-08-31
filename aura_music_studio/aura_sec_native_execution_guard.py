@@ -237,6 +237,7 @@ class AuraSecNativeExecutionGuard:
             field="native execution result evidence digest",
         )
         completed_at = _iso(now)
+        already_complete = False
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
@@ -250,20 +251,24 @@ class AuraSecNativeExecutionGuard:
             state = str(row["state"])
             if state == "completed":
                 stored = str(row["result_evidence_digest"] or "").strip().lower()
-                if secrets.compare_digest(stored, digest):
-                    return self.get(device_id=device_id, command_id=command_id)
-                raise ValueError("Conflicting Aura Sec completion evidence for command")
-            if state != "reserved":
+                if not secrets.compare_digest(stored, digest):
+                    raise ValueError("Conflicting Aura Sec completion evidence for command")
+                already_complete = True
+            elif state != "reserved":
                 raise ValueError("Only a reserved Aura Sec native command can complete")
-            updated = con.execute(
-                """UPDATE aura_sec_native_execution_guard
-                   SET state='completed',completed_at=?,result_evidence_digest=?
-                   WHERE device_id=? AND command_id=? AND state='reserved'""",
-                (completed_at, digest, device_id, command_id),
-            )
-            if updated.rowcount != 1:
-                raise PermissionError("Aura Sec native execution state changed concurrently")
-        return self.get(device_id=device_id, command_id=command_id)
+            else:
+                updated = con.execute(
+                    """UPDATE aura_sec_native_execution_guard
+                       SET state='completed',completed_at=?,result_evidence_digest=?
+                       WHERE device_id=? AND command_id=? AND state='reserved'""",
+                    (completed_at, digest, device_id, command_id),
+                )
+                if updated.rowcount != 1:
+                    raise PermissionError("Aura Sec native execution state changed concurrently")
+        result = self.get(device_id=device_id, command_id=command_id)
+        if already_complete and result.get("state") != "completed":
+            raise PermissionError("Aura Sec native completion state changed concurrently")
+        return result
 
     def mark_failed(
         self,
@@ -277,6 +282,7 @@ class AuraSecNativeExecutionGuard:
         if not _FAILURE_CODE.fullmatch(code):
             raise ValueError("Aura Sec native execution failure code is invalid")
         failed_at = _iso(now)
+        already_failed = False
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             row = con.execute(
@@ -288,20 +294,24 @@ class AuraSecNativeExecutionGuard:
                 raise ValueError("Aura Sec native command was not reserved for execution")
             state = str(row["state"])
             if state == "failed":
-                if secrets.compare_digest(str(row["failure_code"] or ""), code):
-                    return self.get(device_id=device_id, command_id=command_id)
-                raise ValueError("Conflicting Aura Sec failure evidence for command")
-            if state != "reserved":
+                if not secrets.compare_digest(str(row["failure_code"] or ""), code):
+                    raise ValueError("Conflicting Aura Sec failure evidence for command")
+                already_failed = True
+            elif state != "reserved":
                 raise ValueError("Only a reserved Aura Sec native command can fail")
-            updated = con.execute(
-                """UPDATE aura_sec_native_execution_guard
-                   SET state='failed',failed_at=?,failure_code=?
-                   WHERE device_id=? AND command_id=? AND state='reserved'""",
-                (failed_at, code, device_id, command_id),
-            )
-            if updated.rowcount != 1:
-                raise PermissionError("Aura Sec native execution state changed concurrently")
-        return self.get(device_id=device_id, command_id=command_id)
+            else:
+                updated = con.execute(
+                    """UPDATE aura_sec_native_execution_guard
+                       SET state='failed',failed_at=?,failure_code=?
+                       WHERE device_id=? AND command_id=? AND state='reserved'""",
+                    (failed_at, code, device_id, command_id),
+                )
+                if updated.rowcount != 1:
+                    raise PermissionError("Aura Sec native execution state changed concurrently")
+        result = self.get(device_id=device_id, command_id=command_id)
+        if already_failed and result.get("state") != "failed":
+            raise PermissionError("Aura Sec native failure state changed concurrently")
+        return result
 
     def get(self, *, device_id: str, command_id: str) -> dict:
         with self._connect() as con:
