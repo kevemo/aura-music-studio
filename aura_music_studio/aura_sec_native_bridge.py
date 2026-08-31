@@ -13,7 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .accounts import AccountStore
 from .aura_sec_action_parameters import validated_command_parameters
-from .aura_sec_command_signing import ServerCommandSigner
+from .aura_sec_command_delivery import AuraSecCommandDeliveryStore
+from .aura_sec_command_signing import ServerCommandSigner, SignedSecurityCommand
 from .aura_sec_command_store import AuraSecCommandStore
 from .aura_sec_store import AuraSecStore
 
@@ -99,8 +100,8 @@ class AuraSecNativeBridge:
     A trusted verifier adapter must validate the canonical poll payload against the enrolled
     device identity. Replay state advances only after that proof succeeds. The bridge issues
     at most one previously-approved action per verified poll, applies the strict parameter
-    firewall, and refuses to deliver any native command unless a server signing authority
-    cryptographically authenticates the exact bounded command payload.
+    firewall, durably persists the exact signed envelope before transport and redelivers that
+    same envelope after response loss. It never falls back to unsigned native commands.
     """
 
     def __init__(
@@ -109,11 +110,13 @@ class AuraSecNativeBridge:
         security: AuraSecStore | None = None,
         commands: AuraSecCommandStore | None = None,
         command_signer: ServerCommandSigner | None = None,
+        deliveries: AuraSecCommandDeliveryStore | None = None,
     ):
         self.accounts = accounts or AccountStore()
         self.security = security or AuraSecStore(self.accounts)
         self.commands = commands or AuraSecCommandStore(self.accounts, self.security)
         self.command_signer = command_signer
+        self.deliveries = deliveries or AuraSecCommandDeliveryStore(self.accounts)
         self._init_schema()
 
     def _connect(self):
@@ -225,8 +228,6 @@ class AuraSecNativeBridge:
         *,
         verified_at: datetime,
     ) -> None:
-        # Re-check authority immediately before mutating replay state to narrow races with
-        # licence expiry or device revocation that may occur during external verification.
         if self.security.licence(user_id).get("status") != "active":
             raise PermissionError("Active Aura Sec licence required")
         device = self.security.get_device(user_id, poll.device_id)
@@ -276,6 +277,26 @@ class AuraSecNativeBridge:
             ).fetchone()
         return str(row["id"]) if row else None
 
+    @staticmethod
+    def _response(
+        *,
+        command: SignedSecurityCommand | None,
+        poll: NativeCommandPoll,
+        verification: VerifiedNativePollSignature,
+        truth: str,
+    ) -> dict:
+        return {
+            "command": command.model_dump(mode="json") if command is not None else None,
+            "poll_sequence": poll.sequence,
+            "verification": {
+                "verifier_id": verification.verifier_id,
+                "key_algorithm": verification.key_algorithm,
+                "evidence_digest": verification.evidence_digest,
+            },
+            "member_browser_route_exposed": False,
+            "truth": truth,
+        }
+
     def poll_verified_command(
         self,
         user_id: str,
@@ -285,7 +306,7 @@ class AuraSecNativeBridge:
         signature_verifier: NativePollSignatureVerifier | None,
         now: datetime | None = None,
     ) -> dict:
-        """Return at most one freshly-issued, server-signed command to a verified native client."""
+        """Return at most one valid durable server-signed command to a verified native client."""
         verified_at = self._validate_poll_context(user_id, poll, now=now)
         verification = self._verify_poll_signature(
             user_id,
@@ -295,22 +316,31 @@ class AuraSecNativeBridge:
         )
         self._accept_verified_poll_sequence(user_id, poll, verified_at=verified_at)
 
+        pending = self.deliveries.next_pending_for_device(
+            user_id,
+            poll.device_id,
+            now=verified_at,
+        )
+        if pending is not None:
+            return self._response(
+                command=pending,
+                poll=poll,
+                verification=verification,
+                truth=(
+                    "A previously-issued signed command was durably redelivered unchanged after a new authenticated "
+                    "device poll. The command id, nonce, parameters, expiry and server signature are identical."
+                ),
+            )
+
         action_id = self._next_approved_action_id(user_id, poll.device_id)
         if not action_id:
-            return {
-                "command": None,
-                "poll_sequence": poll.sequence,
-                "verification": {
-                    "verifier_id": verification.verifier_id,
-                    "key_algorithm": verification.key_algorithm,
-                    "evidence_digest": verification.evidence_digest,
-                },
-                "member_browser_route_exposed": False,
-                "truth": "No previously-approved bounded action is waiting for this verified device session.",
-            }
+            return self._response(
+                command=None,
+                poll=poll,
+                verification=verification,
+                truth="No previously-approved bounded action is waiting for this verified device session.",
+            )
 
-        # Fail before command persistence if the deployment has not configured an explicit
-        # server signing authority. Aura Sec never falls back to an unsigned native command.
         if self.command_signer is None:
             raise PermissionError("Aura Sec server command signer is required before native command issuance")
 
@@ -325,29 +355,39 @@ class AuraSecNativeBridge:
             ttl_seconds=300,
         )
         try:
-            signed_command = self.command_signer.sign_command(command)
+            signed_command = SignedSecurityCommand.model_validate(
+                self.command_signer.sign_command(command)
+            )
         except Exception as exc:
-            # The command has not been returned to a device, so fail closed. A later hardening
-            # slice will add durable signed-command redelivery/rollback semantics for remote
-            # HSM failures and post-sign network loss; do not silently emit an unsigned command.
+            self.deliveries.abandon_never_delivered(user_id, command.command_id)
             raise PermissionError("Aura Sec server command signing failed closed") from exc
+
         if signed_command.unsigned_command().model_dump(mode="json") != command.model_dump(mode="json"):
+            self.deliveries.abandon_never_delivered(user_id, command.command_id)
             raise PermissionError("Aura Sec server command signer altered the bounded command payload")
 
-        return {
-            "command": signed_command.model_dump(mode="json"),
-            "poll_sequence": poll.sequence,
-            "verification": {
-                "verifier_id": verification.verifier_id,
-                "key_algorithm": verification.key_algorithm,
-                "evidence_digest": verification.evidence_digest,
-            },
-            "member_browser_route_exposed": False,
-            "truth": (
+        try:
+            durable = self.deliveries.persist_first_delivery(
+                user_id,
+                signed_command,
+                delivered_at=verified_at,
+            )
+        except Exception as exc:
+            self.deliveries.abandon_never_delivered(user_id, command.command_id)
+            raise PermissionError(
+                "Aura Sec signed command could not be durably recorded before delivery"
+            ) from exc
+
+        return self._response(
+            command=durable,
+            poll=poll,
+            verification=verification,
+            truth=(
                 "The command was issued only after verifier-backed enrolled-device signature proof, replay protection, "
-                "prior action approval, strict per-action parameter validation and Ed25519 server authentication."
+                "prior action approval, strict per-action parameter validation, Ed25519 server authentication and "
+                "durable pre-transport persistence for exact retry delivery."
             ),
-        }
+        )
 
 
 __all__ = [
