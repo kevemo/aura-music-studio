@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .accounts import AccountStore
 from .aura_sec_action_parameters import validated_command_parameters
 from .aura_sec_command_delivery import AuraSecCommandDeliveryStore
+from .aura_sec_command_sequence import sequenced_command_nonce
 from .aura_sec_command_signing import ServerCommandSigner, SignedSecurityCommand
 from .aura_sec_command_store import AuraSecCommandStore
 from .aura_sec_store import AuraSecStore
@@ -350,7 +351,7 @@ class AuraSecNativeBridge:
             user_id,
             action_id,
             policy_version=poll.policy_version,
-            nonce=secrets.token_urlsafe(32),
+            nonce=sequenced_command_nonce(poll.sequence),
             parameters=parameters,
             ttl_seconds=300,
         )
@@ -384,8 +385,8 @@ class AuraSecNativeBridge:
             verification=verification,
             truth=(
                 "The command was issued only after verifier-backed enrolled-device signature proof, replay protection, "
-                "prior action approval, strict per-action parameter validation, Ed25519 server authentication and "
-                "durable pre-transport persistence for exact retry delivery."
+                "prior action approval, strict per-action parameter validation, signed poll-sequence binding, "
+                "Ed25519 server authentication and durable pre-transport persistence for exact retry delivery."
             ),
         )
 
