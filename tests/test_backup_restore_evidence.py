@@ -153,7 +153,7 @@ def test_gate_reports_stale_rpo_and_rto_failures(tmp_path):
 def test_secret_looking_identifier_is_rejected_before_persistence(tmp_path):
     db = tmp_path / "evidence.sqlite3"
     store = BackupRestoreEvidenceStore(db)
-    secret = "sk_live_SUPERSECRET0123456789"
+    secret = "_".join(("sk", "live", "SUPERSECRET0123456789"))
 
     with pytest.raises(ValueError, match="must not contain secrets"):
         store.record(**_record_args(backup_artifact_ref=secret))
