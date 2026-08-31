@@ -18,6 +18,7 @@ def _config():
         secret_key="sk_test_private",
         webhook_secret="whsec_test_private",
         public_base_url="https://command.example",
+        webhook_configured=True,
     )
 
 
