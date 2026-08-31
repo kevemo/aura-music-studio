@@ -47,6 +47,21 @@ def _order(store: MarketplaceOrderStore, **overrides):
     return store.create_order(**data)
 
 
+def _bound_session(order: dict, session_id: str = "cs_bound") -> dict:
+    return {
+        "id": session_id,
+        "mode": "payment",
+        "client_reference_id": order["buyer_user_id"],
+        "metadata": {
+            "purchase_kind": "marketplace",
+            "marketplace_order_id": order["id"],
+        },
+        "amount_total": order["gross_minor"],
+        "currency": str(order["currency"]).lower(),
+        "url": f"https://checkout.stripe.com/c/pay/{session_id}",
+    }
+
+
 def test_checkout_submits_only_server_authoritative_price_and_opaque_order_metadata(tmp_path, monkeypatch):
     store = MarketplaceOrderStore(tmp_path / "marketplace.sqlite3")
     order = _order(store)
@@ -85,6 +100,11 @@ def test_cross_buyer_checkout_is_rejected_before_stripe(tmp_path, monkeypatch):
         "post",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Stripe must not be called")),
     )
+    monkeypatch.setattr(
+        marketplace,
+        "_stripe_get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Stripe must not be called")),
+    )
 
     with pytest.raises(PermissionError):
         marketplace.create_stripe_marketplace_session(
@@ -94,14 +114,17 @@ def test_cross_buyer_checkout_is_rejected_before_stripe(tmp_path, monkeypatch):
         )
 
 
-def test_non_stripe_and_already_bound_orders_fail_before_submission(tmp_path, monkeypatch):
+def test_non_stripe_order_fails_before_provider_submission(tmp_path, monkeypatch):
     store = MarketplaceOrderStore(tmp_path / "marketplace.sqlite3")
     other = _order(store, provider="paypal", publication_id="publication-b")
-    bound = _order(store, publication_id="publication-c")
-    store.bind_provider_checkout(order_id=bound["id"], provider_checkout_reference="cs_bound")
     monkeypatch.setattr(
         marketplace.httpx,
         "post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Stripe must not be called")),
+    )
+    monkeypatch.setattr(
+        marketplace,
+        "_stripe_get",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Stripe must not be called")),
     )
 
@@ -111,10 +134,48 @@ def test_non_stripe_and_already_bound_orders_fail_before_submission(tmp_path, mo
             user={"id": "buyer-a"},
             config=_config(),
         )
-    with pytest.raises(RuntimeError):
+
+
+def test_bound_order_recovers_same_verified_checkout_without_new_post(tmp_path, monkeypatch):
+    store = MarketplaceOrderStore(tmp_path / "marketplace.sqlite3")
+    order = _order(store)
+    store.bind_provider_checkout(order_id=order["id"], provider_checkout_reference="cs_bound")
+    bound = marketplace._load_order(store, order["id"])
+    monkeypatch.setattr(
+        marketplace.httpx,
+        "post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not create another Checkout Session")),
+    )
+    requested = []
+    monkeypatch.setattr(
+        marketplace,
+        "_stripe_get",
+        lambda config, path: requested.append(path) or _bound_session(bound),
+    )
+
+    session = marketplace.create_stripe_marketplace_session(
+        order=bound,
+        user={"id": "buyer-a", "email": "buyer@example.test"},
+        config=_config(),
+    )
+
+    assert session["id"] == "cs_bound"
+    assert requested == ["/v1/checkout/sessions/cs_bound"]
+
+
+def test_bound_order_recovery_fails_closed_when_provider_identity_changes(tmp_path, monkeypatch):
+    store = MarketplaceOrderStore(tmp_path / "marketplace.sqlite3")
+    order = _order(store)
+    store.bind_provider_checkout(order_id=order["id"], provider_checkout_reference="cs_bound")
+    bound = marketplace._load_order(store, order["id"])
+    changed = _bound_session(bound)
+    changed["amount_total"] = 2600
+    monkeypatch.setattr(marketplace, "_stripe_get", lambda config, path: changed)
+
+    with pytest.raises(RuntimeError, match="could not be revalidated"):
         marketplace.create_stripe_marketplace_session(
-            order=marketplace._load_order(store, bound["id"]),
-            user={"id": "buyer-a"},
+            order=bound,
+            user={"id": "buyer-a", "email": "buyer@example.test"},
             config=_config(),
         )
 
@@ -143,6 +204,34 @@ def test_checkout_route_requires_active_bound_buyer_and_binds_session(tmp_path, 
     assert payload["esp_role_effect"] == "none"
     rebound = marketplace._load_order(store, order["id"])
     assert rebound["provider_checkout_reference"] == "cs_route"
+
+
+def test_checkout_route_can_resume_already_bound_session(tmp_path, monkeypatch):
+    store = MarketplaceOrderStore(tmp_path / "marketplace.sqlite3")
+    order = _order(store)
+    store.bind_provider_checkout(order_id=order["id"], provider_checkout_reference="cs_resume")
+    bound = marketplace._load_order(store, order["id"])
+    monkeypatch.setattr(marketplace, "orders", store)
+    monkeypatch.setattr(
+        marketplace,
+        "_session_user",
+        lambda request: {"id": "buyer-a", "email": "buyer@example.test", "status": "active"},
+    )
+    monkeypatch.setattr(marketplace.StripeConfig, "from_env", classmethod(lambda cls: _config()))
+    monkeypatch.setattr(marketplace, "_stripe_get", lambda config, path: _bound_session(bound, "cs_resume"))
+    monkeypatch.setattr(
+        marketplace.httpx,
+        "post",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not create another Checkout Session")),
+    )
+
+    app = FastAPI()
+    app.include_router(marketplace.router)
+    response = TestClient(app).post("/billing/stripe/checkout/marketplace", json={"order_id": order["id"]})
+
+    assert response.status_code == 200
+    assert response.json()["checkout_session_id"] == "cs_resume"
+    assert response.json()["checkout_url"].endswith("/cs_resume")
 
 
 def test_marketplace_router_is_mounted_on_production_entrypoint():
