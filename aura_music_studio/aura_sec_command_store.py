@@ -12,6 +12,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_approval_grants import AuraSecApprovalGrantStore
 from .aura_sec_protocol import ActionRisk, ActionType, CommandReceipt, SecurityCommand
 from .aura_sec_store import AuraSecStore
 
@@ -79,6 +80,7 @@ class AuraSecCommandStore:
     def __init__(self, accounts: AccountStore | None = None, security: AuraSecStore | None = None):
         self.accounts = accounts or AccountStore()
         self.security = security or AuraSecStore(self.accounts)
+        self.approvals = AuraSecApprovalGrantStore(self.accounts)
         self._init_schema()
 
     def _connect(self):
@@ -231,17 +233,24 @@ class AuraSecCommandStore:
             raise ValueError("Stored Aura Sec action is not compatible with the bounded command protocol") from exc
 
         issued = _now()
-        approval_id = action_id if risk in {
-            ActionRisk.CONFIRMATION_REQUIRED,
-            ActionRisk.STRONG_REAUTH_REQUIRED,
-        } else None
+        grant = self.approvals.ensure_for_approved_action(user_id, action, now=issued)
+        approval_id = str(grant["id"]) if grant is not None else None
+        expires_at = issued + timedelta(seconds=int(ttl_seconds))
+        if grant is not None:
+            grant_expires_at = datetime.fromisoformat(str(grant["expires_at"])).astimezone(timezone.utc)
+            expires_at = min(expires_at, grant_expires_at)
+            if (expires_at - issued).total_seconds() < 30:
+                raise PermissionError(
+                    "Aura Sec approval grant is too close to expiry; fresh authorization is required"
+                )
+
         command = SecurityCommand(
             command_id=uuid4().hex,
             device_id=action["device_id"],
             action=action_type,
             risk=risk,
             issued_at=issued,
-            expires_at=issued + timedelta(seconds=int(ttl_seconds)),
+            expires_at=expires_at,
             policy_version=(policy_version or "").strip(),
             nonce=(nonce or "").strip(),
             approval_id=approval_id,
