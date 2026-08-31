@@ -247,14 +247,19 @@ def test_native_poll_sequence_replay_is_rejected(tmp_path):
         _poll_command(bridge, user_id, poll)
 
 
-def test_next_verified_poll_returns_no_command_after_action_was_issued(tmp_path):
+def test_next_verified_poll_redelivers_exact_same_signed_command_after_issue(tmp_path):
     user_id, _security, device, _action, bridge = _setup(tmp_path)
-    first = _poll(device["id"])
-    _poll_command(bridge, user_id, first)
+    first_poll = _poll(device["id"])
+    first = _poll_command(bridge, user_id, first_poll)
     second = _poll(device["id"], sequence=2, nonce="native-poll-nonce-0002")
     result = _poll_command(bridge, user_id, second)
-    assert result["command"] is None
+
+    assert result["command"] is not None
+    assert result["command"] == first["command"]
+    assert result["command"]["command_id"] == first["command"]["command_id"]
+    assert result["command"]["signature_b64"] == first["command"]["signature_b64"]
     assert result["verification"]["evidence_digest"] == hashlib.sha256(second.signed_payload()).hexdigest()
+    assert "redelivered unchanged" in result["truth"]
 
 
 def test_unregistered_or_smuggled_command_parameters_fail_closed(tmp_path):
