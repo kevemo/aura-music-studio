@@ -29,6 +29,13 @@ def _positive_minor(value: Any, *, field: str) -> int:
     return result
 
 
+def _nonnegative_minor(value: Any, *, field: str) -> int:
+    result = _signed_minor(value, field=field)
+    if result < 0:
+        raise ValueError(f"Stripe marketplace refund evidence requires a non-negative {field}")
+    return result
+
+
 def _original_fee_evidence(
     store: StripeMarketplaceFeeEvidenceStore,
     *,
@@ -153,7 +160,7 @@ class StripeMarketplaceRefundEvidenceStore:
         )
         currency = _currency(currency)
         original_gross_minor = _positive_minor(original_gross_minor, field="original gross amount")
-        original_net_minor = _positive_minor(original_net_minor, field="original net amount")
+        original_net_minor = _nonnegative_minor(original_net_minor, field="original net amount")
 
         if provider_balance_amount_minor != -customer_refund_minor:
             raise ValueError("Stripe refund Balance Transaction amount does not match the customer refund")
