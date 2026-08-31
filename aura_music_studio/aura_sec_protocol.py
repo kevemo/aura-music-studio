@@ -132,6 +132,7 @@ class SecurityCommand(StrictModel):
     schema_version: Literal[1] = 1
     command_id: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
     device_id: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    sequence: int = Field(default=1, ge=1, le=9_223_372_036_854_775_807)
     action: ActionType
     risk: ActionRisk
     issued_at: datetime
@@ -169,7 +170,7 @@ class SecurityCommand(StrictModel):
 
         # Defense in depth: the protocol object itself enforces the exact action schema.
         # This prevents a future caller from bypassing the parameter-firewall helper and
-        # smuggling arbitrary shell, path, URL, command-line or executable fields into a
+        # smuggling arbitrary shell, path, URL, command-line or executable content into a
         # privileged native command.
         from .aura_sec_action_parameters import validated_command_parameters
 
