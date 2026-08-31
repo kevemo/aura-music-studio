@@ -347,7 +347,7 @@ def sample_loop(project_name: str, asset_id: str, bars: int, bpm: float):
     project = _project(project_name)
     record = AssetLibrary(project).get(asset_id)
     if record.kind != "audio":
-        raise HTTPException(400, "Sample analysis requires audio")
+        raise HTTPException(400, "Loop creation requires audio")
     out = project / "output" / "samples" / f"{Path(record.name).stem}_{bars}bar_{bpm:g}bpm.wav"
     out.parent.mkdir(parents=True, exist_ok=True)
     make_loop(project / record.path, out, bars=bars, bpm=bpm)
