@@ -7,19 +7,27 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+from .creation_coin_catalog import validate_creation_coin_packs
 from .plans import get_plan
 from .stripe_billing import (
+    CreditCheckoutRequest,
     StripeConfig,
     _billing_reason,
+    _session_user,
     _subscription_id,
+    create_credit_checkout as base_create_credit_checkout,
+    credit_packs,
     evidence_store,
     stripe_webhook as base_stripe_webhook,
     verify_webhook_signature,
 )
-from .stripe_creation_coins import router as stripe_creation_coins_router
+from .stripe_creation_coins import (
+    creation_coin_catalog as base_creation_coin_catalog,
+    creation_coin_storefront as base_creation_coin_storefront,
+    router as stripe_creation_coins_router,
+)
 
 router = APIRouter(tags=["Stripe Billing Security"])
-router.include_router(stripe_creation_coins_router)
 
 
 def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[str, Any]) -> None:
@@ -54,6 +62,52 @@ def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[s
         raise ValueError("Stripe renewal invoice subscription does not match the local binding")
 
 
+def _validated_creation_coin_packs():
+    try:
+        return validate_creation_coin_packs(credit_packs())
+    except ValueError as exc:
+        raise HTTPException(503, "Creation Coin catalogue is not safely configured") from exc
+
+
+def _require_signed_in_user(request: Request) -> dict[str, Any]:
+    """Preserve the existing authentication boundary before configuration disclosure.
+
+    Missing/invalid member sessions must continue to receive the established 401 response even
+    when the private Creation Coin deployment configuration is absent or invalid. This prevents
+    unauthenticated callers from probing billing-readiness state through storefront endpoints.
+    """
+    return _session_user(request)
+
+
+@router.get("/billing/creation-coins/catalog")
+def hardened_creation_coin_catalog(request: Request):
+    _require_signed_in_user(request)
+    _validated_creation_coin_packs()
+    response = base_creation_coin_catalog(request)
+    if isinstance(response, dict):
+        try:
+            validate_creation_coin_packs({str(index): pack for index, pack in enumerate(response.get("packs") or [])})
+        except ValueError as exc:
+            raise HTTPException(503, "Creation Coin catalogue changed during request processing") from exc
+    return response
+
+
+@router.get("/billing/creation-coins", response_class=HTMLResponse)
+def hardened_creation_coin_storefront(request: Request):
+    _require_signed_in_user(request)
+    _validated_creation_coin_packs()
+    return base_creation_coin_storefront(request)
+
+
+@router.post("/billing/stripe/checkout/credits")
+def hardened_credit_checkout(body: CreditCheckoutRequest, request: Request):
+    # Keep authentication ahead of catalogue validation so unauthenticated callers cannot use
+    # checkout as a billing-configuration oracle. The browser still supplies only a pack ID.
+    _require_signed_in_user(request)
+    _validated_creation_coin_packs()
+    return base_create_credit_checkout(body, request)
+
+
 @router.get("/billing/stripe/success", response_class=HTMLResponse)
 def hardened_stripe_success(session_id: str = ""):
     """Render the informational Stripe return page without reflecting untrusted HTML."""
@@ -69,11 +123,11 @@ def hardened_stripe_success(session_id: str = ""):
 
 @router.post("/billing/stripe/webhook")
 async def hardened_stripe_webhook(request: Request):
-    """Preflight renewal invoices, then delegate to the idempotent Stripe processor.
+    """Preflight immutable Coin values/renewals, then delegate to Stripe's idempotent processor.
 
-    Checkout, credit and non-renewal events remain owned by the base Stripe processor. The
-    request body is cached by Starlette, so the delegated handler verifies the same raw bytes
-    and signature again before it mutates any billing state.
+    The same raw body and signature are verified again by the delegated base processor before
+    any wallet or subscription mutation. Credit-top-up events are additionally blocked here
+    unless the deployment exposes the complete authoritative Creation Coin catalogue.
     """
     config = StripeConfig.from_env()
     if not config.webhook_configured:
@@ -87,8 +141,16 @@ async def hardened_stripe_webhook(request: Request):
     if not isinstance(event, dict):
         raise HTTPException(400, "Invalid Stripe event")
 
-    if str(event.get("type") or "") == "invoice.paid":
-        obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
+    event_type = str(event.get("type") or "")
+    obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
+
+    if event_type == "checkout.session.completed" and isinstance(obj, dict):
+        metadata = obj.get("metadata")
+        metadata = metadata if isinstance(metadata, dict) else {}
+        if str(metadata.get("purchase_kind") or "") == "credit_topup":
+            _validated_creation_coin_packs()
+
+    if event_type == "invoice.paid":
         if isinstance(obj, dict) and _billing_reason(obj) == "subscription_cycle":
             binding = evidence_store.binding(
                 subscription_id=_subscription_id(obj),
@@ -104,4 +166,18 @@ async def hardened_stripe_webhook(request: Request):
     return await base_stripe_webhook(request)
 
 
-__all__ = ["hardened_stripe_success", "router", "validate_subscription_cycle_invoice"]
+# Install the legacy storefront routes after the hardened duplicates. Starlette uses the first
+# matching route, so production requests hit the immutable-catalogue checks while existing route
+# names/imports remain available for compatibility.
+router.include_router(stripe_creation_coins_router)
+
+
+__all__ = [
+    "hardened_creation_coin_catalog",
+    "hardened_creation_coin_storefront",
+    "hardened_credit_checkout",
+    "hardened_stripe_success",
+    "hardened_stripe_webhook",
+    "router",
+    "validate_subscription_cycle_invoice",
+]
