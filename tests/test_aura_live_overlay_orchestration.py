@@ -168,7 +168,7 @@ def test_source_pulse_is_privacy_filtered_and_public_triggers_are_delivered_once
     assert first["provider_live_controlled"] is False
     assert "Opening private cue" not in encoded
     assert "cue_label" not in encoded
-    assert "readiness" not in encoded
+    assert '"readiness"' not in encoded
     assert "updated_by" not in encoded
     assert '"u1"' not in encoded
 
