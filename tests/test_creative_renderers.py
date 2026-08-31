@@ -82,3 +82,129 @@ def test_renderer_state_is_truthful_when_not_configured(monkeypatch):
     assert states["video"]["configured"] is False
     assert states["image"]["connected"] is False
     assert states["video"]["connected"] is False
+
+
+class _FakeResponse:
+    def __init__(self, payload=None):
+        self.payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self.payload
+
+
+class _FakeClient:
+    def __init__(self, snapshots, posts, *args, **kwargs):
+        self.snapshots = snapshots
+        self.posts = posts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def get(self, url, **kwargs):
+        assert url.endswith("/queue")
+        assert self.snapshots, "unexpected queue inspection"
+        return _FakeResponse(self.snapshots.pop(0))
+
+    def post(self, url, json=None, **kwargs):
+        self.posts.append((url, json))
+        return _FakeResponse({})
+
+
+def _install_fake_client(monkeypatch, snapshots, posts):
+    monkeypatch.setattr(
+        "aura_music_studio.creative_renderers.httpx.Client",
+        lambda *args, **kwargs: _FakeClient(snapshots, posts, *args, **kwargs),
+    )
+
+
+def test_cancel_pending_render_deletes_only_requested_prompt(monkeypatch):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    snapshots = [
+        {
+            "queue_running": [],
+            "queue_pending": [[1, "prompt-1", {"workflow": "private"}, {}, []]],
+        },
+        {"queue_running": [], "queue_pending": []},
+    ]
+    posts = []
+    _install_fake_client(monkeypatch, snapshots, posts)
+
+    cancellation = ComfyUIRenderer("image").cancel("prompt-1")
+
+    assert cancellation.state == "cancelled_pending"
+    assert posts == [
+        ("http://127.0.0.1:8188/queue", {"delete": ["prompt-1"]}),
+    ]
+
+
+def test_cancel_running_render_uses_prompt_scoped_interrupt(monkeypatch):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    snapshots = [
+        {
+            "queue_running": [[0, "prompt-2", {"workflow": "private"}, {}, []]],
+            "queue_pending": [],
+        }
+    ]
+    posts = []
+    _install_fake_client(monkeypatch, snapshots, posts)
+
+    cancellation = ComfyUIRenderer("video").cancel("prompt-2")
+
+    assert cancellation.state == "cancelled_running"
+    assert posts == [
+        ("http://127.0.0.1:8188/interrupt", {"prompt_id": "prompt-2"}),
+    ]
+    assert all(payload is not None for _, payload in posts)
+
+
+def test_cancel_pending_render_handles_queue_to_running_race(monkeypatch):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    snapshots = [
+        {
+            "queue_running": [],
+            "queue_pending": [[1, "prompt-race", {}, {}, []]],
+        },
+        {
+            "queue_running": [[0, "prompt-race", {}, {}, []]],
+            "queue_pending": [],
+        },
+    ]
+    posts = []
+    _install_fake_client(monkeypatch, snapshots, posts)
+
+    cancellation = ComfyUIRenderer("image").cancel("prompt-race")
+
+    assert cancellation.state == "cancelled_running"
+    assert posts == [
+        ("http://127.0.0.1:8188/queue", {"delete": ["prompt-race"]}),
+        ("http://127.0.0.1:8188/interrupt", {"prompt_id": "prompt-race"}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "prompt_id",
+    [
+        "bad prompt id",
+        "../../queue",
+        "prompt?clear=true",
+        "prompt#fragment",
+        "/absolute/path",
+        "prompt%2Fhistory",
+    ],
+)
+def test_cancel_rejects_unsafe_prompt_id_before_network(monkeypatch, prompt_id):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    with pytest.raises(ValueError, match="Invalid ComfyUI prompt id"):
+        ComfyUIRenderer("image").cancel(prompt_id)
+
+
+def test_history_rejects_path_like_prompt_id_before_network(monkeypatch):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    with pytest.raises(ValueError, match="Invalid ComfyUI prompt id"):
+        ComfyUIRenderer("video").history("../queue")
