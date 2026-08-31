@@ -1,8 +1,10 @@
-"""Pulsar-Frequency House — Powered by Elevate Souls Productions & Aura AI Systems.
+"""Elevate Souls Productions Content Creation Command Center — Powered by Aura AI.
 
-For Professional Creation Beyond The Cosmos.
+Elevate Your Soul Through Purposeful Media.
 
-The ``aura_music_studio`` package identifier remains for backwards compatibility.
+The ``aura_music_studio`` package identifier remains for backwards compatibility with
+existing installs, project data, automation and deployment configuration. It is not the
+public product brand.
 """
 
 __version__ = "0.20.0"

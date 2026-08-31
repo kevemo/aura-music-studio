@@ -52,7 +52,7 @@ print(json.dumps({
     )
     payload = json.loads(completed.stdout.strip().splitlines()[-1])
     assert payload["projects"] == "/tmp/operator-projects"
-    assert payload["db"].startswith("/tmp/pulsar-frequency-house/")
-    assert payload["social"].startswith("/tmp/pulsar-frequency-house/")
+    assert payload["db"].startswith("/tmp/esp-command-center/")
+    assert payload["social"].startswith("/tmp/esp-command-center/")
     assert payload["base"] == "https://preview.example.vercel.app"
     assert payload["secure"] == "true"

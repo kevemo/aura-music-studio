@@ -1,4 +1,4 @@
-"""Vercel entrypoint for the real Pulsar-Frequency House FastAPI application.
+"""Vercel entrypoint for the Elevate Souls Productions Command Center FastAPI application.
 
 Vercel functions ship the repository as read-only code and provide /tmp for ephemeral
 writes. The production/self-hosted deployment uses durable storage instead; this bootstrap
@@ -16,7 +16,9 @@ def _configure_vercel_runtime() -> None:
     if not os.getenv("VERCEL"):
         return
 
-    root = Path("/tmp/pulsar-frequency-house")
+    # Vercel storage is intentionally ephemeral. This namespace is not a durable product-data
+    # location and must never be represented as production persistence.
+    root = Path("/tmp/esp-command-center")
     data = root / "data"
     defaults = {
         "AURA_PROJECTS_ROOT": str(root / "projects"),
