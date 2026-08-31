@@ -67,7 +67,9 @@ class AuraSecApprovalGrantStore:
     with the existing signed-command protocol while changing the security meaning of
     `approval_id`: it now identifies a concrete immutable grant row, not merely a mutable
     action status. A fresh authorization must use a successor action and therefore receives
-    a different id. Existing grant rows are never updated or reused.
+    a different id. Grant rows are created in the same transaction that changes an action
+    from proposed to approved; missing legacy grants fail closed rather than being inferred
+    later from mutable state.
     """
 
     def __init__(self, accounts: AccountStore | None = None):
@@ -104,6 +106,11 @@ class AuraSecApprovalGrantStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_aura_sec_approval_grants_user_device_expiry
                 ON aura_sec_action_approval_grants(user_id,device_id,expires_at);
+                CREATE TRIGGER IF NOT EXISTS trg_aura_sec_approval_grants_immutable
+                BEFORE UPDATE ON aura_sec_action_approval_grants
+                BEGIN
+                    SELECT RAISE(ABORT, 'Aura Sec approval grants are immutable');
+                END;
                 """
             )
 
@@ -138,10 +145,68 @@ class AuraSecApprovalGrantStore:
             return "explicit_confirmation"
         raise PermissionError("Automatic Aura Sec actions do not use approval grants")
 
+    def record_approved_action(
+        self,
+        con: sqlite3.Connection,
+        user_id: str,
+        action: dict,
+        *,
+        approved_at: datetime,
+    ) -> dict | None:
+        """Insert a high-risk grant inside the caller's action-approval transaction."""
+        if str(action.get("user_id") or "") != user_id:
+            raise PermissionError("Aura Sec approval grant user does not match action owner")
+        try:
+            risk = ActionRisk(str(action.get("risk_class") or ""))
+        except ValueError as exc:
+            raise PermissionError("Stored Aura Sec action risk class is invalid") from exc
+        if risk not in _HIGH_RISK:
+            return None
+
+        approved = approved_at.astimezone(timezone.utc)
+        snapshot = dict(action)
+        snapshot["status"] = "approved"
+        snapshot["approved_at"] = approved.isoformat()
+        deadline = action_approval_deadline(snapshot)
+        assert deadline is not None
+        action_id = str(snapshot.get("id") or "")
+        device_id = str(snapshot.get("device_id") or "")
+        digest = self._snapshot_digest(snapshot)
+        try:
+            con.execute(
+                """INSERT INTO aura_sec_action_approval_grants
+                   (id,action_id,user_id,device_id,risk_class,authorization_method,
+                    approved_at,expires_at,action_snapshot_digest)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    action_id,
+                    action_id,
+                    user_id,
+                    device_id,
+                    risk.value,
+                    self._method_for(risk),
+                    approved.isoformat(),
+                    deadline.isoformat(),
+                    digest,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise PermissionError("Aura Sec approval grant already exists or could not be recorded") from exc
+        row = con.execute(
+            "SELECT * FROM aura_sec_action_approval_grants WHERE user_id=? AND action_id=?",
+            (user_id, action_id),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("Aura Sec approval grant could not be durably recorded")
+        return dict(row)
+
     def _validate_row(self, row: sqlite3.Row, user_id: str, action: dict) -> dict:
         action_id = str(action.get("id") or "")
         device_id = str(action.get("device_id") or "")
-        risk = ActionRisk(str(action.get("risk_class") or ""))
+        try:
+            risk = ActionRisk(str(action.get("risk_class") or ""))
+        except ValueError as exc:
+            raise PermissionError("Stored Aura Sec action risk class is invalid") from exc
         expected_digest = self._snapshot_digest(action)
         expected_deadline = action_approval_deadline(action)
         if expected_deadline is None:
@@ -176,7 +241,7 @@ class AuraSecApprovalGrantStore:
         *,
         now: datetime | None = None,
     ) -> dict | None:
-        """Create-once and validate the high-risk grant, then enforce its deadline."""
+        """Validate a pre-existing immutable high-risk grant and enforce its deadline."""
         if str(action.get("user_id") or "") != user_id:
             raise PermissionError("Aura Sec approval grant user does not match action owner")
         if str(action.get("status") or "") != "approved":
@@ -188,47 +253,19 @@ class AuraSecApprovalGrantStore:
         if risk not in _HIGH_RISK:
             return None
 
-        deadline = action_approval_deadline(action)
-        assert deadline is not None
-        approved_at = _aware(str(action.get("approved_at") or ""))
         action_id = str(action.get("id") or "")
-        device_id = str(action.get("device_id") or "")
-        snapshot_digest = self._snapshot_digest(action)
-
         with self._connect() as con:
             row = con.execute(
                 "SELECT * FROM aura_sec_action_approval_grants WHERE action_id=?",
                 (action_id,),
             ).fetchone()
-            if row is None:
-                try:
-                    con.execute(
-                        """INSERT INTO aura_sec_action_approval_grants
-                           (id,action_id,user_id,device_id,risk_class,authorization_method,
-                            approved_at,expires_at,action_snapshot_digest)
-                           VALUES (?,?,?,?,?,?,?,?,?)""",
-                        (
-                            action_id,
-                            action_id,
-                            user_id,
-                            device_id,
-                            risk.value,
-                            self._method_for(risk),
-                            approved_at.isoformat(),
-                            deadline.isoformat(),
-                            snapshot_digest,
-                        ),
-                    )
-                except sqlite3.IntegrityError:
-                    pass
-                row = con.execute(
-                    "SELECT * FROM aura_sec_action_approval_grants WHERE action_id=?",
-                    (action_id,),
-                ).fetchone()
         if row is None:
-            raise PermissionError("Aura Sec approval grant could not be durably recorded")
+            raise PermissionError(
+                "Aura Sec high-risk approval grant is missing; fresh authorization is required"
+            )
 
         grant = self._validate_row(row, user_id, action)
+        deadline = _aware(str(grant["expires_at"]))
         current = (now or _now()).astimezone(timezone.utc)
         if current >= deadline:
             raise PermissionError("Aura Sec approval grant expired; fresh authorization is required")
