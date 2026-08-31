@@ -18,6 +18,7 @@ from .aura_live_guardian_policy_ui import router as aura_live_guardian_policy_ro
 from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
 from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
 from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
+from .aura_live_overlay_orchestration import router as aura_live_overlay_orchestration_router
 from .aura_live_overlay_studio import router as aura_live_overlay_studio_router
 from .aura_live_prompter import router as aura_live_prompter_router
 from .aura_live_run_engine import router as aura_live_run_engine_router
@@ -83,6 +84,7 @@ app.include_router(aura_live_overlay_studio_router)
 app.include_router(aura_live_overlay_advanced_router)
 app.include_router(aura_live_overlay_engine_router)
 app.include_router(aura_live_overlay_interactives_router)
+app.include_router(aura_live_overlay_orchestration_router)
 app.include_router(aura_live_prompter_router)
 app.include_router(aura_live_run_engine_router)
 app.include_router(aura_live_runtime_intelligence_router)
@@ -345,7 +347,7 @@ def sample_loop(project_name: str, asset_id: str, bars: int, bpm: float):
     project = _project(project_name)
     record = AssetLibrary(project).get(asset_id)
     if record.kind != "audio":
-        raise HTTPException(400, "Loop creation requires audio")
+        raise HTTPException(400, "Sample analysis requires audio")
     out = project / "output" / "samples" / f"{Path(record.name).stem}_{bars}bar_{bpm:g}bpm.wav"
     out.parent.mkdir(parents=True, exist_ok=True)
     make_loop(project / record.path, out, bars=bars, bpm=bpm)
