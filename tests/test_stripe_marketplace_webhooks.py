@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -189,29 +188,20 @@ def test_classifier_supports_marketplace_payment_and_refund_events(monkeypatch):
 
 
 def test_refund_classifier_uses_verified_fee_evidence_without_provider_lookup(tmp_path, monkeypatch):
-    db = tmp_path / "marketplace.sqlite3"
-    store = StripeMarketplaceFeeEvidenceStore(db)
+    store = StripeMarketplaceFeeEvidenceStore(tmp_path / "marketplace.sqlite3")
+    store.record(
+        event_id="evt_marketplace_1",
+        checkout_session_id="cs_marketplace_1",
+        order_id="order-marketplace-1",
+        payment_intent_id="pi_marketplace_1",
+        charge_id="ch_marketplace_1",
+        balance_transaction_id="txn_marketplace_1",
+        gross_minor=2500,
+        provider_fee_minor=100,
+        net_minor=2400,
+        currency="GBP",
+    )
     monkeypatch.setattr(webhooks, "fee_evidence", store)
-    with sqlite3.connect(db) as con:
-        con.execute(
-            """INSERT INTO stripe_marketplace_fee_evidence
-               (checkout_session_id,payment_intent_id,charge_id,balance_transaction_id,
-                gross_minor,provider_fee_minor,net_minor,currency,first_verified_event_id,
-                verified_at,settlement_recorded_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,NULL)""",
-            (
-                "cs_marketplace_1",
-                "pi_marketplace_1",
-                "ch_marketplace_1",
-                "txn_marketplace_1",
-                2500,
-                100,
-                2400,
-                "GBP",
-                "evt_marketplace_1",
-                "2026-08-31T12:00:00+00:00",
-            ),
-        )
     monkeypatch.setattr(
         webhooks,
         "_stripe_get",
