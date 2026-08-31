@@ -18,6 +18,7 @@ RendererCancellationState = Literal["cancelled_running", "cancelled_pending", "n
 _SAFE_WORKFLOW = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$")
 _SAFE_RENDERER_INPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
 _SAFE_RENDERER_SUBFOLDER_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+_SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 _IMAGE_INPUT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"}
 
 
@@ -160,7 +161,7 @@ class ComfyUIRenderer:
     @staticmethod
     def _validate_prompt_id(prompt_id: str) -> str:
         prompt_id = str(prompt_id or "").strip()
-        if not prompt_id or len(prompt_id) > 200 or any(char.isspace() for char in prompt_id):
+        if not _SAFE_PROMPT_ID.fullmatch(prompt_id):
             raise ValueError("Invalid ComfyUI prompt id")
         return prompt_id
 
