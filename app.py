@@ -92,6 +92,7 @@ from aura_music_studio.owner_users_portal import router as owner_users_legacy_ro
 from aura_music_studio.performance_input_api import router as performance_input_router
 from aura_music_studio.privacy_api import router as privacy_router
 from aura_music_studio.production_portal import router as production_portal_router
+from aura_music_studio.production_readiness import router as production_readiness_router
 from aura_music_studio.production_suite_api import router as production_suite_router
 from aura_music_studio.professional_editor_api import router as professional_editor_router
 from aura_music_studio.professional_editor_security_overlay import install_professional_editor_patch_guard
@@ -247,6 +248,9 @@ app.include_router(revision_portal_router)
 app.include_router(take_router)
 app.include_router(take_portal_router)
 app.include_router(source_detection_router)
+# Liveness, fail-closed deployment readiness and authenticated metrics must be mounted on the
+# real release application, not only exercised on an isolated test FastAPI instance.
+app.include_router(production_readiness_router)
 app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
