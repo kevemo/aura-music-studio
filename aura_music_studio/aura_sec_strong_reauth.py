@@ -86,6 +86,7 @@ class VerifiedStrongReauthEvidence:
     subject_user_id: str
     action_id: str
     device_id: str
+    session_binding_digest: str
     verifier_id: str
     authentication_method: str
     assurance_level: str
@@ -115,9 +116,8 @@ class AuraSecStrongReauthGate:
 
     This gate has no boolean trust shortcut. A trusted adapter must validate the external
     authenticator evidence (for example WebAuthn/passkey/hardware-key/IdP MFA) and return a
-    subject/action/device-bound result. The server additionally binds the assertion to the
-    already-authenticated session digest. Canonical assertion digest and challenge nonce are
-    persisted before approval so captured proof cannot be silently replayed later.
+    subject/action/device/session-bound result. Canonical assertion digest and challenge nonce
+    are persisted before approval so captured proof cannot be silently replayed later.
     """
 
     def __init__(
@@ -179,7 +179,7 @@ class AuraSecStrongReauthGate:
         *,
         proof_b64: str,
         evidence_verifier: StrongReauthEvidenceVerifier | None,
-        expected_session_binding_digest: str,
+        expected_session_binding_digest: str | None = None,
         now: datetime | None = None,
     ) -> AcceptedStrongReauth:
         if evidence_verifier is None:
@@ -187,11 +187,12 @@ class AuraSecStrongReauthGate:
         if not isinstance(assertion, StrongReauthAssertion):
             assertion = StrongReauthAssertion.model_validate(assertion)
 
-        expected_session = (expected_session_binding_digest or "").strip().lower()
-        if not _HEX_256.fullmatch(expected_session):
-            raise PermissionError("A trusted Aura Sec session binding digest is required")
-        if not secrets.compare_digest(assertion.session_binding_digest, expected_session):
-            raise PermissionError("Strong re-authentication proof is bound to a different authenticated session")
+        if expected_session_binding_digest is not None:
+            expected_session = expected_session_binding_digest.strip().lower()
+            if not _HEX_256.fullmatch(expected_session):
+                raise PermissionError("A trusted Aura Sec session binding digest is invalid")
+            if not secrets.compare_digest(assertion.session_binding_digest, expected_session):
+                raise PermissionError("Strong re-authentication proof is bound to a different authenticated session")
 
         action = self.security.get_action(user_id, action_id)
         if action.get("status") != "proposed":
@@ -230,6 +231,11 @@ class AuraSecStrongReauthGate:
             raise PermissionError("Verified strong re-authentication action binding is incorrect")
         if not secrets.compare_digest(verified.device_id, assertion.device_id):
             raise PermissionError("Verified strong re-authentication device binding is incorrect")
+        verified_session = (verified.session_binding_digest or "").strip().lower()
+        if not _HEX_256.fullmatch(verified_session) or not secrets.compare_digest(
+            verified_session, assertion.session_binding_digest
+        ):
+            raise PermissionError("Verified strong re-authentication session binding is incorrect")
 
         verifier_id = (verified.verifier_id or "").strip()
         method = (verified.authentication_method or "").strip().lower()
