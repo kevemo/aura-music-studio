@@ -187,7 +187,24 @@ def test_cancel_pending_render_handles_queue_to_running_race(monkeypatch):
     ]
 
 
-def test_cancel_rejects_invalid_prompt_id_before_network(monkeypatch):
+@pytest.mark.parametrize(
+    "prompt_id",
+    [
+        "bad prompt id",
+        "../../queue",
+        "prompt?clear=true",
+        "prompt#fragment",
+        "/absolute/path",
+        "prompt%2Fhistory",
+    ],
+)
+def test_cancel_rejects_unsafe_prompt_id_before_network(monkeypatch, prompt_id):
     monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
     with pytest.raises(ValueError, match="Invalid ComfyUI prompt id"):
-        ComfyUIRenderer("image").cancel("bad prompt id")
+        ComfyUIRenderer("image").cancel(prompt_id)
+
+
+def test_history_rejects_path_like_prompt_id_before_network(monkeypatch):
+    monkeypatch.setenv("AURA_COMFYUI_URL", "http://127.0.0.1:8188")
+    with pytest.raises(ValueError, match="Invalid ComfyUI prompt id"):
+        ComfyUIRenderer("video").history("../queue")
