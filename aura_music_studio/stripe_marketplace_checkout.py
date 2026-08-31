@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .marketplace_orders import MarketplaceOrderStore
 from .stripe_billing import StripeConfig, _clean_base_url, _session_user, accounts
+from .stripe_marketplace_fee_evidence import _stripe_get
 
 
 router = APIRouter(prefix="/billing/stripe", tags=["Stripe Marketplace"])
@@ -42,24 +43,56 @@ def _checkout_idempotency_key(order_id: str) -> str:
     return f"esp-marketplace-checkout-{digest}"
 
 
+def _validated_bound_session(session: dict[str, Any], order: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed unless a retrieved Stripe Session still matches the immutable local order."""
+    expected_session_id = str(order.get("provider_checkout_reference") or "").strip()
+    session_id = str(session.get("id") or "").strip()
+    if not expected_session_id.startswith("cs_") or session_id != expected_session_id:
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+    if str(session.get("mode") or "") != "payment":
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+    if str(session.get("client_reference_id") or "") != str(order.get("buyer_user_id") or ""):
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+
+    metadata = session.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if str(metadata.get("purchase_kind") or "") != "marketplace":
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+    if str(metadata.get("marketplace_order_id") or "") != str(order.get("id") or ""):
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+
+    try:
+        amount_total = int(session.get("amount_total"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated") from exc
+    if amount_total != int(order.get("gross_minor") or 0):
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+    if str(session.get("currency") or "").strip().upper() != str(order.get("currency") or "").strip().upper():
+        raise RuntimeError("Stored marketplace Checkout binding could not be revalidated")
+
+    url = str(session.get("url") or "").strip()
+    if not url.startswith("https://checkout.stripe.com/"):
+        raise RuntimeError("Stored marketplace Checkout Session is no longer available")
+    return session
+
+
 def create_stripe_marketplace_session(
     *,
     order: dict[str, Any],
     user: dict[str, Any],
     config: StripeConfig,
 ) -> dict[str, Any]:
-    """Create Checkout from the immutable order only.
+    """Create or safely recover Checkout from the immutable local order only.
 
     Stripe metadata contains only the opaque local order id. Price, tenant, publication,
     creator payee and Mary/Kev catalogue provenance remain server-authoritative local facts.
-    The deterministic Stripe idempotency key closes the create-session/local-bind crash window.
+    The deterministic Stripe idempotency key closes the create-session/local-bind crash window;
+    an already-bound retry re-fetches and fully revalidates the same provider Session.
     """
     if str(order.get("provider") or "").lower() != "stripe":
         raise ValueError("Marketplace order is not assigned to Stripe")
     if str(order.get("buyer_user_id") or "") != str(user.get("id") or ""):
         raise PermissionError("Marketplace order belongs to a different buyer")
-    if order.get("provider_checkout_reference"):
-        raise RuntimeError("Marketplace order already has a Stripe Checkout binding")
 
     gross_minor = int(order.get("gross_minor") or 0)
     currency = str(order.get("currency") or "").strip().lower()
@@ -67,9 +100,16 @@ def create_stripe_marketplace_session(
         raise ValueError("Marketplace order has invalid immutable price data")
     if not config.secret_key:
         raise RuntimeError("Stripe secret key is not configured")
+
+    existing_reference = str(order.get("provider_checkout_reference") or "").strip()
+    if existing_reference:
+        if not existing_reference.startswith("cs_") or len(existing_reference) > 128 or not existing_reference.replace("_", "").isalnum():
+            raise RuntimeError("Stored marketplace Checkout binding is invalid")
+        session = _stripe_get(config, f"/v1/checkout/sessions/{existing_reference}")
+        return _validated_bound_session(session, order)
+
     base = _clean_base_url(config.public_base_url)
     order_id = str(order["id"])
-
     data = {
         "mode": "payment",
         "client_reference_id": str(order["buyer_user_id"]),
@@ -106,7 +146,7 @@ def create_stripe_marketplace_session(
         raise RuntimeError("Stripe returned an invalid marketplace checkout response")
     session_id = str(body.get("id") or "").strip()
     url = str(body.get("url") or "").strip()
-    if not session_id or not url.startswith("https://checkout.stripe.com/"):
+    if not session_id.startswith("cs_") or not url.startswith("https://checkout.stripe.com/"):
         raise RuntimeError("Stripe did not return a trusted marketplace Checkout session")
     return body
 
