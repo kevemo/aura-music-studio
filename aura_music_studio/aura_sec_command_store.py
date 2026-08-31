@@ -12,6 +12,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_approval_lifetime import AuraSecApprovalLifetime
 from .aura_sec_protocol import ActionRisk, ActionType, CommandReceipt, SecurityCommand
 from .aura_sec_store import AuraSecStore
 
@@ -76,9 +77,15 @@ _ALLOWED_RECEIPT_TRANSITIONS: dict[str, set[str]] = {
 class AuraSecCommandStore:
     """Persist short-lived typed endpoint commands and cryptographically verified receipts."""
 
-    def __init__(self, accounts: AccountStore | None = None, security: AuraSecStore | None = None):
+    def __init__(
+        self,
+        accounts: AccountStore | None = None,
+        security: AuraSecStore | None = None,
+        approvals: AuraSecApprovalLifetime | None = None,
+    ):
         self.accounts = accounts or AccountStore()
         self.security = security or AuraSecStore(self.accounts)
+        self.approvals = approvals or AuraSecApprovalLifetime(self.accounts, self.security)
         self._init_schema()
 
     def _connect(self):
@@ -215,22 +222,39 @@ class AuraSecCommandStore:
         nonce: str,
         parameters: dict | None = None,
         ttl_seconds: int = 300,
+        now: datetime | None = None,
     ) -> SecurityCommand:
-        action = self.security.get_action(user_id, action_id)
-        if action.get("status") != "approved":
-            raise PermissionError("Aura Sec action must be approved before command issuance")
+        if not 30 <= int(ttl_seconds) <= 900:
+            raise ValueError("Aura Sec command lifetime must be between 30 and 900 seconds")
+
+        issued = (now or _now()).astimezone(timezone.utc)
+        action = self.approvals.require_fresh(
+            user_id,
+            action_id,
+            now=issued,
+            minimum_remaining_seconds=30,
+        )
         device = self.security.get_device(user_id, action["device_id"])
         if device.get("status") == "revoked" or device.get("revoked_at"):
             raise PermissionError("Cannot issue Aura Sec command to a revoked device")
-        if not 30 <= int(ttl_seconds) <= 900:
-            raise ValueError("Aura Sec command lifetime must be between 30 and 900 seconds")
         try:
             action_type = ActionType(action["action_type"])
             risk = ActionRisk(action["risk_class"])
         except ValueError as exc:
             raise ValueError("Stored Aura Sec action is not compatible with the bounded command protocol") from exc
 
-        issued = _now()
+        approval_expires_at = datetime.fromisoformat(action["approval_expires_at"]).astimezone(timezone.utc)
+        requested_expiry = issued + timedelta(seconds=int(ttl_seconds))
+        command_expiry = min(requested_expiry, approval_expires_at)
+        if (command_expiry - issued).total_seconds() < 30:
+            self.approvals.require_fresh(
+                user_id,
+                action_id,
+                now=issued,
+                minimum_remaining_seconds=30,
+            )
+            raise PermissionError("Aura Sec approval is too close to expiry for a safe command lifetime")
+
         approval_id = action_id if risk in {
             ActionRisk.CONFIRMATION_REQUIRED,
             ActionRisk.STRONG_REAUTH_REQUIRED,
@@ -241,7 +265,7 @@ class AuraSecCommandStore:
             action=action_type,
             risk=risk,
             issued_at=issued,
-            expires_at=issued + timedelta(seconds=int(ttl_seconds)),
+            expires_at=command_expiry,
             policy_version=(policy_version or "").strip(),
             nonce=(nonce or "").strip(),
             approval_id=approval_id,
@@ -311,8 +335,6 @@ class AuraSecCommandStore:
         if occurred > current + timedelta(seconds=120):
             raise PermissionError("Aura Sec command receipt timestamp is too far in the future")
 
-        # Verify every retry cryptographically. Idempotency is based on the exact canonical
-        # signed payload digest, never on transport identity, signature bytes or status alone.
         verification = self._verify_receipt_signature(
             user_id,
             receipt,
@@ -339,9 +361,6 @@ class AuraSecCommandStore:
                 if stored_payload_digest and secrets.compare_digest(
                     stored_payload_digest, receipt_payload_digest
                 ):
-                    # Exact signed-payload retransmission: no command/action mutation, no timestamp
-                    # rewrite, and no duplicate side effect. This remains valid after command expiry
-                    # because it is not a new successful state transition.
                     duplicate = True
                 else:
                     raise ValueError(
@@ -411,8 +430,6 @@ class AuraSecCommandStore:
                     if action_update.rowcount != 1:
                         raise PermissionError("Aura Sec action state changed before failure receipt")
 
-        # A duplicate deliberately returns the exact persisted state. `get()` also guarantees
-        # callers receive the same representation as a first successful submission.
         return self.get(user_id, receipt.command_id)
 
 
