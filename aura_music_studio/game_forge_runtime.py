@@ -4,6 +4,7 @@ import json
 
 from .game_forge_asset_bindings import binding_runtime_payload
 from .game_forge_assets import runtime_asset_manifest
+from .game_forge_checkpoints import inject_checkpoint_controls
 from .game_forge_integrity import game_integrity_hash
 from .game_forge_models import GameBuild, GameDNA
 from .game_forge_native3d import render_aura3d_playtest
@@ -79,7 +80,13 @@ function frame(now){{const dt=Math.min(.033,(now-last)/1000);last=now;update(dt)
 def build_private_playtest(game: GameDNA) -> tuple[GameDNA, str]:
     ensure_world(game)
     content_hash = game_integrity_hash(game)
-    html = render_foundation_playtest(game)
+    runtime = "aura3d" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura2d"
+    html = inject_checkpoint_controls(
+        render_foundation_playtest(game),
+        runtime=runtime,
+        game_id=game.id,
+        content_hash=content_hash,
+    )
     runtime_name = "aura_game_runtime_3d_webgl2_v4" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura_game_runtime_2d_canvas_v1"
     build = GameBuild(content_hash=content_hash, requested_engine=game.engine_target, runtime=runtime_name)
     folder = game_dir(game.id)
