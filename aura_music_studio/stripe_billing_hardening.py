@@ -118,10 +118,10 @@ def hardened_stripe_success(session_id: str = ""):
     """Render the informational Stripe return page without reflecting untrusted HTML."""
     safe = escape((session_id or "")[:120], quote=True)
     return HTMLResponse(
-        "<!doctype html><html><head name='viewport' content='width=device-width,initial-scale=1'>"
+        "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Payment received</title></head><body style='font-family:system-ui;background:#08050d;color:#fff;padding:36px'>"
         "<main style='max-width:680px;margin:auto'><h1>Thank you.</h1>"
-        "<p>Stripe has returned you to the Command Center. Access, Creation Coins or marketplace settlement are confirmed only after the signed Stripe webhook and server-side provider evidence are verified.</p>"
+        "<p>Stripe has returned you to the Command Center. Access, Creation Coins and marketplace settlement are confirmed only after the signed Stripe webhook and server-side provider evidence are verified.</p>"
         f"<p style='opacity:.7'>Checkout session: {safe}</p><p><a href='/dashboard' style='color:#f4c873'>Return to dashboard</a></p></main></body></html>"
     )
 
