@@ -26,6 +26,10 @@ from .stripe_creation_coins import (
     creation_coin_storefront as base_creation_coin_storefront,
     router as stripe_creation_coins_router,
 )
+from .stripe_marketplace_checkout import (
+    MarketplaceCheckoutRequest,
+    create_marketplace_checkout as base_create_marketplace_checkout,
+)
 
 router = APIRouter(tags=["Stripe Billing Security"])
 
@@ -108,6 +112,18 @@ def hardened_credit_checkout(body: CreditCheckoutRequest, request: Request):
     return base_create_credit_checkout(body, request)
 
 
+@router.post("/billing/stripe/checkout/marketplace")
+def hardened_marketplace_checkout(body: MarketplaceCheckoutRequest, request: Request):
+    """Expose marketplace Checkout through the hardened Stripe surface explicitly.
+
+    The delegated implementation still accepts only the opaque immutable local order id and
+    derives price, currency, tenant, publication, payee and owner provenance server-side. Keeping
+    the production path explicit here avoids router-composition drift while preserving the same
+    authenticated buyer and immutable-order checks.
+    """
+    return base_create_marketplace_checkout(body, request)
+
+
 @router.get("/billing/stripe/success", response_class=HTMLResponse)
 def hardened_stripe_success(session_id: str = ""):
     """Render the informational Stripe return page without reflecting untrusted HTML."""
@@ -176,6 +192,7 @@ __all__ = [
     "hardened_creation_coin_catalog",
     "hardened_creation_coin_storefront",
     "hardened_credit_checkout",
+    "hardened_marketplace_checkout",
     "hardened_stripe_success",
     "hardened_stripe_webhook",
     "router",
