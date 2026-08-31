@@ -4,6 +4,7 @@ import hashlib
 import sqlite3
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -193,24 +194,75 @@ def marketplace_checkout(body: MarketplaceCheckoutRequest, request: Request):
         raise HTTPException(502, str(exc)) from exc
 
 
-def _refund_targets_verified_marketplace(refund: dict[str, Any]) -> bool:
-    payment_intent_id = str(refund.get("payment_intent") or "").strip()
-    charge_id = str(refund.get("charge") or "").strip()
-    if not payment_intent_id or not charge_id:
+def _checkout_reference_is_marketplace(checkout_session_id: str) -> bool:
+    checkout_session_id = (checkout_session_id or "").strip()
+    if not checkout_session_id:
         return False
-    con = sqlite3.connect(Path(fee_evidence.db_path))
+    con = sqlite3.connect(Path(orders.db_path))
     try:
         row = con.execute(
-            """SELECT 1 FROM stripe_marketplace_fee_evidence
-               WHERE payment_intent_id=? AND charge_id=? LIMIT 1""",
-            (payment_intent_id, charge_id),
+            """SELECT 1 FROM marketplace_orders
+               WHERE provider='stripe' AND provider_checkout_reference=? LIMIT 1""",
+            (checkout_session_id,),
         ).fetchone()
     finally:
         con.close()
     return bool(row)
 
 
-def is_marketplace_stripe_event(event_type: str, obj: dict[str, Any]) -> bool:
+def _refund_targets_verified_marketplace(
+    refund: dict[str, Any],
+    config: StripeConfig | None = None,
+) -> bool:
+    """Recognize marketplace Refunds even when Stripe webhooks arrive out of order.
+
+    The fast path uses already-persisted fee evidence. If the refund event arrives before the
+    Checkout completion event has been processed, Stripe's Checkout Session list endpoint can
+    resolve the PaymentIntent back to its Session; the Session must then match a locally bound
+    marketplace order before this event is admitted to marketplace processing.
+    """
+    payment_intent_id = str(refund.get("payment_intent") or "").strip()
+    charge_id = str(refund.get("charge") or "").strip()
+    if not payment_intent_id:
+        return False
+
+    if charge_id:
+        con = sqlite3.connect(Path(fee_evidence.db_path))
+        try:
+            row = con.execute(
+                """SELECT 1 FROM stripe_marketplace_fee_evidence
+                   WHERE payment_intent_id=? AND charge_id=? LIMIT 1""",
+                (payment_intent_id, charge_id),
+            ).fetchone()
+        finally:
+            con.close()
+        if row:
+            return True
+
+    if config is None:
+        return False
+    encoded_payment_intent = quote(payment_intent_id, safe="")
+    sessions = _stripe_get(
+        config,
+        f"/v1/checkout/sessions?payment_intent={encoded_payment_intent}&limit=2",
+    )
+    data = sessions.get("data")
+    if not isinstance(data, list):
+        raise RuntimeError("Stripe returned an invalid Checkout Session list for refund evidence")
+    for session in data:
+        if not isinstance(session, dict):
+            continue
+        session_id = str(session.get("id") or "").strip()
+        if session_id.startswith("cs_") and _checkout_reference_is_marketplace(session_id):
+            return True
+    return False
+
+
+def is_marketplace_stripe_event(
+    event_type: str,
+    obj: dict[str, Any],
+    config: StripeConfig | None = None,
+) -> bool:
     if not isinstance(obj, dict):
         return False
     if event_type in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
@@ -218,7 +270,7 @@ def is_marketplace_stripe_event(event_type: str, obj: dict[str, Any]) -> bool:
         metadata = metadata if isinstance(metadata, dict) else {}
         return str(metadata.get("purchase_kind") or "") == "marketplace"
     if event_type in {"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"}:
-        return _refund_targets_verified_marketplace(obj)
+        return _refund_targets_verified_marketplace(obj, config=config)
     return False
 
 
