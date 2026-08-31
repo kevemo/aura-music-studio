@@ -192,7 +192,7 @@ def test_recent_reports_are_tenant_scoped_and_ended_only(tmp_path, monkeypatch):
     clock[0] = datetime(2026, 8, 31, 12, 1, 0, tzinfo=timezone.utc)
     run2 = _start(runner, _ready_plan(shows, user_id="u2"), user_id="u2")
     clock[0] = datetime(2026, 8, 31, 12, 1, 20, tzinfo=timezone.utc)
-    _command(runner, run2, "abort", "cmd_report_u2_abort")
+    _command(runner, run2, "abort", "cmd_report_u2_abort", user_id="u2")
 
     listed = _json(reports.list_reports(_request("u1"), limit=20))["reports"]
     assert len(listed) == 1
