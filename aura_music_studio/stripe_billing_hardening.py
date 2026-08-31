@@ -26,6 +26,11 @@ from .stripe_creation_coins import (
     creation_coin_storefront as base_creation_coin_storefront,
     router as stripe_creation_coins_router,
 )
+from .stripe_marketplace_commerce import (
+    is_marketplace_stripe_event,
+    process_verified_marketplace_stripe_event,
+    router as stripe_marketplace_router,
+)
 
 router = APIRouter(tags=["Stripe Billing Security"])
 
@@ -113,21 +118,21 @@ def hardened_stripe_success(session_id: str = ""):
     """Render the informational Stripe return page without reflecting untrusted HTML."""
     safe = escape((session_id or "")[:120], quote=True)
     return HTMLResponse(
-        "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<!doctype html><html><head name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Payment received</title></head><body style='font-family:system-ui;background:#08050d;color:#fff;padding:36px'>"
         "<main style='max-width:680px;margin:auto'><h1>Thank you.</h1>"
-        "<p>Stripe has returned you to the Command Center. Access or Creation Coins are confirmed only after the signed Stripe webhook is verified.</p>"
+        "<p>Stripe has returned you to the Command Center. Access, Creation Coins or marketplace settlement are confirmed only after the signed Stripe webhook and server-side provider evidence are verified.</p>"
         f"<p style='opacity:.7'>Checkout session: {safe}</p><p><a href='/dashboard' style='color:#f4c873'>Return to dashboard</a></p></main></body></html>"
     )
 
 
 @router.post("/billing/stripe/webhook")
 async def hardened_stripe_webhook(request: Request):
-    """Preflight immutable Coin values/renewals, then delegate to Stripe's idempotent processor.
+    """Verify Stripe once, then route marketplace or legacy billing through fail-closed paths.
 
-    The same raw body and signature are verified again by the delegated base processor before
-    any wallet or subscription mutation. Credit-top-up events are additionally blocked here
-    unless the deployment exposes the complete authoritative Creation Coin catalogue.
+    Marketplace payment/refund events are audited in the same Stripe evidence store but are not
+    delegated to the legacy subscription/Coin processor. Their commercial facts are reconstructed
+    from immutable local orders plus canonical Stripe provider objects before settlement mutation.
     """
     config = StripeConfig.from_env()
     if not config.webhook_configured:
@@ -141,8 +146,43 @@ async def hardened_stripe_webhook(request: Request):
     if not isinstance(event, dict):
         raise HTTPException(400, "Invalid Stripe event")
 
+    event_id = str(event.get("id") or "").strip()
     event_type = str(event.get("type") or "")
     obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
+
+    if isinstance(obj, dict) and is_marketplace_stripe_event(event_type, obj):
+        try:
+            marketplace_evidence = evidence_store.begin_event(event, raw)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        prior_status = str(marketplace_evidence.get("processing_status") or "")
+        if marketplace_evidence.get("duplicate") and prior_status in {"processed", "ignored"}:
+            return {
+                "received": True,
+                "duplicate": True,
+                "event_id": event_id,
+                "status": prior_status,
+                "marketplace": True,
+            }
+
+        try:
+            result = process_verified_marketplace_stripe_event(
+                event_id=event_id,
+                event_type=event_type,
+                obj=obj,
+                config=config,
+            )
+        except RuntimeError as exc:
+            evidence_store.finish_event(event_id, "failed", str(exc))
+            raise HTTPException(502, str(exc)) from exc
+        except (ValueError, PermissionError) as exc:
+            evidence_store.finish_event(event_id, "failed", str(exc))
+            raise HTTPException(400, str(exc)) from exc
+
+        status = "processed" if result.get("processed") else "ignored"
+        evidence_store.finish_event(event_id, status)
+        return {"received": True, "event_id": event_id, "marketplace": True, **result}
 
     if event_type == "checkout.session.completed" and isinstance(obj, dict):
         metadata = obj.get("metadata")
@@ -166,9 +206,9 @@ async def hardened_stripe_webhook(request: Request):
     return await base_stripe_webhook(request)
 
 
-# Install the legacy storefront routes after the hardened duplicates. Starlette uses the first
-# matching route, so production requests hit the immutable-catalogue checks while existing route
-# names/imports remain available for compatibility.
+# Unique marketplace checkout is mounted through the hardened Stripe surface. Legacy storefront
+# routes remain after hardened duplicates because Starlette resolves the first matching route.
+router.include_router(stripe_marketplace_router)
 router.include_router(stripe_creation_coins_router)
 
 
