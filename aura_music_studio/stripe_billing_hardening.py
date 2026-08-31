@@ -26,14 +26,12 @@ from .stripe_creation_coins import (
     creation_coin_storefront as base_creation_coin_storefront,
     router as stripe_creation_coins_router,
 )
-from .stripe_marketplace_commerce import (
-    is_marketplace_stripe_event,
-    process_verified_marketplace_stripe_event,
-    router as stripe_marketplace_router,
+from .stripe_marketplace_checkout import (
+    MarketplaceCheckoutRequest,
+    create_marketplace_checkout as base_create_marketplace_checkout,
 )
 
 router = APIRouter(tags=["Stripe Billing Security"])
-_REFUND_EVENT_TYPES = frozenset({"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"})
 
 
 def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[str, Any]) -> None:
@@ -85,26 +83,6 @@ def _require_signed_in_user(request: Request) -> dict[str, Any]:
     return _session_user(request)
 
 
-def _begin_marketplace_event(event: dict[str, Any], raw: bytes) -> dict[str, Any]:
-    try:
-        return evidence_store.begin_event(event, raw)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-def _terminal_duplicate_response(evidence: dict[str, Any], event_id: str) -> dict[str, Any] | None:
-    prior_status = str(evidence.get("processing_status") or "")
-    if evidence.get("duplicate") and prior_status in {"processed", "ignored"}:
-        return {
-            "received": True,
-            "duplicate": True,
-            "event_id": event_id,
-            "status": prior_status,
-            "marketplace": True,
-        }
-    return None
-
-
 @router.get("/billing/creation-coins/catalog")
 def hardened_creation_coin_catalog(request: Request):
     _require_signed_in_user(request)
@@ -134,6 +112,18 @@ def hardened_credit_checkout(body: CreditCheckoutRequest, request: Request):
     return base_create_credit_checkout(body, request)
 
 
+@router.post("/billing/stripe/checkout/marketplace")
+def hardened_marketplace_checkout(body: MarketplaceCheckoutRequest, request: Request):
+    """Expose marketplace Checkout through the hardened Stripe surface explicitly.
+
+    The delegated implementation still accepts only the opaque immutable local order id and
+    derives price, currency, tenant, publication, payee and owner provenance server-side. Keeping
+    the production path explicit here avoids router-composition drift while preserving the same
+    authenticated buyer and immutable-order checks.
+    """
+    return base_create_marketplace_checkout(body, request)
+
+
 @router.get("/billing/stripe/success", response_class=HTMLResponse)
 def hardened_stripe_success(session_id: str = ""):
     """Render the informational Stripe return page without reflecting untrusted HTML."""
@@ -142,20 +132,18 @@ def hardened_stripe_success(session_id: str = ""):
         "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<title>Payment received</title></head><body style='font-family:system-ui;background:#08050d;color:#fff;padding:36px'>"
         "<main style='max-width:680px;margin:auto'><h1>Thank you.</h1>"
-        "<p>Stripe has returned you to the Command Center. Access, Creation Coins and marketplace settlement are confirmed only after the signed Stripe webhook and server-side provider evidence are verified.</p>"
+        "<p>Stripe has returned you to the Command Center. Access or Creation Coins are confirmed only after the signed Stripe webhook is verified.</p>"
         f"<p style='opacity:.7'>Checkout session: {safe}</p><p><a href='/dashboard' style='color:#f4c873'>Return to dashboard</a></p></main></body></html>"
     )
 
 
 @router.post("/billing/stripe/webhook")
 async def hardened_stripe_webhook(request: Request):
-    """Verify Stripe once, then route marketplace or legacy billing through fail-closed paths.
+    """Preflight immutable Coin values/renewals, then delegate to Stripe's idempotent processor.
 
-    Marketplace payment/refund events are audited in the same Stripe evidence store but are not
-    delegated to the legacy subscription/Coin processor. Their commercial facts are reconstructed
-    from immutable local orders plus canonical Stripe provider objects before settlement mutation.
-    Refund classification also tolerates webhook reordering by resolving a Refund PaymentIntent
-    back to a locally bound Checkout Session through Stripe when fee evidence is not yet present.
+    The same raw body and signature are verified again by the delegated base processor before
+    any wallet or subscription mutation. Credit-top-up events are additionally blocked here
+    unless the deployment exposes the complete authoritative Creation Coin catalogue.
     """
     config = StripeConfig.from_env()
     if not config.webhook_configured:
@@ -169,49 +157,8 @@ async def hardened_stripe_webhook(request: Request):
     if not isinstance(event, dict):
         raise HTTPException(400, "Invalid Stripe event")
 
-    event_id = str(event.get("id") or "").strip()
     event_type = str(event.get("type") or "")
     obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
-
-    marketplace_event = False
-    if isinstance(obj, dict):
-        try:
-            marketplace_event = is_marketplace_stripe_event(event_type, obj, config=config)
-        except RuntimeError as exc:
-            # Refund events can require a provider lookup to resolve out-of-order delivery. Persist
-            # that transient failure so the same signed event can be retried instead of being lost.
-            if event_type not in _REFUND_EVENT_TYPES:
-                raise HTTPException(502, str(exc)) from exc
-            failed_evidence = _begin_marketplace_event(event, raw)
-            duplicate = _terminal_duplicate_response(failed_evidence, event_id)
-            if duplicate is not None:
-                return duplicate
-            evidence_store.finish_event(event_id, "failed", str(exc))
-            raise HTTPException(502, str(exc)) from exc
-
-    if marketplace_event:
-        marketplace_evidence = _begin_marketplace_event(event, raw)
-        duplicate = _terminal_duplicate_response(marketplace_evidence, event_id)
-        if duplicate is not None:
-            return duplicate
-
-        try:
-            result = process_verified_marketplace_stripe_event(
-                event_id=event_id,
-                event_type=event_type,
-                obj=obj,
-                config=config,
-            )
-        except RuntimeError as exc:
-            evidence_store.finish_event(event_id, "failed", str(exc))
-            raise HTTPException(502, str(exc)) from exc
-        except (ValueError, PermissionError) as exc:
-            evidence_store.finish_event(event_id, "failed", str(exc))
-            raise HTTPException(400, str(exc)) from exc
-
-        status = "processed" if result.get("processed") else "ignored"
-        evidence_store.finish_event(event_id, status)
-        return {"received": True, "event_id": event_id, "marketplace": True, **result}
 
     if event_type == "checkout.session.completed" and isinstance(obj, dict):
         metadata = obj.get("metadata")
@@ -235,9 +182,9 @@ async def hardened_stripe_webhook(request: Request):
     return await base_stripe_webhook(request)
 
 
-# Unique marketplace checkout is mounted through the hardened Stripe surface. Legacy storefront
-# routes remain after hardened duplicates because Starlette resolves the first matching route.
-router.include_router(stripe_marketplace_router)
+# Install the legacy storefront routes after the hardened duplicates. Starlette uses the first
+# matching route, so production requests hit the immutable-catalogue checks while existing route
+# names/imports remain available for compatibility.
 router.include_router(stripe_creation_coins_router)
 
 
@@ -245,6 +192,7 @@ __all__ = [
     "hardened_creation_coin_catalog",
     "hardened_creation_coin_storefront",
     "hardened_credit_checkout",
+    "hardened_marketplace_checkout",
     "hardened_stripe_success",
     "hardened_stripe_webhook",
     "router",
