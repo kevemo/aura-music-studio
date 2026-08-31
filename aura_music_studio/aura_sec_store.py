@@ -13,6 +13,7 @@ from typing import Callable
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_approval_grants import AuraSecApprovalGrantStore
 from .aura_sec_protocol import ActionRisk, ActionType, DeviceHeartbeat, EXPECTED_RISK
 
 
@@ -70,6 +71,7 @@ class AuraSecStore:
     def __init__(self, accounts: AccountStore | None = None):
         self.accounts = accounts or AccountStore()
         self._init_schema()
+        self.approvals = AuraSecApprovalGrantStore(self.accounts)
 
     def _connect(self):
         con = sqlite3.connect(self.accounts.db_path)
@@ -562,10 +564,24 @@ class AuraSecStore:
             raise ValueError("Only proposed actions can be approved")
         if action["risk_class"] == ActionRisk.STRONG_REAUTH_REQUIRED.value and not strong_reauth_verified:
             raise PermissionError("Strong re-authentication is required for this action")
+
+        approved_at = _now()
+        approved_snapshot = dict(action)
+        approved_snapshot["status"] = "approved"
+        approved_snapshot["approved_at"] = _iso(approved_at)
         with self._connect() as con:
-            con.execute(
-                "UPDATE aura_sec_actions SET status='approved',approved_at=? WHERE user_id=? AND id=?",
-                (_iso(), user_id, action_id),
+            updated = con.execute(
+                """UPDATE aura_sec_actions SET status='approved',approved_at=?
+                   WHERE user_id=? AND id=? AND status='proposed'""",
+                (_iso(approved_at), user_id, action_id),
+            )
+            if updated.rowcount != 1:
+                raise PermissionError("Aura Sec action approval state changed concurrently")
+            self.approvals.record_approved_action(
+                con,
+                user_id,
+                approved_snapshot,
+                approved_at=approved_at,
             )
         return self.get_action(user_id, action_id)
 
