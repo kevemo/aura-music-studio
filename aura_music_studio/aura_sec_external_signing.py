@@ -194,6 +194,7 @@ class ExternalCustodyEd25519CommandSigner:
             payload_digest=digest,
             payload=payload,
         )
+        self._last_verified_evidence = None
         try:
             evidence = self._signing_adapter(request)
         except Exception as exc:
@@ -201,7 +202,8 @@ class ExternalCustodyEd25519CommandSigner:
         verified = self._verify_evidence(request, evidence)
         self._last_verified_evidence = verified
 
-        assert isinstance(evidence, ExternalSigningEvidence)
+        if not isinstance(evidence, ExternalSigningEvidence):
+            raise PermissionError("Aura Sec external signer evidence changed unexpectedly")
         return SignedSecurityCommand(
             **command.model_dump(),
             signing_schema_version=1,
