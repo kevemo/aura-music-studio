@@ -7,7 +7,7 @@ import re
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Literal
 from uuid import uuid4
 
@@ -115,7 +115,8 @@ class AuraSecStrongReauthGate:
 
     This gate has no boolean trust shortcut. A trusted adapter must validate the external
     authenticator evidence (for example WebAuthn/passkey/hardware-key/IdP MFA) and return a
-    subject/action/device-bound result. The canonical assertion digest and challenge nonce are
+    subject/action/device-bound result. The server additionally binds the assertion to the
+    already-authenticated session digest. Canonical assertion digest and challenge nonce are
     persisted before approval so captured proof cannot be silently replayed later.
     """
 
@@ -178,12 +179,19 @@ class AuraSecStrongReauthGate:
         *,
         proof_b64: str,
         evidence_verifier: StrongReauthEvidenceVerifier | None,
+        expected_session_binding_digest: str,
         now: datetime | None = None,
     ) -> AcceptedStrongReauth:
         if evidence_verifier is None:
             raise PermissionError("A trusted Aura Sec strong re-authentication verifier is required")
         if not isinstance(assertion, StrongReauthAssertion):
             assertion = StrongReauthAssertion.model_validate(assertion)
+
+        expected_session = (expected_session_binding_digest or "").strip().lower()
+        if not _HEX_256.fullmatch(expected_session):
+            raise PermissionError("A trusted Aura Sec session binding digest is required")
+        if not secrets.compare_digest(assertion.session_binding_digest, expected_session):
+            raise PermissionError("Strong re-authentication proof is bound to a different authenticated session")
 
         action = self.security.get_action(user_id, action_id)
         if action.get("status") != "proposed":
@@ -203,7 +211,7 @@ class AuraSecStrongReauthGate:
             raise PermissionError("Revoked Aura Sec device cannot receive strong-re-authenticated actions")
 
         current = _utc(now)
-        if assertion.issued_at > current + __import__("datetime").timedelta(seconds=60):
+        if assertion.issued_at > current + timedelta(seconds=60):
             raise PermissionError("Aura Sec strong re-authentication issuance is too far in the future")
         if current >= assertion.expires_at:
             raise PermissionError("Aura Sec strong re-authentication proof has expired")
@@ -232,6 +240,8 @@ class AuraSecStrongReauthGate:
             raise PermissionError("Trusted strong re-authentication verifier identity is required")
         if method not in _ALLOWED_METHODS:
             raise PermissionError("Unsupported Aura Sec strong re-authentication method")
+        if not secrets.compare_digest(method, assertion.authentication_context):
+            raise PermissionError("Verified strong re-authentication method does not match the requested context")
         if assurance not in _ALLOWED_ASSURANCE:
             raise PermissionError("Aura Sec strong re-authentication assurance is insufficient")
         if not _HEX_256.fullmatch(fingerprint):
