@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from .marketplace_orders import MarketplaceOrderStore
 from .stripe_billing import StripeConfig, _clean_base_url, _session_user, accounts
+from .stripe_marketplace_fee_evidence import _stripe_get
 
 
 router = APIRouter(prefix="/billing/stripe", tags=["Stripe Marketplace"])
@@ -42,24 +43,45 @@ def _checkout_idempotency_key(order_id: str) -> str:
     return f"esp-marketplace-checkout-{digest}"
 
 
+def _validate_bound_session(session: dict[str, Any], order: dict[str, Any]) -> None:
+    expected_session_id = str(order.get("provider_checkout_reference") or "").strip()
+    if str(session.get("id") or "").strip() != expected_session_id or not expected_session_id.startswith("cs_"):
+        raise ValueError("Stored marketplace Checkout binding does not match Stripe")
+    if str(session.get("mode") or "") != "payment":
+        raise ValueError("Stored marketplace Checkout Session is not a payment session")
+    if str(session.get("client_reference_id") or "") != str(order.get("buyer_user_id") or ""):
+        raise ValueError("Stored marketplace Checkout buyer does not match the immutable order")
+    metadata = session.get("metadata")
+    metadata = metadata if isinstance(metadata, dict) else {}
+    if str(metadata.get("purchase_kind") or "") != "marketplace":
+        raise ValueError("Stored Stripe Session is not a marketplace purchase")
+    if str(metadata.get("marketplace_order_id") or "") != str(order.get("id") or ""):
+        raise ValueError("Stored marketplace Checkout metadata does not match the immutable order")
+    amount_total = session.get("amount_total")
+    if amount_total is not None and int(amount_total) != int(order.get("gross_minor") or 0):
+        raise ValueError("Stored marketplace Checkout amount does not match the immutable order")
+    currency = str(session.get("currency") or "").strip().upper()
+    if currency and currency != str(order.get("currency") or "").strip().upper():
+        raise ValueError("Stored marketplace Checkout currency does not match the immutable order")
+
+
 def create_stripe_marketplace_session(
     *,
     order: dict[str, Any],
     user: dict[str, Any],
     config: StripeConfig,
 ) -> dict[str, Any]:
-    """Create Checkout from the immutable order only.
+    """Create or safely recover Checkout from the immutable order only.
 
     Stripe metadata contains only the opaque local order id. Price, tenant, publication,
     creator payee and Mary/Kev catalogue provenance remain server-authoritative local facts.
-    The deterministic Stripe idempotency key closes the create-session/local-bind crash window.
+    A deterministic idempotency key protects provider creation, and an existing local binding is
+    retrieved and revalidated instead of failing or creating a second Checkout Session.
     """
     if str(order.get("provider") or "").lower() != "stripe":
         raise ValueError("Marketplace order is not assigned to Stripe")
     if str(order.get("buyer_user_id") or "") != str(user.get("id") or ""):
         raise PermissionError("Marketplace order belongs to a different buyer")
-    if order.get("provider_checkout_reference"):
-        raise RuntimeError("Marketplace order already has a Stripe Checkout binding")
 
     gross_minor = int(order.get("gross_minor") or 0)
     currency = str(order.get("currency") or "").strip().lower()
@@ -69,6 +91,12 @@ def create_stripe_marketplace_session(
         raise RuntimeError("Stripe secret key is not configured")
     base = _clean_base_url(config.public_base_url)
     order_id = str(order["id"])
+
+    existing_reference = str(order.get("provider_checkout_reference") or "").strip()
+    if existing_reference:
+        session = _stripe_get(config, f"/v1/checkout/sessions/{existing_reference}")
+        _validate_bound_session(session, order)
+        return session
 
     data = {
         "mode": "payment",
@@ -106,7 +134,7 @@ def create_stripe_marketplace_session(
         raise RuntimeError("Stripe returned an invalid marketplace checkout response")
     session_id = str(body.get("id") or "").strip()
     url = str(body.get("url") or "").strip()
-    if not session_id or not url.startswith("https://checkout.stripe.com/"):
+    if not session_id.startswith("cs_") or not url.startswith("https://checkout.stripe.com/"):
         raise RuntimeError("Stripe did not return a trusted marketplace Checkout session")
     return body
 
@@ -134,11 +162,14 @@ def create_marketplace_checkout(body: MarketplaceCheckoutRequest, request: Reque
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
 
+    url = str(session.get("url") or "").strip()
+    if not url.startswith("https://checkout.stripe.com/"):
+        raise HTTPException(409, "Marketplace Checkout Session is no longer available for browser checkout")
     return {
         "provider": "stripe",
         "marketplace_order_id": bound["id"],
         "checkout_session_id": session["id"],
-        "checkout_url": session["url"],
+        "checkout_url": url,
         "automatic_settlement_from_redirect": False,
         "settlement_source": "verified_stripe_provider_evidence",
         "subscription_effect": "none",
