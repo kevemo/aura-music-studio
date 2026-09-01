@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from .aura_sec_portal import router as aura_sec_portal_router
 from .backup_scheduler import BackupScheduler
 from .compute_capabilities import compatibility
 from .compute_nodes import ComputeNodeRegistry
@@ -98,3 +99,10 @@ def model_catalog():
         ),
         "components": public_catalog(),
     }
+
+
+# The production app mounts this system router directly. Composing the member-safe Aura Sec
+# router here therefore keeps one application, one member identity boundary and one middleware
+# stack. APIRouter preserves the child's public `/aura-sec` prefix; native trust channels remain
+# outside the browser surface.
+router.include_router(aura_sec_portal_router)
