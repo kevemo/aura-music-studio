@@ -8,8 +8,9 @@ from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .assets import AssetLibrary
+from .commercial_entitlement_routes import render_with_commercial_entitlements
 from .creative_project import CreativeProjectStore, CreativeReference
-from .creative_project_api import QueueRendererRequest, queue_creative_render
+from .creative_project_api import QueueRendererRequest
 from .creative_renderers import renderer_for
 from .plans import DEEP_REVISION_HISTORY, REVISION_HISTORY
 from .revisions import create_revision
@@ -277,7 +278,10 @@ def queue_integrated_creative_render(
 
     variables["reference_image_count"] = len(staged)
     integrated_body = body.model_copy(update={"variables": variables})
-    result = queue_creative_render(project_name, directive_id, integrated_body, request)
+    # Route through the same commercial admission ledger as the canonical /render endpoint.
+    # This preserves image allowances, Creation Coin charging/refunds, replay protection and
+    # duplicate-render prevention while still adding project-scoped reference inputs.
+    result = render_with_commercial_entitlements(project_name, directive_id, integrated_body, request)
 
     latest = store.load()
     latest_directive = next(item for item in latest.directives if item.id == directive_id)
