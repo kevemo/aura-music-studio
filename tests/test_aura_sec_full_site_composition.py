@@ -14,15 +14,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _fresh_production_routes() -> list[dict]:
-    """Inspect the release entrypoint in a clean interpreter, like Uvicorn does.
+    """Inspect the exact release entrypoint in a clean interpreter, like Uvicorn does.
 
     The full suite imports the shared FastAPI singleton from many test modules during
-    collection, so its in-process route table is not a reliable clean-boot assertion.
+    collection. Load the repository's exact ``app.py`` by path so neither shared module
+    state nor an unrelated installed module named ``app`` can affect this assertion.
     """
     code = r'''
+import importlib.util
 import json
-import app as production_entrypoint
+from pathlib import Path
 from fastapi.routing import APIRoute
+entrypoint_path = Path.cwd() / "app.py"
+spec = importlib.util.spec_from_file_location("aura_sec_production_entrypoint", entrypoint_path)
+if spec is None or spec.loader is None:
+    raise RuntimeError(f"Unable to load production entrypoint: {entrypoint_path}")
+production_entrypoint = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(production_entrypoint)
 routes = []
 for route in production_entrypoint.app.routes:
     if isinstance(route, APIRoute):
@@ -32,6 +40,7 @@ for route in production_entrypoint.app.routes:
             "module": route.endpoint.__module__,
             "schema": bool(route.include_in_schema),
         })
+print("AURA_SEC_ENTRYPOINT=" + str(entrypoint_path.resolve()))
 print("AURA_SEC_ROUTE_SNAPSHOT=" + json.dumps(routes, separators=(",", ":")))
 '''
     proc = subprocess.run(
@@ -44,6 +53,14 @@ print("AURA_SEC_ROUTE_SNAPSHOT=" + json.dumps(routes, separators=(",", ":")))
         timeout=45,
     )
     assert proc.returncode == 0, proc.stderr
+    entry_marker = "AURA_SEC_ENTRYPOINT="
+    entry_line = next(
+        (item for item in reversed(proc.stdout.splitlines()) if item.startswith(entry_marker)),
+        None,
+    )
+    assert entry_line is not None, proc.stdout
+    assert Path(entry_line[len(entry_marker):]).resolve() == (ROOT / "app.py").resolve()
+
     marker = "AURA_SEC_ROUTE_SNAPSHOT="
     line = next((item for item in reversed(proc.stdout.splitlines()) if item.startswith(marker)), None)
     assert line is not None, proc.stdout
@@ -51,8 +68,12 @@ print("AURA_SEC_ROUTE_SNAPSHOT=" + json.dumps(routes, separators=(",", ":")))
 
 
 def _fresh_route(path: str) -> dict:
-    matches = [route for route in _fresh_production_routes() if route["path"] == path]
-    assert len(matches) == 1, f"expected exactly one clean-production route for {path!r}"
+    routes = _fresh_production_routes()
+    matches = [route for route in routes if route["path"] == path]
+    assert len(matches) == 1, (
+        f"expected exactly one clean-production route for {path!r}; "
+        f"Aura Sec routes were {[route['path'] for route in routes if route['path'].startswith('/aura-sec')]}"
+    )
     return matches[0]
 
 
