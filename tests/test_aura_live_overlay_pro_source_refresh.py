@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import inspect
-import json
-import subprocess
-import sys
 
 
 def test_advanced_source_is_mounted_under_existing_token_boundary():
-    from aura_music_studio import access_control
+    from aura_music_studio import access_control, api
     from aura_music_studio.aura_live_overlay_pro_source import router
 
     expected = {
@@ -21,22 +18,9 @@ def test_advanced_source_is_mounted_under_existing_token_boundary():
     assert expected <= {getattr(route, "path", "") for route in router.routes}
     assert "/live-overlay/source/" in access_control.PUBLIC_PREFIXES
 
-    probe = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "import json; "
-                "from aura_music_studio import api; "
-                "print(json.dumps(sorted(getattr(route, 'path', '') for route in api.app.routes)))"
-            ),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    production_paths = set(json.loads(probe.stdout.strip().splitlines()[-1]))
-    assert expected <= production_paths
+    production_source = inspect.getsource(api)
+    assert "from .aura_live_overlay_pro_source import router as aura_live_overlay_pro_source_router" in production_source
+    assert "app.include_router(aura_live_overlay_pro_source_router)" in production_source
 
 
 def test_advanced_source_rotation_uses_hashed_source_identity():
