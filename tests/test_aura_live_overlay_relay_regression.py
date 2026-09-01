@@ -30,6 +30,7 @@ def _configure(tmp_path, monkeypatch):
     db = tmp_path / "aura-live-relay.sqlite3"
     monkeypatch.setattr(engine, "DB_PATH", db)
     engine._rule_last_fired.clear()
+    engine._connector_rate_limits.clear()
     engine._init_schema()
     monkeypatch.setattr(engine, "_require_active_member", lambda user_id: {"status": "active", "user_id": user_id})
     return engine
@@ -289,7 +290,9 @@ def test_connector_setup_page_is_truthful_and_private(tmp_path, monkeypatch):
     response = engine.connector_setup(RequestStub(member=_member()))
     body = response.body.decode("utf-8")
     assert "/api/live-overlays/connector/rotate" in body
-    assert "/live-overlay/source/relay/events" in body
+    # The browser receives the hidden ingress path only after a successful
+    # credential rotation; the setup HTML does not hard-code/expose it.
+    assert "lastEndpoint=location.origin+d.ingest_path" in body
     assert "does not claim TikTok or any other provider is connected" in body
     assert "Provider connected:</b> <span id='provider'>No" in body
     assert "Provider moderation/write authority:</b> None" in body
