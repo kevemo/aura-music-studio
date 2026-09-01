@@ -19,6 +19,7 @@ from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_rou
 from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
 from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
 from .aura_live_overlay_orchestration import router as aura_live_overlay_orchestration_router
+from .aura_live_overlay_pro_source import router as aura_live_overlay_pro_source_router
 from .aura_live_overlay_studio import router as aura_live_overlay_studio_router
 from .aura_live_post_show_report import router as aura_live_post_show_report_router
 from .aura_live_trend_coach import router as aura_live_trend_coach_router
@@ -84,6 +85,7 @@ app.include_router(aura_support_center_router)
 app.include_router(owner_feature_workshop_router)
 app.include_router(aura_live_overlay_studio_router)
 app.include_router(aura_live_overlay_advanced_router)
+app.include_router(aura_live_overlay_pro_source_router)
 app.include_router(aura_live_overlay_engine_router)
 app.include_router(aura_live_overlay_interactives_router)
 app.include_router(aura_live_overlay_orchestration_router)
