@@ -54,7 +54,7 @@ def _client(monkeypatch, membership):
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(monkeypatch):
+def test_regular_member_dashboard_surfaces_aura_core_and_separate_aura_sec_product(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
@@ -67,6 +67,15 @@ def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(mo
     assert "Verified Workflows" in text
     assert "Open Aura Intelligence" in text
     assert "Pulsar-Frequency House is one integrated creation platform" in text
+
+    assert "Aura Sec Security Center" in text
+    assert "Separate security product · same account" in text
+    assert "protection entitlement is separate from ordinary creative membership" in text
+    assert "The browser is a member-safe control plane only" in text
+    assert "href='/aura-sec'" in text
+    assert text.count("<article class='tool'>") == 6
+    assert "<section class='security'>" in text
+
     assert "ESP areas use the same account and site" in text
     assert "access is owner-approved" in text
     assert "cannot be obtained merely by purchasing a creative subscription" in text
@@ -74,10 +83,25 @@ def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(mo
     assert "Enter ESP Hub" not in text
 
 
-def test_approved_esp_member_gets_private_hub_entry_inside_same_site(monkeypatch):
+def test_dashboard_aura_sec_entry_never_exposes_native_authority_links(monkeypatch):
+    response = _client(monkeypatch, None).get("/dashboard")
+    assert response.status_code == 200
+    text = response.text
+    assert "href='/aura-sec'" in text
+    assert "href='/aura-sec/native/" not in text
+    assert "href='/aura-sec/sign'" not in text
+    assert "href='/aura-sec/approve'" not in text
+    assert "href='/aura-sec/actions/execute'" not in text
+    assert "cannot execute endpoint commands" in text
+    assert "cannot" in text and "access command-signing keys" in text
+
+
+def test_approved_esp_member_gets_private_hub_and_separate_aura_sec_entry(monkeypatch):
     response = _client(monkeypatch, {"status": "active", "roles": "creator"}).get("/dashboard")
     assert response.status_code == 200
     text = response.text
+    assert "Aura Sec Security Center" in text
+    assert "href='/aura-sec'" in text
     assert "Private Elevate Souls Productions Area" in text
     assert "additional areas inside this same Pulsar-Frequency House account" in text
     assert "These areas remain hidden from ordinary public members" in text
