@@ -20,6 +20,8 @@ from aura_music_studio.aura_context_extensions import install_aura_context_exten
 from aura_music_studio.aura_daw_tools import install_aura_daw_tools
 from aura_music_studio.aura_game_tools import install_aura_game_tools
 from aura_music_studio.aura_intelligence import router as aura_intelligence_router
+from aura_music_studio.aura_live_relay_error_boundary import AuraLiveRelayErrorBoundaryMiddleware
+from aura_music_studio.aura_live_relay_identity import AuraLiveRelayIdentityMiddleware
 from aura_music_studio.aura_multimodal import router as aura_multimodal_router
 from aura_music_studio.aura_notifications_ui import router as aura_notifications_ui_router
 from aura_music_studio.aura_productivity_tools import install_aura_productivity_tools
@@ -291,6 +293,11 @@ app.add_middleware(AuraVoiceConversationMiddleware)
 app.add_middleware(AuraAvatarRuntimeMiddleware)
 app.add_middleware(OwnerIdentityMiddleware)
 app.add_middleware(BrandMigrationMiddleware)
+# Require provider + LIVE session + provider event identity at the canonical production relay
+# boundary while preserving the existing engine's token, membership, rate and processing gates.
+app.add_middleware(AuraLiveRelayIdentityMiddleware)
+# Added after the relay identity boundary so validation HTTPExceptions remain bounded 4xx JSON.
+app.add_middleware(AuraLiveRelayErrorBoundaryMiddleware)
 # Added last so this guard wraps all route surfaces at the browser request boundary.
 app.add_middleware(CrossSiteRequestGuardMiddleware)
 
