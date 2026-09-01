@@ -24,7 +24,6 @@ from .stripe_billing import (
 from .stripe_creation_coins import (
     creation_coin_catalog as base_creation_coin_catalog,
     creation_coin_storefront as base_creation_coin_storefront,
-    router as stripe_creation_coins_router,
 )
 from .stripe_marketplace_checkout import (
     MarketplaceCheckoutRequest,
@@ -277,9 +276,6 @@ async def hardened_stripe_webhook(request: Request):
                 raise HTTPException(400, str(exc)) from exc
 
     return await base_stripe_webhook(request)
-
-
-router.include_router(stripe_creation_coins_router)
 
 
 __all__ = [
