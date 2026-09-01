@@ -166,6 +166,7 @@ function drawEntity(row){
 function drawWorld(){for(const row of entities)drawEntity(row)}
 if(typeof drawPlayer==='function'){const baseDrawPlayer=drawPlayer;drawPlayer=function(){drawWorld();baseDrawPlayer()}}
 const help=document.getElementById('help');if(help)help.textContent='WASD / arrows · E interact · authored World DNA active';
+if(typeof auraApplyAll==='function')auraApplyAll();
 syncFromState();
 let last=performance.now();function frame(now){last=now;gameplayTick(now);requestAnimationFrame(frame)}requestAnimationFrame(frame);
 })();
