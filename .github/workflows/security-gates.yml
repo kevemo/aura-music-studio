@@ -60,4 +60,5 @@ jobs:
           tests/test_aura_sec_release.py
           tests/test_aura_sec_release_key_trust.py
           tests/test_aura_sec_release_trust.py
+          tests/test_aura_sec_platform_release.py
           tests/test_aura_sec_release_readiness.py
