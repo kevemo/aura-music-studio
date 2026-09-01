@@ -12,6 +12,7 @@ from aura_music_studio.assets import AssetLibrary
 from aura_music_studio.creative_project import CreativeDirective, CreativeProjectStore, CreativeReference
 from aura_music_studio.creative_project_api import QueueRendererRequest
 from aura_music_studio.creative_renderers import RendererInput
+from aura_music_studio.render_attempts import RenderAttemptStore
 
 
 class _Plan:
@@ -21,7 +22,7 @@ class _Plan:
         return True
 
 
-_MEMBER = SimpleNamespace(plan=_Plan())
+_MEMBER = SimpleNamespace(user_id="chat3-member", plan=_Plan())
 
 
 def _client(monkeypatch, tmp_path: Path):
@@ -267,6 +268,100 @@ def test_commercial_denial_does_not_stage_reference_to_renderer(monkeypatch, tmp
     assert staged["count"] == 0
 
 
+def test_cancel_integrated_releases_matching_durable_attempt_without_fabricating_refund(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+    directive = CreativeDirective(
+        instruction="Create image",
+        operation="create",
+        target_kind="image",
+    )
+    manifest = store.add_directive(directive)
+    store.update_directive(
+        directive.id,
+        status="queued",
+        capability_state="connected",
+        metadata={"creative_renderer": {"prompt_id": "prompt-cancel-1"}},
+    )
+
+    attempts = RenderAttemptStore(tmp_path / "attempts.sqlite3")
+    attempt = attempts.reserve(_MEMBER.user_id, "visual-project", directive.id)
+    attempts.mark_queued(attempt.attempt_id, "prompt-cancel-1")
+    monkeypatch.setattr(integration, "RenderAttemptStore", lambda: attempts)
+
+    def fake_cancel(project_name, directive_id, request):
+        updated = store.update_directive(
+            directive_id,
+            status="ready_for_renderer",
+            metadata={
+                "creative_renderer": {
+                    "prompt_id": "prompt-cancel-1",
+                    "cancelled": True,
+                    "cancellation_state": "cancelled_pending",
+                }
+            },
+        )
+        current = next(item for item in updated.directives if item.id == directive_id)
+        return {
+            "directive": current.model_dump(mode="json"),
+            "cancellation": {"state": "cancelled_pending", "prompt_id": "prompt-cancel-1"},
+            "note": "Creative render cancelled safely.",
+        }
+
+    monkeypatch.setattr(integration, "cancel_creative_render", fake_cancel)
+
+    response = client.post(
+        f"/creative/projects/visual-project/directives/{directive.id}/cancel-integrated",
+        json={},
+    )
+
+    assert response.status_code == 200, response.text
+    reconciliation = response.json()["render_attempt_reconciliation"]
+    assert reconciliation["state"] == "failed"
+    assert reconciliation["provider_prompt_matched"] is True
+    assert reconciliation["refund_issued"] is False
+    assert attempts.active(_MEMBER.user_id, "visual-project", directive.id) is None
+    assert attempts.get(attempt.attempt_id).state == "failed"
+
+
+def test_cancel_integrated_fails_closed_when_provider_prompt_identity_does_not_match(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+    directive = CreativeDirective(
+        instruction="Create image",
+        operation="create",
+        target_kind="image",
+    )
+    store.add_directive(directive)
+    attempts = RenderAttemptStore(tmp_path / "attempts-mismatch.sqlite3")
+    attempt = attempts.reserve(_MEMBER.user_id, "visual-project", directive.id)
+    attempts.mark_queued(attempt.attempt_id, "ledger-prompt")
+    monkeypatch.setattr(integration, "RenderAttemptStore", lambda: attempts)
+
+    def fake_cancel(project_name, directive_id, request):
+        updated = store.update_directive(
+            directive_id,
+            status="ready_for_renderer",
+            metadata={"creative_renderer": {"prompt_id": "different-prompt", "cancelled": True}},
+        )
+        current = next(item for item in updated.directives if item.id == directive_id)
+        return {
+            "directive": current.model_dump(mode="json"),
+            "cancellation": {"state": "cancelled_pending", "prompt_id": "different-prompt"},
+        }
+
+    monkeypatch.setattr(integration, "cancel_creative_render", fake_cancel)
+
+    response = client.post(
+        f"/creative/projects/visual-project/directives/{directive.id}/cancel-integrated",
+        json={},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["render_attempt_reconciliation"] is None
+    assert attempts.active(_MEMBER.user_id, "visual-project", directive.id) is not None
+
+
 def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, tmp_path):
     client, _root = _client(monkeypatch, tmp_path)
 
@@ -291,13 +386,15 @@ def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, t
     assert script.status_code == 200
     assert "/references/upload" in script.text
     assert "/render-integrated" in script.text
-    assert "/cancel-render" in script.text
+    assert "/cancel-integrated" in script.text
     assert "Live monitor active" in script.text
     assert "Upload & attach reference" in script.text
     assert "inferredUploadKind" in script.text
+    assert "cancelRender=cancelIntegrated" in script.text
 
 
 def test_production_entrypoint_mounts_unified_creative_bridge_on_same_site():
     paths = production_entrypoint.app.openapi().get("paths", {})
     assert "/creative/projects/{project_name}/references/upload" in paths
     assert "/creative/projects/{project_name}/directives/{directive_id}/render-integrated" in paths
+    assert "/creative/projects/{project_name}/directives/{directive_id}/cancel-integrated" in paths
