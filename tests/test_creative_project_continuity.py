@@ -99,36 +99,35 @@ def test_middleware_does_not_inject_script_into_non_html_or_non_target_routes():
 
 
 def test_production_entrypoint_mounts_continuity_router_and_middleware():
-    # Validate the repository-root production entrypoint in a fresh interpreter. An editable
-    # installation also exposes an unrelated package-level `app` module, so a plain `import app`
-    # is ambiguous in subprocesses. Load the canonical root app.py by absolute file path instead.
-    # Route discovery walks nested routers because modern FastAPI preserves include_router()
-    # composition lazily rather than requiring every APIRoute to be flattened into app.routes.
+    # Validate the repository-root production entrypoint in a fresh interpreter. FastAPI 0.141
+    # preserves include_router() composition lazily, so hidden routes must not be asserted by
+    # expecting every APIRoute to appear flattened in app.router.routes. Instead prove all three
+    # composition facts directly: the imported router owns the hidden endpoint, root app.py calls
+    # include_router() for that exact alias, and the runtime middleware stack contains the class.
     probe = """
 import importlib.util
 from pathlib import Path
 
 root_app = Path.cwd() / 'app.py'
+source = root_app.read_text(encoding='utf-8')
 spec = importlib.util.spec_from_file_location('command_center_production_entrypoint', root_app)
 assert spec is not None and spec.loader is not None, root_app
 production_entrypoint = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(production_entrypoint)
 
-from aura_music_studio.creative_project_continuity import CreativeProjectContinuityMiddleware
+from aura_music_studio.creative_project_continuity import (
+    CreativeProjectContinuityMiddleware,
+    router as continuity_router,
+)
 
-def contains_path(routes, wanted):
-    for route in routes:
-        if getattr(route, 'path', None) == wanted:
-            return True
-        nested = getattr(route, 'routes', None)
-        if nested and contains_path(nested, wanted):
-            return True
-    return False
-
-assert contains_path(
-    production_entrypoint.app.router.routes,
-    '/creative/project-continuity-ui.js',
-), 'continuity router is not mounted on canonical root app.py'
+assert production_entrypoint.creative_project_continuity_router is continuity_router
+assert any(
+    getattr(route, 'path', None) == '/creative/project-continuity-ui.js'
+    for route in continuity_router.routes
+), 'continuity router does not own the hidden JS endpoint'
+assert 'app.include_router(creative_project_continuity_router)' in source, (
+    'canonical root app.py does not include the continuity router alias'
+)
 middleware_classes = {entry.cls for entry in production_entrypoint.app.user_middleware}
 assert CreativeProjectContinuityMiddleware in middleware_classes, middleware_classes
 """
