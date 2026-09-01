@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 
-import app as production_entrypoint
 from aura_music_studio.creative_project_continuity import (
     CreativeProjectContinuityMiddleware,
     PROJECT_CONTINUITY_SCRIPT,
@@ -97,8 +99,21 @@ def test_middleware_does_not_inject_script_into_non_html_or_non_target_routes():
 
 
 def test_production_entrypoint_mounts_continuity_router_and_middleware():
-    paths = {getattr(route, "path", None) for route in production_entrypoint.app.router.routes}
-    assert "/creative/project-continuity-ui.js" in paths
-
-    middleware_classes = {entry.cls for entry in production_entrypoint.app.user_middleware}
-    assert CreativeProjectContinuityMiddleware in middleware_classes
+    # Validate the canonical production entrypoint in a fresh interpreter. Other integration
+    # tests intentionally rebuild/mutate app state, so a shared module object is not reliable
+    # evidence that the checked-in production composition is mounted correctly.
+    probe = """
+import app as production_entrypoint
+from aura_music_studio.creative_project_continuity import CreativeProjectContinuityMiddleware
+paths = {getattr(route, 'path', None) for route in production_entrypoint.app.router.routes}
+assert '/creative/project-continuity-ui.js' in paths, paths
+middleware_classes = {entry.cls for entry in production_entrypoint.app.user_middleware}
+assert CreativeProjectContinuityMiddleware in middleware_classes, middleware_classes
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
