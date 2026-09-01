@@ -7,7 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 import aura_music_studio.game_forge_project_binding as binding
-from aura_music_studio.creative_project_continuity import PROJECT_CONTINUITY_SCRIPT, router as continuity_router
+from aura_music_studio.creative_project_continuity import PROJECT_CONTINUITY_SCRIPT
 from aura_music_studio.game_forge_models import GameDNA
 
 
@@ -161,8 +161,8 @@ def test_project_bound_create_validates_project_before_game_creation(monkeypatch
     assert payload["project_bound"] is True
 
 
-def test_continuity_router_mounts_project_bound_game_endpoints():
-    paths = {getattr(route, "path", "") for route in continuity_router.routes}
+def test_project_binding_router_declares_project_bound_game_endpoints():
+    paths = {getattr(route, "path", "") for route in binding.router.routes}
     assert "/api/game-forge/projects/{project_name}/games" in paths
     assert "/api/game-forge/games/{game_id}/project-context" in paths
     assert "/api/game-forge/games/{game_id}/project-library" in paths
