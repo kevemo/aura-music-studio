@@ -136,7 +136,32 @@ def test_reference_upload_requires_rights_and_rejects_wrong_kind_extension(monke
     assert "Unsupported image reference file type" in wrong_kind.json()["detail"]
 
 
-def test_integrated_render_stages_project_image_reference_then_uses_commercial_authority(monkeypatch, tmp_path):
+def test_local_reference_marker_is_converted_to_opaque_token_only_inside_submit_stage(tmp_path):
+    source = tmp_path / "member-reference.png"
+    source.write_bytes(b"reference")
+    marker = integration.LocalRendererImageInput(
+        source=source,
+        reference_id="ref-1",
+        asset_id="asset-1",
+    )
+
+    class FakeRenderer:
+        def upload_image_input(self, path: Path):
+            assert path == source
+            return RendererInput(name="opaque.png", workflow_value="opaque/subfolder.png")
+
+    resolved = integration._resolve_local_renderer_inputs(
+        FakeRenderer(),
+        {"prompt": "keep identity", "reference_image": marker, "reference_image_count": 1},
+    )
+
+    assert resolved["reference_image"] == "opaque/subfolder.png"
+    assert resolved["reference_image_count"] == 1
+    assert resolved["prompt"] == "keep identity"
+    assert str(source) not in str(resolved)
+
+
+def test_integrated_render_defers_image_staging_until_commercial_authority_calls_submit(monkeypatch, tmp_path):
     client, root = _client(monkeypatch, tmp_path)
     store = _init(root)
     source = store.project_dir / "reference.png"
@@ -159,19 +184,16 @@ def test_integrated_render_stages_project_image_reference_then_uses_commercial_a
     )
     store.add_directive(directive)
 
-    class FakeRenderer:
-        configured = True
-
-        def upload_image_input(self, path: Path):
-            assert path.name.endswith("reference.png")
-            return RendererInput(name="opaque.png", workflow_value="opaque.png")
-
     captured = {"commercial_calls": 0}
-    monkeypatch.setattr(integration, "renderer_for", lambda _kind: FakeRenderer())
 
     def fake_commercial_queue(project_name, directive_id, body: QueueRendererRequest, request):
         captured["commercial_calls"] += 1
         captured.update(body.variables)
+        marker = body.variables["reference_image"]
+        assert isinstance(marker, integration.LocalRendererImageInput)
+        assert marker.reference_id == reference.id
+        assert marker.asset_id == asset.id
+        assert marker.source.is_file()
         manifest = store.update_directive(
             directive_id,
             status="queued",
@@ -191,7 +213,7 @@ def test_integrated_render_stages_project_image_reference_then_uses_commercial_a
     assert response.status_code == 200, response.text
     body = response.json()
     assert captured["commercial_calls"] == 1
-    assert captured["reference_image"] == "opaque.png"
+    assert isinstance(captured["reference_image"], integration.LocalRendererImageInput)
     assert captured["reference_image_count"] == 1
     assert body["reference_input_count"] == 1
     assert body["reference_inputs"] == [
@@ -201,6 +223,48 @@ def test_integrated_render_stages_project_image_reference_then_uses_commercial_a
     meta = body["directive"]["metadata"]["creative_renderer"]
     assert meta["staged_image_reference_count"] == 1
     assert meta["staged_image_reference_ids"] == [reference.id]
+
+
+def test_commercial_denial_does_not_stage_reference_to_renderer(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+    source = store.project_dir / "denied.png"
+    source.write_bytes(b"denied-reference")
+    asset = AssetLibrary(store.project_dir).ingest(source, kind="image")
+    reference = CreativeReference(
+        kind="image",
+        label="Denied reference",
+        source_ref=f"asset:{asset.id}",
+        rights_confirmed=True,
+        metadata={"asset_id": asset.id},
+    )
+    store.add_reference(reference)
+    directive = CreativeDirective(
+        instruction="Create image",
+        operation="create",
+        target_kind="image",
+        reference_ids=[reference.id],
+    )
+    store.add_directive(directive)
+    staged = {"count": 0}
+
+    def denied(*_args, **_kwargs):
+        raise integration.HTTPException(402, "Creation Coin admission denied")
+
+    def should_not_stage(*_args, **_kwargs):
+        staged["count"] += 1
+        raise AssertionError("renderer staging must not occur before admission")
+
+    monkeypatch.setattr(integration, "render_with_commercial_entitlements", denied)
+    monkeypatch.setattr(integration, "_resolve_local_renderer_inputs", should_not_stage)
+
+    response = client.post(
+        f"/creative/projects/visual-project/directives/{directive.id}/render-integrated",
+        json={"width": 1024, "height": 1024, "frames": 1, "fps": 1},
+    )
+
+    assert response.status_code == 402
+    assert staged["count"] == 0
 
 
 def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, tmp_path):
