@@ -21,14 +21,20 @@ def _signer(key_id: str) -> SelfHostedEd25519CommandSigner:
     return SelfHostedEd25519CommandSigner(Ed25519PrivateKey.generate(), key_id=key_id)
 
 
-def _command(*, suffix: str = "001", device_id: str = DEVICE_ID) -> SecurityCommand:
+def _command(
+    *,
+    suffix: str = "001",
+    device_id: str = DEVICE_ID,
+    issued_at: datetime | None = None,
+) -> SecurityCommand:
+    issued = issued_at or (BASE + timedelta(seconds=1))
     return SecurityCommand(
         command_id=f"command_rotation_{suffix}",
         device_id=device_id,
         action=ActionType.REFRESH_SECURITY_STATE,
         risk=ActionRisk.READ_ONLY,
-        issued_at=BASE + timedelta(seconds=1),
-        expires_at=BASE + timedelta(hours=4),
+        issued_at=issued,
+        expires_at=issued + timedelta(minutes=10),
         policy_version="policy-2026.09",
         nonce=f"rotation-nonce-{suffix}",
         parameters={},
@@ -84,7 +90,12 @@ def test_staged_successor_is_not_trusted_until_activation(tmp_path):
 
     with pytest.raises(PermissionError, match="not trusted"):
         store.verify_command(
-            new.sign_command(_command(suffix="staged")),
+            new.sign_command(
+                _command(
+                    suffix="staged",
+                    issued_at=BASE + timedelta(minutes=1, seconds=30),
+                )
+            ),
             expected_device_id=DEVICE_ID,
             now=BASE + timedelta(minutes=2),
         )
@@ -114,27 +125,33 @@ def test_activation_allows_bounded_overlap_then_old_key_fails_closed(tmp_path):
 
     during = BASE + timedelta(minutes=5)
     assert set(store.trusted_public_keys(now=during)) == {old.key_id, new.key_id}
+    during_issue = BASE + timedelta(minutes=4, seconds=30)
     store.verify_command(
-        old.sign_command(_command(suffix="old-overlap")),
+        old.sign_command(_command(suffix="old-overlap", issued_at=during_issue)),
         expected_device_id=DEVICE_ID,
         now=during,
     )
     store.verify_command(
-        new.sign_command(_command(suffix="new-active")),
+        new.sign_command(_command(suffix="new-active", issued_at=during_issue)),
         expected_device_id=DEVICE_ID,
         now=during,
     )
 
     after = BASE + timedelta(minutes=13)
     assert set(store.trusted_public_keys(now=after)) == {new.key_id}
+    after_issue = BASE + timedelta(minutes=12, seconds=30)
     with pytest.raises(PermissionError, match="not trusted"):
         store.verify_command(
-            old.sign_command(_command(suffix="old-after-overlap")),
+            old.sign_command(
+                _command(suffix="old-after-overlap", issued_at=after_issue)
+            ),
             expected_device_id=DEVICE_ID,
             now=after,
         )
     store.verify_command(
-        new.sign_command(_command(suffix="new-after-overlap")),
+        new.sign_command(
+            _command(suffix="new-after-overlap", issued_at=after_issue)
+        ),
         expected_device_id=DEVICE_ID,
         now=after,
     )
@@ -265,10 +282,20 @@ def test_trust_bound_signer_blocks_stale_signer_immediately_after_activation(tmp
     )
 
     with pytest.raises(PermissionError, match="not the active trusted signing key"):
-        old_guarded.sign_command(_command(suffix="stale-old"))
+        old_guarded.sign_command(
+            _command(
+                suffix="stale-old",
+                issued_at=BASE + timedelta(minutes=2, seconds=30),
+            )
+        )
 
     new_guarded = TrustBoundServerCommandSigner(store, new)
-    fresh = new_guarded.sign_command(_command(suffix="guarded-new"))
+    fresh = new_guarded.sign_command(
+        _command(
+            suffix="guarded-new",
+            issued_at=BASE + timedelta(minutes=2, seconds=30),
+        )
+    )
     assert fresh.signer_key_id == new.key_id
 
 
