@@ -4,7 +4,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .game_forge_project_binding import router as game_forge_project_binding_router
+
 router = APIRouter(tags=["creative-project-continuity"])
+# Project-bound Game Forge endpoints are composed into the already-mounted continuity router so
+# they remain part of the one production application without adding a parallel Game Forge app.
+router.include_router(game_forge_project_binding_router)
 
 _CONTINUITY_PATHS = {
     "/creative-house",
@@ -27,6 +32,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
   const isGame=path==='/game-creation';
   const $=id=>document.getElementById(id);
   let contextualProject=requested;
+  const nativeFetch=window.fetch.bind(window);
 
   function musicProject(){
     if(!isMusic)return '';
@@ -138,6 +144,73 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     }
   }
 
+  async function responseJson(response){
+    let body={};
+    try{body=await response.clone().json()}catch(_){}
+    if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:(body.detail?.message||`Request failed (${response.status})`));
+    return body;
+  }
+
+  function installGameProjectTransport(){
+    if(!isGame)return;
+    window.fetch=async function(input,init={}){
+      if(typeof input!=='string')return nativeFetch(input,init);
+      const url=new URL(input,location.origin);
+      if(url.origin!==location.origin)return nativeFetch(input,init);
+      const method=String(init.method||'GET').toUpperCase();
+      const projectName=currentProject();
+      if(projectName&&url.pathname==='/api/game-forge/games'&&method==='POST'){
+        url.pathname=`/api/game-forge/projects/${encodeURIComponent(projectName)}/games`;
+        return nativeFetch(url.pathname+url.search,init);
+      }
+      const library=url.pathname.match(/^\/api\/game-forge\/games\/([^/]+)\/assets\/library$/);
+      if(library&&method==='GET'){
+        url.pathname=`/api/game-forge/games/${library[1]}/project-library`;
+        return nativeFetch(url.pathname+url.search,init);
+      }
+      const assets=url.pathname.match(/^\/api\/game-forge\/games\/([^/]+)\/assets$/);
+      if(assets&&method==='POST'){
+        url.pathname=`/api/game-forge/games/${assets[1]}/project-assets`;
+        return nativeFetch(url.pathname+url.search,init);
+      }
+      return nativeFetch(input,init);
+    };
+  }
+
+  async function resolveGameProject(gameId){
+    if(!isGame||!gameId)return currentProject();
+    const id=encodeURIComponent(String(gameId));
+    const contextResponse=await nativeFetch(`/api/game-forge/games/${id}/project-context`,{credentials:'same-origin'});
+    const context=await responseJson(contextResponse);
+    if(context.creative_project_name){
+      commitProject(context.creative_project_name);
+      return context.creative_project_name;
+    }
+    const desired=currentProject();
+    if(!desired)return '';
+    const bindResponse=await nativeFetch(`/api/game-forge/games/${id}/project-context`,{
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({creative_project_name:desired}),
+    });
+    const bound=await responseJson(bindResponse);
+    if(bound.creative_project_name)commitProject(bound.creative_project_name);
+    return bound.creative_project_name||desired;
+  }
+
+  function wrapGameWorkspace(){
+    if(!isGame||typeof openWorkspace!=='function')return;
+    const baseOpen=openWorkspace;
+    openWorkspace=async function(gameId,...args){
+      try{await resolveGameProject(gameId)}catch(error){
+        if(typeof notice==='function')notice(error.message||String(error),true);
+        return;
+      }
+      return baseOpen(gameId,...args);
+    };
+  }
+
   async function bootRequestedProject(){
     if(!requested)return drawWorkspace();
     if(isMedia){
@@ -162,15 +235,17 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       return drawWorkspace();
     }
     if(isGame){
-      // Game Forge consumes verified Creative Library assets but has no stable Creative Project key.
-      // Carry the exact context in navigation without inferring identity from human-readable labels.
+      // Game Forge now persists this exact Creative DNA identity into Game DNA when a game is
+      // created or an eligible legacy game is first opened from the project workspace.
       contextualProject=requested;
       return drawWorkspace();
     }
     drawWorkspace();
   }
 
+  installGameProjectTransport();
   wrapProjectFunctions();
+  wrapGameWorkspace();
   drawWorkspace();
   void bootRequestedProject();
 
@@ -182,6 +257,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     currentProject,
     commitProject,
     projectHref,
+    resolveGameProject,
     refresh:drawWorkspace,
   };
 })();
