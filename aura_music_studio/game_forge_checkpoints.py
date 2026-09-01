@@ -96,7 +96,11 @@ function checkpointRead(slot,quiet=false){
       return null;
     }
     return row;
-  }catch(_error){if(!quiet)checkpointMessage('Game save storage is unavailable.');return null}
+  }catch(_error){
+    try{localStorage.removeItem(checkpointKey(slot))}catch(_ignored){}
+    if(!quiet)checkpointMessage('Invalid or unavailable save data was cleared.');
+    return null;
+  }
 }
 function checkpointWrite(slot,name,quiet=false){
   if(!checkpointAllSlots.includes(slot))return null;
@@ -147,7 +151,7 @@ function checkpointMigrateLegacy(){
       localStorage.setItem(checkpointKey('slot1'),JSON.stringify(migrated));
     }
     localStorage.removeItem(checkpointLegacyKey);
-  }catch(_error){}
+  }catch(_error){try{localStorage.removeItem(checkpointLegacyKey)}catch(_ignored){}}
 }
 function checkpointAutosave(){
   if(!checkpointDirty||document.visibilityState==='hidden')return;
@@ -163,6 +167,7 @@ if(checkpointContinue)checkpointContinue.addEventListener('click',()=>{const row
 if(checkpointNew)checkpointNew.addEventListener('click',()=>{checkpointApply(checkpointRow('autosave','New game',checkpointInitialState));checkpointDirty=false;checkpointMessage('New game state started. Existing saves are preserved.')});
 if(checkpointReset)checkpointReset.addEventListener('click',()=>{checkpointDelete(checkpointSlot?.value||'slot1');checkpointRefresh()});
 for(const eventName of ['keydown','pointerdown','wheel'])addEventListener(eventName,()=>{checkpointDirty=true},{passive:true});
+addEventListener('pointermove',event=>{if(event.buttons)checkpointDirty=true},{passive:true});
 setInterval(checkpointAutosave,20000);
 addEventListener('pagehide',()=>{if(checkpointDirty){const state=checkpointCaptureState(),signature=JSON.stringify(state);if(signature!==checkpointLastAutosaveSignature){try{localStorage.setItem(checkpointKey('autosave'),JSON.stringify(checkpointRow('autosave','Autosave',state)))}catch(_error){}}}});
 checkpointRefresh();
