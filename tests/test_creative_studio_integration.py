@@ -109,6 +109,7 @@ def test_duplicate_reference_upload_reuses_asset_identity_without_breaking_older
     assert second.status_code == 200, second.text
     assert first.json()["asset"]["id"] == second.json()["asset"]["id"]
     assert first.json()["reference"]["id"] != second.json()["reference"]["id"]
+    assert second.json()["reused_project_asset"] is True
     assert len(AssetLibrary(store.project_dir).list()) == 1
     refs = store.load().references
     assert refs[0].source_ref == refs[1].source_ref
@@ -135,7 +136,7 @@ def test_reference_upload_requires_rights_and_rejects_wrong_kind_extension(monke
     assert "Unsupported image reference file type" in wrong_kind.json()["detail"]
 
 
-def test_integrated_render_stages_project_image_reference_as_opaque_renderer_input(monkeypatch, tmp_path):
+def test_integrated_render_stages_project_image_reference_then_uses_commercial_authority(monkeypatch, tmp_path):
     client, root = _client(monkeypatch, tmp_path)
     store = _init(root)
     source = store.project_dir / "reference.png"
@@ -165,10 +166,11 @@ def test_integrated_render_stages_project_image_reference_as_opaque_renderer_inp
             assert path.name.endswith("reference.png")
             return RendererInput(name="opaque.png", workflow_value="opaque.png")
 
-    captured = {}
+    captured = {"commercial_calls": 0}
     monkeypatch.setattr(integration, "renderer_for", lambda _kind: FakeRenderer())
 
-    def fake_queue(project_name, directive_id, body: QueueRendererRequest, request):
+    def fake_commercial_queue(project_name, directive_id, body: QueueRendererRequest, request):
+        captured["commercial_calls"] += 1
         captured.update(body.variables)
         manifest = store.update_directive(
             directive_id,
@@ -177,9 +179,9 @@ def test_integrated_render_stages_project_image_reference_as_opaque_renderer_inp
             metadata={"creative_renderer": {"prompt_id": "prompt-1", "workflow_name": "image.json"}},
         )
         current = next(item for item in manifest.directives if item.id == directive_id)
-        return {"directive": current.model_dump(mode="json"), "note": "Renderer accepted the Aura directive."}
+        return {"directive": current.model_dump(mode="json"), "note": "Commercial authority admitted the render."}
 
-    monkeypatch.setattr(integration, "queue_creative_render", fake_queue)
+    monkeypatch.setattr(integration, "render_with_commercial_entitlements", fake_commercial_queue)
 
     response = client.post(
         f"/creative/projects/visual-project/directives/{directive.id}/render-integrated",
@@ -188,6 +190,7 @@ def test_integrated_render_stages_project_image_reference_as_opaque_renderer_inp
 
     assert response.status_code == 200, response.text
     body = response.json()
+    assert captured["commercial_calls"] == 1
     assert captured["reference_image"] == "opaque.png"
     assert captured["reference_image_count"] == 1
     assert body["reference_input_count"] == 1
@@ -203,7 +206,6 @@ def test_integrated_render_stages_project_image_reference_as_opaque_renderer_inp
 def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, tmp_path):
     client, _root = _client(monkeypatch, tmp_path)
 
-    # Add simple route bodies after middleware setup; the integration middleware is path-scoped.
     @client.app.get("/creative-house")
     def creative_house():
         return integration.Response("<html><body>Creative House</body></html>", media_type="text/html")
@@ -228,6 +230,7 @@ def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, t
     assert "/cancel-render" in script.text
     assert "Live monitor active" in script.text
     assert "Upload & attach reference" in script.text
+    assert "inferredUploadKind" in script.text
 
 
 def test_production_entrypoint_mounts_unified_creative_bridge_on_same_site():
