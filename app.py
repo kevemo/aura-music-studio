@@ -31,6 +31,7 @@ from aura_music_studio.aura_reasoning_modes import router as aura_reasoning_mode
 from aura_music_studio.aura_research_tools import install_aura_research_tools
 from aura_music_studio.aura_runtime_context import install_aura_runtime_context
 from aura_music_studio.aura_sandbox import install_aura_sandbox_tools, router as aura_sandbox_router
+from aura_music_studio.aura_self_host_control import router as aura_self_host_control_router
 from aura_music_studio.aura_streaming import router as aura_streaming_router
 from aura_music_studio.aura_table_tools import install_aura_table_tools
 from aura_music_studio.aura_tool_extensions import install_aura_tool_extensions
@@ -172,6 +173,7 @@ app.include_router(aura_artifacts_router)
 app.include_router(aura_artifacts_ui_router)
 app.include_router(aura_notifications_ui_router)
 app.include_router(aura_sandbox_router)
+app.include_router(aura_self_host_control_router)
 app.include_router(aura_ui_extension_router)
 app.include_router(aura_voice_conversation_router)
 app.include_router(aura_avatar_router)
