@@ -47,6 +47,10 @@ from aura_music_studio.creative_library import router as creative_library_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
+from aura_music_studio.creative_studio_integration import (
+    CreativeStudioIntegrationMiddleware,
+    router as creative_studio_integration_router,
+)
 from aura_music_studio.creative_version_autopromotion import router as creative_version_autopromotion_router
 from aura_music_studio.creative_workspace import router as creative_workspace_router
 from aura_music_studio.daw_api import router as daw_router
@@ -188,6 +192,9 @@ app.include_router(professional_editor_router)
 # Commercial entitlement routes intentionally precede their underlying Creative handlers.
 # This makes image/poster daily limits and media-download gates authoritative server-side.
 app.include_router(commercial_entitlement_router)
+# Shared creative upload/render bridge is mounted on the production app so Creative House,
+# Image Designer and Video Studio use the same tenant project, rights ledger and renderer inputs.
+app.include_router(creative_studio_integration_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
 app.include_router(creative_library_router)
@@ -259,6 +266,7 @@ app.include_router(system_router)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
+app.add_middleware(CreativeStudioIntegrationMiddleware)
 app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
