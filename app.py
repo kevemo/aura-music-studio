@@ -47,6 +47,10 @@ from aura_music_studio.creative_library import router as creative_library_router
 from aura_music_studio.creative_media_preview import CreativeMediaPreviewMiddleware, router as creative_media_preview_router
 from aura_music_studio.creative_portal import router as creative_portal_router
 from aura_music_studio.creative_project_api import router as creative_project_router
+from aura_music_studio.creative_project_continuity import (
+    CreativeProjectContinuityMiddleware,
+    router as creative_project_continuity_router,
+)
 from aura_music_studio.creative_studio_integration import (
     CreativeStudioIntegrationMiddleware,
     router as creative_studio_integration_router,
@@ -195,6 +199,9 @@ app.include_router(commercial_entitlement_router)
 # Shared creative upload/render bridge is mounted on the production app so Creative House,
 # Image Designer and Video Studio use the same tenant project, rights ledger and renderer inputs.
 app.include_router(creative_studio_integration_router)
+# Cross-studio project continuity keeps one explicit project context across Creative House,
+# Image Designer, Video Studio, Music Studio and Game Forge without creating duplicate state.
+app.include_router(creative_project_continuity_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
 app.include_router(creative_library_router)
@@ -267,6 +274,9 @@ app.include_router(system_router)
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
 app.add_middleware(CreativeStudioIntegrationMiddleware)
+# Added after the render integration middleware so its script executes last and can preserve the
+# final active project across every creative surface and the links those surfaces already render.
+app.add_middleware(CreativeProjectContinuityMiddleware)
 app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
