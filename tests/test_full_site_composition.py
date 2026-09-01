@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections import Counter
 
-from fastapi.routing import APIRoute
-
 import app as production_entrypoint
 
 
@@ -31,12 +29,24 @@ _REQUIRED_FULL_SITE_SURFACES = {
 
 
 def _production_surface_counts() -> Counter[tuple[str, str]]:
+    """Inspect the real release router by capability, not a concrete FastAPI route class.
+
+    The production application uses compatibility/overlay adapters around route objects. A strict
+    ``isinstance(APIRoute)`` check can therefore silently count zero routes even while the app is
+    serving them. For the composition contract we need only the stable routing capabilities:
+    ``path`` and ``methods``.
+    """
     mounted: Counter[tuple[str, str]] = Counter()
-    for route in production_entrypoint.app.routes:
-        if not isinstance(route, APIRoute):
+    routes = list(getattr(production_entrypoint.app, "routes", ()) or ())
+    assert routes, "Production application exposes no route objects"
+
+    for route in routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if not isinstance(path, str) or not methods:
             continue
-        for method in route.methods or set():
-            mounted[(method.upper(), route.path)] += 1
+        for method in methods:
+            mounted[(str(method).upper(), path)] += 1
     return mounted
 
 
