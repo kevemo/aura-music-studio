@@ -9,7 +9,7 @@ HOSTNAME_VALUE="${LSS_SETUP_HOSTNAME:-}"
 DUCK_SUB="${LSS_SETUP_DUCKDNS_SUBDOMAIN:-}"
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is required to launch the self-hosted Studio stack." >&2
+  echo "Docker is required to launch the self-hosted Command Center stack." >&2
   exit 1
 fi
 
@@ -30,5 +30,5 @@ else
 fi
 
 echo
-printf 'ESP Live Sound Studio started. Local owner access: http://127.0.0.1:8000\n'
+printf 'Elevate Souls Productions Content Creation Command Center started. Local owner access: http://127.0.0.1:8000\n'
 printf 'Run: docker compose exec live-sound-studio aura public-address --refresh\n'
