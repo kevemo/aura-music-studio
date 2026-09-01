@@ -101,6 +101,8 @@ if(!bridge)throw new Error('Aura2D World bridge requires AuraRuntimeState');
 const pixels=Math.max(8,Math.min(256,Number(aura2dBridgeDNA.pixels_per_world_unit||48))),topInset=60;
 const basePositions=new Map(entities.map(row=>[row.id,{x:row.position.x,y:row.position.y,z:row.position.z}]));
 const cooldowns=new Map(),respawns=new Map(),insideTriggers=new Set();
+const authoredGameplay=entities.some(row=>(row.behaviors||[]).length>0);
+if(authoredGameplay){if(typeof stars!=='undefined'&&Array.isArray(stars))stars.length=0;if(typeof haz!=='undefined'&&Array.isArray(haz))haz.length=0}
 function playCenterY(){return topInset+Math.max(1,H-topInset)/2}
 function toScreen(pos){return {x:W/2+Number(pos?.x||0)*pixels,y:playCenterY()+Number(pos?.z||0)*pixels}}
 function toWorld(x,y){return {x:(Number(x||0)-W/2)/pixels,y:0,z:(Number(y||0)-playCenterY())/pixels}}
