@@ -31,8 +31,8 @@ def _runtime_script(
     runtime_json = json.dumps(runtime, ensure_ascii=True)
 
     if runtime == "aura2d":
-        capture_state = "return {x:Number(p.x),y:Number(p.y),score:Number(score),lives:Number(lives)};"
-        valid_state = "const s=row.state;return !!s&&finite(s.x)&&finite(s.y)&&finite(s.score)&&finite(s.lives);"
+        capture_state = "return {x:Number(p.x),y:Number(p.y),score:Number(score),lives:Number(lives),aura:window.AuraRuntimeState?.exportState?.()||null};"
+        valid_state = "const s=row.state;return !!s&&finite(s.x)&&finite(s.y)&&finite(s.score)&&finite(s.lives)&&(s.aura===null||s.aura===undefined||Boolean(window.AuraRuntimeState?.validateState?.(s.aura)));"
         apply_state = """
   const s=row.state;
   p.x=Math.max(p.r,Math.min(Math.max(p.r,W-p.r),s.x));
@@ -41,16 +41,18 @@ def _runtime_script(
   lives=Math.max(1,Math.min(99,Math.trunc(s.lives)));
   const scoreEl=document.getElementById('score');
   if(scoreEl)scoreEl.textContent=`Score ${score} · Lives ${lives}`;
+  if(s.aura&&window.AuraRuntimeState?.importState)window.AuraRuntimeState.importState(s.aura);
 """
         legacy_valid = "finite(row.x)&&finite(row.y)&&finite(row.score)&&finite(row.lives)"
-        legacy_state = "{x:Number(row.x),y:Number(row.y),score:Number(row.score),lives:Number(row.lives)}"
+        legacy_state = "{x:Number(row.x),y:Number(row.y),score:Number(row.score),lives:Number(row.lives),aura:null}"
     elif runtime == "aura3d":
         capture_state = (
             "return {x:Number(player.position.x),y:Number(player.position.y),z:Number(player.position.z),"
-            "yaw:Number(yaw),pitch:Number(pitch),distance:Number(distance)};"
+            "yaw:Number(yaw),pitch:Number(pitch),distance:Number(distance),aura:window.AuraRuntimeState?.exportState?.()||null};"
         )
         valid_state = (
-            "const s=row.state;return !!s&&finite(s.x)&&finite(s.y)&&finite(s.z)&&finite(s.yaw)&&finite(s.pitch)&&finite(s.distance);"
+            "const s=row.state;return !!s&&finite(s.x)&&finite(s.y)&&finite(s.z)&&finite(s.yaw)&&finite(s.pitch)&&finite(s.distance)"
+            "&&(s.aura===null||s.aura===undefined||Boolean(window.AuraRuntimeState?.validateState?.(s.aura)));"
         )
         apply_state = """
   const s=row.state,worldLimit=1000000;
@@ -60,12 +62,13 @@ def _runtime_script(
   yaw=s.yaw;
   pitch=Math.max(-.15,Math.min(1.2,s.pitch));
   distance=Math.max(4,Math.min(35,s.distance));
+  if(s.aura&&window.AuraRuntimeState?.importState)window.AuraRuntimeState.importState(s.aura);
 """
         legacy_valid = (
             "finite(row.x)&&finite(row.y)&&finite(row.z)&&finite(row.yaw)&&finite(row.pitch)&&finite(row.distance)"
         )
         legacy_state = (
-            "{x:Number(row.x),y:Number(row.y),z:Number(row.z),yaw:Number(row.yaw),pitch:Number(row.pitch),distance:Number(row.distance)}"
+            "{x:Number(row.x),y:Number(row.y),z:Number(row.z),yaw:Number(row.yaw),pitch:Number(row.pitch),distance:Number(row.distance),aura:null}"
         )
     else:  # pragma: no cover - guarded by the public entry point
         raise ValueError(f"Unsupported checkpoint runtime: {runtime}")
@@ -76,6 +79,7 @@ const checkpointSlots=['slot1','slot2','slot3'],checkpointAllSlots=[...checkpoin
 const checkpointSlot=document.getElementById('checkpoint-slot'),checkpointName=document.getElementById('checkpoint-name'),checkpointSave=document.getElementById('checkpoint-save'),checkpointLoad=document.getElementById('checkpoint-load'),checkpointContinue=document.getElementById('checkpoint-continue'),checkpointNew=document.getElementById('checkpoint-new'),checkpointReset=document.getElementById('checkpoint-reset'),checkpointStatus=document.getElementById('checkpoint-status');
 const finite=v=>typeof v==='number'&&Number.isFinite(v),checkpointKey=slot=>checkpointPrefix+slot;
 let checkpointDirty=false,checkpointLastAutosaveSignature='',checkpointInitialState=null;
+window.AuraMarkSaveDirty=()=>{checkpointDirty=true};
 function checkpointMessage(message){if(checkpointStatus)checkpointStatus.textContent=message}
 function checkpointCaptureState(){__CAPTURE_STATE__}
 function checkpointValidState(row){__VALID_STATE__}
@@ -196,7 +200,8 @@ def inject_checkpoint_controls(
     Saves never leave the browser. The storage prefix includes the exact trusted Game Forge
     integrity hash, so player progress from one authored build cannot be loaded into another.
     Version-1 single checkpoints are migrated into Slot 1 only when the game id, content hash and
-    runtime still match exactly.
+    runtime still match exactly. When the closed Aura runtime-state kernel is present, its validated
+    quest/inventory/flag/gate/state-machine snapshot is carried inside the same version-2 save row.
     """
     if runtime not in {"aura2d", "aura3d"}:
         raise ValueError(f"Unsupported checkpoint runtime: {runtime}")
