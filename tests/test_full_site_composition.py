@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 import app as production_entrypoint
 
 
@@ -17,6 +19,20 @@ _REQUIRED_NAMED_SURFACES = {
     "esp_gateway": "/command-center",
     "owner_login": "/owner",
 }
+
+# These product workspaces are exercised through the real ASGI application rather than by
+# inspecting FastAPI route object classes. Late composition/middleware adapters are allowed to
+# change the internal route representation, but the actual production URL must still exist and
+# must not crash. Authentication redirects/401/403 are valid evidence that the lane is mounted.
+_REQUIRED_REQUEST_SURFACES = (
+    "/creative-house",
+    "/aura-sec",
+    "/live-overlay-studio",
+    "/command-center/social",
+    "/production-suite",
+    "/daw",
+    "/voice-house/composition-probe",
+)
 
 # Security-sensitive/service endpoints are schema-visible and are validated from the OpenAPI graph
 # produced by the real assembled application. This catches routers that exist in source but were
@@ -44,6 +60,20 @@ def test_major_private_and_ui_surfaces_resolve_on_real_release_app():
     assert not missing, (
         "A major Command Center UI/private surface is not composed into the production app: "
         f"{missing}"
+    )
+
+
+def test_cross_product_workspaces_answer_through_one_release_application():
+    failures: dict[str, int] = {}
+    with TestClient(production_entrypoint.app, raise_server_exceptions=False) as client:
+        for path in _REQUIRED_REQUEST_SURFACES:
+            response = client.get(path, follow_redirects=False)
+            if response.status_code == 404 or response.status_code >= 500:
+                failures[path] = response.status_code
+
+    assert not failures, (
+        "A major product lane is missing or crashing on the one production Command Center "
+        f"application: {failures}"
     )
 
 
