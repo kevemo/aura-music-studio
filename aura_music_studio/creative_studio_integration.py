@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ from .assets import AssetLibrary
 from .commercial_entitlement_routes import render_with_commercial_entitlements
 from .creative_project import CreativeProjectStore, CreativeReference
 from .creative_project_api import QueueRendererRequest
-from .creative_renderers import renderer_for
+from .creative_renderers import ComfyUIRenderer
 from .plans import DEEP_REVISION_HISTORY, REVISION_HISTORY
 from .revisions import create_revision
 from .tenant_storage import project_path
@@ -26,6 +27,60 @@ _TEXT_EXTENSIONS = {".txt", ".md", ".json", ".yaml", ".yml", ".srt", ".lrc"}
 _REFERENCE_KINDS = {"music", "audio", "video", "image", "voice", "text", "reference"}
 _STUDIO_PATHS = {"/creative-house", "/image-designer", "/video-studio"}
 _MAX_RENDERER_IMAGE_REFERENCES = 8
+
+
+@dataclass(frozen=True)
+class LocalRendererImageInput:
+    """Server-only renderer input marker that cannot originate from member JSON."""
+
+    source: Path
+    reference_id: str
+    asset_id: str
+
+
+def _resolve_local_renderer_inputs(renderer, variables: dict) -> dict:
+    """Stage validated local image markers immediately before provider submission.
+
+    The integrated endpoint creates these marker objects only after resolving a reference against
+    the current tenant project. Member JSON can contain only ordinary JSON values, not this Python
+    type, so a caller cannot use the marker to request an arbitrary server path.
+    """
+
+    resolved = dict(variables or {})
+    for key, value in list(resolved.items()):
+        if not isinstance(value, LocalRendererImageInput):
+            continue
+        renderer_input = renderer.upload_image_input(value.source)
+        resolved[key] = renderer_input.workflow_value
+    return resolved
+
+
+def install_creative_reference_staging() -> None:
+    """Compose project reference staging into ComfyUI submit without bypassing admission.
+
+    Commercial entitlement logic calls ``renderer.submit`` only after the durable render attempt
+    and any required Creation Coin debit have been admitted. Keeping staging inside submit means a
+    denied render never uploads a member reference to the renderer. A staging failure propagates
+    through the existing commercial refund/fail-closed path before any prompt is submitted.
+    """
+
+    original = ComfyUIRenderer.submit
+    if getattr(original, "__creative_reference_staging__", False):
+        return
+
+    def staged_submit(self, variables):
+        resolved = _resolve_local_renderer_inputs(self, variables if isinstance(variables, dict) else {})
+        return original(self, resolved)
+
+    staged_submit.__creative_reference_staging__ = True  # type: ignore[attr-defined]
+    staged_submit.__wrapped__ = original  # type: ignore[attr-defined]
+    ComfyUIRenderer.submit = staged_submit  # type: ignore[assignment]
+
+
+# Install idempotently when this production integration module is imported. In the main app this
+# wrapper composes with provider-cost governance: commercial admission happens first, reference
+# staging occurs inside submit, and operational metering records only an accepted provider prompt.
+install_creative_reference_staging()
 
 
 def _member(request: Request):
@@ -243,7 +298,6 @@ def queue_integrated_creative_render(
     if directive.target_kind not in {"image", "video"}:
         raise HTTPException(400, "Integrated renderer bridge accepts image or video Aura directives")
 
-    renderer = renderer_for(directive.target_kind)
     by_reference = {item.id: item for item in manifest.references}
     staged: list[dict] = []
     variables = dict(body.variables)
@@ -264,12 +318,12 @@ def queue_integrated_creative_render(
         raise HTTPException(400, f"At most {_MAX_RENDERER_IMAGE_REFERENCES} image references can be staged per render")
 
     for index, (reference, asset_id, target) in enumerate(candidate_images, start=1):
-        try:
-            renderer_input = renderer.upload_image_input(target)
-        except Exception as exc:
-            raise HTTPException(502, f"Failed staging creative reference for renderer: {type(exc).__name__}: {exc}") from exc
         variable = "reference_image" if index == 1 else f"reference_image_{index}"
-        variables[variable] = renderer_input.workflow_value
+        variables[variable] = LocalRendererImageInput(
+            source=target,
+            reference_id=reference.id,
+            asset_id=asset_id,
+        )
         staged.append({
             "reference_id": reference.id,
             "asset_id": asset_id,
@@ -278,9 +332,9 @@ def queue_integrated_creative_render(
 
     variables["reference_image_count"] = len(staged)
     integrated_body = body.model_copy(update={"variables": variables})
-    # Route through the same commercial admission ledger as the canonical /render endpoint.
-    # This preserves image allowances, Creation Coin charging/refunds, replay protection and
-    # duplicate-render prevention while still adding project-scoped reference inputs.
+    # Commercial admission happens before renderer.submit. LocalRendererImageInput objects remain
+    # server-only until submit is invoked, where the installed staging wrapper converts them into
+    # opaque ComfyUI input tokens. A denied render therefore creates no renderer-side input upload.
     result = render_with_commercial_entitlements(project_name, directive_id, integrated_body, request)
 
     latest = store.load()
@@ -390,7 +444,9 @@ class CreativeStudioIntegrationMiddleware(BaseHTTPMiddleware):
 __all__ = [
     "router",
     "CreativeStudioIntegrationMiddleware",
+    "LocalRendererImageInput",
     "STUDIO_INTEGRATION_SCRIPT",
+    "install_creative_reference_staging",
     "upload_creative_reference",
     "queue_integrated_creative_render",
 ]
