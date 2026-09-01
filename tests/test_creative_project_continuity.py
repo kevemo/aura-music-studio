@@ -99,14 +99,36 @@ def test_middleware_does_not_inject_script_into_non_html_or_non_target_routes():
 
 
 def test_production_entrypoint_mounts_continuity_router_and_middleware():
-    # Validate the canonical production entrypoint in a fresh interpreter. Other integration
-    # tests intentionally rebuild/mutate app state, so a shared module object is not reliable
-    # evidence that the checked-in production composition is mounted correctly.
+    # Validate the repository-root production entrypoint in a fresh interpreter. An editable
+    # installation also exposes an unrelated package-level `app` module, so a plain `import app`
+    # is ambiguous in subprocesses. Load the canonical root app.py by absolute file path instead.
+    # Route discovery walks nested routers because modern FastAPI preserves include_router()
+    # composition lazily rather than requiring every APIRoute to be flattened into app.routes.
     probe = """
-import app as production_entrypoint
+import importlib.util
+from pathlib import Path
+
+root_app = Path.cwd() / 'app.py'
+spec = importlib.util.spec_from_file_location('command_center_production_entrypoint', root_app)
+assert spec is not None and spec.loader is not None, root_app
+production_entrypoint = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(production_entrypoint)
+
 from aura_music_studio.creative_project_continuity import CreativeProjectContinuityMiddleware
-paths = {getattr(route, 'path', None) for route in production_entrypoint.app.router.routes}
-assert '/creative/project-continuity-ui.js' in paths, paths
+
+def contains_path(routes, wanted):
+    for route in routes:
+        if getattr(route, 'path', None) == wanted:
+            return True
+        nested = getattr(route, 'routes', None)
+        if nested and contains_path(nested, wanted):
+            return True
+    return False
+
+assert contains_path(
+    production_entrypoint.app.router.routes,
+    '/creative/project-continuity-ui.js',
+), 'continuity router is not mounted on canonical root app.py'
 middleware_classes = {entry.cls for entry in production_entrypoint.app.user_middleware}
 assert CreativeProjectContinuityMiddleware in middleware_classes, middleware_classes
 """
