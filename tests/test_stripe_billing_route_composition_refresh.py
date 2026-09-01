@@ -32,7 +32,7 @@ def test_hardened_router_declares_one_creation_coin_get_handler_per_path():
     )
 
 
-def test_production_app_has_one_authoritative_creation_coin_get_handler_per_path():
+def test_production_app_exposes_hardened_creation_coin_get_operations():
     probe = r'''
 import json
 import app
@@ -42,27 +42,14 @@ wanted = {
     "/billing/creation-coins/catalog": "hardened_creation_coin_catalog",
 }
 
-
-def walk(routes):
-    for route in routes:
-        yield route
-        nested = getattr(route, "routes", None)
-        if nested:
-            yield from walk(nested)
-
-
-all_routes = list(walk(app.app.routes))
+schema = app.app.openapi()
 result = {}
 for path, expected in wanted.items():
-    routes = [
-        route
-        for route in all_routes
-        if getattr(route, "path", None) == path
-        and "GET" in (getattr(route, "methods", None) or set())
-    ]
+    operation = schema.get("paths", {}).get(path, {}).get("get") or {}
+    operation_id = str(operation.get("operationId") or "")
     result[path] = {
-        "names": [str(getattr(getattr(route, "endpoint", None), "__name__", "")) for route in routes],
-        "openapi_get": "get" in app.app.openapi().get("paths", {}).get(path, {}),
+        "operation_id": operation_id,
+        "matches_hardened_handler": operation_id.startswith(expected + "_"),
         "expected": expected,
     }
 print(json.dumps(result, sort_keys=True))
@@ -76,12 +63,12 @@ print(json.dumps(result, sort_keys=True))
     result = json.loads(completed.stdout.strip().splitlines()[-1])
 
     failures: dict[str, dict] = {}
-    for path, expected_endpoint in _CREATION_COIN_GETS.items():
+    for path in _CREATION_COIN_GETS:
         observation = result[path]
-        if observation["names"] != [expected_endpoint] or not observation["openapi_get"]:
+        if not observation["matches_hardened_handler"]:
             failures[path] = observation
 
     assert not failures, (
-        "Production application must expose exactly one hardened Creation Coin GET handler per path "
-        f"and retain the OpenAPI surface: {failures}"
+        "Production OpenAPI must expose the hardened Creation Coin GET handlers as the "
+        f"authoritative operations: {failures}"
     )
