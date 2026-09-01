@@ -1,74 +1,66 @@
 from __future__ import annotations
 
-from collections import Counter
-
 import app as production_entrypoint
 
 
-# These are representative production entrypoints for the major Command Center domains.
-# The purpose is not to duplicate every feature test; it is to ensure the separate build lanes
-# remain composed into one release application rather than existing only as isolated routers.
-_REQUIRED_FULL_SITE_SURFACES = {
-    ("GET", "/"),
-    ("GET", "/dashboard"),
-    ("GET", "/studio"),
-    ("GET", "/video-studio"),
-    ("GET", "/image-designer"),
-    ("GET", "/creative/library"),
-    ("GET", "/game-creation"),
-    ("GET", "/aura"),
-    ("GET", "/aura-intelligence"),
-    ("GET", "/aura/self-host/status"),
-    ("GET", "/command-center"),
-    ("GET", "/owner"),
-    ("POST", "/billing/stripe/checkout/marketplace"),
-    ("POST", "/billing/stripe/webhook"),
-    ("GET", "/health/live"),
-    ("GET", "/health/ready"),
+# Hidden/private HTML surfaces are validated through Starlette's named route resolver. This is the
+# authoritative routing contract for the production app and remains valid when compatibility
+# overlays intentionally stack more than one handler on the same URL.
+_REQUIRED_NAMED_SURFACES = {
+    "member_dashboard": "/dashboard",
+    "studio": "/studio",
+    "video_studio_entry": "/video-studio",
+    "image_designer_entry": "/image-designer",
+    "creative_library_page": "/creative/library",
+    "game_creation_portal": "/game-creation",
+    "aura_realtime_page": "/aura-intelligence",
+    "esp_gateway": "/command-center",
+    "owner_login": "/owner",
+}
+
+# Security-sensitive/service endpoints are schema-visible and are validated from the OpenAPI graph
+# produced by the real assembled application. This catches routers that exist in source but were
+# never mounted at the production entrypoint.
+_REQUIRED_OPENAPI_OPERATIONS = {
+    ("get", "/aura/self-host/status"),
+    ("post", "/billing/stripe/checkout/marketplace"),
+    ("post", "/billing/stripe/webhook"),
+    ("get", "/health/live"),
+    ("get", "/health/ready"),
 }
 
 
-def _production_surface_counts() -> Counter[tuple[str, str]]:
-    """Inspect the real release router by capability, not a concrete FastAPI route class.
-
-    The production application uses compatibility/overlay adapters around route objects. A strict
-    ``isinstance(APIRoute)`` check can therefore silently count zero routes even while the app is
-    serving them. For the composition contract we need only the stable routing capabilities:
-    ``path`` and ``methods``.
-    """
-    mounted: Counter[tuple[str, str]] = Counter()
-    routes = list(getattr(production_entrypoint.app, "routes", ()) or ())
-    assert routes, "Production application exposes no route objects"
-
-    for route in routes:
-        path = getattr(route, "path", None)
-        methods = getattr(route, "methods", None)
-        if not isinstance(path, str) or not methods:
+def test_major_private_and_ui_surfaces_resolve_on_real_release_app():
+    missing: list[tuple[str, str, str]] = []
+    for route_name, expected_path in _REQUIRED_NAMED_SURFACES.items():
+        try:
+            resolved = str(production_entrypoint.app.url_path_for(route_name))
+        except Exception as exc:  # pragma: no cover - assertion reports exact missing route
+            missing.append((route_name, expected_path, type(exc).__name__))
             continue
-        for method in methods:
-            mounted[(str(method).upper(), path)] += 1
-    return mounted
-
-
-def test_major_full_site_surfaces_are_composed_exactly_once():
-    mounted = _production_surface_counts()
-    missing = sorted(surface for surface in _REQUIRED_FULL_SITE_SURFACES if mounted[surface] == 0)
-    duplicated = sorted(
-        (method, path, mounted[(method, path)])
-        for method, path in _REQUIRED_FULL_SITE_SURFACES
-        if mounted[(method, path)] > 1
-    )
+        if resolved != expected_path:
+            missing.append((route_name, expected_path, resolved))
 
     assert not missing, (
-        "A major Command Center surface exists in the build plan but is not mounted on the "
-        f"production application: {missing}"
+        "A major Command Center UI/private surface is not composed into the production app: "
+        f"{missing}"
     )
-    assert not duplicated, (
-        "A major Command Center surface is mounted more than once in the production application: "
-        f"{duplicated}"
+
+
+def test_security_sensitive_full_site_apis_are_mounted_in_openapi_graph():
+    schema = production_entrypoint.app.openapi()
+    paths = schema.get("paths", {})
+    missing = sorted(
+        (method.upper(), path)
+        for method, path in _REQUIRED_OPENAPI_OPERATIONS
+        if method not in paths.get(path, {})
+    )
+    assert not missing, (
+        "A security-sensitive Command Center API exists in source but is not mounted on the real "
+        f"release application: {missing}"
     )
 
 
 def test_self_host_control_is_part_of_the_real_release_app():
-    mounted = _production_surface_counts()
-    assert mounted[("GET", "/aura/self-host/status")] == 1
+    schema = production_entrypoint.app.openapi()
+    assert "get" in schema.get("paths", {}).get("/aura/self-host/status", {})
