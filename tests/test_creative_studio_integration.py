@@ -1,0 +1,236 @@
+from __future__ import annotations
+
+from pathlib import Path
+from types import SimpleNamespace
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+import app as production_entrypoint
+import aura_music_studio.creative_studio_integration as integration
+from aura_music_studio.assets import AssetLibrary
+from aura_music_studio.creative_project import CreativeDirective, CreativeProjectStore, CreativeReference
+from aura_music_studio.creative_project_api import QueueRendererRequest
+from aura_music_studio.creative_renderers import RendererInput
+
+
+class _Plan:
+    id = "ultimate_pro"
+
+    def has(self, _capability: str) -> bool:
+        return True
+
+
+_MEMBER = SimpleNamespace(plan=_Plan())
+
+
+def _client(monkeypatch, tmp_path: Path):
+    root = tmp_path / "projects"
+    root.mkdir()
+
+    def resolve(name: str, *, must_exist: bool = False):
+        target = root / name
+        if must_exist and not target.exists():
+            raise FileNotFoundError(target)
+        return target
+
+    monkeypatch.setattr(integration, "project_path", resolve)
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def member_context(request, call_next):
+        request.state.member = _MEMBER
+        return await call_next(request)
+
+    app.include_router(integration.router)
+    app.add_middleware(integration.CreativeStudioIntegrationMiddleware)
+    return TestClient(app), root
+
+
+def _init(root: Path, project_name: str = "visual-project") -> CreativeProjectStore:
+    project = root / project_name
+    store = CreativeProjectStore(project)
+    store.initialize(project_name=project_name, title="Visual Project", project_intent="One shared creative project")
+    return store
+
+
+def test_reference_upload_is_one_shared_project_asset_and_creative_dna_reference(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+
+    response = client.post(
+        "/creative/projects/visual-project/references/upload",
+        files={"file": ("portrait.png", b"same-image-content", "image/png")},
+        data={
+            "kind": "image",
+            "label": "Portrait",
+            "usage": "Keep the subject identity and pose",
+            "rights_confirmed": "true",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["shared_project_asset"] is True
+    assert body["reference"]["source_ref"] == f"asset:{body['asset']['id']}"
+    assert body["reference"]["metadata"]["asset_id"] == body["asset"]["id"]
+    assert "path" not in body["asset"]
+    assert body["reference"]["rights_confirmed"] is True
+
+    manifest = store.load()
+    assert manifest.references[-1].id == body["reference"]["id"]
+    assets = AssetLibrary(store.project_dir).list()
+    assert [asset.id for asset in assets] == [body["asset"]["id"]]
+    assert assets[0].rights_record_id
+
+
+def test_duplicate_reference_upload_reuses_asset_identity_without_breaking_older_reference(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+    payload = {
+        "kind": "image",
+        "label": "Same portrait",
+        "usage": "Identity reference",
+        "rights_confirmed": "true",
+    }
+
+    first = client.post(
+        "/creative/projects/visual-project/references/upload",
+        files={"file": ("portrait.png", b"duplicate-content", "image/png")},
+        data=payload,
+    )
+    second = client.post(
+        "/creative/projects/visual-project/references/upload",
+        files={"file": ("portrait-again.png", b"duplicate-content", "image/png")},
+        data=payload,
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["asset"]["id"] == second.json()["asset"]["id"]
+    assert first.json()["reference"]["id"] != second.json()["reference"]["id"]
+    assert len(AssetLibrary(store.project_dir).list()) == 1
+    refs = store.load().references
+    assert refs[0].source_ref == refs[1].source_ref
+
+
+def test_reference_upload_requires_rights_and_rejects_wrong_kind_extension(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    _init(root)
+
+    missing_rights = client.post(
+        "/creative/projects/visual-project/references/upload",
+        files={"file": ("portrait.png", b"image", "image/png")},
+        data={"kind": "image", "rights_confirmed": "false"},
+    )
+    wrong_kind = client.post(
+        "/creative/projects/visual-project/references/upload",
+        files={"file": ("clip.mp4", b"video", "video/mp4")},
+        data={"kind": "image", "rights_confirmed": "true"},
+    )
+
+    assert missing_rights.status_code == 400
+    assert "right or authorization" in missing_rights.json()["detail"]
+    assert wrong_kind.status_code == 400
+    assert "Unsupported image reference file type" in wrong_kind.json()["detail"]
+
+
+def test_integrated_render_stages_project_image_reference_as_opaque_renderer_input(monkeypatch, tmp_path):
+    client, root = _client(monkeypatch, tmp_path)
+    store = _init(root)
+    source = store.project_dir / "reference.png"
+    source.write_bytes(b"reference-image")
+    asset = AssetLibrary(store.project_dir).ingest(source, kind="image")
+    reference = CreativeReference(
+        kind="image",
+        label="Identity reference",
+        source_ref=f"asset:{asset.id}",
+        usage="Keep face and pose",
+        rights_confirmed=True,
+        metadata={"asset_id": asset.id},
+    )
+    store.add_reference(reference)
+    directive = CreativeDirective(
+        instruction="Create a cinematic portrait while preserving the referenced identity.",
+        operation="create",
+        target_kind="image",
+        reference_ids=[reference.id],
+    )
+    store.add_directive(directive)
+
+    class FakeRenderer:
+        configured = True
+
+        def upload_image_input(self, path: Path):
+            assert path.name.endswith("reference.png")
+            return RendererInput(name="opaque.png", workflow_value="opaque.png")
+
+    captured = {}
+    monkeypatch.setattr(integration, "renderer_for", lambda _kind: FakeRenderer())
+
+    def fake_queue(project_name, directive_id, body: QueueRendererRequest, request):
+        captured.update(body.variables)
+        manifest = store.update_directive(
+            directive_id,
+            status="queued",
+            capability_state="connected",
+            metadata={"creative_renderer": {"prompt_id": "prompt-1", "workflow_name": "image.json"}},
+        )
+        current = next(item for item in manifest.directives if item.id == directive_id)
+        return {"directive": current.model_dump(mode="json"), "note": "Renderer accepted the Aura directive."}
+
+    monkeypatch.setattr(integration, "queue_creative_render", fake_queue)
+
+    response = client.post(
+        f"/creative/projects/visual-project/directives/{directive.id}/render-integrated",
+        json={"width": 1024, "height": 1024, "frames": 1, "fps": 1},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert captured["reference_image"] == "opaque.png"
+    assert captured["reference_image_count"] == 1
+    assert body["reference_input_count"] == 1
+    assert body["reference_inputs"] == [
+        {"reference_id": reference.id, "asset_id": asset.id, "workflow_variable": "reference_image"}
+    ]
+    assert str(store.project_dir) not in response.text
+    meta = body["directive"]["metadata"]["creative_renderer"]
+    assert meta["staged_image_reference_count"] == 1
+    assert meta["staged_image_reference_ids"] == [reference.id]
+
+
+def test_integration_ui_is_injected_into_all_three_chat3_surfaces(monkeypatch, tmp_path):
+    client, _root = _client(monkeypatch, tmp_path)
+
+    # Add simple route bodies after middleware setup; the integration middleware is path-scoped.
+    @client.app.get("/creative-house")
+    def creative_house():
+        return integration.Response("<html><body>Creative House</body></html>", media_type="text/html")
+
+    @client.app.get("/image-designer")
+    def image_designer():
+        return integration.Response("<html><body>Image Designer</body></html>", media_type="text/html")
+
+    @client.app.get("/video-studio")
+    def video_studio():
+        return integration.Response("<html><body>Video Studio</body></html>", media_type="text/html")
+
+    for path in ("/creative-house", "/image-designer", "/video-studio"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "<script src='/creative/studio-integration-ui.js'></script>" in response.text
+
+    script = client.get("/creative/studio-integration-ui.js")
+    assert script.status_code == 200
+    assert "/references/upload" in script.text
+    assert "/render-integrated" in script.text
+    assert "/cancel-render" in script.text
+    assert "Live monitor active" in script.text
+    assert "Upload & attach reference" in script.text
+
+
+def test_production_entrypoint_mounts_unified_creative_bridge_on_same_site():
+    paths = production_entrypoint.app.openapi().get("paths", {})
+    assert "/creative/projects/{project_name}/references/upload" in paths
+    assert "/creative/projects/{project_name}/directives/{directive_id}/render-integrated" in paths
