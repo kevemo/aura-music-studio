@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from . import creative_reference_bridge as _creative_reference_bridge  # noqa: F401
 from .commercial_entitlement_routes import render_with_commercial_entitlements as base_commercial_render
 from .content_safety import enforce_creation_policy
 from .creative_project import CreativeProjectStore
