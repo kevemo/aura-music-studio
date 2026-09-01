@@ -177,3 +177,19 @@ def test_game_page_transport_uses_project_bound_endpoints_and_binding_resolution
     assert "creative_project_name:desired" in script
     assert "commitProject(context.creative_project_name)" in script
     assert "Game Forge now persists this exact Creative DNA identity into Game DNA" in script
+
+
+def test_project_bound_game_routes_are_mounted_on_real_release_app():
+    import app as production_entrypoint
+
+    schema = production_entrypoint.app.openapi()
+    paths = schema.get("paths", {})
+    required = {
+        ("post", "/api/game-forge/projects/{project_name}/games"),
+        ("get", "/api/game-forge/games/{game_id}/project-context"),
+        ("post", "/api/game-forge/games/{game_id}/project-context"),
+        ("get", "/api/game-forge/games/{game_id}/project-library"),
+        ("post", "/api/game-forge/games/{game_id}/project-assets"),
+    }
+    missing = sorted((method, path) for method, path in required if method not in paths.get(path, {}))
+    assert not missing, f"Game Forge project-continuity routes are not composed into the production app: {missing}"
