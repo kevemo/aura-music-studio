@@ -16,6 +16,12 @@ def test_vercel_entrypoint_targets_real_fastapi_bootstrap():
     assert config["tool"]["vercel"]["entrypoint"] == "vercel_bootstrap:app"
 
 
+def test_chat1_payment_evidence_branch_is_not_deployed_by_vercel():
+    config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    deployment = config.get("git", {}).get("deploymentEnabled", {})
+    assert deployment.get("feature/chat1-paypal-evidence-conflict-20260901") is False
+
+
 def test_vercel_function_excludes_non_runtime_payload():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     fn = config["functions"]["vercel_bootstrap.py"]
