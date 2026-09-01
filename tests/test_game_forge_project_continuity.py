@@ -1,4 +1,7 @@
 from types import SimpleNamespace
+import subprocess
+import sys
+import textwrap
 
 import pytest
 from fastapi import HTTPException
@@ -180,16 +183,28 @@ def test_game_page_transport_uses_project_bound_endpoints_and_binding_resolution
 
 
 def test_project_bound_game_routes_are_mounted_on_real_release_app():
-    import app as production_entrypoint
+    code = textwrap.dedent(
+        """
+        import app as production_entrypoint
 
-    schema = production_entrypoint.app.openapi()
-    paths = schema.get("paths", {})
-    required = {
-        ("post", "/api/game-forge/projects/{project_name}/games"),
-        ("get", "/api/game-forge/games/{game_id}/project-context"),
-        ("post", "/api/game-forge/games/{game_id}/project-context"),
-        ("get", "/api/game-forge/games/{game_id}/project-library"),
-        ("post", "/api/game-forge/games/{game_id}/project-assets"),
-    }
-    missing = sorted((method, path) for method, path in required if method not in paths.get(path, {}))
-    assert not missing, f"Game Forge project-continuity routes are not composed into the production app: {missing}"
+        schema = production_entrypoint.app.openapi()
+        paths = schema.get("paths", {})
+        required = {
+            ("post", "/api/game-forge/projects/{project_name}/games"),
+            ("get", "/api/game-forge/games/{game_id}/project-context"),
+            ("post", "/api/game-forge/games/{game_id}/project-context"),
+            ("get", "/api/game-forge/games/{game_id}/project-library"),
+            ("post", "/api/game-forge/games/{game_id}/project-assets"),
+        }
+        missing = sorted((method, path) for method, path in required if method not in paths.get(path, {}))
+        if missing:
+            raise SystemExit(f"Game Forge project-continuity routes are not composed into the production app: {missing}")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
