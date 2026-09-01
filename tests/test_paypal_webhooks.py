@@ -72,6 +72,29 @@ def test_verified_event_ledger_is_idempotent(tmp_path):
     assert evidence.recent(1)[0]["event_id"] == event["id"]
 
 
+@pytest.mark.parametrize(
+    "changed_event, transmission_id",
+    [
+        (paid_event(status="REFUNDED"), "transmission-1"),
+        (paid_event(), "transmission-2"),
+    ],
+)
+def test_verified_event_ledger_rejects_conflicting_duplicate_evidence(
+    tmp_path, changed_event, transmission_id
+):
+    store = AccountStore(tmp_path / "accounts.sqlite3")
+    evidence = PayPalWebhookEvidenceStore(store)
+    evidence.record(paid_event(), "transmission-1")
+
+    with pytest.raises(PayPalWebhookError, match="conflicts"):
+        evidence.record(changed_event, transmission_id)
+
+    stored = evidence.get("WH-TEST-001")
+    assert stored is not None
+    assert stored["transmission_id"] == "transmission-1"
+    assert stored["payload"]["resource"]["status"] == "PAID"
+
+
 def test_verifier_rejects_non_paypal_certificate_host(monkeypatch):
     monkeypatch.setenv("LSS_PAYPAL_CLIENT_ID", "client")
     monkeypatch.setenv("LSS_PAYPAL_CLIENT_SECRET", "secret")
