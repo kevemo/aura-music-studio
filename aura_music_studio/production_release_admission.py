@@ -84,9 +84,7 @@ def normalize_release_evidence(item: ProductionReleaseEvidence) -> ProductionRel
 
     environment = _clean_token(item.environment, field="environment", minimum=2, maximum=40).lower()
     outcome = _clean_token(item.outcome, field="outcome", minimum=2, maximum=40).lower()
-    evidence_digest = _clean_token(
-        item.evidence_digest, field="evidence_digest", minimum=64, maximum=64
-    ).lower()
+    evidence_digest = str(item.evidence_digest or "").strip().lower()
     if not _SHA256_RE.fullmatch(evidence_digest):
         raise ValueError("evidence_digest must be a lowercase SHA-256 digest")
 
