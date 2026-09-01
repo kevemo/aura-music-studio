@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fastapi.routing import APIRoute
+
 import app as production_entrypoint
 
 
@@ -16,6 +18,19 @@ _REQUIRED_NAMED_SURFACES = {
     "aura_realtime_page": "/aura-intelligence",
     "esp_gateway": "/command-center",
     "owner_login": "/owner",
+}
+
+# Some core pages are intentionally excluded from OpenAPI, or are parameterised workspaces whose
+# route names can evolve while the public path contract stays stable. Validate those paths against
+# the actual APIRoute graph from the assembled production application.
+_REQUIRED_MOUNTED_PATHS = {
+    "/creative-house",
+    "/aura-sec",
+    "/live-overlay-studio",
+    "/command-center/social",
+    "/production-suite",
+    "/daw",
+    "/voice-house/{project_name}",
 }
 
 # Security-sensitive/service endpoints are schema-visible and are validated from the OpenAPI graph
@@ -44,6 +59,19 @@ def test_major_private_and_ui_surfaces_resolve_on_real_release_app():
     assert not missing, (
         "A major Command Center UI/private surface is not composed into the production app: "
         f"{missing}"
+    )
+
+
+def test_cross_product_workspaces_are_mounted_on_one_release_application():
+    mounted_paths = {
+        str(route.path)
+        for route in production_entrypoint.app.routes
+        if isinstance(route, APIRoute)
+    }
+    missing = sorted(_REQUIRED_MOUNTED_PATHS - mounted_paths)
+    assert not missing, (
+        "A major product lane exists in source but is not mounted on the one production "
+        f"Command Center application: {missing}"
     )
 
 
