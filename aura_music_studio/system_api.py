@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 
+from .aura_sec_portal import router as aura_sec_portal_router
 from .backup_scheduler import BackupScheduler
 from .compute_capabilities import compatibility
 from .compute_nodes import ComputeNodeRegistry
@@ -98,3 +99,10 @@ def model_catalog():
         ),
         "components": public_catalog(),
     }
+
+
+# Aura Sec is intentionally composed through the production system router so it shares the
+# canonical member/session and application middleware stack. The nested router exposes only a
+# member-safe read-only Security Center; native heartbeat, command polling, command signing and
+# endpoint execution interfaces remain outside the browser application.
+router.include_router(aura_sec_portal_router)
