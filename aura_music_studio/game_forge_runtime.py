@@ -8,6 +8,7 @@ from .game_forge_checkpoints import inject_checkpoint_controls
 from .game_forge_integrity import game_integrity_hash
 from .game_forge_models import GameBuild, GameDNA
 from .game_forge_native3d import render_aura3d_playtest
+from .game_forge_runtime_2d import inject_aura2d_world_bridge
 from .game_forge_runtime_state import inject_runtime_state
 from .game_forge_store import game_dir, save_game
 from .game_forge_world import ensure_world, world_stream_index, world_summary
@@ -84,6 +85,8 @@ def build_private_playtest(game: GameDNA) -> tuple[GameDNA, str]:
     runtime = "aura3d" if game.dimension == "3d" and game.engine_target == "aura3d" else "aura2d"
     html = render_foundation_playtest(game)
     html = inject_runtime_state(html, game=game, world=world, runtime=runtime)
+    if runtime == "aura2d":
+        html = inject_aura2d_world_bridge(html, game=game, world=world)
     html = inject_checkpoint_controls(
         html,
         runtime=runtime,
