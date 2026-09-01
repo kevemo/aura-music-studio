@@ -132,6 +132,7 @@ async def upload_creative_reference(
     project = store.project_dir.resolve()
     incoming = project / "input" / "uploads"
     temporary = incoming / f"{uuid4().hex}_{safe_name}"
+    reused_asset = False
     try:
         try:
             limit = int(asset_upload_limit())
@@ -146,15 +147,21 @@ async def upload_creative_reference(
                 raise HTTPException(400, "Creative reference upload is empty") from exc
             raise
 
-        attestation = "I confirm I have the right or authorization to use this reference in this creative project."
-        record = AssetLibrary(project).ingest(
-            temporary,
-            kind=_asset_kind(kind, suffix),
-            rights_basis="user_owned_or_licensed",
-            attestation=attestation,
-            tags=["creative-reference", kind],
-            notes=str(usage or "creative reference")[:500],
-        )
+        library = AssetLibrary(project)
+        digest = library.ledger.sha256(temporary)
+        record = next((item for item in library.list() if item.sha256 == digest), None)
+        if record is not None:
+            reused_asset = True
+        else:
+            attestation = "I confirm I have the right or authorization to use this reference in this creative project."
+            record = library.ingest(
+                temporary,
+                kind=_asset_kind(kind, suffix),
+                rights_basis="user_owned_or_licensed",
+                attestation=attestation,
+                tags=["creative-reference", kind],
+                notes=str(usage or "creative reference")[:500],
+            )
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -174,6 +181,7 @@ async def upload_creative_reference(
             "asset_mime_type": record.mime_type,
             "rights_record_id": record.rights_record_id,
             "uploaded_via": "unified_creative_reference_bridge",
+            "reused_project_asset": reused_asset,
         },
     )
     revision = _snapshot(member, store, label=f"Before attaching {reference.label}", reason="creative_reference_upload")
@@ -187,7 +195,12 @@ async def upload_creative_reference(
         "manifest": manifest.model_dump(mode="json"),
         "revision_snapshot": revision,
         "shared_project_asset": True,
-        "note": "Reference uploaded once into this project and attached to Creative DNA.",
+        "reused_project_asset": reused_asset,
+        "note": (
+            "Existing project asset reused and attached as another Creative DNA reference."
+            if reused_asset
+            else "Reference uploaded once into this project and attached to Creative DNA."
+        ),
     }
 
 
@@ -303,9 +316,10 @@ STUDIO_INTEGRATION_SCRIPT = r"""
   const setManifest=value=>{try{manifest=value}catch(_){}};
   const redraw=()=>{try{if(typeof render==='function')render()}catch(_){}};
   function idsForReference(){return isHouse?{label:'referenceLabel',source:'referenceSource',usage:'referenceUsage',rights:'referenceRights',kind:'referenceKind'}:{label:'refLabel',source:'refSource',usage:'refUsage',rights:'refRights',kind:null}}
-  function referenceKind(){const ids=idsForReference();if(ids.kind&&$(ids.kind))return $(ids.kind).value;try{return typeof KIND!=='undefined'?KIND:'reference'}catch(_){return 'reference'}}
+  function selectedReferenceKind(){const ids=idsForReference();if(ids.kind&&$(ids.kind))return $(ids.kind).value;try{return typeof KIND!=='undefined'?KIND:'reference'}catch(_){return 'reference'}}
+  function inferredUploadKind(file){if(isHouse)return selectedReferenceKind();const type=String(file?.type||'').toLowerCase(),name=String(file?.name||'').toLowerCase();if(type.startsWith('image/')||/\.(png|jpe?g|webp|avif|gif)$/.test(name))return 'image';if(type.startsWith('video/')||/\.(mp4|mov|webm|mkv|avi|m4v)$/.test(name))return 'video';if(type.startsWith('audio/')||/\.(wav|mp3|flac|m4a|aac|ogg)$/.test(name))return 'audio';return selectedReferenceKind()}
   function ensureUploadUI(){const ids=idsForReference(),source=$(ids.source);if(!source||$('creativeReferenceFile'))return;const file=document.createElement('input');file.id='creativeReferenceFile';file.type='file';file.className=source.className||'field';file.accept=isHouse?'image/*,video/*,audio/*,.txt,.md,.json,.srt,.lrc':path==='/video-studio'?'image/*,video/*':'image/*';const button=document.createElement('button');button.id='creativeReferenceUpload';button.type='button';button.className=isHouse?'btn small':'btn';button.textContent='Upload & attach reference';button.onclick=uploadReference;const hint=document.createElement('div');hint.className='muted';hint.style.fontSize='.7rem';hint.textContent='Uploads are stored once in this same private project, rights-attested, then attached to Creative DNA. Manual asset/URI references remain available below.';source.parentNode.insertBefore(file,source);source.parentNode.insertBefore(button,source);source.parentNode.insertBefore(hint,source)}
-  async function uploadReference(){const ids=idsForReference(),file=$('creativeReferenceFile')?.files?.[0],rights=$(ids.rights),pid=projectId();if(!pid)return show('Load or initialize this project first.',true);if(!file)return show('Choose a reference file to upload.',true);if(!rights?.checked)return show('Rights/authorization confirmation is required.',true);const form=new FormData();form.append('file',file);form.append('kind',referenceKind());form.append('label',($(ids.label)?.value||file.name).trim());form.append('usage',($(ids.usage)?.value||'creative reference').trim());form.append('rights_confirmed','true');try{const r=await fetch(`/creative/projects/${encodeURIComponent(pid)}/references/upload`,{method:'POST',credentials:'same-origin',body:form});let data={};try{data=await r.json()}catch(_){}if(!r.ok)throw new Error(data.detail||`Upload failed (${r.status})`);setManifest(data.manifest);if($(ids.source))$(ids.source).value=data.reference?.source_ref||'';if($(ids.label))$(ids.label).value='';if($(ids.usage))$(ids.usage).value='';rights.checked=false;$('creativeReferenceFile').value='';redraw();show(data.note||'Reference uploaded and attached to Creative DNA.')}catch(error){show(error.message,true)}}
+  async function uploadReference(){const ids=idsForReference(),file=$('creativeReferenceFile')?.files?.[0],rights=$(ids.rights),pid=projectId();if(!pid)return show('Load or initialize this project first.',true);if(!file)return show('Choose a reference file to upload.',true);if(!rights?.checked)return show('Rights/authorization confirmation is required.',true);const form=new FormData();form.append('file',file);form.append('kind',inferredUploadKind(file));form.append('label',($(ids.label)?.value||file.name).trim());form.append('usage',($(ids.usage)?.value||'creative reference').trim());form.append('rights_confirmed','true');try{const r=await fetch(`/creative/projects/${encodeURIComponent(pid)}/references/upload`,{method:'POST',credentials:'same-origin',body:form});let data={};try{data=await r.json()}catch(_){}if(!r.ok)throw new Error(data.detail||`Upload failed (${r.status})`);setManifest(data.manifest);if($(ids.source))$(ids.source).value=data.reference?.source_ref||'';if($(ids.label))$(ids.label).value='';if($(ids.usage))$(ids.usage).value='';rights.checked=false;$('creativeReferenceFile').value='';redraw();show(data.note||'Reference uploaded and attached to Creative DNA.')}catch(error){show(error.message,true)}}
   window.uploadCreativeReference=uploadReference;
   function activeHouse(){if(!isHouse)return[];const m=currentManifest();return (m?.directives||[]).filter(d=>['image','video'].includes(d.target_kind)&&['queued','running'].includes(d.status))}
   function stop(){if(timer){clearTimeout(timer);timer=null}}
