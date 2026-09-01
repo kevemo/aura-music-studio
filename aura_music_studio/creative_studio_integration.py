@@ -11,9 +11,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .assets import AssetLibrary
 from .commercial_entitlement_routes import render_with_commercial_entitlements
 from .creative_project import CreativeProjectStore, CreativeReference
-from .creative_project_api import QueueRendererRequest
+from .creative_project_api import QueueRendererRequest, cancel_creative_render
 from .creative_renderers import ComfyUIRenderer
 from .plans import DEEP_REVISION_HISTORY, REVISION_HISTORY
+from .render_attempts import RenderAttemptStore
 from .revisions import create_revision
 from .tenant_storage import project_path
 from .upload_security import UploadTooLargeError, asset_upload_limit, safe_upload_filename, save_bounded_upload
@@ -358,6 +359,63 @@ def queue_integrated_creative_render(
     return result
 
 
+def _reconcile_cancelled_attempt(member, project_name: str, directive_id: str, result: dict) -> dict | None:
+    """Release only the durable admission proven to belong to the cancelled provider prompt."""
+
+    user_id = str(getattr(member, "user_id", "") or "").strip()
+    if not user_id:
+        return None
+    attempts = RenderAttemptStore()
+    active = attempts.active(user_id, project_name, directive_id)
+    if active is None:
+        return None
+
+    directive = result.get("directive") if isinstance(result, dict) else None
+    if not isinstance(directive, dict):
+        return None
+    metadata = directive.get("metadata")
+    render_meta = metadata.get("creative_renderer") if isinstance(metadata, dict) else None
+    prompt_id = str(render_meta.get("prompt_id") or "").strip() if isinstance(render_meta, dict) else ""
+    if not prompt_id or not active.provider_prompt_id or prompt_id != active.provider_prompt_id:
+        # Fail closed for ambiguous/legacy admissions. Never release an attempt merely because
+        # the same member/project/directive names match when provider identity does not.
+        return None
+
+    status = str(directive.get("status") or "")
+    cancellation = result.get("cancellation") if isinstance(result, dict) else None
+    cancellation_state = str(cancellation.get("state") or "") if isinstance(cancellation, dict) else ""
+    try:
+        if status == "completed":
+            updated = attempts.mark_completed(active.attempt_id)
+        elif status == "failed":
+            updated = attempts.mark_failed(active.attempt_id)
+        elif status == "ready_for_renderer" and cancellation_state in {"cancelled_running", "cancelled_pending"}:
+            # The attempt ledger predates creator-facing cancellation and has no cancelled state.
+            # Marking this provider attempt failed releases replay admission without fabricating a
+            # refund. Any already-consumed allowance/Creation Coin remains governed by its policy.
+            updated = attempts.mark_failed(active.attempt_id)
+        else:
+            return None
+    except (KeyError, ValueError):
+        return None
+    return {
+        "attempt_id": updated.attempt_id,
+        "state": updated.state,
+        "provider_status": updated.provider_status,
+        "provider_prompt_matched": True,
+        "refund_issued": False,
+    }
+
+
+@router.post("/creative/projects/{project_name}/directives/{directive_id}/cancel-integrated")
+def cancel_integrated_creative_render(project_name: str, directive_id: str, request: Request):
+    member = _member(request)
+    result = cancel_creative_render(project_name, directive_id, request)
+    reconciliation = _reconcile_cancelled_attempt(member, project_name, directive_id, result)
+    result["render_attempt_reconciliation"] = reconciliation
+    return result
+
+
 STUDIO_INTEGRATION_SCRIPT = r"""
 (()=>{
   const path=location.pathname;
@@ -384,15 +442,16 @@ STUDIO_INTEGRATION_SCRIPT = r"""
   function schedule(){if(!isHouse)return;stop();if(document.hidden||!activeHouse().length)return;timer=setTimeout(()=>void pollHouse(),3000)}
   function upsert(d){const m=currentManifest();if(!m||!d)return;const rows=m.directives||[];const i=rows.findIndex(x=>x.id===d.id);if(i>=0)rows[i]=d;else rows.push(d);m.directives=rows}
   async function pollHouse(force=false){if(!isHouse||polling||(!force&&document.hidden))return;const active=activeHouse();if(!active.length){stop();return}polling=true;try{for(const d of active){if(busy.has(d.id))continue;try{const s=await json(`/creative/projects/${encodeURIComponent(projectId())}/directives/${encodeURIComponent(d.id)}/render-status`);upsert(s.directive);if(['completed','failed'].includes(s.renderer_status)&&!terminal.has(d.id)){terminal.add(d.id);show(s.renderer_status==='completed'?`${d.target_kind==='video'?'Video':'Image'} render complete — ${s.outputs.length} output(s) ready to import.`:'Creative render failed.',s.renderer_status==='failed')}}catch(error){show(`Live render status: ${error.message}`,true)}}redraw()}finally{polling=false;schedule()}}
-  async function cancelHouse(id){if(!isHouse||busy.has(id))return;busy.add(id);redraw();try{const data=await json(`/creative/projects/${encodeURIComponent(projectId())}/directives/${encodeURIComponent(id)}/cancel-render`,{method:'POST',body:'{}'});upsert(data.directive);terminal.delete(id);redraw();show(data.note||'Render cancelled safely.')}catch(error){show(error.message,true)}finally{busy.delete(id);redraw();schedule()}}
+  async function cancelIntegrated(id){if(busy.has(id))return;busy.add(id);redraw();try{const data=await json(`/creative/projects/${encodeURIComponent(projectId())}/directives/${encodeURIComponent(id)}/cancel-integrated`,{method:'POST',body:'{}'});upsert(data.directive);terminal.delete(id);redraw();show(data.note||'Render cancelled safely.')}catch(error){show(error.message,true)}finally{busy.delete(id);redraw();if(isHouse)schedule()}}
   async function refreshHouse(id){if(!isHouse||busy.has(id))return;busy.add(id);redraw();try{const data=await json(`/creative/projects/${encodeURIComponent(projectId())}/directives/${encodeURIComponent(id)}/render-status`);upsert(data.directive);redraw();show(`Renderer status: ${data.renderer_status}. ${data.outputs.length} output(s).`)}catch(error){show(error.message,true)}finally{busy.delete(id);redraw();schedule()}}
-  window.cancelIntegratedCreativeRender=cancelHouse;window.refreshIntegratedCreativeRender=refreshHouse;
+  window.cancelIntegratedCreativeRender=cancelIntegrated;window.refreshIntegratedCreativeRender=refreshHouse;
   if(isHouse&&typeof rendererActions==='function'){
     rendererActions=function(d){if(!['image','video'].includes(d.target_kind))return '';const r=renderers[d.target_kind]||{},meta=d.metadata?.creative_renderer||{},disabled=busy.has(d.id)?' disabled':'';if(d.status==='completed'&&meta.synced)return `<span class="chip good">${meta.output_count||0} output(s) imported</span>`;if(d.status==='completed')return `<button class="btn small primary" onclick="syncOutputs('${d.id}')"${disabled}>Import outputs</button>`;if(['queued','running'].includes(d.status))return `<button class="btn small" onclick="refreshIntegratedCreativeRender('${d.id}')"${disabled}>Refresh now</button><button class="btn small" onclick="cancelIntegratedCreativeRender('${d.id}')"${disabled}>${busy.has(d.id)?'Working…':'Cancel render'}</button><span class="chip wait">Live monitor active</span>`;if(r.configured)return `<button class="btn small primary" onclick="queueRender('${d.id}')"${disabled}>${busy.has(d.id)?'Starting…':`Render ${d.target_kind}`}</button>`;return `<button class="btn small" disabled>${d.target_kind} renderer not configured</button>`};
   }
   async function integratedQueue(id,kind,settings){if(busy.has(id))return;busy.add(id);redraw();try{const data=await json(`/creative/projects/${encodeURIComponent(projectId())}/directives/${encodeURIComponent(id)}/render-integrated`,{method:'POST',body:JSON.stringify(settings)});upsert(data.directive);terminal.delete(id);redraw();show(data.note||'Render queued.');if(isHouse)void pollHouse(true);else{try{if(typeof pollActiveRenders==='function')void pollActiveRenders(true)}catch(_){}}}catch(error){show(error.message,true)}finally{busy.delete(id);redraw();if(isHouse)schedule()}}
   if(isHouse&&typeof queueRender==='function')queueRender=async function(id){const d=currentManifest()?.directives?.find(x=>x.id===id);if(!d)return;const settings={negative_prompt:$('negativePrompt')?.value.trim()||'',width:Number($('renderWidth')?.value||1024),height:Number($('renderHeight')?.value||1024),frames:Number($('renderFrames')?.value||121),fps:Number($('renderFps')?.value||24)};return integratedQueue(id,d.target_kind,settings)};
   if(isMedia&&typeof queue==='function')queue=async function(id){const settings={negative_prompt:$('negative')?.value.trim()||'',width:Number($('width')?.value||1024),height:Number($('height')?.value||1024),frames:Number($('frames')?.value||1),fps:Number($('fps')?.value||1)};return integratedQueue(id,typeof KIND!=='undefined'?KIND:'image',settings)};
+  if(isMedia&&typeof cancelRender==='function')cancelRender=cancelIntegrated;
   if(isHouse&&typeof loadProject==='function'){const baseLoad=loadProject;loadProject=async function(...args){const out=await baseLoad(...args);schedule();return out}}
   if(isHouse&&typeof initializeProject==='function'){const baseInit=initializeProject;initializeProject=async function(...args){const out=await baseInit(...args);schedule();return out}}
   document.addEventListener('visibilitychange',()=>{if(isHouse&&!document.hidden)void pollHouse(true)});window.addEventListener('beforeunload',stop);
@@ -449,4 +508,5 @@ __all__ = [
     "install_creative_reference_staging",
     "upload_creative_reference",
     "queue_integrated_creative_render",
+    "cancel_integrated_creative_render",
 ]
