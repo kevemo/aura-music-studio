@@ -36,15 +36,27 @@ def test_production_app_has_one_authoritative_creation_coin_get_handler_per_path
     probe = r'''
 import json
 import app
+
 wanted = {
     "/billing/creation-coins": "hardened_creation_coin_storefront",
     "/billing/creation-coins/catalog": "hardened_creation_coin_catalog",
 }
+
+
+def walk(routes):
+    for route in routes:
+        yield route
+        nested = getattr(route, "routes", None)
+        if nested:
+            yield from walk(nested)
+
+
+all_routes = list(walk(app.app.routes))
 result = {}
 for path, expected in wanted.items():
     routes = [
         route
-        for route in app.app.routes
+        for route in all_routes
         if getattr(route, "path", None) == path
         and "GET" in (getattr(route, "methods", None) or set())
     ]
