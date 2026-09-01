@@ -82,6 +82,7 @@ jobs:
               '/health/live': {'get'},
               '/health/ready': {'get'},
               '/billing/stripe/checkout/marketplace': {'post'},
+              '/aura-sec/overview': {'get'},
           }
           paths = schema.get('paths', {})
           missing = []
@@ -93,7 +94,7 @@ jobs:
           if missing:
               raise SystemExit('Unified production route surface missing: ' + ', '.join(missing))
 
-          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes")
+          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes including Aura Sec")
           PY
 
       - name: Capture self-host logs on failure
