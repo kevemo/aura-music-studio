@@ -90,7 +90,7 @@ def build_private_playtest(game: GameDNA) -> tuple[GameDNA, str]:
         game_id=game.id,
         content_hash=content_hash,
     )
-    runtime_name = "aura_game_runtime_3d_webgl2_v4_state_v1" if runtime == "aura3d" else "aura_game_runtime_2d_canvas_state_v1"
+    runtime_name = "aura_game_runtime_3d_webgl2_v4" if runtime == "aura3d" else "aura_game_runtime_2d_canvas_v1"
     build = GameBuild(content_hash=content_hash, requested_engine=game.engine_target, runtime=runtime_name)
     folder = game_dir(game.id)
     build_dir = folder / "builds" / build.build_id
