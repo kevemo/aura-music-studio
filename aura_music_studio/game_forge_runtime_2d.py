@@ -80,6 +80,7 @@ def aura2d_world_bridge_payload(game: GameDNA, world: GameWorldDNA) -> dict[str,
             "dialogue_and_gate_interaction": True,
             "state_machine_player_near": True,
             "save_state_integration": True,
+            "world_dna_spawn_binding": True,
             "creator_javascript": False,
             "external_network_access": False,
         },
@@ -106,6 +107,8 @@ if(authoredGameplay){if(typeof stars!=='undefined'&&Array.isArray(stars))stars.l
 function playCenterY(){return topInset+Math.max(1,H-topInset)/2}
 function toScreen(pos){return {x:W/2+Number(pos?.x||0)*pixels,y:playCenterY()+Number(pos?.z||0)*pixels}}
 function toWorld(x,y){return {x:(Number(x||0)-W/2)/pixels,y:0,z:(Number(y||0)-playCenterY())/pixels}}
+const spawnEntity=entities.find(row=>row.kind==='spawn'),playerEntity=entities.find(row=>row.kind==='player'),authoredStart=spawnEntity?.position||playerEntity?.position||null;
+if(authoredStart){const start=toScreen(authoredStart);p.x=Math.max(p.r,Math.min(W-p.r,start.x));p.y=Math.max(topInset+p.r,Math.min(H-p.r,start.y))}
 function playerWorld(){return toWorld(p.x,p.y)}
 function entityEnabled(row){return row&&row.active!==false&&!row._auraGateHidden&&!row._auraStateHidden&&!row._auraCollectedHidden}
 function collisionRadius(row){const sx=Math.abs(Number(row.scale?.x||1)),sz=Math.abs(Number(row.scale?.z||1));return Math.max(.35,Math.max(sx,sz)*.55+p.r/pixels)}
@@ -161,7 +164,7 @@ function gameplayTick(now){
 function nearestInteraction(){const pp=playerWorld();let best=null,bestDistance=1.8;const ids=new Set();for(const row of auraDialogues.values())ids.add(row.trigger_entity_id);for(const row of auraGates.values())ids.add(row.trigger_entity_id);for(const row of auraObjectives.values())if(row.kind==='reach'&&row.target_entity_id)ids.add(row.target_entity_id);for(const id of ids){const row=entities.find(entity=>entity.id===id);if(!row||!entityEnabled(row))continue;const d=Math.hypot(pp.x-row.position.x,pp.z-row.position.z);if(d<=bestDistance){best=row;bestDistance=d}}return best}
 addEventListener('keydown',event=>{if(event.key.toLowerCase()!=='e'||event.repeat)return;const row=nearestInteraction();if(!row)return;if(auraTalk(row.id))return;auraDispatch('reach',row.id)});
 function drawEntity(row){
-  if(!entityEnabled(row)||row.visible===false)return;const s=toScreen(row.position),sx=Math.max(10,Math.min(90,Math.abs(Number(row.scale?.x||1))*pixels*.55)),sz=Math.max(10,Math.min(90,Math.abs(Number(row.scale?.z||1))*pixels*.55));ctx.save();ctx.lineWidth=2;ctx.font='600 11px system-ui,sans-serif';ctx.textAlign='center';
+  if(row.kind==='player'||row.kind==='spawn'||!entityEnabled(row)||row.visible===false)return;const s=toScreen(row.position),sx=Math.max(10,Math.min(90,Math.abs(Number(row.scale?.x||1))*pixels*.55)),sz=Math.max(10,Math.min(90,Math.abs(Number(row.scale?.z||1))*pixels*.55));ctx.save();ctx.lineWidth=2;ctx.font='600 11px system-ui,sans-serif';ctx.textAlign='center';
   if(row.kind==='collectible'){ctx.fillStyle='#f6d36c';ctx.beginPath();ctx.arc(s.x,s.y,Math.max(7,Math.min(24,sx*.35)),0,Math.PI*2);ctx.fill()}else if(row.kind==='hazard'){ctx.fillStyle='#ff627f';ctx.fillRect(s.x-sx/2,s.y-sz/2,sx,sz)}else if(row.kind==='trigger'){ctx.strokeStyle='#7ce8ff';ctx.setLineDash([5,4]);ctx.strokeRect(s.x-sx/2,s.y-sz/2,sx,sz)}else if(row.kind==='npc'){ctx.fillStyle='#c4a7ff';ctx.beginPath();ctx.arc(s.x,s.y,Math.max(9,Math.min(28,sx*.4)),0,Math.PI*2);ctx.fill()}else{ctx.fillStyle='#93a4c7';ctx.fillRect(s.x-sx/2,s.y-sz/2,sx,sz)}
   ctx.setLineDash([]);ctx.fillStyle='#ffffff';ctx.fillText(String(row.name||'').slice(0,42),s.x,s.y-Math.max(12,sz/2+7));ctx.restore()
 }
