@@ -54,7 +54,7 @@ def _client(monkeypatch, membership):
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_and_separate_aura_sec_product(monkeypatch):
+def test_regular_member_dashboard_surfaces_aura_core_game_forge_and_separate_aura_sec_product(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
@@ -68,12 +68,16 @@ def test_regular_member_dashboard_surfaces_aura_core_and_separate_aura_sec_produ
     assert "Open Aura Intelligence" in text
     assert "Pulsar-Frequency House is one integrated creation platform" in text
 
+    assert "Game Forge" in text
+    assert "Open Game Forge" in text
+    assert "href='/game-creation'" in text
+
     assert "Aura Sec Security Center" in text
     assert "Separate security product · same account" in text
     assert "protection entitlement is separate from ordinary creative membership" in text
     assert "The browser is a member-safe control plane only" in text
     assert "href='/aura-sec'" in text
-    assert text.count("<article class='tool'>") == 6
+    assert text.count("<article class='tool'>") == 7
     assert "<section class='security'>" in text
 
     assert "ESP areas use the same account and site" in text
