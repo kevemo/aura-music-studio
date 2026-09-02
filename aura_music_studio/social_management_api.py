@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
+from .esp_social_facebook_oauth import router as facebook_oauth_router
 from .esp_social_oauth import router as social_oauth_router
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
@@ -381,4 +382,7 @@ def register_connection_state(
 
 # Nested private routes inherit /command-center/api/social and the same server-side ESP gates.
 router.include_router(publish_queue_router)
+# Register the exact Facebook routes before the generic /oauth/{provider} routes so
+# Facebook capability/start/callback/disconnect cannot be intercepted by the older provider set.
+router.include_router(facebook_oauth_router)
 router.include_router(social_oauth_router)
