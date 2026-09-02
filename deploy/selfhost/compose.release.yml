@@ -22,3 +22,7 @@ services:
   aura-address-manager:
     image: ${ESP_COMMAND_CENTER_IMAGE:?ESP_COMMAND_CENTER_IMAGE must be an immutable signed image digest}
     pull_policy: always
+
+  ace-step:
+    image: ${AURA_ACESTEP_IMAGE:?AURA_ACESTEP_IMAGE must be an immutable signed image digest}
+    pull_policy: always
