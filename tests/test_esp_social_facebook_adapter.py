@@ -167,6 +167,8 @@ def test_facebook_pages_adapter_refuses_unimplemented_reels_and_profiles(monkeyp
 
 
 def test_publish_worker_resolves_facebook_adapter_without_widening_platform(monkeypatch):
+    monkeypatch.setenv("AURA_FACEBOOK_GRAPH_VERSION", "v23.0")
+    monkeypatch.setenv("AURA_SOCIAL_TOKEN_FACEBOOK_PAGE_TEST", "deployment-page-token")
     content = SocialContent(
         title="Facebook Page",
         variants=[PlatformVariant(platform="facebook", content_type="post", caption="Hello")],
