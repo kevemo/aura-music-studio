@@ -20,7 +20,7 @@ from typing import Iterable
 _MARKER_RE = re.compile(r"\b(TODO|FIXME|XXX)\b", re.IGNORECASE)
 _ALLOW_COMMENT = "source-audit: allow"
 _PROTOCOL_BASES = {"Protocol"}
-_ENTRYPOINTS = ("app.py", "worker.py", "vercel_bootstrap.py")
+_ENTRYPOINTS = ("app.py", "worker.py")
 
 
 @dataclass(frozen=True, order=True)
