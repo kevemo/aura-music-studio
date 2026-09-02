@@ -1,0 +1,66 @@
+name: Elevate Souls Release Control Audit
+
+on:
+  push:
+    branches: [main, development/full-site-build]
+  pull_request:
+    branches: [main, development/full-site-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: command-center-release-control-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  branch-protection:
+    name: Release branches are protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify GitHub reports protection on release branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const targets = ['main', 'development/full-site-build'];
+            const failures = [];
+
+            for (const branch of targets) {
+              const response = await github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch,
+              });
+              const protectedBranch = Boolean(response.data.protected);
+              core.info(`${branch}: protected=${protectedBranch}`);
+              if (!protectedBranch) failures.push(branch);
+            }
+
+            if (failures.length) {
+              core.setFailed(
+                `Release control is incomplete: GitHub reports these branches as unprotected: ${failures.join(', ')}`
+              );
+            }
+
+  codeowners-contract:
+    name: Release ownership contract exists
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout candidate tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify release-critical CODEOWNERS coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .github/CODEOWNERS
+          grep -Fq '* @kevemo' .github/CODEOWNERS
+          grep -Fq '/.github/ @kevemo' .github/CODEOWNERS
+          grep -Fq '/app.py @kevemo' .github/CODEOWNERS
+          grep -Fq '/aura_music_studio/ @kevemo' .github/CODEOWNERS
+          echo 'PASS: release-critical CODEOWNERS contract is present.'
