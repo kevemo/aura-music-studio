@@ -247,7 +247,14 @@ def test_marketplace_account_api_requires_session_and_ignores_cross_account_user
 
 
 def test_hardened_finance_router_mounts_marketplace_account_routes():
-    paths = {route.path for route in hardened_billing_router.routes}
-    assert "/api/marketplace/account/purchases" in paths
-    assert "/api/marketplace/account/seller" in paths
-    assert "/marketplace/account" in paths
+    app = FastAPI()
+    app.include_router(hardened_billing_router)
+    client = TestClient(app)
+
+    openapi_paths = set(client.get("/openapi.json").json()["paths"])
+    assert "/api/marketplace/account/purchases" in openapi_paths
+    assert "/api/marketplace/account/seller" in openapi_paths
+
+    page = client.get("/marketplace/account", follow_redirects=False)
+    assert page.status_code == 303
+    assert page.headers["location"] == "/signin"
