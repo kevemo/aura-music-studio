@@ -5,7 +5,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .stripe_billing import _session_user, accounts
@@ -132,9 +132,23 @@ class MarketplaceAccountReadStore:
                    LIMIT ?""",
                 (creator_user_id, limit),
             ).fetchall()
+            total_rows = con.execute(
+                """SELECT s.currency,
+                          COUNT(*) AS sales_count,
+                          COALESCE(SUM(s.creator_share_minor),0) AS seller_earned_minor,
+                          COALESCE(SUM((
+                              SELECT COALESCE(SUM(r.creator_share_minor),0)
+                              FROM marketplace_reversals r
+                              WHERE r.settlement_id=s.id
+                          )),0) AS seller_reversed_minor
+                   FROM marketplace_settlements s
+                   WHERE s.creator_user_id=? AND s.esp_owned=0
+                   GROUP BY s.currency
+                   ORDER BY s.currency ASC""",
+                (creator_user_id,),
+            ).fetchall()
 
         sales: list[dict[str, Any]] = []
-        totals: dict[str, dict[str, int | str]] = {}
         for source in rows:
             row = dict(source)
             earned_minor = int(row["creator_share_minor"])
@@ -146,40 +160,41 @@ class MarketplaceAccountReadStore:
                 status = "partially_refunded"
             else:
                 status = "refunded"
-            currency = str(row["currency"])
-            sale = {
-                "publication_id": str(row["publication_id"]),
-                "provider": str(row["provider"]),
-                "gross_minor": int(row["gross_minor"]),
-                "provider_fee_minor": int(row["provider_fee_minor"]),
-                "verified_net_minor": int(row["net_minor"]),
-                "seller_earned_minor": earned_minor,
-                "seller_reversed_minor": reversed_minor,
-                "seller_net_minor": net_minor,
-                "currency": currency,
-                "status": status,
-                "verified_at": str(row["verified_at"]),
-                "refund_count": int(row["reversal_count"]),
-            }
-            sales.append(sale)
-            bucket = totals.setdefault(
-                currency,
+            sales.append(
                 {
-                    "currency": currency,
-                    "sales_count": 0,
-                    "seller_earned_minor": 0,
-                    "seller_reversed_minor": 0,
-                    "seller_net_minor": 0,
-                },
+                    "publication_id": str(row["publication_id"]),
+                    "provider": str(row["provider"]),
+                    "gross_minor": int(row["gross_minor"]),
+                    "provider_fee_minor": int(row["provider_fee_minor"]),
+                    "verified_net_minor": int(row["net_minor"]),
+                    "seller_earned_minor": earned_minor,
+                    "seller_reversed_minor": reversed_minor,
+                    "seller_net_minor": net_minor,
+                    "currency": str(row["currency"]),
+                    "status": status,
+                    "verified_at": str(row["verified_at"]),
+                    "refund_count": int(row["reversal_count"]),
+                }
             )
-            bucket["sales_count"] = int(bucket["sales_count"]) + 1
-            bucket["seller_earned_minor"] = int(bucket["seller_earned_minor"]) + earned_minor
-            bucket["seller_reversed_minor"] = int(bucket["seller_reversed_minor"]) + reversed_minor
-            bucket["seller_net_minor"] = int(bucket["seller_net_minor"]) + net_minor
+
+        totals: list[dict[str, int | str]] = []
+        for source in total_rows:
+            row = dict(source)
+            earned_minor = max(0, int(row["seller_earned_minor"] or 0))
+            reversed_minor = min(earned_minor, max(0, int(row["seller_reversed_minor"] or 0)))
+            totals.append(
+                {
+                    "currency": str(row["currency"]),
+                    "sales_count": int(row["sales_count"]),
+                    "seller_earned_minor": earned_minor,
+                    "seller_reversed_minor": reversed_minor,
+                    "seller_net_minor": earned_minor - reversed_minor,
+                }
+            )
 
         return {
             "sales": sales,
-            "totals_by_currency": [totals[key] for key in sorted(totals)],
+            "totals_by_currency": totals,
         }
 
 
@@ -222,9 +237,8 @@ def marketplace_seller_account(request: Request, limit: int = Query(default=50, 
 def marketplace_account_page(request: Request):
     try:
         user = _session_user(request)
-    except Exception as exc:
-        status_code = getattr(exc, "status_code", None)
-        if status_code == 401:
+    except HTTPException as exc:
+        if exc.status_code == 401:
             return RedirectResponse("/signin", status_code=303)
         raise
 
