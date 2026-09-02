@@ -130,9 +130,13 @@ def _fixture(tmp_path):
 
     return {
         "accounts": accounts,
+        "orders": orders,
+        "settlements": settlements,
+        "fees": fees,
         "read_store": read_store,
         "buyer_a": buyer_a,
         "buyer_a_token": buyer_a_token,
+        "buyer_b": buyer_b,
         "seller_a": seller_a,
         "seller_a_token": seller_a_token,
         "order_a": order_a,
@@ -175,6 +179,32 @@ def test_seller_statement_is_account_scoped_and_refunds_reduce_net_proceeds(tmp_
             "seller_earned_minor": 450,
             "seller_reversed_minor": 225,
             "seller_net_minor": 225,
+        }
+    ]
+
+
+def test_seller_totals_are_all_time_even_when_activity_rows_are_limited(tmp_path):
+    data = _fixture(tmp_path)
+    _verified_sale(
+        orders=data["orders"],
+        settlements=data["settlements"],
+        fees=data["fees"],
+        buyer_id=data["buyer_b"],
+        seller_id=data["seller_a"],
+        suffix="paid_a_second",
+        publication_id="publication-a-second",
+    )
+
+    statement = data["read_store"].sales_for_seller(data["seller_a"], limit=1)
+
+    assert len(statement["sales"]) == 1
+    assert statement["totals_by_currency"] == [
+        {
+            "currency": "GBP",
+            "sales_count": 2,
+            "seller_earned_minor": 900,
+            "seller_reversed_minor": 225,
+            "seller_net_minor": 675,
         }
     ]
 
