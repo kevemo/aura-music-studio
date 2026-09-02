@@ -26,6 +26,7 @@ class SectionCandidateBatch(BaseModel):
     section_id: str
     section_start_seconds: float
     section_end_seconds: float
+    preserve_instrument_identity: bool = True
     tracks: list[SectionTrackCandidate] = Field(default_factory=list)
 
 
@@ -61,8 +62,27 @@ def _section(dna: SongDNA, directive: SongEditDirective):
     return section
 
 
+def _preserve_identity_requested(dna: SongDNA, directive: SongEditDirective) -> bool:
+    """Translate the legacy planner's preserve-all-instruments contract into identity preservation.
+
+    Before multitrack regeneration existed, ``preserve_instruments=True`` placed every instrument
+    layer in ``preserve_ids`` because a flat section repaint was expected to leave them alone. In
+    the multitrack implementation those same layers must be regenerated independently while
+    retaining their identity. A manually preserved subset still means "leave these layers alone".
+    """
+    if not bool(directive.metadata.get("local_regeneration_required")):
+        return bool(directive.metadata.get("preserve_instrument_identity", False))
+    instrument_ids = {layer.id for layer in dna.instruments}
+    if not instrument_ids:
+        return False
+    preserved_instruments = instrument_ids.intersection(directive.preserve_ids)
+    return instrument_ids.issubset(preserved_instruments)
+
+
 def _eligible_layers(dna: SongDNA, directive: SongEditDirective) -> list[InstrumentLayer]:
     preserved = set(directive.preserve_ids)
+    if _preserve_identity_requested(dna, directive):
+        preserved.difference_update(layer.id for layer in dna.instruments)
     return [
         layer
         for layer in dna.instruments
@@ -88,12 +108,14 @@ def generate_section_candidate_batch(
     session = session or StudioSession.load(project / "aura_session.json")
     work_dir = _safe_project_path(project, work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    preserve_identity = _preserve_identity_requested(dna, directive)
 
     batch = SectionCandidateBatch(
         directive_id=directive.id,
         section_id=section.id,
         section_start_seconds=float(section.start_seconds),
         section_end_seconds=float(section.end_seconds),
+        preserve_instrument_identity=preserve_identity,
     )
     seen_tracks: set[str] = set()
 
@@ -117,17 +139,25 @@ def generate_section_candidate_batch(
 
         relative_start = overlap_start - clip_start + float(base.source_offset)
         relative_end = overlap_end - clip_start + float(base.source_offset)
+        identity_instruction = (
+            "Preserve the same instrument identity and performer character. "
+            if preserve_identity
+            else "Keep this layer role-compatible with the arrangement while allowing the requested musical variation. "
+        )
+        negative_prompt = "changed tempo, changed key, extra instruments, flattened mix, abrupt edit boundary"
+        if preserve_identity:
+            negative_prompt += ", different instrument identity"
         request = RegionEditRequest(
             operation="repaint",
             start_seconds=relative_start,
             end_seconds=relative_end,
             prompt=(
                 f"Regenerate only the {section.name} passage of the {layer.label} layer. "
-                f"{directive.instruction} Preserve the same instrument identity, performer character, key, tempo, groove, "
-                "timing, dynamics, production space and all audio outside the selected passage. Keep this layer isolated; "
-                "do not add other instruments or vocals unless this is itself a vocal layer."
+                f"{directive.instruction} {identity_instruction}Preserve key, tempo, groove, timing, dynamics, production space "
+                "and all audio outside the selected passage. Keep this layer isolated; do not add other instruments or vocals "
+                "unless this is itself a vocal layer."
             ).strip(),
-            negative_prompt="changed tempo, changed key, different instrument identity, extra instruments, flattened mix, abrupt edit boundary",
+            negative_prompt=negative_prompt,
             strength=0.68,
         )
         candidate = generate_region_take(
@@ -222,6 +252,7 @@ def stage_section_candidate_batch(
             "track_ids": [item.track_id for item in batch.tracks],
             "clip_ids": committed_clip_ids,
             "candidate_count": len(batch.tracks),
+            "preserve_instrument_identity": batch.preserve_instrument_identity,
             "persisted": False,
         }
     )
