@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from .esp_social_facebook_adapter import FacebookPagesAdapter
 from .esp_social_provider_adapters import (
     ProviderAdapterError,
     ProviderProgress,
@@ -193,7 +194,10 @@ def _lookup_runtime(store: SocialHouseStore, space_id: str, entry_id: str):
             "Authorised publishing connection is no longer available"
         )
     adapter_name = str(connection.metadata.get("publishing_adapter") or "").strip()
-    adapter = provider_adapter(adapter_name)
+    if adapter_name == FacebookPagesAdapter.name:
+        adapter = FacebookPagesAdapter()
+    else:
+        adapter = provider_adapter(adapter_name)
     if adapter.platform != variant.platform:
         raise ProviderAdapterError(
             f"Publishing adapter {adapter_name} is for {adapter.platform}, not {variant.platform}"
