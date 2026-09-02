@@ -159,6 +159,10 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       if(url.origin!==location.origin)return nativeFetch(input,init);
       const method=String(init.method||'GET').toUpperCase();
       const projectName=currentProject();
+      if(projectName&&url.pathname==='/api/game-forge/games'&&method==='GET'){
+        url.pathname=`/api/game-forge/projects/${encodeURIComponent(projectName)}/games`;
+        return nativeFetch(url.pathname+url.search,init);
+      }
       if(projectName&&url.pathname==='/api/game-forge/games'&&method==='POST'){
         url.pathname=`/api/game-forge/projects/${encodeURIComponent(projectName)}/games`;
         return nativeFetch(url.pathname+url.search,init);
@@ -177,13 +181,20 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     };
   }
 
+  async function refreshGameProjectList(){
+    if(!isGame||!currentProject()||typeof loadMine!=='function')return;
+    await loadMine();
+  }
+
   async function resolveGameProject(gameId){
     if(!isGame||!gameId)return currentProject();
     const id=encodeURIComponent(String(gameId));
+    const previous=currentProject();
     const contextResponse=await nativeFetch(`/api/game-forge/games/${id}/project-context`,{credentials:'same-origin'});
     const context=await responseJson(contextResponse);
     if(context.creative_project_name){
       commitProject(context.creative_project_name);
+      if(previous!==context.creative_project_name)await refreshGameProjectList();
       return context.creative_project_name;
     }
     const desired=currentProject();
@@ -195,7 +206,10 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       body:JSON.stringify({creative_project_name:desired}),
     });
     const bound=await responseJson(bindResponse);
-    if(bound.creative_project_name)commitProject(bound.creative_project_name);
+    if(bound.creative_project_name){
+      commitProject(bound.creative_project_name);
+      if(previous!==bound.creative_project_name)await refreshGameProjectList();
+    }
     return bound.creative_project_name||desired;
   }
 
@@ -236,9 +250,12 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     }
     if(isGame){
       // Game Forge now persists this exact Creative DNA identity into Game DNA when a game is
-      // created or an eligible legacy game is first opened from the project workspace.
+      // created or an eligible legacy game is first opened from the project workspace. Refresh the
+      // native list through the project-scoped transport so unrelated Game DNA never remains visible.
       contextualProject=requested;
-      return drawWorkspace();
+      drawWorkspace();
+      try{await refreshGameProjectList()}catch(_){/* Game Forge keeps its native list error handling. */}
+      return;
     }
     drawWorkspace();
   }
