@@ -12,7 +12,12 @@ from .esp_social_facebook_oauth import (
     facebook_oauth_disconnect,
     facebook_oauth_start,
 )
-from .esp_social_oauth import router as social_oauth_router
+from .esp_social_oauth import (
+    oauth_callback,
+    oauth_disconnect,
+    oauth_providers,
+    oauth_start,
+)
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
 from .social_management import (
@@ -416,5 +421,25 @@ router.add_api_route(
     methods=["POST"],
 )
 
-# Generic provider routes must remain later so /oauth/facebook/* resolves to the bounded Page flow.
-router.include_router(social_oauth_router)
+# Register the existing TikTok/Instagram/YouTube OAuth endpoints directly as well. The previous
+# child-router composition could omit these routes from the canonical production router. Keep the
+# generic provider routes after Facebook so /oauth/facebook/* always resolves to the bounded Page flow.
+router.add_api_route("/oauth/providers", oauth_providers, methods=["GET"])
+router.add_api_route(
+    "/oauth/{provider}/start",
+    oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/{provider}/callback",
+    oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/{provider}/disconnect",
+    oauth_disconnect,
+    methods=["POST"],
+)
