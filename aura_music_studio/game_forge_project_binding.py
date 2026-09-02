@@ -7,7 +7,14 @@ from pydantic import BaseModel, Field
 
 from .creative_library import scan_creative_library
 from .creative_project import CreativeProjectStore
-from .game_forge_api import CreateGameRequest, _creator, _invalidate_after_edit, _public_game, create_game_for_member
+from .game_forge_api import (
+    CreateGameRequest,
+    _creator,
+    _invalidate_after_edit,
+    _member,
+    _public_game,
+    create_game_for_member,
+)
 from .game_forge_assets import (
     AttachGameAssetRequest,
     _ALLOWED_MEDIA_KINDS,
@@ -19,7 +26,8 @@ from .game_forge_assets import (
     public_asset,
 )
 from .game_forge_models import GameDNA
-from .game_forge_store import load_game, save_game
+from .game_forge_store import active_editable_games, list_games, load_game, save_game
+from .plans import GAME_CREATE, GAME_CREATE_UNLIMITED
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Game Forge Creative Project Continuity"])
@@ -114,6 +122,31 @@ def _project_library(member, game: GameDNA) -> tuple[list[dict], str | None]:
     project, _manifest = _creative_project(binding)
     rows = scan_creative_library(member, project_dirs=[project])
     return [row for row in rows if row.get("kind") in _ALLOWED_MEDIA_KINDS], binding
+
+
+def _project_games(project_name: str) -> list[GameDNA]:
+    clean = str(project_name or "").strip()
+    return [row for row in list_games() if creative_project_name(row) == clean]
+
+
+@router.get("/api/game-forge/projects/{project_name}/games")
+def games_in_creative_project(project_name: str, request: Request):
+    member = _member(request)
+    _creative_project(project_name)
+    clean = project_name.strip()
+    rows = _project_games(clean)
+    unlimited = member.plan.has(GAME_CREATE_UNLIMITED)
+    can_create = member.plan.has(GAME_CREATE)
+    return {
+        "games": [{**_public_game(row), **_binding_payload(row)} for row in rows],
+        "creative_project_name": clean,
+        "project_bound_view": True,
+        "can_create": can_create,
+        "unlimited_active_projects": unlimited,
+        # The create entitlement is global to Game Forge, so this remains deliberately unscoped.
+        "active_editable_count": len(active_editable_games()),
+        "basic_active_limit": None if unlimited else (1 if can_create else 0),
+    }
 
 
 @router.post("/api/game-forge/projects/{project_name}/games")
@@ -214,6 +247,7 @@ __all__ = [
     "create_game_in_creative_project",
     "game_project_context",
     "game_project_library",
+    "games_in_creative_project",
     "import_project_game_asset",
     "router",
 ]
