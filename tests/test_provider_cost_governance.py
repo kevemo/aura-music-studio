@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from pathlib import Path
 
@@ -179,11 +180,11 @@ def test_owner_api_is_private_and_does_not_expose_raw_refs(monkeypatch, tmp_path
     assert body["privacy"]["provider_secrets_exposed"] is False
 
 
-def test_production_app_mounts_cost_governance_and_branch_is_deploy_disabled():
+def test_production_app_mounts_cost_governance_and_vercel_is_globally_disabled():
     app_source = Path("app.py").read_text(encoding="utf-8")
     assert "install_provider_cost_governance" in app_source
     assert "install_provider_cost_governance()" in app_source
     assert "app.include_router(provider_cost_governance_router)" in app_source
 
-    vercel = Path("vercel.json").read_text(encoding="utf-8")
-    assert '"feature/provider-cost-governance": false' in vercel
+    vercel = json.loads(Path("vercel.json").read_text(encoding="utf-8"))
+    assert vercel["git"]["deploymentEnabled"] is False
