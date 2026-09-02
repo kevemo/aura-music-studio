@@ -8,3 +8,10 @@ public product brand.
 """
 
 __version__ = "0.20.0"
+
+# Install the provider-cost hard-budget boundary at package import so every ComfyUI renderer
+# entrypoint receives the same pre-submission protection. The default remains warning-only;
+# hard blocking activates only through deployment-owned environment configuration.
+from .provider_budget_enforcement import install_provider_budget_enforcement
+
+install_provider_budget_enforcement()
