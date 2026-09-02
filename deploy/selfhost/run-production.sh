@@ -32,25 +32,48 @@ docker compose version >/dev/null
 python3 - "$RELEASE_FILE" <<'PY'
 import json, re, sys
 data=json.load(open(sys.argv[1], encoding="utf-8"))
-sha=str(data.get("git_sha", "")); image=str(data.get("command_center_image", ""))
+sha=str(data.get("git_sha", ""))
+command_image=str(data.get("command_center_image", ""))
+ace_step_image=str(data.get("ace_step_image", ""))
+ace_step_commit=str(data.get("ace_step_upstream_commit", ""))
 if data.get("schema_version") != 1: raise SystemExit("Unsupported release manifest schema")
 if data.get("environment") != "production": raise SystemExit("Release manifest is not production")
 if data.get("approved") is not True: raise SystemExit("Release manifest is not approved")
 if not re.fullmatch(r"[0-9a-f]{40}", sha): raise SystemExit("git_sha must be an exact 40-character lowercase SHA")
-if not re.search(r"@sha256:[0-9a-f]{64}$", image): raise SystemExit("command_center_image must use an immutable sha256 digest")
+for label, image in (("command_center_image", command_image), ("ace_step_image", ace_step_image)):
+    if not re.search(r"@sha256:[0-9a-f]{64}$", image):
+        raise SystemExit(f"{label} must use an immutable sha256 digest")
+if not re.fullmatch(r"[0-9a-f]{40}", ace_step_commit):
+    raise SystemExit("ace_step_upstream_commit must be an exact reviewed Git SHA")
 evidence=data.get("supply_chain") or {}
-required=("buildkit_provenance","buildkit_sbom","trivy_high_critical_gate","trivy_unfixed_high_critical_gate","cosign_signature_verified")
+required=(
+    "buildkit_provenance",
+    "buildkit_sbom",
+    "trivy_high_critical_gate",
+    "trivy_unfixed_high_critical_gate",
+    "cosign_signature_verified",
+    "ace_step_buildkit_provenance",
+    "ace_step_buildkit_sbom",
+    "ace_step_trivy_high_critical_gate",
+    "ace_step_cosign_signature_verified",
+)
 missing=[key for key in required if evidence.get(key) is not True]
 if missing: raise SystemExit("Release manifest supply-chain evidence is incomplete: " + ", ".join(missing))
 PY
 
 mapfile -t RELEASE_VALUES < <(python3 - "$RELEASE_FILE" <<'PY'
 import json, sys
-d=json.load(open(sys.argv[1], encoding="utf-8")); print(d["git_sha"]); print(d["command_center_image"])
+d=json.load(open(sys.argv[1], encoding="utf-8"))
+print(d["git_sha"])
+print(d["command_center_image"])
+print(d["ace_step_image"])
+print(d["ace_step_upstream_commit"])
 PY
 )
 EXPECTED_SHA="${RELEASE_VALUES[0]}"
 export ESP_COMMAND_CENTER_IMAGE="${RELEASE_VALUES[1]}"
+export AURA_ACESTEP_IMAGE="${RELEASE_VALUES[2]}"
+EXPECTED_ACESTEP_COMMIT="${RELEASE_VALUES[3]}"
 
 mapfile -t INFERENCE_VALUES < <(python3 - "$INFERENCE_FILE" <<'PY'
 import json, re, sys
@@ -82,7 +105,7 @@ source "$ENV_FILE"
 set +a
 
 required=(
-  LSS_PUBLIC_BASE_URL LSS_ADMIN_KEY LSS_PROVENANCE_SECRET ACESTEP_API_KEY
+  LSS_PUBLIC_BASE_URL LSS_PUBLIC_SITE_ADDRESS LSS_ADMIN_KEY LSS_PROVENANCE_SECRET ACESTEP_API_KEY
   AURA_MONITORING_TOKEN LSS_BACKUP_AGE_RECIPIENT COSIGN_VERIFY_KEY
   AURA_SELFHOST_LLM_MODEL_DIR AURA_LLM_INTERNAL_API_KEY
   AURA_ACESTEP_CUDA_VISIBLE_DEVICES AURA_LLM_CUDA_VISIBLE_DEVICES
@@ -95,6 +118,11 @@ done
 [[ "${LSS_COOKIE_SECURE:-}" == "true" ]] || { echo "LSS_COOKIE_SECURE must be true" >&2; exit 78; }
 [[ "${AURA_WEB_ALLOW_HTTP:-}" == "false" ]] || { echo "AURA_WEB_ALLOW_HTTP must be false" >&2; exit 78; }
 [[ "${AURA_REQUIRE_LIVE_RENDERER:-}" == "true" ]] || { echo "AURA_REQUIRE_LIVE_RENDERER must be true" >&2; exit 78; }
+[[ "$LSS_PUBLIC_BASE_URL" == https://* ]] || { echo "LSS_PUBLIC_BASE_URL must use HTTPS in production" >&2; exit 78; }
+[[ "$LSS_PUBLIC_SITE_ADDRESS" != http://* && "$LSS_PUBLIC_SITE_ADDRESS" != https://* ]] || {
+  echo "LSS_PUBLIC_SITE_ADDRESS must be a hostname so Caddy can own production TLS" >&2
+  exit 78
+}
 
 # On the immediate single-host path, never let ACE-Step and Aura silently contend for the
 # same CUDA device/MIG UUID. Cluster deployments use dedicated node pools instead.
@@ -110,9 +138,15 @@ PY
 python3 "$ROOT/deploy/selfhost/aura_model_integrity.py" verify \
   "$AURA_SELFHOST_LLM_MODEL_DIR" "$EXPECTED_MODEL_MANIFEST_SHA" >/dev/null
 
-# Re-verify both runtime images at deployment time using current vulnerability intelligence.
+# Re-verify every privileged runtime image at deployment time using current vulnerability
+# intelligence and the exact release identities recorded in the approved manifests.
 cosign verify --key "$COSIGN_VERIFY_KEY" -a "git_sha=$EXPECTED_SHA" "$ESP_COMMAND_CENTER_IMAGE" >/dev/null
 trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$ESP_COMMAND_CENTER_IMAGE"
+cosign verify --key "$COSIGN_VERIFY_KEY" \
+  -a "component=ace-step" \
+  -a "upstream_commit=$EXPECTED_ACESTEP_COMMIT" \
+  "$AURA_ACESTEP_IMAGE" >/dev/null
+trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$AURA_ACESTEP_IMAGE"
 cosign verify --key "$COSIGN_VERIFY_KEY" -a "component=aura-selfhost-inference" "$AURA_VLLM_IMAGE" >/dev/null
 trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$AURA_VLLM_IMAGE"
 
@@ -121,8 +155,13 @@ if [[ "${AURA_GPU_REQUIRED:-true}" == "true" ]]; then
   nvidia-smi -L >/dev/null || { echo "No usable NVIDIA GPU detected" >&2; exit 69; }
 fi
 
-COMPOSE=(
-  docker compose --env-file "$ENV_FILE"
+# The production release always starts Caddy. Social publishing is opt-in and only starts after
+# its provider apps/permissions/credentials have been explicitly enabled in the production env.
+COMPOSE=(docker compose --env-file "$ENV_FILE" --profile public)
+if [[ "${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}" == "true" ]]; then
+  COMPOSE+=(--profile social-publishing)
+fi
+COMPOSE+=(
   -f "$ROOT/docker-compose.yml"
   -f "$ROOT/docker-compose.gpu.yml"
   -f "$ROOT/deploy/production/docker-compose.production.yml"
@@ -131,7 +170,14 @@ COMPOSE=(
 )
 
 "${COMPOSE[@]}" config >/dev/null
-"${COMPOSE[@]}" pull live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager aura-llm
+PULL_SERVICES=(
+  live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager
+  ace-step aura-llm searxng caddy
+)
+if [[ "${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}" == "true" ]]; then
+  PULL_SERVICES+=(esp-social-publish-worker)
+fi
+"${COMPOSE[@]}" pull "${PULL_SERVICES[@]}"
 "${COMPOSE[@]}" up -d --no-build --remove-orphans
 
 "${COMPOSE[@]}" exec -T ace-step curl -fsS http://127.0.0.1:8001/health >/dev/null
@@ -158,7 +204,7 @@ until curl --fail --silent --show-error --max-time 10 "$READY_URL" >/dev/null; d
   if (( SECONDS >= DEADLINE )); then
     echo "Production readiness failed: $READY_URL" >&2
     "${COMPOSE[@]}" ps >&2 || true
-    "${COMPOSE[@]}" logs --tail=120 live-sound-studio aura-worker ace-step aura-llm >&2 || true
+    "${COMPOSE[@]}" logs --tail=120 live-sound-studio aura-worker ace-step aura-llm caddy >&2 || true
     exit 70
   fi
   sleep 5
