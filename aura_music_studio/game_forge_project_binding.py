@@ -25,6 +25,7 @@ from .game_forge_assets import (
     list_game_assets,
     public_asset,
 )
+from .game_forge_export_readiness import aura_web_export_readiness
 from .game_forge_models import GameDNA
 from .game_forge_store import active_editable_games, list_games, load_game, save_game
 from .plans import GAME_CREATE, GAME_CREATE_UNLIMITED
@@ -79,6 +80,14 @@ def _binding_payload(game: GameDNA) -> dict:
         "project_bound": bool(name),
         "legacy_unbound_compatibility": not bool(name),
         "single_project_workspace": bool(name),
+    }
+
+
+def _project_game_payload(game: GameDNA) -> dict:
+    return {
+        **_public_game(game),
+        **_binding_payload(game),
+        "aura_web_export": aura_web_export_readiness(game),
     }
 
 
@@ -138,7 +147,7 @@ def games_in_creative_project(project_name: str, request: Request):
     unlimited = member.plan.has(GAME_CREATE_UNLIMITED)
     can_create = member.plan.has(GAME_CREATE)
     return {
-        "games": [{**_public_game(row), **_binding_payload(row)} for row in rows],
+        "games": [_project_game_payload(row) for row in rows],
         "creative_project_name": clean,
         "project_bound_view": True,
         "can_create": can_create,
@@ -164,7 +173,7 @@ def create_game_in_creative_project(project_name: str, body: CreateGameRequest, 
         "creative_project_continuity": "shared_tenant_project",
     }
     save_game(game)
-    return {**_public_game(game), **_binding_payload(game)}
+    return _project_game_payload(game)
 
 
 @router.get("/api/game-forge/games/{game_id}/project-context")
