@@ -118,6 +118,7 @@ from aura_music_studio.recording_api import router as recording_router
 from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
+from aura_music_studio.route_integrity import deduplicate_http_routes
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
@@ -280,6 +281,11 @@ app.include_router(source_detection_router)
 # real release application, not only exercised on an isolated test FastAPI instance.
 app.include_router(production_readiness_router)
 app.include_router(system_router)
+
+# FastAPI/Starlette dispatches the first exact path+method match. Remove later exact copies after
+# every router has been composed so route ownership is unambiguous and OpenAPI has one operation
+# per reachable handler while preserving the runtime precedence the application already used.
+deduplicate_http_routes(app)
 
 app.add_middleware(CreativeUsageMiddleware)
 app.add_middleware(CreativeMediaPreviewMiddleware)
