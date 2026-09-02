@@ -23,7 +23,7 @@ At minimum, subscribe the PayPal REST app to `INVOICING.INVOICE.PAID` while the 
 
 ## Security model
 
-For every delivery, Pulsar requires the PayPal transmission headers, rejects non-PayPal certificate hosts, obtains an OAuth access token from the configured PayPal environment, and posts the event evidence to PayPal's `verify-webhook-signature` endpoint. Only `SUCCESS` events are written to the local evidence ledger. Event IDs are primary keys so retries are idempotent.
+For every delivery, Pulsar requires the PayPal transmission headers, rejects non-PayPal certificate hosts, obtains an OAuth access token from the configured PayPal environment, and posts the event evidence to PayPal's `verify-webhook-signature` endpoint. Only `SUCCESS` events are written to the local evidence ledger. Event IDs are primary keys so exact retries are idempotent. A repeated event ID with a different transmission ID or payload is rejected as conflicting evidence instead of silently replacing or reusing the original record.
 
 Webhook receipt never changes a user's plan. An ESP administrator may activate a verified invoice event through the owner-only API only when all of the following are true:
 

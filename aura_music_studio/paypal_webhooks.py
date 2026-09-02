@@ -143,17 +143,37 @@ class PayPalWebhookEvidenceStore:
         payload = json.dumps(event, sort_keys=True, separators=(",", ":"))
         now = _now_iso()
         with self._connect() as con:
-            cursor = con.execute(
-                """INSERT OR IGNORE INTO paypal_webhook_events
-                   (event_id,event_type,resource_id,transmission_id,payload_json,verified_at)
-                   VALUES (?,?,?,?,?,?)""",
-                (event_id, event_type, resource_id, transmission_id, payload, now),
-            )
+            existing = con.execute(
+                """SELECT event_type,resource_id,transmission_id,payload_json
+                   FROM paypal_webhook_events WHERE event_id=?""",
+                (event_id,),
+            ).fetchone()
+            if existing:
+                stored = dict(existing)
+                incoming = {
+                    "event_type": event_type,
+                    "resource_id": resource_id,
+                    "transmission_id": transmission_id,
+                    "payload_json": payload,
+                }
+                if stored != incoming:
+                    raise PayPalWebhookError(
+                        "PayPal event id conflicts with previously verified delivery evidence"
+                    )
+                duplicate = True
+            else:
+                con.execute(
+                    """INSERT INTO paypal_webhook_events
+                       (event_id,event_type,resource_id,transmission_id,payload_json,verified_at)
+                       VALUES (?,?,?,?,?,?)""",
+                    (event_id, event_type, resource_id, transmission_id, payload, now),
+                )
+                duplicate = False
         return {
             "event_id": event_id,
             "event_type": event_type,
             "resource_id": resource_id,
-            "duplicate": cursor.rowcount == 0,
+            "duplicate": duplicate,
             "verified": True,
         }
 
