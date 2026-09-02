@@ -231,8 +231,8 @@ def test_facebook_static_oauth_routes_are_registered_before_generic_provider_rou
     from aura_music_studio.social_management_api import router
 
     paths = [route.path for route in router.routes if hasattr(route, "path")]
-    facebook_callback = "/oauth/facebook/callback"
-    generic_callback = "/oauth/{provider}/callback"
+    facebook_callback = "/command-center/api/social/oauth/facebook/callback"
+    generic_callback = "/command-center/api/social/oauth/{provider}/callback"
     assert facebook_callback in paths
     assert generic_callback in paths
     assert paths.index(facebook_callback) < paths.index(generic_callback)
