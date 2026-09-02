@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .creation_coin_catalog import validate_creation_coin_packs
+from .marketplace_accounting import router as marketplace_account_router
 from .plans import get_plan
 from .stripe_billing import (
     CreditCheckoutRequest,
@@ -39,6 +40,7 @@ from .stripe_marketplace_webhooks import (
 )
 
 router = APIRouter(tags=["Stripe Billing Security"])
+router.include_router(marketplace_account_router)
 _REFUND_EVENT_TYPES = frozenset({"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"})
 
 
