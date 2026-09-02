@@ -89,22 +89,29 @@ def resolve_publish_capability(
     if getattr(connection, "supports_auto_publish", False) is not True:
         _append(result, "auto_publish_disabled", "automatic publishing is not enabled for this connection")
 
+    # Keep credential validation ahead of adapter-state reasons so existing queue
+    # diagnostics remain stable while the richer capability codes are added.
+    if not valid_social_token_ref(getattr(connection, "token_secret_ref", None)):
+        _append(
+            result,
+            "invalid_credential_reference",
+            "OAuth token reference must use the restricted social-token:// alias format or encrypted social-oauth:// credential format",
+        )
+
     metadata = getattr(connection, "metadata", {}) or {}
     adapter_name = str(metadata.get("publishing_adapter") or "").strip()
     result.adapter = adapter_name or None
+    result.active = bool(adapter_name) and metadata.get("publishing_adapter_active") is True
     if not adapter_name:
         _append(result, "adapter_missing", "official publishing adapter not active")
-        return result
-
-    result.active = metadata.get("publishing_adapter_active") is True
-    if not result.active:
+    elif not result.active:
         _append(result, "adapter_inactive", "official publishing adapter not active")
 
-    expected_platform = _ADAPTER_PLATFORMS.get(adapter_name)
+    expected_platform = _ADAPTER_PLATFORMS.get(adapter_name) if adapter_name else None
     result.implemented = expected_platform is not None
-    if not result.implemented:
+    if adapter_name and not result.implemented:
         _append(result, "adapter_unavailable", "configured publishing adapter is not implemented by this runtime")
-    elif expected_platform != clean_platform:
+    elif expected_platform is not None and expected_platform != clean_platform:
         _append(result, "adapter_platform_mismatch", "configured publishing adapter belongs to a different platform")
 
     supported_types = _ADAPTER_CONTENT_TYPES.get(adapter_name, frozenset())
@@ -113,13 +120,6 @@ def resolve_publish_capability(
             result,
             "unsupported_content_type",
             f"{clean_content_type or 'requested content'} is planning-only for the configured publishing adapter",
-        )
-
-    if not valid_social_token_ref(getattr(connection, "token_secret_ref", None)):
-        _append(
-            result,
-            "invalid_credential_reference",
-            "OAuth token reference must use the restricted social-token:// alias format or encrypted social-oauth:// credential format",
         )
 
     result.configured = not any(
