@@ -20,7 +20,7 @@ PLATFORM_AWARE_UI = r"""
   function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
   function pretty(v){return String(v||'').replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}
   async function capabilities(){if(caps)return caps;if(loading)return loading;loading=fetch(endpoint,{credentials:'same-origin'}).then(async r=>{let b={};try{b=await r.json()}catch(_){}if(!r.ok)throw new Error(b.detail||`Platform registry failed (${r.status})`);caps=b.capabilities||{};return caps}).finally(()=>loading=null);return loading}
-  function updateTypes(platform,type,info){const spec=caps?.[platform.value]||{},types=Array.isArray(spec.content_types)?spec.content_types:[];const old=type.value;type.innerHTML=types.map(v=>`<option value="${esc(v)}">${esc(pretty(v))}</option>`).join('');if(types.includes(old))type.value=old;const caption=spec.caption_limit==null?'No registry caption limit':`${Number(spec.caption_limit).toLocaleString()} character caption limit`;const media=spec.max_media==null?'No registry media limit':`up to ${spec.max_media} media`;const publish=spec.auto_publish===false?'planning only':'official adapter + authorisation required for publishing';info.textContent=`${caption} · ${media} · ${publish}`}
+  function updateTypes(platform,type,info){const spec=caps?.[platform.value]||{},types=Array.isArray(spec.content_types)?spec.content_types:[];const old=type.value;type.innerHTML=types.map(v=>`<option value="${esc(v)}">${esc(pretty(v))}</option>`).join('');if(types.includes(old))type.value=old;const caption=spec.caption_limit==null?'No registry caption limit':`${Number(spec.caption_limit).toLocaleString()} character caption limit`;const media=spec.max_media==null?'No registry media limit':`up to ${spec.max_media} media`;const implemented=Array.isArray(spec.auto_publish_content_types)?spec.auto_publish_content_types:[];const publish=implemented.length?`runtime publishing: ${implemented.map(pretty).join(', ')}`:'planning only in this runtime';info.textContent=`${caption} · ${media} · ${publish}`}
   async function enhance(){const platform=document.getElementById('postPlatform'),type=document.getElementById('postType');if(!platform||!type||platform.dataset.registryReady==='1')return;try{await capabilities();const keys=Object.keys(caps||{}).filter(k=>caps[k]?.planning!==false);if(!keys.length)return;const selected=caps[platform.value]?platform.value:keys[0];platform.innerHTML=keys.map(v=>`<option value="${esc(v)}">${esc(pretty(v))}</option>`).join('');platform.value=selected;platform.dataset.registryReady='1';let info=document.getElementById('postPlatformRules');if(!info){info=document.createElement('div');info.id='postPlatformRules';info.className='muted';info.style.cssText='font-size:.68rem;line-height:1.4;margin-top:-2px';type.closest('.row')?.insertAdjacentElement('afterend',info)}const sync=()=>updateTypes(platform,type,info);platform.addEventListener('change',sync);sync()}catch(error){console.warn('ESP platform-aware planner unavailable',error)}}
   const observer=new MutationObserver(()=>enhance());observer.observe(document.documentElement,{subtree:true,childList:true});enhance();
 })();
@@ -38,7 +38,7 @@ MULTI_PLATFORM_UI = r"""
   function activeHouse(){try{return typeof house!=='undefined'?house:null}catch(_){return null}}
   async function caps(){if(registry)return registry;const d=await request(root+'/platforms');registry=d.capabilities||{};return registry}
   function ensureButton(){const tabs=document.querySelector('.tabs');if(!tabs||document.getElementById('espMultiPlatformButton'))return;const b=document.createElement('button');b.id='espMultiPlatformButton';b.className='tab';b.textContent='＋ Multi-platform Post';b.onclick=open;tabs.append(b)}
-  function ensureDrawer(){if(drawer)return drawer;drawer=document.createElement('aside');drawer.id='espMultiPlatformDrawer';drawer.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(760px,100%);z-index:99;transform:translateX(105%);transition:.2s;background:#080b16fc;border-left:1px solid #ffffff20;padding:18px;overflow:auto;box-shadow:-24px 0 70px #000a';drawer.innerHTML=`<div style="display:flex;align-items:flex-start;gap:9px"><div style="flex:1"><div class="eyebrow">Cross-platform planning</div><h2 style="margin:4px 0">Multi-platform Post</h2><p class="muted" style="font-size:.78rem">One content item with a separate validated variant for every selected destination. Planning only until an official publishing adapter is authorised.</p></div><button class="btn small" id="espMultiClose">✕</button></div><div class="formbox" style="margin-top:10px"><div class="stack"><input id="espMultiTitle" class="field" maxlength="300" placeholder="Content title"><label class="muted"><input id="espMultiApproval" type="checkbox"> Require approval before publishing</label><div id="espMultiPlatforms"></div><button id="espMultiSave" class="btn primary">Add multi-platform content</button><div class="muted" style="font-size:.68rem">This composer always saves <code>auto_publish:false</code>. Connecting and authorising official platform publishing remains a separate step.</div></div></div>`;document.body.append(drawer);document.getElementById('espMultiClose').onclick=close;document.getElementById('espMultiSave').onclick=save;drawer.addEventListener('change',e=>{const cb=e.target.closest('[data-multi-enable]');if(cb)toggleRow(cb.dataset.multiEnable,cb.checked)});return drawer}
+  function ensureDrawer(){if(drawer)return drawer;drawer=document.createElement('aside');drawer.id='espMultiPlatformDrawer';drawer.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(760px,100%);z-index:99;transform:translateX(105%);transition:.2s;background:#080b16fc;border-left:1px solid #ffffff20;padding:18px;overflow:auto;box-shadow:-24px 0 70px #000a';drawer.innerHTML=`<div style="display:flex;align-items:flex-start;gap:9px"><div style="flex:1"><div class="eyebrow">Cross-platform planning</div><h2 style="margin:4px 0">Multi-platform Post</h2><p class="muted" style="font-size:.78rem">One content item with a separate validated variant for every selected destination. Planning remains separate from provider-authorised publishing.</p></div><button class="btn small" id="espMultiClose">✕</button></div><div class="formbox" style="margin-top:10px"><div class="stack"><input id="espMultiTitle" class="field" maxlength="300" placeholder="Content title"><label class="muted"><input id="espMultiApproval" type="checkbox"> Require approval before publishing</label><div id="espMultiPlatforms"></div><button id="espMultiSave" class="btn primary">Add multi-platform content</button><div class="muted" style="font-size:.68rem">This composer always saves <code>auto_publish:false</code>. Provider-authorised publishing is enabled separately only for runtime-supported surfaces.</div></div></div>`;document.body.append(drawer);document.getElementById('espMultiClose').onclick=close;document.getElementById('espMultiSave').onclick=save;drawer.addEventListener('change',e=>{const cb=e.target.closest('[data-multi-enable]');if(cb)toggleRow(cb.dataset.multiEnable,cb.checked)});return drawer}
   function close(){ensureDrawer().style.transform='translateX(105%)'}
   function platformCard(name,spec){const types=Array.isArray(spec.content_types)?spec.content_types:[];const cap=spec.caption_limit==null?'no registry caption cap':`${spec.caption_limit} chars`;const media=spec.max_media==null?'no registry media cap':`max ${spec.max_media} media`;return `<div class="card" style="margin:8px 0"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" data-multi-enable="${esc(name)}"><b>${esc(pretty(name))}</b><span class="muted" style="font-size:.68rem">${esc(cap)} · ${esc(media)}</span></label><div id="multi_${esc(name)}" style="display:none;margin-top:9px" class="stack"><select class="field" data-multi-type="${esc(name)}">${types.map(t=>`<option value="${esc(t)}">${esc(pretty(t))}</option>`).join('')}</select><textarea class="field" data-multi-caption="${esc(name)}" maxlength="63206" placeholder="${esc(pretty(name))} caption"></textarea><input class="field" data-multi-tags="${esc(name)}" placeholder="Hashtags, separated by spaces or commas"><div class="row"><label class="muted" style="font-size:.72rem">Schedule (optional)<input class="field" type="datetime-local" data-multi-schedule="${esc(name)}"></label><label class="muted" style="font-size:.72rem">Timezone<input class="field" data-multi-zone="${esc(name)}" value="${esc(Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC')}"></label></div></div></div>`}
   function toggleRow(name,on){const el=document.getElementById(`multi_${name}`);if(el)el.style.display=on?'grid':'none'}
@@ -47,6 +47,63 @@ MULTI_PLATFORM_UI = r"""
   function scheduleValue(input){if(!input?.value)return null;const d=new Date(input.value);return Number.isNaN(d.getTime())?null:d.toISOString()}
   async function save(){const h=activeHouse(),title=document.getElementById('espMultiTitle')?.value.trim();if(!h?.id)return toast('Choose a Social House first.',true);if(!title)return toast('Enter a content title.',true);const selected=[...document.querySelectorAll('[data-multi-enable]:checked')].map(x=>x.dataset.multiEnable);if(!selected.length)return toast('Select at least one platform.',true);const variants=selected.map(name=>({platform:name,content_type:document.querySelector(`[data-multi-type="${CSS.escape(name)}"]`).value,caption:document.querySelector(`[data-multi-caption="${CSS.escape(name)}"]`).value.trim(),hashtags:hashtags(document.querySelector(`[data-multi-tags="${CSS.escape(name)}"]`).value),scheduled_at:scheduleValue(document.querySelector(`[data-multi-schedule="${CSS.escape(name)}"]`)),timezone:document.querySelector(`[data-multi-zone="${CSS.escape(name)}"]`).value.trim()||null,media_refs:[],auto_publish:false}));const approval=document.getElementById('espMultiApproval').checked;const anyScheduled=variants.some(v=>v.scheduled_at);const status=approval?'pending_approval':(anyScheduled?'scheduled':'draft');try{const d=await request(`${root}/spaces/${encodeURIComponent(h.id)}/content`,{method:'POST',body:JSON.stringify({title,status,approval_required:approval,content_pillars:[],variants})});try{house=d.house;renderSpaces();renderTab()}catch(_){}close();toast(`${variants.length} platform variant${variants.length===1?'':'s'} added to one content item.`)}catch(e){toast(e.message,true)}}
   const observer=new MutationObserver(ensureButton);observer.observe(document.documentElement,{subtree:true,childList:true});ensureButton();
+})();
+</script>
+"""
+
+NICHE_COACH_UI = r"""
+<script id="espAuraNicheCoach">
+(()=>{
+  const social='/command-center/api/social';
+  const intelligence='/command-center/api/social-intelligence';
+  async function request(url,opt={}){const r=await fetch(url,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});let b={};try{b=await r.json()}catch(_){}if(!r.ok)throw new Error(b.detail||`Request failed (${r.status})`);return b}
+  function toast(message,bad=false){try{notice(message,bad)}catch(_){console[bad?'error':'log'](message)}}
+  function activeHouse(){try{return typeof house!=='undefined'?house:null}catch(_){return null}}
+  function titleForToday(){const d=new Date();const stamp=d.toISOString().slice(0,10);return `Aura Niche Growth Sprint · ${stamp}`}
+  function safeRecommendation(value){return String(value||'').trim().replace(/\s+/g,' ').slice(0,300)}
+  async function build(){
+    const h=activeHouse();
+    if(!h?.id)return toast('Choose or create a Social House first.',true);
+    const button=document.getElementById('auraNicheCoachButton');
+    if(button){button.disabled=true;button.textContent='Building growth plan…'}
+    try{
+      const insight=await request(`${intelligence}/spaces/${encodeURIComponent(h.id)}/aura-insights`);
+      const recommendations=(Array.isArray(insight.recommendations)?insight.recommendations:[]).map(safeRecommendation).filter(Boolean).slice(0,8);
+      if(!recommendations.length)throw new Error('Aura could not derive a safe niche growth action from the current profile and analytics.');
+      const description=[
+        'Aura-generated ESP niche growth sprint based on the member’s selected niche, ESP training priorities and authorised social analytics.',
+        '',
+        ...recommendations.map((item,index)=>`${index+1}. ${item}`),
+      ].join('\n').slice(0,2000);
+      const projectResponse=await request(`${social}/spaces/${encodeURIComponent(h.id)}/projects`,{
+        method:'POST',
+        body:JSON.stringify({name:titleForToday(),description,tags:['aura-plan','niche-growth']})
+      });
+      const project=projectResponse.project;
+      if(!project?.id)throw new Error('Aura created the campaign record but no project identifier was returned.');
+      let created=0;
+      for(const recommendation of recommendations){
+        await request(`${social}/spaces/${encodeURIComponent(h.id)}/tasks`,{
+          method:'POST',
+          body:JSON.stringify({
+            title:recommendation,
+            description:'Aura action generated from this ESP niche profile and authorised social-performance context.',
+            status:'todo',
+            priority:'normal',
+            project_id:project.id,
+            tags:['aura','niche-growth']
+          })
+        });
+        created+=1;
+      }
+      try{await loadHouse(h.id)}catch(_){}
+      toast(`Aura created ${created} actionable growth task${created===1?'':'s'} inside “${project.name}”.`);
+      try{showTab('campaigns',[...document.querySelectorAll('.tab')].find(x=>x.textContent.trim()==='Campaigns'))}catch(_){}
+    }catch(error){toast(error.message||'Aura growth planning failed.',true)}finally{
+      if(button){button.disabled=false;button.textContent='Build Aura growth plan'}
+    }
+  }
+  window.runAuraNicheCoach=build;
 })();
 </script>
 """
@@ -62,27 +119,50 @@ def social_house_with_intelligence(request: Request):
         html = response.body.decode("utf-8")
     except Exception:
         return response
+
     marker = "<a class='btn optional' href='/command-center/niche'>Change Niche</a>"
-    extra = (
+    nav_links = (
         "<a class='btn primary' href='/command-center/social-insights'>Analytics & Aura Insights</a>"
+        "<a class='btn' href='/command-center/social/connections'>Connections</a>"
         "<a class='btn' href='/command-center/social/creative-launch'>Creative → Social Launch</a>"
         "<a class='btn' href='/command-center/social/approvals'>Approval Inbox</a>"
         "<a class='btn' href='/command-center/social/publish-queue'>Publish Queue</a>"
     )
-    if marker in html and "/command-center/social/creative-launch" not in html:
-        html = html.replace(marker, marker + extra, 1)
-    elif marker in html and "/command-center/social/approvals" not in html:
-        html = html.replace(marker, marker + "<a class='btn' href='/command-center/social/approvals'>Approval Inbox</a>", 1)
-    if marker in html and "/command-center/social/publish-queue" not in html:
-        html = html.replace(marker, marker + "<a class='btn' href='/command-center/social/publish-queue'>Publish Queue</a>", 1)
+    if marker in html:
+        missing = []
+        for path, label, css in (
+            ("/command-center/social-insights", "Analytics & Aura Insights", "btn primary"),
+            ("/command-center/social/connections", "Connections", "btn"),
+            ("/command-center/social/creative-launch", "Creative → Social Launch", "btn"),
+            ("/command-center/social/approvals", "Approval Inbox", "btn"),
+            ("/command-center/social/publish-queue", "Publish Queue", "btn"),
+        ):
+            if path not in html:
+                missing.append(f"<a class='{css}' href='{path}'>{label}</a>")
+        if missing:
+            html = html.replace(marker, marker + "".join(missing), 1)
+
+    old_placeholder = (
+        "<button class=\"btn\" onclick=\"notice('Aura niche campaign generation is in the next integration stage.')\">"
+        "Plan niche campaign</button>"
+    )
+    live_coach = (
+        "<button class=\"btn\" id=\"auraNicheCoachButton\" onclick=\"runAuraNicheCoach()\">"
+        "Build Aura growth plan</button>"
+    )
+    if old_placeholder in html:
+        html = html.replace(old_placeholder, live_coach, 1)
+
     additions = ""
     if "id=\"espPlatformAwarePostEditor\"" not in html:
         additions += PLATFORM_AWARE_UI
     if "id=\"espMultiPlatformComposer\"" not in html:
         additions += MULTI_PLATFORM_UI
+    if "id=\"espAuraNicheCoach\"" not in html:
+        additions += NICHE_COACH_UI
     if additions and "</body>" in html:
         html = html.replace("</body>", additions + "</body>", 1)
     return HTMLResponse(html, status_code=response.status_code)
 
 
-__all__ = ["router", "PLATFORM_AWARE_UI", "MULTI_PLATFORM_UI"]
+__all__ = ["router", "PLATFORM_AWARE_UI", "MULTI_PLATFORM_UI", "NICHE_COACH_UI"]
