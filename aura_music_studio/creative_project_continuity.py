@@ -25,13 +25,16 @@ PROJECT_CONTINUITY_SCRIPT = r"""
   const TARGETS=new Set(['/creative-house','/image-designer','/video-studio','/studio','/game-creation']);
   if(!TARGETS.has(path))return;
 
-  const requested=(new URLSearchParams(location.search).get('project')||'').trim();
+  const params=new URLSearchParams(location.search);
+  const requested=(params.get('project')||'').trim();
+  const requestedGame=(params.get('game')||'').trim();
   const isHouse=path==='/creative-house';
   const isMedia=path==='/image-designer'||path==='/video-studio';
   const isMusic=path==='/studio';
   const isGame=path==='/game-creation';
   const $=id=>document.getElementById(id);
   let contextualProject=requested;
+  let gameSummaryToken=0;
   const nativeFetch=window.fetch.bind(window);
 
   function musicProject(){
@@ -51,6 +54,16 @@ PROJECT_CONTINUITY_SCRIPT = r"""
   function projectHref(target,projectName=currentProject()){
     const clean=String(projectName||'').trim();
     return target+(clean?`?project=${encodeURIComponent(clean)}`:'');
+  }
+
+  function projectGameHref(gameId,projectName=currentProject()){
+    const cleanProject=String(projectName||'').trim();
+    const cleanGame=String(gameId||'').trim();
+    const query=new URLSearchParams();
+    if(cleanProject)query.set('project',cleanProject);
+    if(cleanGame)query.set('game',cleanGame);
+    const encoded=query.toString();
+    return '/game-creation'+(encoded?`?${encoded}`:'');
   }
 
   function updateLocation(projectName){
@@ -81,11 +94,54 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     bar.id='creativeProjectContinuity';
     bar.setAttribute('aria-label','Creative project workspace');
     bar.style.cssText='margin:10px 0 16px;padding:11px 13px;border:1px solid #ffffff24;border-radius:15px;background:#0b0d17dd;color:#fff;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-family:Inter,ui-sans-serif,system-ui,sans-serif;box-shadow:0 10px 30px #0003';
-    bar.innerHTML=`<strong style="color:#f3c76d">One Project Workspace</strong><span id="creativeProjectContext" style="font-size:.78rem;color:#c9c6d5"></span><nav id="creativeProjectLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto"></nav>`;
+    bar.innerHTML=`<strong style="color:#f3c76d">One Project Workspace</strong><span id="creativeProjectContext" style="font-size:.78rem;color:#c9c6d5"></span><span id="creativeProjectGameContext" style="font-size:.72rem;color:#8fdff0"></span><a id="creativeProjectResumeGame" href="/game-creation" hidden style="color:#fff;text-decoration:none;border:1px solid #5be1ff66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#5be1ff12">Resume latest game</a><nav id="creativeProjectLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto"></nav>`;
     const host=document.querySelector('main.wrap')||document.querySelector('.wrap')||document.body;
     const top=host.querySelector?.('.top,header,.hero');
     if(top?.parentNode===host)top.insertAdjacentElement('afterend',bar);else host.insertBefore(bar,host.firstChild);
     return bar;
+  }
+
+  async function responseJson(response){
+    let body={};
+    try{body=await response.clone().json()}catch(_){}
+    if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:(body.detail?.message||`Request failed (${response.status})`));
+    return body;
+  }
+
+  async function refreshGameProjectSummary(projectName=currentProject()){
+    ensureWorkspaceBar();
+    const clean=String(projectName||'').trim();
+    const token=++gameSummaryToken;
+    const context=$('creativeProjectGameContext');
+    const resume=$('creativeProjectResumeGame');
+    if(!clean){
+      if(context)context.textContent='';
+      if(resume)resume.hidden=true;
+      return;
+    }
+    if(context)context.textContent='Game Forge: checking…';
+    if(resume)resume.hidden=true;
+    try{
+      const response=await nativeFetch(`/api/game-forge/projects/${encodeURIComponent(clean)}/games`,{credentials:'same-origin'});
+      const payload=await responseJson(response);
+      if(token!==gameSummaryToken||currentProject()!==clean)return;
+      const games=Array.isArray(payload.games)?payload.games:[];
+      if(!games.length){
+        if(context)context.textContent='Game Forge: no Game DNA yet';
+        return;
+      }
+      const latest=games[0]||{};
+      if(context)context.textContent=`Game Forge: ${games.length} game${games.length===1?'':'s'} · ${String(latest.status||'draft').replaceAll('_',' ')}`;
+      if(resume&&latest.id){
+        resume.href=projectGameHref(latest.id,clean);
+        resume.textContent=games.length===1?'Resume game':'Resume latest game';
+        resume.hidden=false;
+      }
+    }catch(_){
+      if(token!==gameSummaryToken)return;
+      if(context)context.textContent='Game Forge status unavailable';
+      if(resume)resume.hidden=true;
+    }
   }
 
   function drawWorkspace(){
@@ -112,6 +168,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       }));
     }
     preserveExistingLinks(projectName);
+    void refreshGameProjectSummary(projectName);
   }
 
   function commitProject(projectName){
@@ -142,13 +199,6 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       const baseSelect=selectProject;
       selectProject=function(name,...args){const out=baseSelect(name,...args);commitProject(name);return out};
     }
-  }
-
-  async function responseJson(response){
-    let body={};
-    try{body=await response.clone().json()}catch(_){}
-    if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:(body.detail?.message||`Request failed (${response.status})`));
-    return body;
   }
 
   function installGameProjectTransport(){
@@ -255,6 +305,9 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       contextualProject=requested;
       drawWorkspace();
       try{await refreshGameProjectList()}catch(_){/* Game Forge keeps its native list error handling. */}
+      if(requestedGame&&typeof openWorkspace==='function'){
+        try{await openWorkspace(requestedGame)}catch(_){/* The native Game Forge workspace reports errors. */}
+      }
       return;
     }
     drawWorkspace();
@@ -274,6 +327,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     currentProject,
     commitProject,
     projectHref,
+    projectGameHref,
     resolveGameProject,
     refresh:drawWorkspace,
   };
