@@ -52,7 +52,8 @@
       "feature/project-image-to-video-refresh": false,
       "feature/video-scene-image-source": false,
       "feature/provider-cost-governance": false,
-      "feature/paypal-evidence-conflict-current-20260902": false
+      "feature/paypal-evidence-conflict-current-20260902": false,
+      "feature/facebook-page-publishing-20260902": false
     }
   },
   "functions": {
