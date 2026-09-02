@@ -86,6 +86,7 @@ from aura_music_studio.esp_social_intelligence_api import router as esp_social_i
 from aura_music_studio.esp_social_portal_overlay import router as esp_social_portal_overlay_router
 from aura_music_studio.game_forge_api import router as game_forge_router
 from aura_music_studio.game_forge_portal import router as game_forge_portal_router
+from aura_music_studio.game_forge_project_navigation_middleware import GameForgeProjectNavigationMiddleware
 from aura_music_studio.game_forge_world_api import router as game_forge_world_router
 from aura_music_studio.lyric_alignment_api import router as lyric_alignment_router
 from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
@@ -286,6 +287,9 @@ app.add_middleware(CreativeStudioIntegrationMiddleware)
 # Added after the shared creative integration middleware so the continuity script executes last
 # on these member pages and only rewrites same-origin links among the five creative surfaces.
 app.add_middleware(CreativeProjectContinuityMiddleware)
+# Game Forge sub-workspaces keep their route-level auth/plan authority; this layer only restores
+# the persisted Creative project identity into same-game navigation after an HTML page is allowed.
+app.add_middleware(GameForgeProjectNavigationMiddleware)
 app.add_middleware(PulsarPlayerMiddleware)
 app.add_middleware(AuraUIExtensionMiddleware)
 app.add_middleware(AuraArtifactsUIMiddleware)
