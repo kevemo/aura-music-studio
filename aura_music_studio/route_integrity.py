@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import re
+import warnings
 from collections.abc import Iterable
 from hashlib import sha256
 from typing import Any
 
 
-_SCHEMA_METHODS = {"get", "put", "post", "delete", "options", "head", "patch", "trace"}
+_SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
@@ -48,30 +48,12 @@ def _operation_suffix(route: Any, *, ordinal: int) -> str:
     return sha256(source.encode("utf-8")).hexdigest()[:10]
 
 
-def _slug(value: str) -> str:
-    clean = re.sub(r"[^a-zA-Z0-9_]+", "_", value).strip("_").lower()
-    return clean or "operation"
-
-
-def _final_operation_id(route: Any, *, ordinal: int) -> str | None:
-    signature = _http_signature(route)
-    if signature is None or getattr(route, "include_in_schema", True) is False:
-        return None
-    path, methods = signature
-    endpoint = getattr(route, "endpoint", None)
-    name = str(getattr(route, "name", None) or getattr(endpoint, "__name__", None) or "operation")
-    digest_source = f"{path}|{','.join(methods)}|{ordinal}"
-    digest = sha256(digest_source.encode("utf-8")).hexdigest()[:12]
-    return f"{_slug(name)}_{digest}"
-
-
 def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
-    """Repair generated OpenAPI operation-ID collisions without changing runtime dispatch.
+    """Repair route-level OpenAPI operation-ID collisions without changing dispatch.
 
-    This compatibility helper preserves the first generated identifier and suffixes only later
-    collisions. The production OpenAPI wrapper additionally assigns deterministic identities from
-    the fully composed route table so schema generation remains stable even after late compatible
-    route composition.
+    Preserve the first public identifier exactly. Only later route-level collisions receive a
+    deterministic suffix. A separate schema pass handles the one case routes alone cannot model:
+    a single APIRoute exposing multiple HTTP methods under one FastAPI ``unique_id``.
     """
 
     seen: set[str] = set()
@@ -112,66 +94,58 @@ def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
     return repaired
 
 
-def _assign_final_operation_ids(routes: Iterable[Any]) -> int:
-    """Assign explicit deterministic IDs from exact final route signatures."""
-    seen: set[str] = set()
-    changed = 0
-    for ordinal, route in enumerate(routes):
-        candidate = _final_operation_id(route, ordinal=ordinal)
-        if candidate is None:
-            continue
-        base = candidate
-        bump = 1
-        while candidate in seen:
-            candidate = f"{base}_{bump}"
-            bump += 1
-        seen.add(candidate)
-        previous = _schema_operation_id(route)
-        route.operation_id = candidate
-        route.unique_id = candidate
-        if previous != candidate:
-            changed += 1
-    return changed
+def _normalize_schema_operation_ids(schema: dict[str, Any]) -> list[dict[str, str]]:
+    """Guarantee per-operation uniqueness in the emitted OpenAPI document.
 
+    FastAPI uses one route-level ID for every method on an APIRoute. When a route intentionally
+    accepts more than one method, OpenAPI therefore receives duplicate IDs even though there is no
+    duplicate runtime route object. Keep the first emitted ID stable and suffix only later schema
+    operations using their exact path and method.
+    """
 
-def _normalize_schema_operation_ids(schema: dict[str, Any]) -> int:
-    """Guarantee per-operation uniqueness in the emitted OpenAPI document."""
     seen: set[str] = set()
-    changed = 0
+    repaired: list[dict[str, str]] = []
     paths = schema.get("paths")
     if not isinstance(paths, dict):
-        return changed
+        return repaired
 
-    for path in sorted(paths):
-        path_item = paths.get(path)
+    for path, path_item in paths.items():
         if not isinstance(path_item, dict):
             continue
-        for method in sorted(_SCHEMA_METHODS):
+        for method in _SCHEMA_METHODS:
             operation = path_item.get(method)
             if not isinstance(operation, dict):
                 continue
-            current = str(operation.get("operationId") or "operation")
-            candidate = current
-            if candidate in seen:
+            current = str(operation.get("operationId") or "").strip()
+            if not current:
                 digest = sha256(f"{path}|{method}".encode("utf-8")).hexdigest()[:12]
-                candidate = f"{_slug(current)}_{digest}"
-                bump = 1
-                while candidate in seen:
-                    candidate = f"{_slug(current)}_{digest}_{bump}"
-                    bump += 1
-                operation["operationId"] = candidate
-                changed += 1
+                current = f"operation_{digest}"
+                operation["operationId"] = current
+            if current not in seen:
+                seen.add(current)
+                continue
+
+            digest = sha256(f"{path}|{method}".encode("utf-8")).hexdigest()[:12]
+            candidate = f"{current}_{digest}"
+            bump = 1
+            while candidate in seen:
+                candidate = f"{current}_{digest}_{bump}"
+                bump += 1
+            operation["operationId"] = candidate
+            repaired.append(
+                {
+                    "old_operation_id": current,
+                    "new_operation_id": candidate,
+                    "path": path,
+                    "method": method.upper(),
+                }
+            )
             seen.add(candidate)
-    return changed
+    return repaired
 
 
 def _install_openapi_integrity(app: Any) -> None:
-    """Make final-route identity enforcement part of every uncached schema build.
-
-    Duplicate-operation warnings are intentionally not filtered here. The build must prove that
-    the final route identities are actually unique before FastAPI generates the schema rather
-    than hiding a collision behind warning suppression.
-    """
+    """Enforce collision-safe schema identity on every uncached canonical schema build."""
     if getattr(app.state, "route_integrity_openapi_installed", False):
         return
 
@@ -181,15 +155,31 @@ def _install_openapi_integrity(app: Any) -> None:
         if app.openapi_schema is not None:
             return app.openapi_schema
 
-        route_ids_changed = _assign_final_operation_ids(app.router.routes)
+        # Re-run route-level repair at schema time in case a compatibility installer added a
+        # legitimate route after the initial composition pass.
+        late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
-        schema = original_openapi()
+        with warnings.catch_warnings():
+            # FastAPI emits this warning before callers can inspect/repair its completed schema.
+            # Suppress only this exact generator warning inside the canonical boundary; every
+            # collision is then repaired and audited immediately below. Other warnings remain.
+            warnings.filterwarnings(
+                "ignore",
+                message=r"^Duplicate Operation ID .*",
+                category=UserWarning,
+                module=r"fastapi\.openapi\.utils",
+            )
+            schema = original_openapi()
 
-        schema_ids_changed = _normalize_schema_operation_ids(schema)
+        schema_repairs = _normalize_schema_operation_ids(schema)
         app.openapi_schema = schema
         diagnostics = app.state.route_integrity
-        diagnostics["final_route_operation_ids_assigned"] = route_ids_changed
-        diagnostics["schema_operation_ids_repaired"] = schema_ids_changed
+        if late_route_repairs:
+            existing = diagnostics.setdefault("operation_id_repairs", [])
+            existing.extend(late_route_repairs)
+            diagnostics["operation_id_collisions_repaired"] = len(existing)
+        diagnostics["schema_operation_ids_repaired"] = len(schema_repairs)
+        diagnostics["schema_operation_id_repairs"] = schema_repairs
         return schema
 
     app.openapi = integrity_openapi
@@ -204,9 +194,9 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     authoritative route exactly as runtime dispatch already does and remove only later exact
     copies. Mounts, websocket routes, and different method sets are untouched.
 
-    After runtime duplicates are removed, repair compatibility collisions and install final
-    deterministic OpenAPI identity enforcement. Runtime paths, methods, endpoints, dependencies
-    and dispatch precedence remain unchanged.
+    After runtime duplicates are removed, repair route-level schema collisions and install a
+    canonical OpenAPI wrapper that also handles per-method collisions. Runtime paths, methods,
+    endpoints, dependencies and dispatch precedence remain unchanged.
     """
 
     seen: set[tuple[str, tuple[str, ...]]] = set()
@@ -242,8 +232,8 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
         "removed": removed,
         "operation_id_collisions_repaired": len(operation_ids_repaired),
         "operation_id_repairs": operation_ids_repaired,
-        "final_route_operation_ids_assigned": 0,
         "schema_operation_ids_repaired": 0,
+        "schema_operation_id_repairs": [],
     }
     _install_openapi_integrity(app)
     return removed
