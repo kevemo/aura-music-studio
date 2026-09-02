@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
-from .esp_social_facebook_oauth import router as facebook_oauth_router
+from .esp_social_facebook_oauth import (
+    facebook_oauth_callback,
+    facebook_oauth_capability,
+    facebook_oauth_disconnect,
+    facebook_oauth_start,
+)
 from .esp_social_oauth import router as social_oauth_router
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
@@ -382,7 +388,33 @@ def register_connection_state(
 
 # Nested private routes inherit /command-center/api/social and the same server-side ESP gates.
 router.include_router(publish_queue_router)
-# Register the exact Facebook routes before the generic /oauth/{provider} routes so
-# Facebook capability/start/callback/disconnect cannot be intercepted by the older provider set.
-router.include_router(facebook_oauth_router)
+
+# Register the Facebook Page endpoints directly on the canonical Social router. This avoids the
+# late nested-router composition edge that can leave newly added child routes absent from an
+# already-composed production router. Every endpoint still independently rechecks the ESP gate.
+router.add_api_route(
+    "/oauth/facebook/capability",
+    facebook_oauth_capability,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/oauth/facebook/start",
+    facebook_oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/facebook/callback",
+    facebook_oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/facebook/disconnect",
+    facebook_oauth_disconnect,
+    methods=["POST"],
+)
+
+# Generic provider routes must remain later so /oauth/facebook/* resolves to the bounded Page flow.
 router.include_router(social_oauth_router)
