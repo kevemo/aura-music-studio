@@ -21,6 +21,7 @@ _MARKER_RE = re.compile(r"\b(TODO|FIXME|XXX)\b", re.IGNORECASE)
 _ALLOW_COMMENT = "source-audit: allow"
 _PROTOCOL_BASES = {"Protocol"}
 _ENTRYPOINTS = ("app.py", "worker.py")
+_PRODUCTION_TREES = ("aura_music_studio", "deploy", "scripts")
 
 
 @dataclass(frozen=True, order=True)
@@ -164,12 +165,19 @@ def audit_source(source: str, *, relative_path: str = "<memory>") -> list[Findin
 
 
 def production_python_files(root: Path) -> Iterable[Path]:
-    package = root / "aura_music_studio"
-    if package.is_dir():
-        yield from sorted(path for path in package.rglob("*.py") if path.is_file())
+    seen: set[Path] = set()
+    for tree_name in _PRODUCTION_TREES:
+        tree = root / tree_name
+        if not tree.is_dir():
+            continue
+        for path in sorted(item for item in tree.rglob("*.py") if item.is_file()):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                yield path
     for name in _ENTRYPOINTS:
         path = root / name
-        if path.is_file():
+        if path.is_file() and path.resolve() not in seen:
             yield path
 
 
