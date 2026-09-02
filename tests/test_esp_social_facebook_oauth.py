@@ -230,7 +230,7 @@ def test_facebook_oauth_fails_closed_when_required_permission_or_target_page_is_
 def test_facebook_static_oauth_routes_are_registered_before_generic_provider_routes():
     from aura_music_studio.social_management_api import router
 
-    paths = [route.path for route in router.routes]
+    paths = [route.path for route in router.routes if hasattr(route, "path")]
     facebook_callback = "/oauth/facebook/callback"
     generic_callback = "/oauth/{provider}/callback"
     assert facebook_callback in paths
