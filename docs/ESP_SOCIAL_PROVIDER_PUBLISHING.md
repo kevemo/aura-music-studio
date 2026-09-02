@@ -21,14 +21,17 @@ The authoritative capability resolver is `aura_music_studio.esp_social_publish_c
 
 TikTok, Instagram and YouTube use the private ESP member OAuth flow. Their provider applications, scopes and callbacks must be configured in the deployment before the Connections screen offers authorization.
 
-Facebook Pages is intentionally separate from the generic member OAuth registry. An ESP owner registers:
+Facebook Pages uses a separate bounded member OAuth flow because Page publishing requires explicit Page selection and Page-specific permission verification. Before redirecting to Meta, the member must supply the numeric Facebook Page ID they intend to authorize. The callback verifies the required Page-publishing permissions and resolves only that exact Page from the authorized account; it never silently selects a different Page when several are available.
 
-- the numeric Facebook Page ID; and
-- a restricted deployment token alias such as `social-token://facebook_pages`.
+The selected Page token is stored only in the existing encrypted, per-member Social OAuth vault. Social House JSON receives a `social-oauth://...` reference rather than the raw Page credential. The browser never receives or renders the raw Page access token.
 
-The browser never asks for or renders the raw Facebook Page access token. The token value must exist only in the deployment secret namespace, for example `AURA_SOCIAL_TOKEN_FACEBOOK_PAGES`.
+Production activation requires a configured Meta Graph version (`AURA_FACEBOOK_GRAPH_VERSION` or `AURA_META_GRAPH_VERSION`), a Meta application ID/secret, the Social OAuth Fernet master key and the correct callback origin. The bounded deployment-variable contract is documented in:
 
-Facebook Pages readiness additionally requires a configured Meta Graph version (`AURA_FACEBOOK_GRAPH_VERSION` or `AURA_META_GRAPH_VERSION`). The queue will not report a Facebook Page post as publishable if the deployment secret, Graph version or numeric Page identity is missing. Meta remains authoritative for Page permissions and publication at provider-call time.
+`config/social/facebook-page-oauth.env.example`
+
+Meta remains authoritative for Page permissions, application review and publication at provider-call time. The Facebook OAuth implementation does not grant personal-profile publishing, Reels, Stories, video publishing, inbox/DM or analytics authority.
+
+Deployment-managed `social-token://` aliases remain a supported restricted secret-reference type for explicitly configured Social connections. They are not a substitute for member OAuth and must map only into the dedicated `AURA_SOCIAL_TOKEN_*` deployment-secret namespace.
 
 ## Worker boundary
 
@@ -77,16 +80,18 @@ A variant can move through provider publishing only when all applicable checks p
 Raw provider credentials must never be written into Social House JSON. A deployment-managed connection may store only a restricted alias such as:
 
 ```text
-social-token://facebook_pages
+social-token://facebook-pages-legacy
 ```
 
-which maps only to the social-token environment namespace:
+which maps only to the social-token environment namespace, for example:
 
 ```text
-AURA_SOCIAL_TOKEN_FACEBOOK_PAGES
+AURA_SOCIAL_TOKEN_FACEBOOK_PAGES_LEGACY
 ```
 
 OAuth-backed member connections use encrypted `social-oauth://` credential references managed by the dedicated OAuth vault. These reference types cannot be used to read unrelated owner/admin secrets, SMTP passwords or arbitrary connector keys.
+
+For Facebook Page OAuth specifically, only the explicitly selected Page token is encrypted into the member vault after Page identity and permissions are verified. The temporary user token used during authorization is not persisted into Social House JSON.
 
 ## Media security
 
@@ -110,7 +115,9 @@ If a worker crashes after a provider request may have begun but before a provide
 
 ### Facebook Pages
 
-`facebook_pages_graph` publishes bounded Page feed posts and a single approved image where the provider can access the media URL. Reels, Stories and personal-profile publishing are not exposed by this adapter.
+`facebook_pages_graph` publishes bounded Page feed posts and a single approved image where the provider can access the media URL. The dedicated member OAuth flow requires explicit numeric Page selection and verifies `pages_show_list`, `pages_manage_posts` and `pages_read_engagement` before storing the selected Page token. Reels, Stories, personal-profile publishing, inbox and analytics are not exposed by this adapter/OAuth capability.
+
+Facebook Page token expiry currently requires reconnect; the runtime does not claim an unimplemented automatic Page-token refresh lifecycle.
 
 ### Instagram
 
