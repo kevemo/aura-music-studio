@@ -135,6 +135,6 @@ def test_reset_delivery_uses_fragment_and_public_response_does_not_expose_secret
     assert '"token":' not in public_route_section
 
 
-def test_consolidation_branch_is_blocked_from_vercel():
+def test_vercel_git_deployment_is_globally_disabled():
     vercel = json.loads(Path("vercel.json").read_text(encoding="utf-8"))
-    assert vercel["git"]["deploymentEnabled"]["feature/core-account-security-consolidation"] is False
+    assert vercel["git"]["deploymentEnabled"] is False

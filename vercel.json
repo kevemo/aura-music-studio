@@ -1,66 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": {
-      "main": false,
-      "development/full-site-build": false,
-      "chat4/*": false,
-      "feature/aura-platform-core": false,
-      "feature/core-email-verification": false,
-      "feature/core-password-recovery-sessions": false,
-      "feature/core-account-security-consolidation": false,
-      "feature/esp-command-centers": false,
-      "feature/creative-studios-game-forge": false,
-      "feature/hourly-auto-build": false,
-      "feature/stripe-billing": false,
-      "feature/production-security-gates-v2": false,
-      "feature/pro-creative-editors-v2": false,
-      "feature/pro-editor-workspace": false,
-      "feature/pro-editor-compositor": false,
-      "feature/owner-finance-dashboard": false,
-      "feature/owner-finance-dashboard-v2": false,
-      "feature/global-compliance-i18n": false,
-      "feature/privacy-rights-consent-v2": false,
-      "feature/privacy-rights-consent-v3": false,
-      "feature/privacy-case-management": false,
-      "feature/privacy-consent-controls": false,
-      "feature/safety-reports-appeals": false,
-      "feature/ip-rights-notice-review": false,
-      "feature/esp-live-compliance-training": false,
-      "feature/esp-live-compliance-training-v2": false,
-      "feature/creative-ip-firewall": false,
-      "feature/creative-ip-firewall-v2": false,
-      "feature/export-provenance-review-refresh": false,
-      "feature/compliance-jurisdiction-applicability": false,
-      "feature/creative-render-resource-governance": false,
-      "feature/aura-realtime-voice-broker": false,
-      "feature/aura-realtime-webrtc-ui": false,
-      "feature/aura-realtime-thread-sync": false,
-      "feature/video-scene-timeline": false,
-      "feature/video-scene-render-regeneration": false,
-      "feature/video-visual-continuity-locks": false,
-      "feature/video-localized-scene-revisions": false,
-      "feature/video-music-sync-map-refresh": false,
-      "feature/music-video-storyboard-refresh": false,
-      "feature/video-audio-analysis-ingestion": false,
-      "feature/video-sync-pro-entitlement-gate": false,
-      "feature/stripe-creation-coins-storefront-refresh": false,
-      "feature/creation-coin-image-overage": false,
-      "feature/creation-coin-free-video-render": false,
-      "feature/video-verified-lyric-sync-ingestion-refresh": false,
-      "feature/video-verified-caption-export": false,
-      "feature/scene-video-coin-meter-refresh": false,
-      "feature/project-image-to-video-refresh": false,
-      "feature/video-scene-image-source": false,
-      "feature/provider-cost-governance": false,
-      "feature/paypal-evidence-conflict-current-20260902": false,
-      "feature/facebook-page-publishing-20260902": false
-    }
-  },
-  "functions": {
-    "vercel_bootstrap.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{tests/**,preview/**,docs/**,deploy/**,.github/**,docker-compose*.yml,*.md,*.pdf,*.docx}"
-    }
+    "deploymentEnabled": false
   }
 }

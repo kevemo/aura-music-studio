@@ -1,7 +1,12 @@
 {
-  "schema_version": 1,
-  "git_sha": "0123456789abcdef0123456789abcdef01234567",
-  "command_center_image": "registry.example.invalid/elevate-souls/command-center@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "schema_version": 2,
+  "git_sha": "",
+  "command_center_image": "",
+  "runtime_images": {
+    "ace_step": "",
+    "caddy": "",
+    "searxng": ""
+  },
   "environment": "production",
   "approved": false,
   "supply_chain": {
@@ -9,7 +14,8 @@
     "buildkit_sbom": false,
     "trivy_high_critical_gate": false,
     "trivy_unfixed_high_critical_gate": false,
+    "runtime_images_trivy_high_critical_gate": false,
     "cosign_signature_verified": false
   },
-  "notes": "Template only. Use build-release.sh to produce verified supply-chain evidence. Set approved=true only after all production release gates pass."
+  "notes": "Non-runnable template. build-release.sh must create the real digest-pinned manifest; production deployment refuses this file."
 }
