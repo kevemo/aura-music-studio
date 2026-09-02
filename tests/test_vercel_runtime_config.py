@@ -16,6 +16,12 @@ def test_vercel_entrypoint_targets_real_fastapi_bootstrap():
     assert config["tool"]["vercel"]["entrypoint"] == "vercel_bootstrap:app"
 
 
+def test_paypal_evidence_branch_is_not_deployed_by_vercel():
+    config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    deployment = config.get("git", {}).get("deploymentEnabled", {})
+    assert deployment.get("feature/paypal-evidence-conflict-current-20260902") is False
+
+
 def test_vercel_function_excludes_non_runtime_payload():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     fn = config["functions"]["vercel_bootstrap.py"]
