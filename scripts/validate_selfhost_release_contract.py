@@ -50,6 +50,15 @@ def validate() -> list[str]:
     for line in ("LSS_DEPLOYMENT_MODE=selfhost", "LSS_PUBLIC_BASE_URL=", "LSS_PUBLIC_SITE_ADDRESS="):
         if line not in prod_env:
             errors.append(f"production.env.example missing fail-closed self-host contract: {line}")
+    for key in (
+        "COSIGN_VERIFY_KEY",
+        "AURA_SELFHOST_LLM_MODEL_DIR",
+        "AURA_LLM_INTERNAL_API_KEY",
+        "AURA_ACESTEP_CUDA_VISIBLE_DEVICES",
+        "AURA_LLM_CUDA_VISIBLE_DEVICES",
+    ):
+        if not re.search(rf"(?m)^{re.escape(key)}=", prod_env):
+            errors.append(f"production.env.example missing launcher-required setting: {key}")
 
     production_compose = _read("deploy/production/docker-compose.production.yml")
     if "LSS_DEPLOYMENT_MODE" not in production_compose:
@@ -65,11 +74,14 @@ def validate() -> list[str]:
     runner = _read("deploy/selfhost/run-production.sh")
     required_runner_fragments = (
         "LSS_DEPLOYMENT_MODE must be selfhost",
-        "docker compose --profile public",
+        "--profile public",
+        "--profile social-publishing",
         "LSS_PUBLIC_SITE_ADDRESS",
         "ESP_ACESTEP_IMAGE",
         "ESP_CADDY_IMAGE",
         "ESP_SEARXNG_IMAGE",
+        "ace_step_upstream_commit",
+        "component=ace-step",
         "Required production service is not running",
         'READY_URL="${LSS_PUBLIC_BASE_URL%/}/health/ready"',
     )
@@ -82,7 +94,12 @@ def validate() -> list[str]:
         '"schema_version": 2',
         '"runtime_images"',
         "runtime_images_trivy_high_critical_gate",
-        "ESP_ACESTEP_IMAGE",
+        "ESP_ACESTEP_REGISTRY_IMAGE",
+        "ESP_ACESTEP_UPSTREAM_COMMIT",
+        "ace_step_upstream_commit",
+        "ace_step_buildkit_provenance",
+        "ace_step_cosign_signature_verified",
+        "component=ace-step",
         "ESP_CADDY_IMAGE",
         "ESP_SEARXNG_IMAGE",
     ):
@@ -99,6 +116,12 @@ def validate() -> list[str]:
     runtime = manifest.get("runtime_images") or {}
     if any(runtime.get(key) for key in ("ace_step", "caddy", "searxng")):
         errors.append("release manifest template must not contain fake runtime image digests")
+    if manifest.get("ace_step_upstream_commit"):
+        errors.append("release manifest template must not contain a fake ACE-Step source identity")
+    evidence = manifest.get("supply_chain") or {}
+    for key in ("ace_step_buildkit_provenance", "ace_step_buildkit_sbom", "ace_step_cosign_signature_verified"):
+        if evidence.get(key) is not False:
+            errors.append(f"release manifest template must fail closed for {key}")
 
     # Guard against accidentally reintroducing a serverless FastAPI entrypoint.
     for path in ("pyproject.toml", "vercel.json"):
