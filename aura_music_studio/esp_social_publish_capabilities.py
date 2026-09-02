@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -22,8 +20,6 @@ _ADAPTER_PLATFORMS = {
     "facebook_pages_graph": "facebook",
     **{name: adapter.platform for name, adapter in ADAPTERS.items()},
 }
-_GRAPH_VERSION_RE = re.compile(r"^v[0-9]+(?:\.[0-9]+)?$")
-_PAGE_ID_RE = re.compile(r"^[0-9]{2,40}$")
 
 
 class PublishCapability(BaseModel):
@@ -68,39 +64,6 @@ def _append(result: PublishCapability, code: str, reason: str) -> None:
         result.reasons.append(reason)
 
 
-def _provider_configuration_reasons(
-    result: PublishCapability,
-    connection: Any,
-    adapter_name: str,
-) -> None:
-    if adapter_name == "facebook_pages_graph":
-        page_id = (
-            getattr(connection, "account_external_id", None)
-            or str(getattr(connection, "metadata", {}).get("facebook_page_id") or "")
-        ).strip()
-        if not _PAGE_ID_RE.fullmatch(page_id):
-            _append(result, "missing_provider_configuration", "verified numeric Facebook Page ID is required")
-        version = (
-            os.getenv("AURA_FACEBOOK_GRAPH_VERSION", "").strip()
-            or os.getenv("AURA_META_GRAPH_VERSION", "").strip()
-        )
-        if not _GRAPH_VERSION_RE.fullmatch(version):
-            _append(result, "missing_provider_configuration", "Facebook Graph API version is not configured")
-    elif adapter_name == "instagram_graph":
-        account_id = (
-            getattr(connection, "account_external_id", None)
-            or str(getattr(connection, "metadata", {}).get("instagram_user_id") or "")
-        ).strip()
-        if not account_id:
-            _append(result, "missing_provider_configuration", "Instagram professional account ID is required")
-        version = (
-            os.getenv("AURA_INSTAGRAM_GRAPH_VERSION", "").strip()
-            or os.getenv("AURA_META_GRAPH_VERSION", "").strip()
-        )
-        if not _GRAPH_VERSION_RE.fullmatch(version):
-            _append(result, "missing_provider_configuration", "Instagram Graph API version is not configured")
-
-
 def resolve_publish_capability(
     connection: Any | None,
     *,
@@ -130,12 +93,12 @@ def resolve_publish_capability(
     adapter_name = str(metadata.get("publishing_adapter") or "").strip()
     result.adapter = adapter_name or None
     if not adapter_name:
-        _append(result, "adapter_missing", "official publishing adapter is not configured")
+        _append(result, "adapter_missing", "official publishing adapter not active")
         return result
 
     result.active = metadata.get("publishing_adapter_active") is True
     if not result.active:
-        _append(result, "adapter_inactive", "official publishing adapter is not active")
+        _append(result, "adapter_inactive", "official publishing adapter not active")
 
     expected_platform = _ADAPTER_PLATFORMS.get(adapter_name)
     result.implemented = expected_platform is not None
@@ -156,11 +119,8 @@ def resolve_publish_capability(
         _append(
             result,
             "invalid_credential_reference",
-            "OAuth credential must use an approved social-token:// or social-oauth:// reference",
+            "OAuth token reference must use the restricted social-token:// alias format or encrypted social-oauth:// credential format",
         )
-
-    if result.implemented and expected_platform == clean_platform:
-        _provider_configuration_reasons(result, connection, adapter_name)
 
     result.configured = not any(
         code in result.reason_codes
@@ -169,7 +129,6 @@ def resolve_publish_capability(
             "adapter_unavailable",
             "adapter_platform_mismatch",
             "invalid_credential_reference",
-            "missing_provider_configuration",
         }
     )
     result.publishable = (
