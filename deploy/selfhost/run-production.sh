@@ -36,7 +36,9 @@ if d.get("schema_version") != 2: raise SystemExit("Unsupported release manifest 
 if d.get("environment") != "production": raise SystemExit("Release manifest is not production")
 if d.get("approved") is not True: raise SystemExit("Release manifest is not approved")
 sha=str(d.get("git_sha", "")); command=str(d.get("command_center_image", ""))
+ace_commit=str(d.get("ace_step_upstream_commit", ""))
 if not re.fullmatch(r"[0-9a-f]{40}", sha): raise SystemExit("git_sha must be an exact 40-character lowercase SHA")
+if not re.fullmatch(r"[0-9a-f]{40}", ace_commit): raise SystemExit("ace_step_upstream_commit must be an exact reviewed Git SHA")
 def pinned(value, name):
     value=str(value or "")
     if not re.search(r"@sha256:[0-9a-f]{64}$", value): raise SystemExit(f"{name} must use an immutable sha256 digest")
@@ -47,10 +49,20 @@ caddy=pinned(runtime.get("caddy"), "runtime_images.caddy")
 searx=pinned(runtime.get("searxng"), "runtime_images.searxng")
 command=pinned(command, "command_center_image")
 evidence=d.get("supply_chain") or {}
-required=("buildkit_provenance","buildkit_sbom","trivy_high_critical_gate","trivy_unfixed_high_critical_gate","cosign_signature_verified","runtime_images_trivy_high_critical_gate")
+required=(
+    "buildkit_provenance",
+    "buildkit_sbom",
+    "trivy_high_critical_gate",
+    "trivy_unfixed_high_critical_gate",
+    "runtime_images_trivy_high_critical_gate",
+    "cosign_signature_verified",
+    "ace_step_buildkit_provenance",
+    "ace_step_buildkit_sbom",
+    "ace_step_cosign_signature_verified",
+)
 missing=[key for key in required if evidence.get(key) is not True]
 if missing: raise SystemExit("Release manifest supply-chain evidence is incomplete: " + ", ".join(missing))
-print(sha); print(command); print(ace); print(caddy); print(searx)
+print(sha); print(command); print(ace); print(caddy); print(searx); print(ace_commit)
 PY
 )
 EXPECTED_SHA="${RELEASE_VALUES[0]}"
@@ -58,6 +70,7 @@ export ESP_COMMAND_CENTER_IMAGE="${RELEASE_VALUES[1]}"
 export ESP_ACESTEP_IMAGE="${RELEASE_VALUES[2]}"
 export ESP_CADDY_IMAGE="${RELEASE_VALUES[3]}"
 export ESP_SEARXNG_IMAGE="${RELEASE_VALUES[4]}"
+EXPECTED_ACESTEP_COMMIT="${RELEASE_VALUES[5]}"
 
 mapfile -t INFERENCE_VALUES < <(python3 - "$INFERENCE_FILE" <<'PY'
 import json, re, sys
@@ -133,8 +146,14 @@ PY
 
 python3 "$ROOT/deploy/selfhost/aura_model_integrity.py" verify "$AURA_SELFHOST_LLM_MODEL_DIR" "$EXPECTED_MODEL_MANIFEST_SHA" >/dev/null
 
+# Re-verify exact release artifacts at deployment time. ACE-Step must match the reviewed source
+# commit recorded in the approved schema-2 release manifest.
 cosign verify --key "$COSIGN_VERIFY_KEY" -a "git_sha=$EXPECTED_SHA" "$ESP_COMMAND_CENTER_IMAGE" >/dev/null
 trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$ESP_COMMAND_CENTER_IMAGE"
+cosign verify --key "$COSIGN_VERIFY_KEY" \
+  -a "component=ace-step" \
+  -a "upstream_commit=$EXPECTED_ACESTEP_COMMIT" \
+  "$ESP_ACESTEP_IMAGE" >/dev/null
 for image in "$ESP_ACESTEP_IMAGE" "$ESP_CADDY_IMAGE" "$ESP_SEARXNG_IMAGE"; do
   trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$image"
 done
@@ -146,8 +165,12 @@ if [[ "${AURA_GPU_REQUIRED:-true}" == "true" ]]; then
   nvidia-smi -L >/dev/null || { echo "No usable NVIDIA GPU detected" >&2; exit 69; }
 fi
 
-COMPOSE=(
-  docker compose --profile public --env-file "$ENV_FILE"
+# Caddy is mandatory in production. Social publishing remains explicitly opt-in.
+COMPOSE=(docker compose --profile public --env-file "$ENV_FILE")
+if [[ "${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}" == "true" ]]; then
+  COMPOSE+=(--profile social-publishing)
+fi
+COMPOSE+=(
   -f "$ROOT/docker-compose.yml"
   -f "$ROOT/docker-compose.gpu.yml"
   -f "$ROOT/deploy/production/docker-compose.production.yml"
@@ -156,10 +179,15 @@ COMPOSE=(
 )
 
 "${COMPOSE[@]}" config >/dev/null
-"${COMPOSE[@]}" pull live-sound-studio aura-worker aura-task-worker esp-social-publish-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy
+PULL_SERVICES=(live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy)
+REQUIRED_SERVICES=(live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy)
+if [[ "${AURA_SOCIAL_PUBLISH_WORKER_ENABLED:-false}" == "true" ]]; then
+  PULL_SERVICES+=(esp-social-publish-worker)
+  REQUIRED_SERVICES+=(esp-social-publish-worker)
+fi
+"${COMPOSE[@]}" pull "${PULL_SERVICES[@]}"
 "${COMPOSE[@]}" up -d --no-build --remove-orphans
 
-REQUIRED_SERVICES=(live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy)
 mapfile -t RUNNING < <("${COMPOSE[@]}" ps --services --status running)
 for service in "${REQUIRED_SERVICES[@]}"; do
   printf '%s\n' "${RUNNING[@]}" | grep -Fxq "$service" || {
