@@ -5,6 +5,7 @@ from threading import RLock
 from typing import Callable
 
 from . import aura_agent_core as core
+from .aura_esp_tools import install_aura_esp_tools
 from .brand_migration import rebrand_text
 from .branding import PRODUCT_FULL_NAME
 
@@ -85,6 +86,11 @@ def install_aura_context_extensions() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
+
+    # ESP tools are registered here because this installer is already part of the canonical Aura
+    # composition path. Registration is read-only and the tool remains undiscoverable unless the
+    # signed-in member has current server-authoritative ESP access.
+    install_aura_esp_tools()
 
     original_respond = core.AuraAgent.respond
     original_complete = core.AuraModelClient.complete
