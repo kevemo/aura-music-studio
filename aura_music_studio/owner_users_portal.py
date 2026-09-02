@@ -1,18 +1,18 @@
 from __future__ import annotations
 
-import os
-import secrets
 from html import escape
 from urllib.parse import quote
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from .audit import AuditLedger
 from .owner_user_control import OwnerUserControl
+from .protected_data_authority import authorize_protected_data_access
 
 router = APIRouter()
 control = OwnerUserControl()
-ADMIN_COOKIE = "lss_admin_session"
+audit = AuditLedger(control.accounts)
 
 CSS = """
 :root{--bg:#08050e;--panel:#17101f;--line:#ffffff1d;--gold:#e9bd65;--text:#fff;--muted:#c8bfd2;--green:#75da9e;--red:#ff8fa3;--purple:#a376ff}
@@ -20,18 +20,24 @@ CSS = """
 """
 
 
-def _authorized(request: Request) -> bool:
-    configured = os.getenv("LSS_ADMIN_KEY") or ""
-    supplied = request.cookies.get(ADMIN_COOKIE) or ""
-    return bool(configured and supplied and secrets.compare_digest(configured, supplied))
+def _authorized(request: Request, *, action: str, subject_user_id: str | None = None) -> bool:
+    return authorize_protected_data_access(
+        request,
+        action=action,
+        subject_user_id=subject_user_id,
+        audit=audit,
+    ).allowed
 
 
 def _page(body: str) -> HTMLResponse:
-    return HTMLResponse(
+    response = HTMLResponse(
         "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
         "<meta name='robots' content='noindex,nofollow'><title>ESP Owner Users</title>"
         f"<style>{CSS}</style></head><body><main class='wrap'>{body}</main></body></html>"
     )
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 def _esp_label(row: dict) -> str:
@@ -103,7 +109,7 @@ def _selected(actual: str, expected: str) -> str:
 
 @router.get("/owner/users", response_class=HTMLResponse, include_in_schema=False)
 def owner_users(request: Request, q: str = ""):
-    if not _authorized(request):
+    if not _authorized(request, action="owner_user_directory_read"):
         return RedirectResponse("/owner", status_code=303)
     rows = control.list_users()
     query = (q or "").strip().lower()
@@ -132,7 +138,7 @@ def owner_users(request: Request, q: str = ""):
 
 @router.get("/owner/users/{user_id}", response_class=HTMLResponse, include_in_schema=False)
 def owner_user_detail(user_id: str, request: Request, message: str = ""):
-    if not _authorized(request):
+    if not _authorized(request, action="owner_user_detail_read", subject_user_id=user_id):
         return RedirectResponse("/owner", status_code=303)
     data = control.detail(user_id)
     if not data:
@@ -191,7 +197,7 @@ def owner_user_detail(user_id: str, request: Request, message: str = ""):
 
 @router.post("/owner/users/{user_id}/plan", include_in_schema=False)
 def owner_set_plan(user_id: str, request: Request, plan_id: str = Form(...)):
-    if not _authorized(request):
+    if not _authorized(request, action="owner_user_plan_write", subject_user_id=user_id):
         return RedirectResponse("/owner", status_code=303)
     try:
         control.set_plan(user_id, plan_id, "Mary/Kev Owner Console")
@@ -203,7 +209,7 @@ def owner_set_plan(user_id: str, request: Request, plan_id: str = Form(...)):
 
 @router.post("/owner/users/{user_id}/esp-role", include_in_schema=False)
 def owner_set_esp_role(user_id: str, request: Request, role: str = Form(...)):
-    if not _authorized(request):
+    if not _authorized(request, action="owner_user_esp_role_write", subject_user_id=user_id):
         return RedirectResponse("/owner", status_code=303)
     try:
         control.set_esp_role(user_id, role, "Mary/Kev Owner Console")
@@ -215,7 +221,7 @@ def owner_set_esp_role(user_id: str, request: Request, role: str = Form(...)):
 
 @router.post("/owner/users/{user_id}/esp-decline", include_in_schema=False)
 def owner_decline_esp(user_id: str, request: Request):
-    if not _authorized(request):
+    if not _authorized(request, action="owner_user_esp_decline", subject_user_id=user_id):
         return RedirectResponse("/owner", status_code=303)
     try:
         control.decline_esp_requests(user_id, "Mary/Kev Owner Console")
