@@ -10,6 +10,9 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   ESP_REGISTRY_IMAGE=registry.example/elevate-souls/command-center \
+  ESP_ACESTEP_IMAGE=registry.example/ace-step@sha256:<digest> \
+  ESP_CADDY_IMAGE=caddy@sha256:<digest> \
+  ESP_SEARXNG_IMAGE=searxng/searxng@sha256:<digest> \
   COSIGN_SIGNING_KEY=/secure/cosign.key \
   COSIGN_VERIFY_KEY=/secure/cosign.pub \
   deploy/selfhost/build-release.sh
@@ -28,6 +31,17 @@ for bin in docker git python3 cosign trivy; do
 done
 docker buildx version >/dev/null
 
+validate_pinned_image() {
+  local name="$1" value="$2"
+  [[ "$value" =~ @sha256:[0-9a-f]{64}$ ]] || {
+    echo "$name must be supplied as an immutable @sha256 digest reference" >&2
+    exit 78
+  }
+}
+validate_pinned_image ESP_ACESTEP_IMAGE "${ESP_ACESTEP_IMAGE:-}"
+validate_pinned_image ESP_CADDY_IMAGE "${ESP_CADDY_IMAGE:-}"
+validate_pinned_image ESP_SEARXNG_IMAGE "${ESP_SEARXNG_IMAGE:-}"
+
 GIT_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 [[ "$GIT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Could not resolve exact Git SHA" >&2; exit 65; }
 [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]] || {
@@ -35,8 +49,6 @@ GIT_SHA="$(git -C "$ROOT" rev-parse HEAD)"
   exit 65
 }
 
-# The registry login is deliberately external to this script. Credentials belong in the
-# operator's secret store/credential helper, never on the command line or in the repository.
 TAGGED_IMAGE="${REGISTRY_IMAGE}:${GIT_SHA}"
 METADATA="$(mktemp)"
 trap 'rm -f "$METADATA"' EXIT
@@ -61,17 +73,11 @@ PY
 )"
 IMMUTABLE_IMAGE="${REGISTRY_IMAGE}@${DIGEST}"
 
-# Scan what was actually pushed. Every HIGH/CRITICAL vulnerability blocks release by default,
-# including vulnerabilities without a current fix. Any exception must live in a separately
-# reviewed Trivy policy rather than being silently ignored by this release path.
-trivy image \
-  --exit-code 1 \
-  --severity HIGH,CRITICAL \
-  --scanners vuln \
-  "$IMMUTABLE_IMAGE"
+# Scan the exact command-center image and every externally supplied production runtime image.
+for image in "$IMMUTABLE_IMAGE" "$ESP_ACESTEP_IMAGE" "$ESP_CADDY_IMAGE" "$ESP_SEARXNG_IMAGE"; do
+  trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$image"
+done
 
-# Production signing never guesses a verification key or silently falls back to public OIDC.
-# Paths may also be supported KMS URIs, but both signing and verification identities are explicit.
 [[ -n "${COSIGN_SIGNING_KEY:-}" ]] || {
   echo "COSIGN_SIGNING_KEY is required for ESP production release signing" >&2
   exit 78
@@ -84,17 +90,20 @@ cosign sign --yes --key "$COSIGN_SIGNING_KEY" \
   -a "git_sha=$GIT_SHA" \
   -a "product=Elevate Souls Productions Content Creation Command Center" \
   "$IMMUTABLE_IMAGE"
-cosign verify --key "$COSIGN_VERIFY_KEY" \
-  -a "git_sha=$GIT_SHA" \
-  "$IMMUTABLE_IMAGE" >/dev/null
+cosign verify --key "$COSIGN_VERIFY_KEY" -a "git_sha=$GIT_SHA" "$IMMUTABLE_IMAGE" >/dev/null
 
-python3 - "$OUTPUT_RELEASE" "$GIT_SHA" "$IMMUTABLE_IMAGE" <<'PY'
+python3 - "$OUTPUT_RELEASE" "$GIT_SHA" "$IMMUTABLE_IMAGE" "$ESP_ACESTEP_IMAGE" "$ESP_CADDY_IMAGE" "$ESP_SEARXNG_IMAGE" <<'PY'
 import json, os, sys
-path, sha, image = sys.argv[1:]
+path, sha, command, ace_step, caddy, searxng = sys.argv[1:]
 payload = {
-    "schema_version": 1,
+    "schema_version": 2,
     "git_sha": sha,
-    "command_center_image": image,
+    "command_center_image": command,
+    "runtime_images": {
+        "ace_step": ace_step,
+        "caddy": caddy,
+        "searxng": searxng,
+    },
     "environment": "production",
     "approved": False,
     "supply_chain": {
@@ -102,9 +111,10 @@ payload = {
         "buildkit_sbom": True,
         "trivy_high_critical_gate": True,
         "trivy_unfixed_high_critical_gate": True,
+        "runtime_images_trivy_high_critical_gate": True,
         "cosign_signature_verified": True,
     },
-    "notes": "Scanner/signature gates passed. Owner/release approval is still required before deployment."
+    "notes": "All production runtime images are digest-pinned and scanned. Owner/release approval is still required before deployment."
 }
 os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
 with open(path, "w", encoding="utf-8") as f:
