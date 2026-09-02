@@ -1,14 +1,12 @@
-"""Compatibility shim for the consolidated member account-security surface.
+"""Compatibility bridge for the consolidated member account-security surface.
 
 Password reset, recovery UI and session management are owned by
-``aura_music_studio.account_security_api`` and are mounted once through the shared
-security composition. This module remains importable because an earlier Core increment
-mounted ``router`` from here through ``api.py``; keeping an empty router avoids import
-churn while guaranteeing there is only one authoritative authentication route set.
+``aura_music_studio.account_security_api``. The shared API composition historically
+imports ``router`` from this module, so re-export the authoritative router here rather
+than defining a second set of handlers. This keeps one route owner while preserving the
+stable integration seam used by ``aura_music_studio.api`` and the production app.
 """
 
-from fastapi import APIRouter
-
-router = APIRouter()
+from .account_security_api import router
 
 __all__ = ["router"]
