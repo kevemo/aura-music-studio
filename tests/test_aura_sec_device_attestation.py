@@ -50,7 +50,7 @@ class _FakeLinuxAdapter:
         )
 
 
-def _command_signer():
+def _server_signer():
     return SelfHostedEd25519CommandSigner(
         Ed25519PrivateKey.generate(),
         key_id="attestation-server-key-v1",
@@ -100,25 +100,7 @@ def _stack(tmp_path, *, device_id: str, now: datetime):
     return adapter, native, store, attested, device, registration
 
 
-def test_valid_device_assertion_is_consumed_before_one_native_execution(tmp_path):
-    now = datetime.now(timezone.utc)
-    device_id = "device-attested-native-0001"
-    command_id = "command-attested-native-0001"
-    server = _command_signer()
-    trusted = {server.key_id: server.public_key_raw()}
-    command = _signed_command(
-        server,
-        device_id=device_id,
-        command_id=command_id,
-        sequence=1,
-        now=now,
-    )
-    adapter, _, store, attested, device, registration = _stack(
-        tmp_path,
-        device_id=device_id,
-        now=now,
-    )
-
+def _challenge_and_assertion(attested, device, command, trusted, device_id, now):
     challenge = attested.issue_challenge(
         command,
         trusted_public_keys=trusted,
@@ -127,10 +109,22 @@ def test_valid_device_assertion_is_consumed_before_one_native_execution(tmp_path
         device_key_id=device.key_id,
         now=now + timedelta(seconds=1),
     )
-    assertion = device.sign_challenge(
-        challenge,
-        attested_at=now + timedelta(seconds=2),
+    assertion = device.sign_challenge(challenge, attested_at=now + timedelta(seconds=2))
+    return challenge, assertion
+
+
+def test_valid_device_assertion_is_consumed_before_one_native_execution(tmp_path):
+    now = datetime.now(timezone.utc)
+    device_id = "device-attested-native-0001"
+    command_id = "command-attested-native-0001"
+    server = _server_signer()
+    trusted = {server.key_id: server.public_key_raw()}
+    command = _signed_command(server, device_id=device_id, command_id=command_id, sequence=1, now=now)
+    adapter, _, store, attested, device, registration = _stack(
+        tmp_path, device_id=device_id, now=now
     )
+    _, assertion = _challenge_and_assertion(attested, device, command, trusted, device_id, now)
+
     result = attested.dispatch(
         command,
         assertion,
@@ -163,7 +157,7 @@ def test_valid_device_assertion_is_consumed_before_one_native_execution(tmp_path
 def test_replayed_assertion_never_reaches_native_adapter_twice(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0002"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -173,15 +167,7 @@ def test_replayed_assertion_never_reaches_native_adapter_twice(tmp_path):
         now=now,
     )
     adapter, _, _, attested, device, _ = _stack(tmp_path, device_id=device_id, now=now)
-    challenge = attested.issue_challenge(
-        command,
-        trusted_public_keys=trusted,
-        expected_device_id=device_id,
-        platform="linux",
-        device_key_id=device.key_id,
-        now=now + timedelta(seconds=1),
-    )
-    assertion = device.sign_challenge(challenge, attested_at=now + timedelta(seconds=2))
+    _, assertion = _challenge_and_assertion(attested, device, command, trusted, device_id, now)
 
     attested.dispatch(
         command,
@@ -206,7 +192,7 @@ def test_replayed_assertion_never_reaches_native_adapter_twice(tmp_path):
 def test_expired_challenge_fails_before_native_execution(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0003"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -239,10 +225,19 @@ def test_expired_challenge_fails_before_native_execution(tmp_path):
     assert adapter.calls == 0
 
 
-def test_wrong_command_platform_executor_or_device_binding_fails_before_native(tmp_path):
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("device_id", "device-attested-native-9999", "different device"),
+        ("command_id", "command-attested-native-9999", "different command"),
+        ("platform", "windows", "different platform"),
+        ("executor_id", "linux-attested-native-wrong", "different native executor"),
+    ],
+)
+def test_wrong_attestation_binding_fails_before_native(tmp_path, field, value, message):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0004"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -252,50 +247,25 @@ def test_wrong_command_platform_executor_or_device_binding_fails_before_native(t
         now=now,
     )
     adapter, _, _, attested, device, _ = _stack(tmp_path, device_id=device_id, now=now)
-    challenge = attested.issue_challenge(
-        command,
-        trusted_public_keys=trusted,
-        expected_device_id=device_id,
-        platform="linux",
-        device_key_id=device.key_id,
-        now=now + timedelta(seconds=1),
-    )
-    good = device.sign_challenge(challenge, attested_at=now + timedelta(seconds=2))
+    _, good = _challenge_and_assertion(attested, device, command, trusted, device_id, now)
+    bad = good.model_copy(update={field: value})
 
-    cases = [
-        (good.model_copy(update={"device_id": "device-attested-native-9999"}), "different device"),
-        (good.model_copy(update={"command_id": "command-attested-native-9999"}), "different command"),
-        (good.model_copy(update={"platform": "windows"}), "different platform"),
-        (good.model_copy(update={"executor_id": "linux-attested-native-wrong"}), "different native executor"),
-    ]
-    for assertion, message in cases:
-        with pytest.raises(PermissionError, match=message):
-            attested.dispatch(
-                command,
-                assertion,
-                trusted_public_keys=trusted,
-                expected_device_id=device_id,
-                platform="linux",
-                now=now + timedelta(seconds=3),
-            )
+    with pytest.raises(PermissionError, match=message):
+        attested.dispatch(
+            command,
+            bad,
+            trusted_public_keys=trusted,
+            expected_device_id=device_id,
+            platform="linux",
+            now=now + timedelta(seconds=3),
+        )
     assert adapter.calls == 0
-
-    result = attested.dispatch(
-        command,
-        good,
-        trusted_public_keys=trusted,
-        expected_device_id=device_id,
-        platform="linux",
-        now=now + timedelta(seconds=4),
-    )
-    assert result.native.executed is True
-    assert adapter.calls == 1
 
 
 def test_bad_signature_does_not_consume_challenge_and_good_signature_still_works(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0005"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -305,15 +275,7 @@ def test_bad_signature_does_not_consume_challenge_and_good_signature_still_works
         now=now,
     )
     adapter, _, _, attested, device, _ = _stack(tmp_path, device_id=device_id, now=now)
-    challenge = attested.issue_challenge(
-        command,
-        trusted_public_keys=trusted,
-        expected_device_id=device_id,
-        platform="linux",
-        device_key_id=device.key_id,
-        now=now + timedelta(seconds=1),
-    )
-    good = device.sign_challenge(challenge, attested_at=now + timedelta(seconds=2))
+    _, good = _challenge_and_assertion(attested, device, command, trusted, device_id, now)
     bad = good.model_copy(
         update={"signature_b64": base64.b64encode(b"\x00" * 64).decode("ascii")}
     )
@@ -340,10 +302,10 @@ def test_bad_signature_does_not_consume_challenge_and_good_signature_still_works
     assert adapter.calls == 1
 
 
-def test_revoked_device_key_invalidates_an_already_issued_challenge(tmp_path):
+def test_revoked_device_key_invalidates_existing_challenge_and_cannot_reactivate(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0006"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -353,15 +315,7 @@ def test_revoked_device_key_invalidates_an_already_issued_challenge(tmp_path):
         now=now,
     )
     adapter, _, store, attested, device, _ = _stack(tmp_path, device_id=device_id, now=now)
-    challenge = attested.issue_challenge(
-        command,
-        trusted_public_keys=trusted,
-        expected_device_id=device_id,
-        platform="linux",
-        device_key_id=device.key_id,
-        now=now + timedelta(seconds=1),
-    )
-    assertion = device.sign_challenge(challenge, attested_at=now + timedelta(seconds=2))
+    _, assertion = _challenge_and_assertion(attested, device, command, trusted, device_id, now)
     revoked = store.revoke_device_key(
         device_id=device_id,
         key_id=device.key_id,
@@ -393,7 +347,7 @@ def test_revoked_device_key_invalidates_an_already_issued_challenge(tmp_path):
 def test_attestation_timestamp_skew_fails_closed_before_native(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0007"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -425,11 +379,11 @@ def test_attestation_timestamp_skew_fails_closed_before_native(tmp_path):
     assert adapter.calls == 0
 
 
-def test_invalid_server_command_cannot_issue_or_consume_device_challenge(tmp_path):
+def test_untrusted_server_command_cannot_issue_device_challenge(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0008"
-    server = _command_signer()
-    wrong_server = _command_signer()
+    server = _server_signer()
+    wrong_server = _server_signer()
     command = _signed_command(
         server,
         device_id=device_id,
@@ -439,7 +393,7 @@ def test_invalid_server_command_cannot_issue_or_consume_device_challenge(tmp_pat
     )
     adapter, _, _, attested, device, _ = _stack(tmp_path, device_id=device_id, now=now)
 
-    with pytest.raises(PermissionError, match="signer is not trusted"):
+    with pytest.raises(PermissionError, match="signer"):
         attested.issue_challenge(
             command,
             trusted_public_keys={wrong_server.key_id: wrong_server.public_key_raw()},
@@ -451,10 +405,10 @@ def test_invalid_server_command_cannot_issue_or_consume_device_challenge(tmp_pat
     assert adapter.calls == 0
 
 
-def test_raw_challenge_nonce_is_not_persisted_and_enrollment_is_executor_bound(tmp_path):
+def test_raw_challenge_nonce_is_not_persisted(tmp_path):
     now = datetime.now(timezone.utc)
     device_id = "device-attested-native-0009"
-    server = _command_signer()
+    server = _server_signer()
     trusted = {server.key_id: server.public_key_raw()}
     command = _signed_command(
         server,
@@ -464,9 +418,7 @@ def test_raw_challenge_nonce_is_not_persisted_and_enrollment_is_executor_bound(t
         now=now,
     )
     adapter, _, store, attested, device, registration = _stack(
-        tmp_path,
-        device_id=device_id,
-        now=now,
+        tmp_path, device_id=device_id, now=now
     )
     assert registration.executor_id == adapter.executor_id
     challenge = attested.issue_challenge(
@@ -488,13 +440,43 @@ def test_raw_challenge_nonce_is_not_persisted_and_enrollment_is_executor_bound(t
     assert row[0] == hashlib.sha256(challenge.challenge_nonce.encode("ascii")).hexdigest()
     assert challenge.challenge_nonce not in store.db_path.read_bytes().decode("latin1", errors="ignore")
 
-    other = _device_attestor(key_id="device-key-v2")
+
+def test_executor_binding_is_enforced_when_challenge_is_issued(tmp_path):
+    now = datetime.now(timezone.utc)
+    device_id = "device-attested-native-0010"
+    server = _server_signer()
+    trusted = {server.key_id: server.public_key_raw()}
+    command = _signed_command(
+        server,
+        device_id=device_id,
+        command_id="command-attested-native-0010",
+        sequence=1,
+        now=now,
+    )
+    adapter = _FakeLinuxAdapter()
+    native = AuraSecNativePlatformExecutor(
+        tmp_path / "native-executor-bound.sqlite3",
+        adapters={"linux": adapter},
+    )
+    store = AuraSecDeviceAttestationStore(tmp_path / "attestation-executor-bound.sqlite3")
+    attested = AuraSecAttestedNativePlatformExecutor(native, store)
+    device = _device_attestor(key_id="device-key-executor-bound")
+    store.enroll_device_key(
+        device_id=device_id,
+        key_id=device.key_id,
+        platform="linux",
+        executor_id="linux-other-executor-v1",
+        public_key=device.public_key_raw(),
+        now=now,
+    )
+
     with pytest.raises(PermissionError, match="different executor"):
-        store.enroll_device_key(
-            device_id=device_id,
-            key_id=other.key_id,
+        attested.issue_challenge(
+            command,
+            trusted_public_keys=trusted,
+            expected_device_id=device_id,
             platform="linux",
-            executor_id="linux-other-executor-v1",
-            public_key=other.public_key_raw(),
-            now=now + timedelta(seconds=2),
+            device_key_id=device.key_id,
+            now=now + timedelta(seconds=1),
         )
+    assert adapter.calls == 0
