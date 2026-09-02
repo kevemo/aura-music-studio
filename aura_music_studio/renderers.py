@@ -109,7 +109,9 @@ class BaseRenderer:
         return True
 
     def render(self, workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan) -> RenderResult:
-        raise NotImplementedError
+        raise RuntimeError(
+            "BaseRenderer is a non-executable renderer contract; select a configured concrete renderer."
+        )
 
 
 class AceStepApiRenderer(BaseRenderer):

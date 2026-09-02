@@ -37,6 +37,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
+      - name: Production source completeness audit
+        run: python scripts/source_completeness_audit.py
+
       - name: Compile Python
         run: python -m compileall -q aura_music_studio scripts
 
