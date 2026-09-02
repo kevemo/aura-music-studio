@@ -31,18 +31,18 @@ This matrix records the current engineering boundary. GitHub code, tests and wor
 | Music / DAW / mastering / approved whole-song voice | CODE-COMPLETE / INTEGRATED | Approved-voice whole-song path is implemented with execution-time consent checks; real production renderer/model capacity remains evidence-gated. |
 | Image / Poster / Video / professional editor | CODE-COMPLETE / INTEGRATED | Shared project, media, editor and entitlement surfaces are wired into the canonical app. Provider-specific premium inference remains evidence-gated where credentials/capacity are required. |
 | Game Forge | CODE-COMPLETE / INTEGRATED | Project continuity, playtest navigation, exports and integrated creative context are part of the shared application. |
-| Social Media Centre | CODE-COMPLETE when exact-head final Social validation is merged | Runtime publishing capability is authoritative; provider calls remain fail-closed without valid provider apps/credentials/permissions. |
+| Social Media Centre | CODE-COMPLETE / INTEGRATED | Runtime publishing capability is authoritative and the final Social slice is merged; provider calls remain fail-closed without valid provider apps, credentials and permissions. |
 | Aura LIVE Overlay Studio, relay, prompter, Guardian and LIVE intelligence | CODE-COMPLETE / INTEGRATED | Normalized relay and LIVE tools are wired. Direct provider authority exists only when officially supported/authorised and configured. |
 | ESP Creator, Agent and Owner hubs | CODE-COMPLETE / INTEGRATED | Role separation remains distinct from commercial subscription state. |
 | Privacy, consent, safeguarding, IP and audit controls | CODE-COMPLETE / INTEGRATED | Consequential/provider actions remain human/provider evidence-gated where required. |
-| Self-host topology, staging/production topology and readiness contracts | CODE-COMPLETE / INTEGRATED | CI validates Compose/topology and fail-closed readiness contracts. Actual production provisioning and operations remain evidence-gated. |
+| Self-host topology, staging/production topology and readiness contracts | CODE-COMPLETE / INTEGRATED | Docker/Compose + Caddy is the authoritative Phase-1 release path; Command Center, ACE-Step and private Aura inference use immutable verified release artifacts. Actual production provisioning and operations remain evidence-gated. |
 | Aura Sec web/control plane and bounded native-command contracts | CODE-COMPLETE / INTEGRATED within this repository | Full native commercial product requires the separate private native-engine repository and real platform-native release evidence. |
 
 ## Permanent code-completeness gates
 
 The canonical Command Center CI must run, on the exact candidate head:
 
-1. production-source completeness audit;
+1. production-source completeness audit across application and deployment/runtime Python;
 2. Python compilation;
 3. complete pytest regression suite;
 4. self-host Compose validation;
@@ -81,7 +81,7 @@ These are not code placeholders and must not be filled with invented values:
 
 - active GitHub branch protection/rulesets and required-check enforcement;
 - approved production domain/TLS and deployment environment;
-- production database/object-storage and GPU/AI capacity evidence;
+- production database/storage and GPU/AI capacity evidence for the selected self-host host;
 - real payment-provider credentials, webhook delivery and real-money payment/refund/payout certification;
 - independent bank/Open-Banking reconciliation evidence where financial release policy requires it;
 - production email/provider credentials and delivery verification;
@@ -112,5 +112,7 @@ For every final candidate:
 ## Final engineering truth
 
 The Command Center can be code-complete inside the repository while still being correctly held from public production release. “No placeholders” means no unfinished executable implementation is hidden behind stubs or optimistic browser state; it does **not** mean inserting fake credentials, fake provider approvals, fake bank evidence, fake signing certificates or fake infrastructure state.
+
+The supported release architecture for the Command Center is self-hosted. There is no Vercel runtime or production deployment path in the final candidate.
 
 **Elevate Souls Productions Content Creation Command Center — Powered by Aura AI** remains the sole current product identity for this integration and release matrix.
