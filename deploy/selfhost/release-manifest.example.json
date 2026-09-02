@@ -2,6 +2,8 @@
   "schema_version": 1,
   "git_sha": "0123456789abcdef0123456789abcdef01234567",
   "command_center_image": "registry.example.invalid/elevate-souls/command-center@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "ace_step_image": "registry.example.invalid/elevate-souls/ace-step@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "ace_step_upstream_commit": "14c0211d5a0653b0f63e27686f4c3f151b4d8629",
   "environment": "production",
   "approved": false,
   "supply_chain": {
@@ -9,7 +11,11 @@
     "buildkit_sbom": false,
     "trivy_high_critical_gate": false,
     "trivy_unfixed_high_critical_gate": false,
-    "cosign_signature_verified": false
+    "cosign_signature_verified": false,
+    "ace_step_buildkit_provenance": false,
+    "ace_step_buildkit_sbom": false,
+    "ace_step_trivy_high_critical_gate": false,
+    "ace_step_cosign_signature_verified": false
   },
-  "notes": "Template only. Use build-release.sh to produce verified supply-chain evidence. Set approved=true only after all production release gates pass."
+  "notes": "Template only. Use build-release.sh to produce immutable verified Command Center and ACE-Step release images. Set approved=true only after all production release gates pass."
 }
