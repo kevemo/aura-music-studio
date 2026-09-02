@@ -29,28 +29,35 @@ for bin in docker curl python3 git cosign trivy; do
 done
 docker compose version >/dev/null
 
-python3 - "$RELEASE_FILE" <<'PY'
+mapfile -t RELEASE_VALUES < <(python3 - "$RELEASE_FILE" <<'PY'
 import json, re, sys
-data=json.load(open(sys.argv[1], encoding="utf-8"))
-sha=str(data.get("git_sha", "")); image=str(data.get("command_center_image", ""))
-if data.get("schema_version") != 1: raise SystemExit("Unsupported release manifest schema")
-if data.get("environment") != "production": raise SystemExit("Release manifest is not production")
-if data.get("approved") is not True: raise SystemExit("Release manifest is not approved")
+d=json.load(open(sys.argv[1], encoding="utf-8"))
+if d.get("schema_version") != 2: raise SystemExit("Unsupported release manifest schema; schema 2 is required")
+if d.get("environment") != "production": raise SystemExit("Release manifest is not production")
+if d.get("approved") is not True: raise SystemExit("Release manifest is not approved")
+sha=str(d.get("git_sha", "")); command=str(d.get("command_center_image", ""))
 if not re.fullmatch(r"[0-9a-f]{40}", sha): raise SystemExit("git_sha must be an exact 40-character lowercase SHA")
-if not re.search(r"@sha256:[0-9a-f]{64}$", image): raise SystemExit("command_center_image must use an immutable sha256 digest")
-evidence=data.get("supply_chain") or {}
-required=("buildkit_provenance","buildkit_sbom","trivy_high_critical_gate","trivy_unfixed_high_critical_gate","cosign_signature_verified")
+def pinned(value, name):
+    value=str(value or "")
+    if not re.search(r"@sha256:[0-9a-f]{64}$", value): raise SystemExit(f"{name} must use an immutable sha256 digest")
+    return value
+runtime=d.get("runtime_images") or {}
+ace=pinned(runtime.get("ace_step"), "runtime_images.ace_step")
+caddy=pinned(runtime.get("caddy"), "runtime_images.caddy")
+searx=pinned(runtime.get("searxng"), "runtime_images.searxng")
+command=pinned(command, "command_center_image")
+evidence=d.get("supply_chain") or {}
+required=("buildkit_provenance","buildkit_sbom","trivy_high_critical_gate","trivy_unfixed_high_critical_gate","cosign_signature_verified","runtime_images_trivy_high_critical_gate")
 missing=[key for key in required if evidence.get(key) is not True]
 if missing: raise SystemExit("Release manifest supply-chain evidence is incomplete: " + ", ".join(missing))
-PY
-
-mapfile -t RELEASE_VALUES < <(python3 - "$RELEASE_FILE" <<'PY'
-import json, sys
-d=json.load(open(sys.argv[1], encoding="utf-8")); print(d["git_sha"]); print(d["command_center_image"])
+print(sha); print(command); print(ace); print(caddy); print(searx)
 PY
 )
 EXPECTED_SHA="${RELEASE_VALUES[0]}"
 export ESP_COMMAND_CENTER_IMAGE="${RELEASE_VALUES[1]}"
+export ESP_ACESTEP_IMAGE="${RELEASE_VALUES[2]}"
+export ESP_CADDY_IMAGE="${RELEASE_VALUES[3]}"
+export ESP_SEARXNG_IMAGE="${RELEASE_VALUES[4]}"
 
 mapfile -t INFERENCE_VALUES < <(python3 - "$INFERENCE_FILE" <<'PY'
 import json, re, sys
@@ -76,13 +83,13 @@ ACTUAL_SHA="$(git -C "$ROOT" rev-parse HEAD)"
 [[ "$ACTUAL_SHA" == "$EXPECTED_SHA" ]] || { echo "Release identity mismatch: checkout=$ACTUAL_SHA manifest=$EXPECTED_SHA" >&2; exit 65; }
 [[ -z "$(git -C "$ROOT" status --porcelain --untracked-files=no)" ]] || { echo "Refusing production deployment from a modified tracked working tree" >&2; exit 65; }
 
-# shellcheck disable=SC1090
 set -a
+# shellcheck disable=SC1090
 source "$ENV_FILE"
 set +a
 
 required=(
-  LSS_PUBLIC_BASE_URL LSS_ADMIN_KEY LSS_PROVENANCE_SECRET ACESTEP_API_KEY
+  LSS_PUBLIC_BASE_URL LSS_PUBLIC_SITE_ADDRESS LSS_ADMIN_KEY LSS_PROVENANCE_SECRET ACESTEP_API_KEY
   AURA_MONITORING_TOKEN LSS_BACKUP_AGE_RECIPIENT COSIGN_VERIFY_KEY
   AURA_SELFHOST_LLM_MODEL_DIR AURA_LLM_INTERNAL_API_KEY
   AURA_ACESTEP_CUDA_VISIBLE_DEVICES AURA_LLM_CUDA_VISIBLE_DEVICES
@@ -91,13 +98,30 @@ for key in "${required[@]}"; do
   [[ -n "${!key:-}" ]] || { echo "Required production secret/config missing: $key" >&2; exit 78; }
 done
 
-[[ "${AURA_DEPLOYMENT_ENV:-production}" == "production" ]] || { echo "AURA_DEPLOYMENT_ENV must be production" >&2; exit 78; }
+[[ "${AURA_DEPLOYMENT_ENV:-}" == "production" ]] || { echo "AURA_DEPLOYMENT_ENV must be production" >&2; exit 78; }
+[[ "${LSS_DEPLOYMENT_MODE:-}" == "selfhost" ]] || { echo "LSS_DEPLOYMENT_MODE must be selfhost" >&2; exit 78; }
 [[ "${LSS_COOKIE_SECURE:-}" == "true" ]] || { echo "LSS_COOKIE_SECURE must be true" >&2; exit 78; }
 [[ "${AURA_WEB_ALLOW_HTTP:-}" == "false" ]] || { echo "AURA_WEB_ALLOW_HTTP must be false" >&2; exit 78; }
 [[ "${AURA_REQUIRE_LIVE_RENDERER:-}" == "true" ]] || { echo "AURA_REQUIRE_LIVE_RENDERER must be true" >&2; exit 78; }
 
-# On the immediate single-host path, never let ACE-Step and Aura silently contend for the
-# same CUDA device/MIG UUID. Cluster deployments use dedicated node pools instead.
+python3 - "$LSS_PUBLIC_BASE_URL" "$LSS_PUBLIC_SITE_ADDRESS" <<'PY'
+from urllib.parse import urlparse
+import sys
+
+def origin(raw, name):
+    p=urlparse(raw)
+    if p.scheme != "https" or not p.hostname or p.username or p.password or p.query or p.fragment:
+        raise SystemExit(f"{name} must be a real HTTPS origin without credentials/query/fragment")
+    if p.path not in {"", "/"}:
+        raise SystemExit(f"{name} must not contain a path")
+    host=p.hostname.lower()
+    port=f":{p.port}" if p.port and p.port != 443 else ""
+    return f"https://{host}{port}"
+base=origin(sys.argv[1], "LSS_PUBLIC_BASE_URL")
+site=origin(sys.argv[2], "LSS_PUBLIC_SITE_ADDRESS")
+if base != site: raise SystemExit("LSS_PUBLIC_BASE_URL and LSS_PUBLIC_SITE_ADDRESS must identify the same HTTPS origin")
+PY
+
 python3 - "$AURA_ACESTEP_CUDA_VISIBLE_DEVICES" "$AURA_LLM_CUDA_VISIBLE_DEVICES" <<'PY'
 import sys
 parse=lambda value: {part.strip() for part in value.split(",") if part.strip()}
@@ -107,12 +131,13 @@ overlap=sorted(a & b)
 if overlap: raise SystemExit("ACE-Step and Aura inference GPU assignments overlap: " + ", ".join(overlap))
 PY
 
-python3 "$ROOT/deploy/selfhost/aura_model_integrity.py" verify \
-  "$AURA_SELFHOST_LLM_MODEL_DIR" "$EXPECTED_MODEL_MANIFEST_SHA" >/dev/null
+python3 "$ROOT/deploy/selfhost/aura_model_integrity.py" verify "$AURA_SELFHOST_LLM_MODEL_DIR" "$EXPECTED_MODEL_MANIFEST_SHA" >/dev/null
 
-# Re-verify both runtime images at deployment time using current vulnerability intelligence.
 cosign verify --key "$COSIGN_VERIFY_KEY" -a "git_sha=$EXPECTED_SHA" "$ESP_COMMAND_CENTER_IMAGE" >/dev/null
 trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$ESP_COMMAND_CENTER_IMAGE"
+for image in "$ESP_ACESTEP_IMAGE" "$ESP_CADDY_IMAGE" "$ESP_SEARXNG_IMAGE"; do
+  trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$image"
+done
 cosign verify --key "$COSIGN_VERIFY_KEY" -a "component=aura-selfhost-inference" "$AURA_VLLM_IMAGE" >/dev/null
 trivy image --exit-code 1 --severity HIGH,CRITICAL --scanners vuln "$AURA_VLLM_IMAGE"
 
@@ -122,7 +147,7 @@ if [[ "${AURA_GPU_REQUIRED:-true}" == "true" ]]; then
 fi
 
 COMPOSE=(
-  docker compose --env-file "$ENV_FILE"
+  docker compose --profile public --env-file "$ENV_FILE"
   -f "$ROOT/docker-compose.yml"
   -f "$ROOT/docker-compose.gpu.yml"
   -f "$ROOT/deploy/production/docker-compose.production.yml"
@@ -131,14 +156,22 @@ COMPOSE=(
 )
 
 "${COMPOSE[@]}" config >/dev/null
-"${COMPOSE[@]}" pull live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager aura-llm
+"${COMPOSE[@]}" pull live-sound-studio aura-worker aura-task-worker esp-social-publish-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy
 "${COMPOSE[@]}" up -d --no-build --remove-orphans
+
+REQUIRED_SERVICES=(live-sound-studio aura-worker aura-task-worker aura-backup-scheduler aura-address-manager ace-step searxng aura-llm caddy)
+mapfile -t RUNNING < <("${COMPOSE[@]}" ps --services --status running)
+for service in "${REQUIRED_SERVICES[@]}"; do
+  printf '%s\n' "${RUNNING[@]}" | grep -Fxq "$service" || {
+    echo "Required production service is not running: $service" >&2
+    "${COMPOSE[@]}" ps >&2 || true
+    exit 70
+  }
+done
 
 "${COMPOSE[@]}" exec -T ace-step curl -fsS http://127.0.0.1:8001/health >/dev/null
 "${COMPOSE[@]}" exec -T aura-llm python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10).read()"
 
-# Prove Aura can reach the private OpenAI-compatible model endpoint through the same network
-# and credentials the application uses; a healthy vLLM process alone is not sufficient.
 "${COMPOSE[@]}" exec -T live-sound-studio python - <<'PY'
 import os, requests
 base=os.environ["AURA_LLM_BASE_URL"].rstrip("/")
@@ -156,13 +189,13 @@ READY_URL="${LSS_PUBLIC_BASE_URL%/}/health/ready"
 DEADLINE=$((SECONDS + WAIT_SECONDS))
 until curl --fail --silent --show-error --max-time 10 "$READY_URL" >/dev/null; do
   if (( SECONDS >= DEADLINE )); then
-    echo "Production readiness failed: $READY_URL" >&2
+    echo "Production readiness failed through public HTTPS ingress: $READY_URL" >&2
     "${COMPOSE[@]}" ps >&2 || true
-    "${COMPOSE[@]}" logs --tail=120 live-sound-studio aura-worker ace-step aura-llm >&2 || true
+    "${COMPOSE[@]}" logs --tail=120 live-sound-studio aura-worker ace-step aura-llm caddy >&2 || true
     exit 70
   fi
   sleep 5
 done
 
 "${COMPOSE[@]}" ps
-echo "ESP self-host release is READY with private Aura inference at $READY_URL (git $EXPECTED_SHA)"
+echo "ESP authoritative self-host release is READY through $READY_URL (git $EXPECTED_SHA)"
