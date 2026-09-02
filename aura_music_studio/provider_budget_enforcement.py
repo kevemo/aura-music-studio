@@ -5,11 +5,16 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from . import provider_cost_governance as governance
-
 
 class ProviderBudgetExceeded(RuntimeError):
     """Raised before a provider call when an operator hard budget would be exceeded."""
+
+
+def _governance():
+    # Import lazily so importing the package does not initialise the operational cost database.
+    from . import provider_cost_governance
+
+    return provider_cost_governance
 
 
 def _utcnow() -> datetime:
@@ -37,6 +42,7 @@ def _reservation_ttl_seconds() -> int:
 
 
 def _connect() -> sqlite3.Connection:
+    governance = _governance()
     con = sqlite3.connect(governance.store.db_path, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
@@ -94,6 +100,7 @@ def reserve_provider_budget(*, provider: str, service: str, operation: str) -> s
     if _enforcement_mode() != "hard":
         return None
 
+    governance = _governance()
     estimate = governance.configured_estimate_minor(provider, service, operation)
     if estimate is None:
         raise ProviderBudgetExceeded(
@@ -183,6 +190,7 @@ def install_provider_budget_enforcement() -> None:
         if reservation_id:
             recorded = False
             try:
+                governance = _governance()
                 unit_name, units = governance._renderer_units(self.kind, values)
                 governance.store.record_submission(
                     provider=submission.provider,
