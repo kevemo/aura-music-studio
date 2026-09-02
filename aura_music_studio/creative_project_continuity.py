@@ -66,6 +66,16 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     return '/game-creation'+(encoded?`?${encoded}`:'');
   }
 
+  function projectGameExportHref(gameId,projectName=currentProject()){
+    const cleanProject=String(projectName||'').trim();
+    const cleanGame=String(gameId||'').trim();
+    if(!cleanGame)return projectHref('/game-creation',cleanProject);
+    const query=new URLSearchParams();
+    if(cleanProject)query.set('project',cleanProject);
+    const encoded=query.toString();
+    return `/game-creation/export/${encodeURIComponent(cleanGame)}`+(encoded?`?${encoded}`:'');
+  }
+
   function updateLocation(projectName){
     const clean=String(projectName||'').trim();
     contextualProject=clean;
@@ -94,7 +104,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     bar.id='creativeProjectContinuity';
     bar.setAttribute('aria-label','Creative project workspace');
     bar.style.cssText='margin:10px 0 16px;padding:11px 13px;border:1px solid #ffffff24;border-radius:15px;background:#0b0d17dd;color:#fff;display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-family:Inter,ui-sans-serif,system-ui,sans-serif;box-shadow:0 10px 30px #0003';
-    bar.innerHTML=`<strong style="color:#f3c76d">One Project Workspace</strong><span id="creativeProjectContext" style="font-size:.78rem;color:#c9c6d5"></span><span id="creativeProjectGameContext" style="font-size:.72rem;color:#8fdff0"></span><a id="creativeProjectResumeGame" href="/game-creation" hidden style="color:#fff;text-decoration:none;border:1px solid #5be1ff66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#5be1ff12">Resume latest game</a><a id="creativeProjectPlayGame" href="/game-creation" hidden target="_blank" rel="noopener noreferrer" style="color:#fff;text-decoration:none;border:1px solid #79dda566;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#79dda512">Play build</a><a id="creativeProjectPublicGame" href="/game-gallery" hidden target="_blank" rel="noopener noreferrer" style="color:#fff;text-decoration:none;border:1px solid #efca6d66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#efca6d12">Public test</a><nav id="creativeProjectLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto"></nav>`;
+    bar.innerHTML=`<strong style="color:#f3c76d">One Project Workspace</strong><span id="creativeProjectContext" style="font-size:.78rem;color:#c9c6d5"></span><span id="creativeProjectGameContext" style="font-size:.72rem;color:#8fdff0"></span><a id="creativeProjectResumeGame" href="/game-creation" hidden style="color:#fff;text-decoration:none;border:1px solid #5be1ff66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#5be1ff12">Resume latest game</a><a id="creativeProjectPlayGame" href="/game-creation" hidden target="_blank" rel="noopener noreferrer" style="color:#fff;text-decoration:none;border:1px solid #79dda566;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#79dda512">Play build</a><a id="creativeProjectPublicGame" href="/game-gallery" hidden target="_blank" rel="noopener noreferrer" style="color:#fff;text-decoration:none;border:1px solid #efca6d66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#efca6d12">Public test</a><a id="creativeProjectExportGame" href="/game-creation" hidden style="color:#fff;text-decoration:none;border:1px solid #986cff66;border-radius:999px;padding:6px 9px;font-size:.72rem;font-weight:800;background:#986cff12">Export PWA</a><nav id="creativeProjectLinks" style="display:flex;gap:6px;flex-wrap:wrap;margin-left:auto"></nav>`;
     const host=document.querySelector('main.wrap')||document.querySelector('.wrap')||document.body;
     const top=host.querySelector?.('.top,header,.hero');
     if(top?.parentNode===host)top.insertAdjacentElement('afterend',bar);else host.insertBefore(bar,host.firstChild);
@@ -112,9 +122,11 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     const resume=$('creativeProjectResumeGame');
     const play=$('creativeProjectPlayGame');
     const publicPlay=$('creativeProjectPublicGame');
+    const exportGame=$('creativeProjectExportGame');
     if(resume)resume.hidden=true;
     if(play)play.hidden=true;
     if(publicPlay)publicPlay.hidden=true;
+    if(exportGame)exportGame.hidden=true;
   }
 
   async function refreshGameProjectSummary(projectName=currentProject()){
@@ -125,6 +137,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     const resume=$('creativeProjectResumeGame');
     const play=$('creativeProjectPlayGame');
     const publicPlay=$('creativeProjectPublicGame');
+    const exportGame=$('creativeProjectExportGame');
     if(!clean){
       if(context)context.textContent='';
       hideGameProjectActions();
@@ -142,8 +155,10 @@ PROJECT_CONTINUITY_SCRIPT = r"""
         return;
       }
       const latest=games[0]||{};
+      const exportState=latest.aura_web_export||{};
       const testState=latest.public_id?'public test':(latest.latest_build?'build ready':'not built');
-      if(context)context.textContent=`Game Forge: ${games.length} game${games.length===1?'':'s'} · ${String(latest.status||'draft').replaceAll('_',' ')} · ${testState}`;
+      const deliveryState=exportState.ready?'export ready':'export blocked';
+      if(context)context.textContent=`Game Forge: ${games.length} game${games.length===1?'':'s'} · ${String(latest.status||'draft').replaceAll('_',' ')} · ${testState} · ${deliveryState}`;
       if(resume&&latest.id){
         resume.href=projectGameHref(latest.id,clean);
         resume.textContent=games.length===1?'Resume game':'Resume latest game';
@@ -156,6 +171,10 @@ PROJECT_CONTINUITY_SCRIPT = r"""
       if(publicPlay&&latest.public_id){
         publicPlay.href=`/game-gallery/${encodeURIComponent(String(latest.public_id))}`;
         publicPlay.hidden=false;
+      }
+      if(exportGame&&payload.can_create&&latest.id&&exportState.ready&&exportState.production_ready_target){
+        exportGame.href=projectGameExportHref(latest.id,clean);
+        exportGame.hidden=false;
       }
     }catch(_){
       if(token!==gameSummaryToken)return;
@@ -348,6 +367,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
     commitProject,
     projectHref,
     projectGameHref,
+    projectGameExportHref,
     resolveGameProject,
     refresh:drawWorkspace,
   };
