@@ -40,8 +40,11 @@ jobs:
       - name: Production source completeness audit
         run: python scripts/source_completeness_audit.py
 
+      - name: Self-host release script syntax
+        run: bash -n deploy/selfhost/*.sh
+
       - name: Compile Python
-        run: python -m compileall -q aura_music_studio
+        run: python -m compileall -q aura_music_studio deploy scripts app.py worker.py
 
       - name: Run test suite
         run: python -m pytest -q -ra
@@ -85,10 +88,29 @@ jobs:
             -f deploy/production/docker-compose.production.yml \
             config -q
           ACESTEP_API_KEY=ci-production-renderer-key-0123456789 docker compose \
+            --profile public \
             -f docker-compose.yml \
             -f docker-compose.gpu.yml \
             -f deploy/production/docker-compose.production.yml \
-            --profile public config -q
+            config -q
+
+      - name: Immutable self-host release topology validation
+        run: |
+          env \
+            ESP_COMMAND_CENTER_IMAGE=registry.example.invalid/elevate-souls/command-center@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+            AURA_ACESTEP_IMAGE=registry.example.invalid/elevate-souls/ace-step@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+            AURA_VLLM_IMAGE=registry.example.invalid/elevate-souls/aura-inference@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+            AURA_LLM_INTERNAL_API_KEY=ci-private-aura-key-0123456789 \
+            AURA_SELFHOST_LLM_MODEL_DIR=/tmp/ci-aura-model \
+            ACESTEP_API_KEY=ci-production-renderer-key-0123456789 \
+            docker compose \
+              --profile public \
+              -f docker-compose.yml \
+              -f docker-compose.gpu.yml \
+              -f deploy/production/docker-compose.production.yml \
+              -f deploy/selfhost/compose.release.yml \
+              -f deploy/selfhost/compose.aura-inference.yml \
+              config -q
 
       - name: Production readiness fail-closed smoke
         run: |
