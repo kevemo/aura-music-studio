@@ -4,6 +4,7 @@
     "deploymentEnabled": {
       "main": false,
       "development/full-site-build": false,
+      "chat4/*": false,
       "feature/aura-platform-core": false,
       "feature/core-email-verification": false,
       "feature/core-password-recovery-sessions": false,

@@ -26,7 +26,7 @@ PROJECT_CONTINUITY_SCRIPT = r"""
   if(!TARGETS.has(path))return;
 
   const params=new URLSearchParams(location.search);
-  const requested=(params.get('project')||'').trim();
+  const requested=(new URLSearchParams(location.search).get('project')||'').trim();
   const requestedGame=(params.get('game')||'').trim();
   const isHouse=path==='/creative-house';
   const isMedia=path==='/image-designer'||path==='/video-studio';
