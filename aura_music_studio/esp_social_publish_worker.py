@@ -15,6 +15,7 @@ from .esp_social_provider_adapters import (
     ProviderProgress,
     provider_adapter,
 )
+from .esp_social_publish_capabilities import resolve_publish_capability
 from .esp_social_publish_media import resolve_variant_media
 from .esp_social_publish_queue import SocialPublishQueue
 from .esp_social_secret_refs import resolve_social_token
@@ -180,20 +181,18 @@ def _raw_variant(store: SocialHouseStore, space_id: str, entry_id: str):
 def _lookup_runtime(store: SocialHouseStore, space_id: str, entry_id: str):
     house, content, variant = _raw_variant(store, space_id, entry_id)
     connection = next(
-        (
-            item
-            for item in house.connections
-            if item.platform == variant.platform
-            and item.state == "connected"
-            and item.supports_auto_publish
-        ),
+        (item for item in house.connections if item.platform == variant.platform),
         None,
     )
-    if connection is None:
-        raise ProviderAdapterError(
-            "Authorised publishing connection is no longer available"
-        )
-    adapter_name = str(connection.metadata.get("publishing_adapter") or "").strip()
+    capability = resolve_publish_capability(
+        connection,
+        platform=variant.platform,
+        content_type=variant.content_type,
+    )
+    if not capability.publishable or connection is None or not capability.adapter:
+        detail = "; ".join(capability.reasons) or "Authorised publishing connection is no longer available"
+        raise ProviderAdapterError(detail)
+    adapter_name = capability.adapter
     if adapter_name == FacebookPagesAdapter.name:
         adapter = FacebookPagesAdapter()
     else:
