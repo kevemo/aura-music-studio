@@ -81,10 +81,11 @@ jobs:
       - name: Install focused native trust dependencies
         run: python -m pip install pytest cryptography 'pydantic>=2,<3' argon2-cffi
 
-      - name: Verify signed sequence, device attestation, execute-once and native adapter boundaries
+      - name: Verify signed sequence, exact command binding, device attestation, execute-once and native adapter boundaries
         run: >-
           python -m pytest -q
           tests/test_aura_sec_command_sequence.py
+          tests/test_aura_sec_command_bound_attestation.py
           tests/test_aura_sec_device_attestation.py
           tests/test_aura_sec_native_execution_guard.py
           tests/test_aura_sec_native_platform_execution.py
