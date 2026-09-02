@@ -20,12 +20,15 @@ def connection(
     state: str = "connected",
     active: bool = True,
     supports_auto_publish: bool = True,
+    account_external_id: str | None = None,
+    token_secret_ref: str = "social-token://test_provider",
 ) -> SocialConnection:
     return SocialConnection(
         platform=platform,
+        account_external_id=account_external_id,
         state=state,
         supports_auto_publish=supports_auto_publish,
-        token_secret_ref="social-token://test_provider",
+        token_secret_ref=token_secret_ref,
         metadata={
             "publishing_adapter": adapter,
             "publishing_adapter_active": active,
@@ -96,6 +99,45 @@ def test_disconnected_or_inactive_connection_is_never_publishable():
     )
     assert inactive.publishable is False
     assert "adapter_inactive" in inactive.reason_codes
+
+
+def test_facebook_page_requires_local_deployment_prerequisites(monkeypatch):
+    monkeypatch.delenv("AURA_SOCIAL_TOKEN_FACEBOOK_PAGES", raising=False)
+    monkeypatch.delenv("AURA_FACEBOOK_GRAPH_VERSION", raising=False)
+    monkeypatch.delenv("AURA_META_GRAPH_VERSION", raising=False)
+    fb = connection(
+        "facebook",
+        "facebook_pages_graph",
+        account_external_id="123456789012345",
+        token_secret_ref="social-token://facebook_pages",
+    )
+
+    missing = resolve_publish_capability(fb, platform="facebook", content_type="post")
+    assert missing.publishable is False
+    assert missing.configured is False
+    assert "deployment_credential_unavailable" in missing.reason_codes
+    assert "provider_config_missing" in missing.reason_codes
+
+    monkeypatch.setenv("AURA_SOCIAL_TOKEN_FACEBOOK_PAGES", "server-only-page-token")
+    monkeypatch.setenv("AURA_FACEBOOK_GRAPH_VERSION", "v23.0")
+    ready = resolve_publish_capability(fb, platform="facebook", content_type="post")
+    assert ready.publishable is True
+    assert ready.configured is True
+    assert ready.reason_codes == []
+
+
+def test_facebook_page_rejects_invalid_page_identity_even_with_deployment_secret(monkeypatch):
+    monkeypatch.setenv("AURA_SOCIAL_TOKEN_FACEBOOK_PAGES", "server-only-page-token")
+    monkeypatch.setenv("AURA_FACEBOOK_GRAPH_VERSION", "v23.0")
+    fb = connection(
+        "facebook",
+        "facebook_pages_graph",
+        account_external_id="me",
+        token_secret_ref="social-token://facebook_pages",
+    )
+    result = resolve_publish_capability(fb, platform="facebook", content_type="post")
+    assert result.publishable is False
+    assert "facebook_page_id_invalid" in result.reason_codes
 
 
 def test_content_validation_rejects_auto_publish_for_unimplemented_surface():
