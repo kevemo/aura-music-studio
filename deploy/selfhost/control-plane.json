@@ -3,7 +3,7 @@
   "product": "Elevate Souls Productions Content Creation Command Center",
   "endorsement": "Powered by Aura AI",
   "authoritative_runtime": "esp-self-host",
-  "vercel_role": "optional-preview-only",
+  "vercel_role": "disabled-legacy-integration",
   "release_model": "exact-git-sha-and-immutable-container-digest",
   "current_safe_mode": {
     "phase": 1,
