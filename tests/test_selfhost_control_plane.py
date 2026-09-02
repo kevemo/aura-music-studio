@@ -8,18 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SELFHOST = ROOT / "deploy" / "selfhost"
 
 
-def test_selfhost_is_authoritative_and_vercel_is_optional_preview_only():
+def test_selfhost_is_authoritative_and_vercel_is_disabled_legacy_integration():
     contract = json.loads((SELFHOST / "control-plane.json").read_text(encoding="utf-8"))
     assert contract["product"] == "Elevate Souls Productions Content Creation Command Center"
     assert contract["endorsement"] == "Powered by Aura AI"
     assert contract["authoritative_runtime"] == "esp-self-host"
-    assert contract["vercel_role"] == "optional-preview-only"
+    assert contract["vercel_role"] == "disabled-legacy-integration"
     assert contract["target_platform"]["runtime_dependency_on_vercel"] is False
 
     vercel = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
-    deployment = vercel["git"]["deploymentEnabled"]
-    assert deployment["main"] is False
-    assert deployment["development/full-site-build"] is False
+    assert vercel["git"]["deploymentEnabled"] is False
 
 
 def test_current_sqlite_mode_refuses_fake_horizontal_scaling_claim():
@@ -49,10 +47,16 @@ def test_target_platform_has_owned_registry_scaling_secrets_and_supply_chain():
     assert gates["dynamic-secrets-ha"]["status"] == "blocked"
 
 
-def test_release_manifest_requires_immutable_digest_shape_and_starts_untrusted():
+def test_release_manifest_template_is_schema2_non_runnable_and_untrusted():
     example = json.loads((SELFHOST / "release-manifest.example.json").read_text(encoding="utf-8"))
-    assert len(example["git_sha"]) == 40
-    assert "@sha256:" in example["command_center_image"]
+    assert example["schema_version"] == 2
+    assert example["git_sha"] == ""
+    assert example["command_center_image"] == ""
+    assert example["runtime_images"] == {
+        "ace_step": "",
+        "caddy": "",
+        "searxng": "",
+    }
     assert example["approved"] is False
     evidence = example["supply_chain"]
     assert evidence
@@ -73,6 +77,7 @@ def test_release_builder_requires_scan_signature_sbom_and_provenance():
         "cosign verify",
         '"approved": False',
         '"trivy_unfixed_high_critical_gate": True',
+        '"runtime_images_trivy_high_critical_gate": True',
     ):
         assert required in script
     assert "Mutable latest tags are forbidden" in script
@@ -92,18 +97,23 @@ def test_production_wrapper_is_fail_closed_and_reverifies_supply_chain_and_readi
         '"buildkit_sbom"',
         '"trivy_high_critical_gate"',
         '"trivy_unfixed_high_critical_gate"',
+        '"runtime_images_trivy_high_critical_gate"',
         '"cosign_signature_verified"',
         "cosign verify",
         "trivy image",
         "--severity HIGH,CRITICAL",
         "/health/ready",
         "ace-step",
+        "caddy",
+        "searxng",
+        "--profile",
+        "public",
         "--no-build",
         "@sha256:",
     ):
         assert required in script
     assert "--ignore-unfixed" not in script
-    assert "ESP self-host release is READY" in script
+    assert "ESP authoritative self-host release is READY" in script
 
 
 def test_kubernetes_bootstrap_forbids_mutable_release_channels_and_unsafe_cluster_mutation():
