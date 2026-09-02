@@ -72,10 +72,5 @@ include = ["aura_music_studio*"]
 [tool.setuptools.package-data]
 aura_music_studio = ["static/*.webp", "static/*.svg"]
 
-# Vercel must serve the real FastAPI application, not the static working-model HTML.
-# The bootstrap sets only serverless-safe writable path defaults before importing app.py.
-[tool.vercel]
-entrypoint = "vercel_bootstrap:app"
-
 [tool.ruff]
 line-length = 100
