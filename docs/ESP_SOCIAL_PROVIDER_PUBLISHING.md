@@ -1,28 +1,38 @@
 # ESP Social Provider Publishing
 
-## Status
+## Current implementation
 
-Pulsar-Frequency House now contains the **trusted worker and provider-adapter foundation** needed to move approved ESP Social Management content from the internal production queue to official platform APIs.
+The ESP Content Creation Command Center contains a fail-closed publishing pipeline for the provider surfaces implemented by this runtime. Planning capabilities can be broader than provider execution; a planned format never becomes automatically publishable merely because a connection record says it can.
 
-This does **not** mean provider OAuth applications are already configured or that live publishing should be enabled by default.
+Implemented automatic publishing surfaces are:
 
-The worker remains disabled unless all of the following are deliberately configured:
+| Platform | Runtime adapter | Automatic publishing surface |
+| --- | --- | --- |
+| Facebook Pages | `facebook_pages_graph` | Page post |
+| Instagram | `instagram_graph` | Post, reel |
+| TikTok | `tiktok_content_posting` | Video |
+| YouTube | `youtube_data_v3` | Video, short |
 
-1. the provider application exists and has the required provider product/scopes;
-2. provider review/audit requirements have been satisfied for the intended visibility/use case;
-3. the ESP member has completed the provider's official OAuth/consent flow;
-4. the deployment stores the member's provider token in the dedicated social-token secret namespace;
-5. the SocialConnection points to an implemented adapter and is explicitly marked active;
-6. the content has passed ESP approval gates where required;
-7. every attached publish asset comes from the ESP Social Media Library and is rights-confirmed/approved;
-8. the scheduled time is due;
-9. provider-specific metadata/consent requirements are satisfied.
+Other platform/content combinations remain planning-only until a bounded provider adapter actually implements them.
 
-`queued`, `publishing` and `published` are intentionally distinct states. Only provider-confirmed completion may produce `published`.
+The authoritative capability resolver is `aura_music_studio.esp_social_publish_capabilities`. Content validation, queue transitions and the privileged provider worker all use the same runtime capability contract. The worker revalidates capability immediately before any provider call, which prevents stale or optimistic metadata from widening provider access.
+
+## Connection models
+
+TikTok, Instagram and YouTube use the private ESP member OAuth flow. Their provider applications, scopes and callbacks must be configured in the deployment before the Connections screen offers authorization.
+
+Facebook Pages is intentionally separate from the generic member OAuth registry. An ESP owner registers:
+
+- the numeric Facebook Page ID; and
+- a restricted deployment token alias such as `social-token://facebook_pages`.
+
+The browser never asks for or renders the raw Facebook Page access token. The token value must exist only in the deployment secret namespace, for example `AURA_SOCIAL_TOKEN_FACEBOOK_PAGES`.
+
+Facebook Pages readiness additionally requires a configured Meta Graph version (`AURA_FACEBOOK_GRAPH_VERSION` or `AURA_META_GRAPH_VERSION`). The queue will not report a Facebook Page post as publishable if the deployment secret, Graph version or numeric Page identity is missing. Meta remains authoritative for Page permissions and publication at provider-call time.
 
 ## Worker boundary
 
-The privileged process is:
+The privileged publisher runs separately from Aura's ordinary durable task worker:
 
 ```text
 aura-social-publish-worker
@@ -34,175 +44,88 @@ or:
 python -m aura_music_studio.esp_social_publish_worker
 ```
 
-It is separate from Aura's normal durable task worker. The normal task worker remains unable to publish social content.
-
-Docker Compose exposes the provider worker only through the opt-in `social-publishing` profile. The service mounts:
-
-- durable application data, including private Social House queue state;
-- Creative Project storage **read-only**, so rights-approved local media can be uploaded without granting the worker permission to edit creative projects.
-
-The worker is also disabled internally unless:
+It remains disabled unless:
 
 ```text
 AURA_SOCIAL_PUBLISH_WORKER_ENABLED=true
 ```
 
+Docker Compose exposes the provider worker through the opt-in `social-publishing` profile. Normal Aura task execution cannot publish social content.
+
+## Fail-closed requirements
+
+A variant can move through provider publishing only when all applicable checks pass:
+
+1. the member has ESP Social access;
+2. the Social House connection is connected;
+3. automatic publishing is enabled for that connection;
+4. the credential reference uses an approved `social-token://` or encrypted `social-oauth://` path;
+5. the configured adapter exists in the runtime and belongs to the requested platform;
+6. the requested content type is implemented by that adapter;
+7. the adapter is explicitly active;
+8. approval requirements have been satisfied;
+9. scheduled publication is due;
+10. attached library media is rights-confirmed and approved;
+11. provider-specific consent/privacy/media requirements pass;
+12. deployment/provider credentials and configuration are available;
+13. the provider confirms success.
+
+`queued`, `publishing` and `published` are deliberately distinct states. Only provider-confirmed completion can produce `published`.
+
 ## Token security
 
-Raw provider access tokens must never be written into Social House JSON.
-
-A SocialConnection stores an alias such as:
+Raw provider credentials must never be written into Social House JSON. A deployment-managed connection may store only a restricted alias such as:
 
 ```text
-social-token://creator-one
+social-token://facebook_pages
 ```
 
-The worker maps that alias only to:
+which maps only to the social-token environment namespace:
 
 ```text
-AURA_SOCIAL_TOKEN_CREATOR_ONE
+AURA_SOCIAL_TOKEN_FACEBOOK_PAGES
 ```
 
-This restricted namespace is deliberate. A member-controlled SocialConnection cannot point the worker at unrelated deployment secrets such as owner/admin credentials, SMTP passwords or general connector keys.
+OAuth-backed member connections use encrypted `social-oauth://` credential references managed by the dedicated OAuth vault. These reference types cannot be used to read unrelated owner/admin secrets, SMTP passwords or arbitrary connector keys.
 
 ## Media security
 
-The provider worker does not accept arbitrary filesystem paths or arbitrary media URLs from content metadata.
+Publishable media references come through the ESP Social Media Library. The resolver verifies that the asset:
 
-Each publishable media reference must be attached as:
-
-```text
-library:<media_asset_id>
-```
-
-The resolver then verifies that the ESP Social Media Library asset:
-
-- exists inside the same tenant Social House;
+- belongs to the same Social House;
 - is not archived;
 - has `approval_state=approved`;
-- has `rights_confirmed=true`;
+- has `rights_confirmed=true`; and
 - resolves through a supported source type.
 
-Provider-pulled URLs must use public HTTPS and direct localhost/private IP targets are rejected.
-
-Creative Project files are accepted only when the library provenance resolves to a real Creative Element and its file path remains inside that tenant's project directory.
+Provider-pulled URLs must use public HTTPS. Localhost/private-network targets are rejected. Creative Project files are accepted only when provenance resolves to a real Creative Element inside the tenant project directory.
 
 ## Queue and crash safety
 
-Before an external provider call begins, a due variant is claimed by the trusted worker and changes from `queued` to `publishing`.
+A due variant is atomically claimed before an external provider call and moves from `queued` to `publishing`. Provider job identifiers are persisted as soon as they are received, and existing provider jobs are polled before new work is claimed.
 
-Provider job identifiers are persisted as soon as an adapter receives them. The worker polls existing provider jobs before claiming new work.
+If a worker crashes after a provider request may have begun but before a provider job ID is safely stored, the item enters an ambiguous-state review path rather than being blindly replayed. A single-worker lease prevents concurrent consumers from publishing the same deployment queue.
 
-If the worker crashes after a provider call may have begun but before a provider job ID is saved, the item is **not automatically replayed** after its lease expires. It is failed into an ambiguous-state review path instead. This is intentional duplicate-post protection.
+## Provider-specific boundaries
 
-A single-worker lease also prevents two accidental provider-worker processes from consuming the same deployment queue concurrently.
+### Facebook Pages
 
-## Implemented provider adapters
+`facebook_pages_graph` publishes bounded Page feed posts and a single approved image where the provider can access the media URL. Reels, Stories and personal-profile publishing are not exposed by this adapter.
 
-### TikTok — `tiktok_content_posting`
+### Instagram
 
-Implementation follows the official TikTok Content Posting API Direct Post workflow:
+`instagram_graph` supports the implemented Professional-account post/reel path. Planning can include additional Instagram formats, but unsupported planned formats remain planning-only.
 
-1. Query Creator Info;
-2. require explicit creator consent in the variant;
-3. require a creator-selected privacy value that is allowed by current Creator Info;
-4. initialize `/v2/post/publish/video/init/` using `video.publish`;
-5. transfer the video using `PULL_FROM_URL` or `FILE_UPLOAD`;
-6. persist `publish_id`;
-7. poll `/v2/post/publish/status/fetch/`;
-8. record `published` only after TikTok reports `PUBLISH_COMPLETE`.
+### TikTok
 
-Current worker release enables TikTok **video Direct Post**. The platform registry can plan photo content, but photo provider execution remains a separate adapter extension.
+`tiktok_content_posting` implements video Direct Post with provider creator-info/privacy/consent checks and provider status polling. TikTok photo planning does not imply photo publishing.
 
-TikTok's official documentation states that unaudited Direct Post clients are restricted to private visibility. Production public posting therefore requires TikTok's applicable audit/approval.
+### YouTube
 
-Official references:
+`youtube_data_v3` uses OAuth-authorized video upload and provider processing checks for video/short surfaces. The queue is not marked published until the provider confirms processing success.
 
-- https://developers.tiktok.com/docs/en/content-posting-api-get-started
-- https://developers.tiktok.com/docs/en/content-posting-api-reference-direct-post
-- https://developers.tiktok.com/docs/en/content-posting-api-reference-get-video-status
+## Deployment truth
 
-### Instagram — `instagram_graph`
+Code completion does not manufacture third-party authorization. Production provider calls still require the real provider applications, credentials, scopes, review/audit status and permissions required by Meta, TikTok, Google/YouTube or Instagram for the intended account and visibility.
 
-This adapter implements the Meta **Instagram API with Facebook Login** publishing path for Instagram Professional accounts.
-
-It currently supports:
-
-- one approved image post; or
-- one approved video/reel with a provider-accessible HTTPS URL.
-
-The adapter creates the media container, polls its provider processing state and invokes media publishing only when the container is ready.
-
-The Graph API version is deployment configuration rather than a permanent source-code constant:
-
-```text
-AURA_META_GRAPH_VERSION=
-```
-
-That prevents a future Meta version change from silently altering a deployment without validation.
-
-Meta also provides an Instagram Login/Business Login API path with a different permission set. That path should be represented by its own adapter/configuration rather than silently mixing OAuth models.
-
-Official Meta-maintained Postman references:
-
-- https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api
-- https://www.postman.com/meta/instagram/collection/6yqw8pt/instagram-api
-
-### YouTube — `youtube_data_v3`
-
-The YouTube adapter uses OAuth-authorized `videos.insert` resumable media upload and then polls `videos.list` processing details.
-
-The expected OAuth scope includes:
-
-```text
-https://www.googleapis.com/auth/youtube.upload
-```
-
-This release requires an approved, materialized local video asset. Default privacy is `private` unless the variant explicitly selects another valid YouTube privacy state.
-
-The queue is not marked `published` until YouTube reports successful video processing.
-
-YouTube states that uploads from unverified API projects created after July 28, 2020 are restricted to private viewing until the API project passes the required audit.
-
-Official references:
-
-- https://developers.google.com/youtube/v3/docs/videos/insert
-- https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol
-- https://developers.google.com/youtube/v3/docs/videos/list
-
-## Connection metadata
-
-A provider connection uses the existing SocialConnection object. Example shape (illustrative aliases only; never place a real token here):
-
-```json
-{
-  "platform": "instagram",
-  "account_external_id": "<professional-account-id>",
-  "state": "connected",
-  "supports_auto_publish": true,
-  "token_secret_ref": "social-token://creator-one",
-  "metadata": {
-    "publishing_adapter": "instagram_graph",
-    "publishing_adapter_active": true
-  }
-}
-```
-
-The API's existing connection-state endpoint records capability state only. A later OAuth portal must create/update these fields from verified provider callbacks rather than asking members to paste access tokens into the browser.
-
-## Next integration stage
-
-The next provider work should focus on:
-
-1. first-party OAuth start/callback portals for TikTok, Meta/Instagram and Google/YouTube;
-2. encrypted refresh-token lifecycle and access-token refresh where the provider supports it;
-3. provider webhook verification/ingestion;
-4. TikTok photo publishing;
-5. Instagram carousel publishing and the Instagram Login/Business Login adapter path;
-6. fully resumable/recoverable interrupted YouTube upload sessions;
-7. public-media delivery for approved Creative Project outputs where a provider requires URL pull;
-8. provider account/capability synchronization back into the Social Management UI;
-9. analytics ingestion after confirmed publication;
-10. unified social inbox adapters where provider permissions permit.
-
-None of those should weaken the existing ESP-only membership, niche, affiliation/no-poaching, approval, rights/provenance or provider-confirmation gates.
+The Connections UI reports those boundaries rather than presenting them as unfinished application placeholders: provider-authorized capabilities are enabled only when the runtime and deployment can truthfully support them.
