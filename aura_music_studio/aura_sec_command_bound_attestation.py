@@ -159,8 +159,9 @@ class AuraSecCommandBoundAttestedNativeExecutor:
 
       1. verify the server-signed command;
       2. require the command digest in the device proof to equal that exact signed payload;
-      3. verify the additional device-key binding signature using the already-enrolled public key;
-      4. delegate to the existing attested executor, which atomically consumes the one-time
+      3. independently re-hash the nested base device assertion;
+      4. verify the additional device-key binding signature using the already-enrolled public key;
+      5. delegate to the existing attested executor, which atomically consumes the one-time
          challenge and then re-applies signed-command, anti-rollback and execute-once admission.
 
     A malformed binding proof never consumes the underlying one-time challenge and never reaches
@@ -241,6 +242,13 @@ class AuraSecCommandBoundAttestedNativeExecutor:
         except Exception as exc:
             raise PermissionError("Aura Sec enrolled device public key is invalid") from exc
 
+    @staticmethod
+    def _verify_base_assertion_digest(assertion: DeviceAttestationAssertion) -> None:
+        payload = assertion.canonical_payload()
+        digest = hashlib.sha256(payload).hexdigest()
+        if not secrets.compare_digest(digest, assertion.payload_digest):
+            raise PermissionError("Aura Sec base device-attestation payload digest does not match")
+
     def _verify_binding_signature(
         self,
         assertion: CommandBoundDeviceAttestationAssertion,
@@ -293,6 +301,7 @@ class AuraSecCommandBoundAttestedNativeExecutor:
             raise PermissionError("Aura Sec command-bound assertion targets a different device")
         if not secrets.compare_digest(base.command_id, command.command_id):
             raise PermissionError("Aura Sec command-bound assertion targets a different command")
+        self._verify_base_assertion_digest(base)
         self._verify_binding_signature(assertion)
         return self.attested_executor.dispatch(
             command,
