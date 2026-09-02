@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from html import escape
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -100,6 +101,31 @@ def _public_game(game: GameDNA) -> dict:
         "updated_at": game.updated_at,
         "private_storage_exposed": False,
     }
+
+
+def _creative_project_name(game: GameDNA) -> str:
+    metadata = game.metadata if isinstance(game.metadata, dict) else {}
+    return str(metadata.get("creative_project_name") or "").strip()
+
+
+def _game_creation_url(game: GameDNA) -> str:
+    params: list[tuple[str, str]] = []
+    project = _creative_project_name(game)
+    if project:
+        params.append(("project", project))
+    params.append(("game", str(game.id)))
+    return f"/game-creation?{urlencode(params)}"
+
+
+def _private_playtest_url(game: GameDNA, *, popout: bool = False) -> str:
+    params: list[tuple[str, str]] = []
+    project = _creative_project_name(game)
+    if project:
+        params.append(("project", project))
+    params.append(("game", str(game.id)))
+    if popout:
+        params.append(("popout", "1"))
+    return f"/game-creation/play/{quote(str(game.id), safe='')}?{urlencode(params)}"
 
 
 def _invalidate_after_edit(game: GameDNA) -> None:
@@ -221,7 +247,7 @@ def build_game(game_id: str, request: Request):
         raise HTTPException(404, "Game not found") from exc
     return {
         "game": _public_game(game),
-        "private_playtest_url": f"/game-creation/play/{game.id}",
+        "private_playtest_url": _private_playtest_url(game),
         "runtime": game.latest_build.runtime if game.latest_build else None,
         "requested_engine": game.engine_target,
         "aura_native_runtime": True,
@@ -315,11 +341,23 @@ def game_gallery(request: Request):
     return {"games": list_public_games(), "free_tier_playtesting": True}
 
 
-def _host_page(title: str, frame_url: str, *, rating_line: str, popout: bool) -> HTMLResponse:
+def _host_page(
+    title: str,
+    frame_url: str,
+    *,
+    rating_line: str,
+    popout: bool,
+    return_url: str = "/game-creation",
+    popout_url: str | None = None,
+) -> HTMLResponse:
     safe_title = escape(title)
     safe_frame = escape(frame_url, quote=True)
-    popup = "" if popout else f"<button onclick=\"window.open('{safe_frame.replace('/frame', '')}','pulsarGame','width=1280,height=800,noopener,noreferrer')\">Pop Out for TikTok LIVE Studio</button>"
-    html = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>{safe_title} — Playtest</title><style>html,body{{margin:0;height:100%;background:#03050a;color:white;font-family:system-ui}}header{{height:58px;padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #ffffff22}}header small{{color:#c4cada}}button,a{{background:#1a2030;color:white;border:1px solid #ffffff2a;border-radius:9px;padding:8px 10px;text-decoration:none;font-weight:800}}iframe{{display:block;width:100%;height:calc(100% - 59px);border:0;background:#050611}}</style></head><body><header><div><b>{safe_title}</b><br><small>{escape(rating_line)}</small></div><div>{popup} <a href='/game-creation'>Game Creation</a></div></header><iframe src='{safe_frame}' sandbox='allow-scripts allow-pointer-lock' referrerpolicy='no-referrer' allow='gamepad'></iframe></body></html>"""
+    safe_return = escape(return_url, quote=True)
+    safe_popout = escape(popout_url or "", quote=True)
+    popup = ""
+    if not popout and safe_popout:
+        popup = f"<a href='{safe_popout}' target='_blank' rel='noopener noreferrer'>Pop Out for TikTok LIVE Studio</a>"
+    html = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>{safe_title} — Playtest</title><style>html,body{{margin:0;height:100%;background:#03050a;color:white;font-family:system-ui}}header{{height:58px;padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid #ffffff22}}header small{{color:#c4cada}}button,a{{background:#1a2030;color:white;border:1px solid #ffffff2a;border-radius:9px;padding:8px 10px;text-decoration:none;font-weight:800}}iframe{{display:block;width:100%;height:calc(100% - 59px);border:0;background:#050611}}</style></head><body><header><div><b>{safe_title}</b><br><small>{escape(rating_line)}</small></div><div>{popup} <a href='{safe_return}'>Game Creation</a></div></header><iframe src='{safe_frame}' sandbox='allow-scripts allow-pointer-lock' referrerpolicy='no-referrer' allow='gamepad'></iframe></body></html>"""
     return HTMLResponse(html, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"})
 
 
@@ -333,7 +371,14 @@ def private_playtest(game_id: str, request: Request, popout: int = 0):
     if not game.latest_build:
         raise HTTPException(409, "Build the game before opening its playtest")
     rating = game.rating_assessment.suggested_age_band if game.rating_assessment else "Not yet scanned"
-    return _host_page(game.title, f"/api/game-forge/games/{game.id}/playtest-frame", rating_line=f"Pulsar provisional rating: {rating}", popout=bool(popout))
+    return _host_page(
+        game.title,
+        f"/api/game-forge/games/{game.id}/playtest-frame",
+        rating_line=f"Pulsar provisional rating: {rating}",
+        popout=bool(popout),
+        return_url=_game_creation_url(game),
+        popout_url=_private_playtest_url(game, popout=True),
+    )
 
 
 @router.get("/api/game-forge/games/{game_id}/playtest-frame", response_class=HTMLResponse, include_in_schema=False)
@@ -362,11 +407,13 @@ def public_game_host(public_id: str, request: Request, popout: int = 0):
         manifest = public_manifest(public_id)
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(404, "Public game not found") from exc
+    safe_public_id = quote(str(public_id), safe="")
     return _host_page(
         str(manifest.get("title") or "Pulsar Game"),
-        f"/game-gallery/{public_id}/frame",
+        f"/game-gallery/{safe_public_id}/frame",
         rating_line=f"Pulsar provisional assessment: {manifest.get('suggested_age_band') or 'unrated'} — not an official authority rating",
         popout=bool(popout),
+        popout_url=f"/game-gallery/{safe_public_id}?popout=1",
     )
 
 
