@@ -161,6 +161,15 @@ def member_dashboard(request: Request):
             None,
             None,
         ),
+        (
+            "🛍️",
+            "Marketplace Account",
+            "View your account-scoped purchase history plus verified creator marketplace earnings, refund reversals and net proceeds. This surface is read-only and marketplace participation remains opt-in.",
+            "/marketplace/account",
+            "Open Marketplace Account",
+            None,
+            None,
+        ),
     ]
     cards = "".join(
         f"""<article class='tool'><div class='icon'>{icon}</div><h3>{escape(title)}</h3><p>{escape(copy)}</p><div class='toolactions'><a class='btn primary' href='{escape(url, quote=True)}'>{escape(cta)}</a>{f"<a class='btn secondary' href='{escape(secondary_url, quote=True)}'>{escape(secondary_cta)}</a>" if secondary_url and secondary_cta else ''}</div></article>"""
