@@ -7,6 +7,7 @@ from aura_music_studio.esp_social_portal_overlay import (
     MULTI_PLATFORM_UI,
     NICHE_COACH_UI,
     PLATFORM_AWARE_UI,
+    TRUTH_REPLACEMENTS,
 )
 from aura_music_studio.social_management import (
     PlatformVariant,
@@ -62,7 +63,7 @@ def test_multi_platform_composer_creates_independent_variants_and_never_auto_pub
     assert "Provider-authorised publishing" in MULTI_PLATFORM_UI
 
 
-def test_aura_niche_coach_builds_durable_campaign_and_tasks():
+def test_aura_niche_coach_builds_repeat_safe_durable_campaign_and_tasks():
     assert "/command-center/api/social-intelligence" in NICHE_COACH_UI
     assert "/aura-insights" in NICHE_COACH_UI
     assert "/projects" in NICHE_COACH_UI
@@ -70,13 +71,21 @@ def test_aura_niche_coach_builds_durable_campaign_and_tasks():
     assert "aura-plan" in NICHE_COACH_UI
     assert "niche-growth" in NICHE_COACH_UI
     assert "window.runAuraNicheCoach=build" in NICHE_COACH_UI
+    assert "existingProject" in NICHE_COACH_UI
+    assert "no duplicate tasks were created" in NICHE_COACH_UI
     assert "next integration stage" not in NICHE_COACH_UI
 
 
-def test_social_overlay_replaces_placeholder_and_exposes_connections(monkeypatch):
+def test_social_overlay_replaces_placeholder_future_copy_and_exposes_connections(monkeypatch):
     original = """<!doctype html><html><body>
 <a class='btn optional' href='/command-center/niche'>Change Niche</a>
 <button class="btn" onclick="notice('Aura niche campaign generation is in the next integration stage.')">Plan niche campaign</button>
+<p>This truthful calendar is the surface the external Calendar interfaces and later provider-authorised publishing adapters build on.</p>
+<p>Aura will be able to layer recommendations on this structure without bypassing approvals.</p>
+<p>The API already supports task creation/update; this view exposes the operational foundation.</p>
+<p>Roadmap layer: future approval-link workflows still remain approval-state based.</p>
+<p>Future authorised Social Inbox (comments/DMs via platform APIs only after permission)</p>
+<footer>Powered by Aura AI Systems</footer>
 </body></html>"""
     monkeypatch.setattr(overlay_module, "base_social_house", lambda _request: HTMLResponse(original))
 
@@ -84,11 +93,19 @@ def test_social_overlay_replaces_placeholder_and_exposes_connections(monkeypatch
     html = response.body.decode("utf-8")
 
     assert "next integration stage" not in html
+    assert "later provider-authorised" not in html
+    assert "will be able" not in html
+    assert "operational foundation" not in html
+    assert "Roadmap layer" not in html
+    assert "Future authorised Social Inbox" not in html
+    assert "Powered by Aura AI Systems" not in html
+    assert "Powered by Aura AI" in html
     assert "id=\"auraNicheCoachButton\"" in html
     assert "runAuraNicheCoach()" in html
     assert "href='/command-center/social/connections'" in html
     assert "href='/command-center/social/publish-queue'" in html
     assert "id=\"espAuraNicheCoach\"" in html
+    assert len(TRUTH_REPLACEMENTS) >= 6
 
 
 def test_backend_accepts_valid_cross_platform_variants_and_rejects_invalid_pair():
