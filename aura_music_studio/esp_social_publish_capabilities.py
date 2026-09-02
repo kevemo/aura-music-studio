@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from .esp_social_provider_adapters import ADAPTERS
-from .esp_social_secret_refs import valid_social_token_ref
+from .esp_social_secret_refs import social_token_env_name, valid_social_token_ref
 
 # This map deliberately describes only content surfaces that the current runtime
 # adapters actually implement. Planning capabilities remain broader in
@@ -62,6 +63,50 @@ def _append(result: PublishCapability, code: str, reason: str) -> None:
     if code not in result.reason_codes:
         result.reason_codes.append(code)
         result.reasons.append(reason)
+
+
+def _facebook_deployment_checks(result: PublishCapability, connection: Any, metadata: dict[str, Any]) -> None:
+    """Verify local Facebook Page deployment prerequisites without a network call.
+
+    Facebook Pages is intentionally not part of the member OAuth registry. Its
+    Page token is provisioned by an ESP owner as a restricted social-token alias,
+    so queue/readiness state must not claim publishability unless that alias
+    resolves to a deployment secret and the Graph API version/Page identity are
+    locally configured. Meta still remains authoritative at provider-call time.
+    """
+
+    token_ref = getattr(connection, "token_secret_ref", None)
+    env_name = social_token_env_name(token_ref)
+    if not env_name or not (os.getenv(env_name) or "").strip():
+        _append(
+            result,
+            "deployment_credential_unavailable",
+            "deployment-managed Facebook Page credential is not configured on this server",
+        )
+
+    graph_version = (
+        os.getenv("AURA_FACEBOOK_GRAPH_VERSION")
+        or os.getenv("AURA_META_GRAPH_VERSION")
+        or ""
+    ).strip()
+    if not graph_version:
+        _append(
+            result,
+            "provider_config_missing",
+            "Facebook Graph API version is not configured on this server",
+        )
+
+    page_id = str(
+        getattr(connection, "account_external_id", None)
+        or metadata.get("facebook_page_id")
+        or ""
+    ).strip()
+    if not page_id.isdigit() or not 2 <= len(page_id) <= 40:
+        _append(
+            result,
+            "facebook_page_id_invalid",
+            "a numeric Facebook Page ID is required for automatic Page publishing",
+        )
 
 
 def resolve_publish_capability(
@@ -122,6 +167,11 @@ def resolve_publish_capability(
             f"{clean_content_type or 'requested content'} is planning-only for the configured publishing adapter",
         )
 
+    # Facebook Pages is deployment-managed rather than member-OAuth managed, so
+    # local deployment prerequisites are part of truthful queue readiness.
+    if adapter_name == "facebook_pages_graph" and expected_platform == clean_platform:
+        _facebook_deployment_checks(result, connection, metadata)
+
     result.configured = not any(
         code in result.reason_codes
         for code in {
@@ -129,6 +179,9 @@ def resolve_publish_capability(
             "adapter_unavailable",
             "adapter_platform_mismatch",
             "invalid_credential_reference",
+            "deployment_credential_unavailable",
+            "provider_config_missing",
+            "facebook_page_id_invalid",
         }
     )
     result.publishable = (
