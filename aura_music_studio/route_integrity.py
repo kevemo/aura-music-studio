@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import warnings
 from collections.abc import Iterable
 from hashlib import sha256
 from typing import Any
@@ -167,7 +166,12 @@ def _normalize_schema_operation_ids(schema: dict[str, Any]) -> int:
 
 
 def _install_openapi_integrity(app: Any) -> None:
-    """Make final-route identity enforcement part of every uncached schema build."""
+    """Make final-route identity enforcement part of every uncached schema build.
+
+    Duplicate-operation warnings are intentionally not filtered here. The build must prove that
+    the final route identities are actually unique before FastAPI generates the schema rather
+    than hiding a collision behind warning suppression.
+    """
     if getattr(app.state, "route_integrity_openapi_installed", False):
         return
 
@@ -179,9 +183,7 @@ def _install_openapi_integrity(app: Any) -> None:
 
         route_ids_changed = _assign_final_operation_ids(app.router.routes)
         app.openapi_schema = None
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message=r"Duplicate Operation ID.*", category=UserWarning)
-            schema = original_openapi()
+        schema = original_openapi()
 
         schema_ids_changed = _normalize_schema_operation_ids(schema)
         app.openapi_schema = schema
