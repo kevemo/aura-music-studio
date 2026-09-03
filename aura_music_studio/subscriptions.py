@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import calendar
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
-from .plans import get_plan
+from .plans import BILLING_ANNUAL, BILLING_MONTHLY, get_plan
 
 
 def _now() -> datetime:
@@ -26,19 +27,39 @@ def _columns(con: sqlite3.Connection, table: str) -> set[str]:
     return {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
-def _ensure_payment_currency_columns(con: sqlite3.Connection) -> None:
-    """Upgrade pre-GBP ledgers in place without deleting the legacy amount_usd column."""
-    columns = _columns(con, "subscription_payments")
-    if "amount" not in columns:
-        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount TEXT")
-    if "amount_minor" not in columns:
-        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount_minor INTEGER")
-    if "currency" not in columns:
-        con.execute("ALTER TABLE subscription_payments ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'")
+def _advance_period(start: datetime, billing_period: str) -> datetime:
+    """Advance by a real calendar billing period instead of an arbitrary day count."""
+    period = (billing_period or "").strip().lower()
+    if period == BILLING_MONTHLY:
+        year = start.year + (1 if start.month == 12 else 0)
+        month = 1 if start.month == 12 else start.month + 1
+        day = min(start.day, calendar.monthrange(year, month)[1])
+        return start.replace(year=year, month=month, day=day)
+    if period == BILLING_ANNUAL:
+        year = start.year + 1
+        day = min(start.day, calendar.monthrange(year, start.month)[1])
+        return start.replace(year=year, day=day)
+    raise ValueError(f"Unknown billing period: {billing_period}")
 
-    # Historical 4.99/9.99 values were the intended public GBP prices despite the old
-    # amount_usd column name. Preserve that column as a compatibility mirror and backfill
-    # the canonical currency-aware columns.
+
+def _ensure_payment_currency_columns(con: sqlite3.Connection) -> None:
+    """Upgrade pre-GBP/period ledgers in place without deleting compatibility columns."""
+    payment_columns = _columns(con, "subscription_payments")
+    if "amount" not in payment_columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount TEXT")
+    if "amount_minor" not in payment_columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN amount_minor INTEGER")
+    if "currency" not in payment_columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN currency TEXT NOT NULL DEFAULT 'GBP'")
+    if "billing_period" not in payment_columns:
+        con.execute("ALTER TABLE subscription_payments ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly'")
+
+    state_columns = _columns(con, "subscription_state")
+    if "billing_period" not in state_columns:
+        con.execute("ALTER TABLE subscription_state ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly'")
+
+    # Historical values were monthly. Preserve the legacy amount_usd column as a compatibility
+    # mirror and backfill canonical currency-aware columns without changing entitlement history.
     con.execute(
         "UPDATE subscription_payments SET amount=COALESCE(NULLIF(amount,''),amount_usd) WHERE amount IS NULL OR amount=''"
     )
@@ -48,6 +69,8 @@ def _ensure_payment_currency_columns(con: sqlite3.Connection) -> None:
            WHERE amount_minor IS NULL"""
     )
     con.execute("UPDATE subscription_payments SET currency='GBP' WHERE currency IS NULL OR currency=''")
+    con.execute("UPDATE subscription_payments SET billing_period='monthly' WHERE billing_period IS NULL OR billing_period=''")
+    con.execute("UPDATE subscription_state SET billing_period='monthly' WHERE billing_period IS NULL OR billing_period=''")
 
 
 class SubscriptionLedger:
@@ -82,6 +105,7 @@ class SubscriptionLedger:
                     user_id TEXT PRIMARY KEY,
                     plan_id TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    billing_period TEXT NOT NULL DEFAULT 'monthly',
                     period_start TEXT NOT NULL,
                     period_end TEXT NOT NULL,
                     last_payment_reference TEXT,
@@ -98,6 +122,7 @@ class SubscriptionLedger:
                     amount TEXT,
                     amount_minor INTEGER,
                     currency TEXT NOT NULL DEFAULT 'GBP',
+                    billing_period TEXT NOT NULL DEFAULT 'monthly',
                     period_start TEXT NOT NULL,
                     period_end TEXT NOT NULL,
                     verified_at TEXT NOT NULL,
@@ -112,10 +137,19 @@ class SubscriptionLedger:
             row = con.execute("SELECT * FROM subscription_state WHERE user_id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
-    def verify_payment(self, user_id: str, plan_id: str, payment_reference: str, *, period_days: int = 31) -> dict:
+    def verify_payment(
+        self,
+        user_id: str,
+        plan_id: str,
+        payment_reference: str,
+        *,
+        billing_period: str = BILLING_MONTHLY,
+    ) -> dict:
         plan = get_plan(plan_id)
         if plan.id == "free":
             raise ValueError("Free membership does not require a subscription payment")
+        period = (billing_period or "").strip().lower()
+        amount_value = plan.price_for_period(period)
         reference = (payment_reference or "").strip()
         if len(reference) < 3:
             raise ValueError("A PayPal/payment reference is required")
@@ -130,8 +164,8 @@ class SubscriptionLedger:
         existing = self.get(user_id)
         existing_end = _parse(existing.get("period_end")) if existing else None
         start = existing_end if existing_end and existing_end > now else now
-        end = start + timedelta(days=period_days)
-        amount = str(plan.monthly_price)
+        end = _advance_period(start, period)
+        amount = str(amount_value)
 
         with self._connect() as con:
             duplicate = con.execute(
@@ -142,8 +176,8 @@ class SubscriptionLedger:
 
             con.execute(
                 """INSERT INTO subscription_payments
-                   (id,user_id,plan_id,payment_reference,amount_usd,amount,amount_minor,currency,period_start,period_end,verified_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id,user_id,plan_id,payment_reference,amount_usd,amount,amount_minor,currency,billing_period,period_start,period_end,verified_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid4().hex,
                     user_id,
@@ -151,8 +185,9 @@ class SubscriptionLedger:
                     reference,
                     amount,  # deprecated compatibility mirror
                     amount,
-                    plan.monthly_price_minor,
+                    plan.price_minor(period),
                     plan.currency,
+                    period,
                     _iso(start),
                     _iso(end),
                     _iso(now),
@@ -160,16 +195,17 @@ class SubscriptionLedger:
             )
             con.execute(
                 """INSERT INTO subscription_state
-                   (user_id,plan_id,status,period_start,period_end,last_payment_reference,updated_at)
-                   VALUES (?,?, 'active', ?, ?, ?, ?)
+                   (user_id,plan_id,status,billing_period,period_start,period_end,last_payment_reference,updated_at)
+                   VALUES (?,?, 'active', ?, ?, ?, ?, ?)
                    ON CONFLICT(user_id) DO UPDATE SET
                      plan_id=excluded.plan_id,
                      status='active',
+                     billing_period=excluded.billing_period,
                      period_start=excluded.period_start,
                      period_end=excluded.period_end,
                      last_payment_reference=excluded.last_payment_reference,
                      updated_at=excluded.updated_at""",
-                (user_id, plan.id, _iso(start), _iso(end), reference, _iso(now)),
+                (user_id, plan.id, period, _iso(start), _iso(end), reference, _iso(now)),
             )
             con.execute(
                 "UPDATE users SET status='active', plan_id=?, requested_plan_id=?, billing_status='active' WHERE id=?",
