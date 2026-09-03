@@ -58,3 +58,32 @@ def test_aura_sec_panel_inactive_state_points_to_canonical_native_products_accou
     assert "/account/native-products" in html
     assert "Commercial access never grants native device trust by itself" in html
     assert "separate from ordinary creative membership" not in html
+
+
+def test_dashboard_native_access_fails_closed_when_authoritative_account_is_missing(monkeypatch):
+    def missing_account(_user_id: str):
+        raise LookupError("Member account not found")
+
+    monkeypatch.setattr(dashboard.native_access, "resolve", missing_account)
+
+    access = dashboard._dashboard_native_access({"id": "synthetic-user", "plan_id": "pro"})
+
+    assert access.user_id == "synthetic-user"
+    assert access.membership_plan_id == "free"
+    assert access.entitlements == frozenset()
+    assert not access.has(AURA_SEC_ENTITLEMENT)
+    assert access.sources_for(AURA_SEC_ENTITLEMENT) == ()
+
+
+def test_dashboard_native_access_delegates_to_authoritative_resolver(monkeypatch):
+    expected = _Access(active=True, sources=("membership:pro",))
+    seen: list[str] = []
+
+    def resolved(user_id: str):
+        seen.append(user_id)
+        return expected
+
+    monkeypatch.setattr(dashboard.native_access, "resolve", resolved)
+
+    assert dashboard._dashboard_native_access({"id": "member-123", "plan_id": "free"}) is expected
+    assert seen == ["member-123"]
