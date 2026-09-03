@@ -73,8 +73,8 @@ router.include_router(owner_ip_rights_router)
 router.include_router(export_provenance_router)
 router.include_router(owner_export_provenance_router)
 router.include_router(stripe_commerce_receipts_router)
-# Membership checkout/status must resolve before the generic Stripe layers so owner-approved
-# plan/period contracts and Basic annual configuration are enforced before provider resource creation.
+# Membership checkout/status must resolve before the generic Stripe layers so the exact
+# owner-approved plan/period contract is enforced before any provider resource is created.
 router.include_router(stripe_membership_checkout_router)
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
