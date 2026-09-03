@@ -51,6 +51,7 @@ def _stripe_production_env() -> dict[str, str]:
             "STRIPE_WEBHOOK_SECRET": "whsec_testfixture_0123456789",
             "STRIPE_BASE_PRICE_ID": "price_tier2_testfixture_0123456789",
             "STRIPE_PRO_PRICE_ID": "price_pro_testfixture_0123456789",
+            "STRIPE_PRO_ANNUAL_PRICE_ID": "price_pro_annual_testfixture_0123456789",
         }
     )
     return env
