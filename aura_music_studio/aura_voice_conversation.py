@@ -20,6 +20,7 @@ VOICE_SCRIPT = r"""
 
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
   function hostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
+  function hostPerformance(detail={}){try{window.AuraHost?.performance?.speechFrame(detail)}catch(_){}}
   function button(){return document.getElementById('auraHandsFree')}
   function setButton(){const b=button();if(!b)return;b.textContent=enabled?'■ Stop Aura Voice':'◉ Aura Voice';b.style.borderColor=enabled?'#73e2aa66':''}
   function cleanupCapture(){
@@ -28,7 +29,7 @@ VOICE_SCRIPT = r"""
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
     if(audioCtx){try{audioCtx.close()}catch(_){}}audioCtx=null;analyser=null;media=null;
   }
-  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
+  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle'});cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
 
   function rmsLevel(){
     if(!analyser)return 0;const data=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(data);let total=0;
@@ -58,10 +59,14 @@ VOICE_SCRIPT = r"""
     if(!message){return listen()}
     try{
       hostState('speaking',{message_id:message.id});
+      // The generic TTS endpoint currently returns audio only. Tell the avatar the truthful
+      // speech lifecycle, but do not invent phoneme or viseme timestamps that the provider
+      // did not supply. A timing-capable provider can dispatch aura:speech-frame separately.
+      hostPerformance({speaking:true,source:'tts_lifecycle',message_id:message.id});
       activeAudio=new Audio(`${api}/threads/${encodeURIComponent(current)}/messages/${encodeURIComponent(message.id)}/speech`);
       await new Promise((resolve,reject)=>{activeAudio.onended=resolve;activeAudio.onerror=()=>reject(new Error('Aura speech output is unavailable'));activeAudio.play().catch(reject)});
-      activeAudio=null;if(enabled)await listen();else hostState('idle');
-    }catch(error){activeAudio=null;hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
+      activeAudio=null;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle',message_id:message.id});if(enabled)await listen();else hostState('idle');
+    }catch(error){activeAudio=null;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle',message_id:message.id});hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
   }
 
   async function listen(){
@@ -108,7 +113,7 @@ VOICE_SCRIPT = r"""
     const b=document.createElement('button');b.id='auraHandsFree';b.className='btn';b.textContent='◉ Aura Voice';b.title='Hands-free listen → Aura response → spoken reply loop';b.onclick=startVoice;foot.prepend(b);
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&enabled)stopVoice()});
-  window.addEventListener('beforeunload',()=>{enabled=false;cleanupCapture()});
+  window.addEventListener('beforeunload',()=>{enabled=false;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle'});cleanupCapture()});
 })();
 """
 
