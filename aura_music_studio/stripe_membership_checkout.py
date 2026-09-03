@@ -29,11 +29,9 @@ class MembershipSubscriptionCheckoutRequest(BaseModel):
 
 
 def _annual_price_env(plan_id: str) -> str:
-    if plan_id == "base":
-        return "STRIPE_BASE_ANNUAL_PRICE_ID"
     if plan_id == "pro":
         return "STRIPE_PRO_ANNUAL_PRICE_ID"
-    raise ValueError("Stripe subscription checkout accepts Basic or Unlimited Pro only")
+    raise ValueError("Annual Stripe membership checkout is available for Unlimited Pro only")
 
 
 def subscription_price_id(
@@ -46,6 +44,8 @@ def subscription_price_id(
     plan = get_plan(plan_id)
     if plan.id == "free":
         raise ValueError("Free membership does not use Stripe subscription checkout")
+    # Canonical catalogue validation deliberately rejects unsupported periods, including
+    # Basic annual billing. Provider configuration can never create a new public tier/period.
     plan.price_for(period)
     if period is BillingPeriod.MONTHLY:
         return config.price_id(plan.id)
@@ -79,7 +79,7 @@ def _configured_periods(config: StripeConfig) -> dict[str, dict[str, bool]]:
     return {
         "base": {
             "monthly": bool(shared and config.base_price_id),
-            "annual": bool(shared and (os.getenv("STRIPE_BASE_ANNUAL_PRICE_ID") or "").strip()),
+            "annual": False,
         },
         "pro": {
             "monthly": bool(shared and config.pro_price_id),
