@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import json
 
-from .game_forge_live_voice import VOICE_CHANNEL_QUERY, VOICE_MESSAGE_TYPE, install_live_voice_host_bridge
+from .game_forge_live_voice import (
+    VOICE_CHANNEL_QUERY,
+    VOICE_MESSAGE_TYPE,
+    VOICE_READY_MESSAGE_TYPE,
+    install_live_voice_host_bridge,
+)
 from .game_forge_models import GameDNA
 
 _MARKER = "id='aura-live-copilot'"
@@ -41,6 +46,7 @@ def inject_live_copilot(html: str, *, game: GameDNA) -> str:
             "external_network_access": False,
             "arbitrary_code_execution": False,
             "voice_message_type": VOICE_MESSAGE_TYPE,
+            "voice_ready_message_type": VOICE_READY_MESSAGE_TYPE,
             "voice_channel_query": VOICE_CHANNEL_QUERY,
         },
         ensure_ascii=True,
@@ -206,6 +212,11 @@ if(liveVoiceChannel){
     liveInput.value=command;
     liveCommand(command);
   });
+  window.parent.postMessage({
+    type:liveCfg.voice_ready_message_type,
+    game_id:String(liveCfg.game_id),
+    channel:liveVoiceChannel
+  },'*');
 }
 liveApply.addEventListener('click',()=>liveCommand(liveInput.value));
 liveUndo.addEventListener('click',liveUndoLast);
