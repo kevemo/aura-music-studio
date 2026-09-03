@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from .creation_coin_catalog import validate_creation_coin_packs
 from .marketplace_accounting import router as marketplace_account_router
-from .plans import get_plan
+from .plans import BILLING_MONTH, get_plan, normalize_billing_period
 from .stripe_billing import (
     CreditCheckoutRequest,
     StripeConfig,
@@ -38,8 +38,16 @@ from .stripe_marketplace_webhooks import (
     is_marketplace_stripe_event,
     process_verified_marketplace_stripe_event,
 )
+from .stripe_membership_periods import (
+    process_verified_membership_event,
+    router as stripe_membership_period_router,
+)
 
 router = APIRouter(tags=["Stripe Billing Security"])
+# Period-aware membership Checkout is deliberately included before the legacy Stripe
+# router. Starlette resolves the first matching route, so the canonical catalogue owns
+# subscription checkout while the legacy route remains as a compatibility fallback.
+router.include_router(stripe_membership_period_router)
 router.include_router(marketplace_account_router)
 _REFUND_EVENT_TYPES = frozenset({"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"})
 
@@ -48,12 +56,14 @@ def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[s
     """Fail closed before a recurring Stripe invoice is allowed to extend access.
 
     The signed event must still describe the exact locally-bound subscription/customer and
-    the exact configured plan price. This prevents a dashboard-side price/coupon/configuration
-    drift from silently extending a different or underpaid local entitlement.
+    the exact configured plan + billing period. This prevents a dashboard-side price,
+    period, coupon or configuration drift from silently extending a different or underpaid
+    local entitlement.
     """
     plan = get_plan(str(binding.get("plan_id") or ""))
-    if plan.id == "free":
-        raise ValueError("Free plan cannot be renewed from Stripe")
+    period = normalize_billing_period(str(binding.get("billing_period") or BILLING_MONTH))
+    if plan.id == "free" or not plan.supports_billing_period(period):
+        raise ValueError("Free or unsupported plan period cannot be renewed from Stripe")
     if str(invoice.get("status") or "").lower() != "paid":
         raise ValueError("Stripe renewal invoice is not paid")
     if str(invoice.get("currency") or "").upper() != plan.currency:
@@ -62,8 +72,8 @@ def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[s
         amount_paid = int(invoice.get("amount_paid"))
     except (TypeError, ValueError) as exc:
         raise ValueError("Stripe renewal invoice has no valid paid amount") from exc
-    if amount_paid != plan.monthly_price_minor:
-        raise ValueError("Stripe renewal invoice paid amount does not match the configured membership price")
+    if amount_paid != plan.price_minor(period):
+        raise ValueError("Stripe renewal invoice paid amount does not match the configured membership price and period")
 
     expected_customer = str(binding.get("stripe_customer_id") or "")
     actual_customer = str(invoice.get("customer") or "")
@@ -176,9 +186,10 @@ def hardened_stripe_success(session_id: str = ""):
 async def hardened_stripe_webhook(request: Request):
     """Verify Stripe once, then route hardened finance events through fail-closed paths.
 
-    Marketplace settlement/refund events and provider payout events share the signed Stripe event
-    audit boundary. Provider payout evidence never mutates marketplace allocation and never claims
-    independent bank reconciliation.
+    Membership checkout/renewal is processed from the canonical plan + billing-period
+    catalogue before legacy billing. Marketplace settlement/refund events and provider payout
+    events share the signed Stripe event audit boundary. Provider payout evidence never mutates
+    marketplace allocation and never claims independent bank reconciliation.
     """
     config = StripeConfig.from_env()
     if not config.webhook_configured:
@@ -195,6 +206,13 @@ async def hardened_stripe_webhook(request: Request):
     event_id = str(event.get("id") or "").strip()
     event_type = str(event.get("type") or "")
     obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event.get("data"), dict) else {}
+
+    try:
+        membership_result = process_verified_membership_event(event, raw)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if membership_result is not None:
+        return membership_result
 
     if event_type in PAYOUT_EVENT_TYPES:
         payout_event_evidence = _begin_marketplace_event(event, raw)
