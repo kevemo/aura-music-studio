@@ -123,7 +123,7 @@ def test_real_grouped_track_opacity_keyframes_change_visible_pixels_over_time(tm
     )
 
     result = TrackKeyframeUniversalVisualVideoCompositor(project).render_video_advanced(sequence.id)
-    output = project / "exports" / result.filename
+    output = project / result.output_ref
     assert output.is_file()
     assert result.renderer == "ffmpeg-universal-track-opacity-keyframe-video-compositor"
 
