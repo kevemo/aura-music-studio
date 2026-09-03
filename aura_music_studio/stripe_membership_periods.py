@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .membership_billing_periods import bind_stripe_subscription, ensure_billing_period_schema, verify_catalog_payment
-from .plans import BILLING_MONTH, BILLING_YEAR, get_plan, normalize_billing_period
+from .plans import BILLING_MONTH, BILLING_YEAR, get_plan, normalize_billing_period, public_plans
 from .stripe_billing import (
     StripeClient,
     StripeConfig,
@@ -17,6 +17,7 @@ from .stripe_billing import (
     _subscription_id,
     _validate_checkout_user,
     accounts,
+    credit_packs,
     evidence_store,
     subscriptions,
 )
@@ -44,6 +45,14 @@ def stripe_membership_price_id(config: StripeConfig, plan_id: str, billing_perio
     return value
 
 
+def _annual_checkout_configured(config: StripeConfig) -> bool:
+    return bool(
+        config.secret_key
+        and config.public_base_url
+        and (os.getenv("STRIPE_PRO_ANNUAL_PRICE_ID") or "").strip()
+    )
+
+
 def _checkout_payload(config: StripeConfig, user: dict[str, Any], plan_id: str, billing_period: str) -> dict[str, str]:
     plan = get_plan(plan_id)
     period = normalize_billing_period(billing_period)
@@ -64,6 +73,43 @@ def _checkout_payload(config: StripeConfig, user: dict[str, Any], plan_id: str, 
         "subscription_data[metadata][user_id]": str(user["id"]),
         "subscription_data[metadata][plan_id]": plan.id,
         "subscription_data[metadata][billing_period]": period,
+    }
+
+
+@router.get("/billing/stripe/status")
+def canonical_stripe_status():
+    """Expose billing readiness without leaking Stripe Price IDs or credentials."""
+    config = StripeConfig.from_env()
+    packs = credit_packs()
+    pro = get_plan("pro")
+    return {
+        "provider": "stripe",
+        "checkout_configured": config.checkout_configured,
+        "webhook_configured": config.webhook_configured,
+        "subscription_plans": ["base", "pro"],
+        "subscription_billing_options": {
+            "base": [BILLING_MONTH],
+            "pro": [BILLING_MONTH, BILLING_YEAR],
+        },
+        "pro_monthly_checkout_configured": bool(
+            config.secret_key and config.public_base_url and config.pro_price_id
+        ),
+        "pro_annual_checkout_configured": _annual_checkout_configured(config),
+        "pro_catalog_amounts": {
+            BILLING_MONTH: {
+                "amount_minor": pro.price_minor(BILLING_MONTH),
+                "currency": pro.currency,
+            },
+            BILLING_YEAR: {
+                "amount_minor": pro.price_minor(BILLING_YEAR),
+                "currency": pro.currency,
+            },
+        },
+        "public_catalogue": public_plans(),
+        "credit_topups_configured": bool(packs),
+        "bank_details_stored_in_application": False,
+        "settlement_destination": "Configured privately in the Stripe Dashboard",
+        "production_payment_verified": False,
     }
 
 
@@ -174,15 +220,14 @@ def process_verified_membership_event(event: dict[str, Any], raw: bytes) -> dict
             if user.get("status") == "approved_pending_payment" and user.get("requested_plan_id") != plan.id:
                 raise ValueError("Stripe plan does not match the owner-approved requested plan")
             _validate_paid_amount(obj, plan.id, period, amount_field="amount_total")
-            customer_id = str(obj.get("customer") or "")
-            subscription_id = str(obj.get("subscription") or "")
-            status = verify_catalog_payment(
-                subscriptions,
-                user_id,
-                plan.id,
-                f"stripe:checkout:{obj.get('id')}",
-                billing_period=period,
-            )
+            customer_id = str(obj.get("customer") or "").strip()
+            subscription_id = str(obj.get("subscription") or "").strip()
+            if not customer_id or not subscription_id:
+                raise ValueError("Stripe paid Checkout Session is missing customer or subscription binding")
+
+            # Record the provider binding before entitlement activation. All fields and the
+            # canonical amount/period above have already been validated, so a malformed
+            # Checkout Session cannot partially activate a local membership first.
             bind_stripe_subscription(
                 accounts.db_path,
                 user_id=user_id,
@@ -190,8 +235,16 @@ def process_verified_membership_event(event: dict[str, Any], raw: bytes) -> dict
                 subscription_id=subscription_id,
                 plan_id=plan.id,
                 billing_period=period,
-                status="active",
+                status="pending_activation",
             )
+            status = verify_catalog_payment(
+                subscriptions,
+                user_id,
+                plan.id,
+                f"stripe:checkout:{obj.get('id')}",
+                billing_period=period,
+            )
+            evidence_store.set_binding_status(user_id, "active")
             result = {
                 "received": True,
                 "event_id": event_id,
@@ -328,6 +381,7 @@ def process_verified_membership_event(event: dict[str, Any], raw: bytes) -> dict
 
 __all__ = [
     "CanonicalSubscriptionCheckoutRequest",
+    "canonical_stripe_status",
     "canonical_subscription_checkout",
     "process_verified_membership_event",
     "router",
