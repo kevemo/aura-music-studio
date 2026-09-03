@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
 # Production inheritance remains explicit for regression/audit tooling:
-# professional_keyframed_mask_video_compositor -> professional_chroma_key_video_compositor ->
-# professional_universal_scoped_visual_video_compositor -> grouped professional compositor.
-# Automatic mask tracking remains a separate, fail-closed capability until a genuine tracker is
-# wired and validated.
-from .professional_keyframed_mask_video_compositor import UniversalVisualVideoCompositor
+# professional_video_track_keyframe_compositor -> professional_keyframed_mask_video_compositor ->
+# professional_chroma_key_video_compositor -> professional_universal_scoped_visual_video_compositor
+# -> grouped professional compositor. Automatic mask tracking and unsupported track automation
+# remain separate, fail-closed capabilities until genuine runtimes are wired and validated.
+from .professional_video_track_keyframe_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
     EditorRenderError,
@@ -156,10 +156,10 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            # The production Video Studio renderer preserves the established grouped/scoped effect
-            # ordering, Wave 7 chroma alpha, and authored mask semantics. Keyframed roto masks are
-            # evaluated against sequence time (including speed/reverse) and streamed as gray matte
-            # frames into FFmpeg; automatic tracking remains explicitly fail-closed.
+            # The production Video Studio renderer preserves grouped/scoped effect ordering, chroma
+            # alpha and authored roto masks, then evaluates supported track-opacity automation after
+            # whole-track effects and before track blend. Unsupported track paths and automatic mask
+            # tracking remain explicitly fail-closed.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
             result = _execute_video_render(
                 member,
