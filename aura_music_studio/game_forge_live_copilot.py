@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from .game_forge_live_voice import VOICE_CHANNEL_QUERY, VOICE_MESSAGE_TYPE, install_live_voice_host_bridge
 from .game_forge_models import GameDNA
 
 _MARKER = "id='aura-live-copilot'"
@@ -39,6 +40,8 @@ def inject_live_copilot(html: str, *, game: GameDNA) -> str:
             "project_persistence": False,
             "external_network_access": False,
             "arbitrary_code_execution": False,
+            "voice_message_type": VOICE_MESSAGE_TYPE,
+            "voice_channel_query": VOICE_CHANNEL_QUERY,
         },
         ensure_ascii=True,
         separators=(",", ":"),
@@ -97,6 +100,8 @@ const liveHistory=[];
 const liveMaxHistory=Math.max(1,Math.min(20,Number(liveCfg.max_history)||20));
 const liveMaxObjects=Math.max(1,Math.min(32,Number(liveCfg.max_dynamic_objects)||32));
 const liveMaxCommand=Math.max(1,Math.min(240,Number(liveCfg.max_command_chars)||240));
+const liveVoiceRaw=new URLSearchParams(location.search).get(String(liveCfg.voice_channel_query||''))||'';
+const liveVoiceChannel=/^[A-Za-z0-9_-]{24,128}$/.test(liveVoiceRaw)?liveVoiceRaw:'';
 const live2D=()=>liveCfg.runtime==='aura2d';
 const liveHasPlayer=()=>live2D()&&typeof p!=='undefined'&&p&&Number.isFinite(Number(p.s));
 const liveStars=()=>live2D()&&typeof stars!=='undefined'&&Array.isArray(stars)?stars:null;
@@ -188,6 +193,20 @@ function liveCommand(raw){
   liveSay('That live instruction is outside the safe playtest mutation set. Ask Aura for "help" to see supported changes.');
   return false;
 }
+if(liveVoiceChannel){
+  liveMic.hidden=true;
+  liveMic.setAttribute('aria-hidden','true');
+  window.addEventListener('message',event=>{
+    const data=event.data;
+    if(event.source!==window.parent||!data||typeof data!=='object')return;
+    if(data.type!==liveCfg.voice_message_type||data.game_id!==String(liveCfg.game_id)||data.channel!==liveVoiceChannel)return;
+    if(typeof data.command!=='string'||data.command.length>liveMaxCommand)return;
+    const command=data.command.trim();
+    if(!command)return;
+    liveInput.value=command;
+    liveCommand(command);
+  });
+}
 liveApply.addEventListener('click',()=>liveCommand(liveInput.value));
 liveUndo.addEventListener('click',liveUndoLast);
 liveInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();liveCommand(liveInput.value)}});
@@ -231,5 +250,7 @@ livePanel.dataset.ready='true';
 """
     return html.replace(_BODY_CLOSE, fragment.replace("__CONFIG__", config) + _BODY_CLOSE, 1)
 
+
+install_live_voice_host_bridge()
 
 __all__ = ["inject_live_copilot"]
