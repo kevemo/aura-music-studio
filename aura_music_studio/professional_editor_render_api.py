@@ -10,9 +10,12 @@ from pydantic import BaseModel, Field
 
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
-# The chroma-capable compositor extends professional_universal_scoped_visual_video_compositor,
-# retaining the existing scoped universal effect, grouped-track, mask and blend foundation.
-from .professional_chroma_key_video_compositor import UniversalVisualVideoCompositor
+# Production inheritance remains explicit for regression/audit tooling:
+# professional_keyframed_mask_video_compositor -> professional_chroma_key_video_compositor ->
+# professional_universal_scoped_visual_video_compositor -> grouped professional compositor.
+# Automatic mask tracking remains a separate, fail-closed capability until a genuine tracker is
+# wired and validated.
+from .professional_keyframed_mask_video_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
     EditorRenderError,
@@ -153,12 +156,10 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            # The scoped universal visual compositor keeps item effects non-destructive and applies
-            # whole-track/adjustment effects only after every item on that track has been composed.
-            # Its chroma-key extension preserves clip alpha in a transient lossless derivative so
-            # green/blue/custom keyed pixels reveal lower tracks instead of being flattened to black.
-            # It then delegates opacity/blend/final MP4 production to the established grouped
-            # renderer, preserving project-local sources and the shared entitlement/metering path.
+            # The production Video Studio renderer preserves the established grouped/scoped effect
+            # ordering, Wave 7 chroma alpha, and authored mask semantics. Keyframed roto masks are
+            # evaluated against sequence time (including speed/reverse) and streamed as gray matte
+            # frames into FFmpeg; automatic tracking remains explicitly fail-closed.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
             result = _execute_video_render(
                 member,
