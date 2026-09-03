@@ -50,21 +50,16 @@ def payment_option(
     period = _period(billing_period)
 
     # Resolve through the authoritative plan catalogue first. Unsupported combinations
-    # fail closed here rather than allowing a payment route to invent a price.
+    # fail closed here rather than allowing a payment route to invent a price or period.
     amount_value = plan.price_for(period)
     amount_minor = plan.price_minor_for(period)
     if plan.id == "free":
         return None
 
     if plan.id == "base":
-        if period is BillingPeriod.MONTHLY:
-            url = (os.getenv("LSS_PAYPAL_BASE_URL") or DEFAULT_BASE_PAYPAL_URL).strip()
-        else:
-            # Annual Basic is canonical at £59.99/year but must never reuse the monthly
-            # fixed-price invoice. A dedicated annual route is required.
-            url = (os.getenv("LSS_PAYPAL_BASE_ANNUAL_URL") or "").strip()
-            if not url:
-                raise ValueError("Annual Basic PayPal route is not configured")
+        # Basic is intentionally monthly-only. plan.price_for() above rejects annual before
+        # any provider URL is considered, so provider configuration cannot create a new tier.
+        url = (os.getenv("LSS_PAYPAL_BASE_URL") or DEFAULT_BASE_PAYPAL_URL).strip()
     elif plan.id == "pro":
         if period is BillingPeriod.MONTHLY:
             url = (os.getenv("LSS_PAYPAL_PRO_URL") or DEFAULT_PRO_PAYPAL_URL).strip()
@@ -102,9 +97,9 @@ def payment_option(
 def public_payment_options() -> list[dict]:
     """Return currently configured default monthly manual-payment routes.
 
-    Annual Basic and Unlimited Pro prices remain visible through the canonical plan catalogue.
-    Annual manual PayPal routes are intentionally omitted from this default projection and are
-    returned only when explicitly requested after their dedicated URLs are configured.
+    Unlimited Pro annual pricing remains visible through the canonical plan catalogue. Its
+    annual manual PayPal route is returned only when explicitly requested and separately
+    configured. Basic has no annual creative subscription period.
     """
     result = []
     for plan_id in ("base", "pro"):
