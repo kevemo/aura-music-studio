@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, model_validator
 from .acestep_api import AceStepClient
 from .assets import AssetLibrary
 from .autotune import AutoTuneSettings, tune_vocal
+from .groove_engine import conform_audio_to_groove, groove_template_from_performance_input
 from .mastering import master, translation_report
 from .performance_inputs import get_input, register_input
 from .restoration import AudioRestorer
@@ -18,7 +19,7 @@ from .tempo_engine import conform_audio_to_tempo_map, tempo_map_from_performance
 
 
 class EngineeringJobRequest(BaseModel):
-    operation: Literal["split", "master", "autotune", "restore", "spatial", "cover", "repaint", "smart_warp"]
+    operation: Literal["split", "master", "autotune", "restore", "spatial", "cover", "repaint", "smart_warp", "groove_follow"]
     asset_id: str
     split_mode: str = "four_stems"
     master_preset: str = "universal"
@@ -47,6 +48,12 @@ class EngineeringJobRequest(BaseModel):
     source_bpm: float | None = Field(default=None, ge=30.0, le=300.0)
     max_stretch_ratio: float = Field(default=1.8, ge=1.05, le=3.0)
     crossfade_ms: float = Field(default=4.0, ge=0.0, le=20.0)
+    instrument_role: Literal["drums", "bass", "guitar", "piano", "percussion", "other"] = "other"
+    groove_strength: float = Field(default=1.0, ge=0.0, le=1.0)
+    humanize_timing_ms: float = Field(default=0.0, ge=0.0, le=40.0)
+    humanize_seed: int = Field(default=0, ge=0, le=2_147_483_647)
+    max_groove_shift_ms: float = Field(default=100.0, ge=5.0, le=150.0)
+    groove_max_stretch_ratio: float = Field(default=1.35, ge=1.05, le=1.8)
 
     @model_validator(mode="after")
     def validate_transform(self):
@@ -62,6 +69,8 @@ class EngineeringJobRequest(BaseModel):
                     raise ValueError("A single region repaint is limited to 120 seconds")
         if self.operation == "smart_warp" and not (self.target_performance_input_id or "").strip():
             raise ValueError("Smart Warp requires target_performance_input_id")
+        if self.operation == "groove_follow" and not (self.target_performance_input_id or "").strip():
+            raise ValueError("Groove Follow requires target_performance_input_id")
         return self
 
 
@@ -323,6 +332,66 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
             "audio_origin": "local_pitch_preserving_time_warp",
             "source_preserved": True,
             "final_audio": True,
+        }
+
+    if request.operation == "groove_follow":
+        target_id = str(request.target_performance_input_id or "").strip()
+        try:
+            target_input = get_input(project, target_id)
+        except KeyError as exc:
+            raise ValueError("Groove Follow target performance input was not found") from exc
+        if not target_input.rights_confirmed or not target_input.metadata.get("rights_record_id"):
+            raise ValueError("Groove Follow target performance input has no complete rights/provenance record")
+        template, template_ref = groove_template_from_performance_input(project, target_input)
+        target_input.metadata.update(
+            {
+                "groove_template_ref": template_ref,
+                "groove_template_id": template.id,
+                "groove_swing_ratio": template.swing_ratio,
+                "groove_timing_variation_ms": template.timing_variation_ms,
+            }
+        )
+        register_input(project, target_input)
+        output = project / "output" / "groove_follow" / record.id / f"{stem}_AuraGroove_{uuid4().hex[:12]}.wav"
+        rendered, report = conform_audio_to_groove(
+            source,
+            output,
+            template,
+            source_ref=Path(record.path).as_posix(),
+            instrument_role=request.instrument_role,
+            source_bpm=request.source_bpm,
+            groove_strength=request.groove_strength,
+            humanize_timing_ms=request.humanize_timing_ms,
+            humanize_seed=request.humanize_seed,
+            max_shift_ms=request.max_groove_shift_ms,
+            max_stretch_ratio=request.groove_max_stretch_ratio,
+            crossfade_ms=request.crossfade_ms,
+        )
+        return {
+            "operation": "groove_follow",
+            "source_asset_id": record.id,
+            "target_performance_input_id": target_input.id,
+            "target_groove_template_ref": template_ref,
+            "target_groove_template": template.model_dump(mode="json"),
+            "instrument_role": request.instrument_role,
+            "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation="groove_follow",
+                source_asset_id=record.id,
+                role=request.instrument_role,
+            ),
+            "report": report.model_dump(mode="json"),
+            "audio_origin": "local_pitch_preserving_groove_conform",
+            "source_preserved": True,
+            "final_audio": True,
+            "humanisation": {
+                "timing_ms": request.humanize_timing_ms,
+                "seed": request.humanize_seed,
+                "deterministic": True,
+            },
         }
 
     if request.operation in {"cover", "repaint"}:
