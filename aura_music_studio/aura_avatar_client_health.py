@@ -28,13 +28,6 @@ RendererErrorCode = Literal[
 class AvatarClientHealthReport(BaseModel):
     schema_version: int = Field(default=1, ge=1, le=1)
     client_class: ClientClass = "unknown"
-    mobile_hint: bool = False
-    viewport_width: int = Field(ge=1, le=10000)
-    viewport_height: int = Field(ge=1, le=10000)
-    device_pixel_ratio: float = Field(ge=0.5, le=8.0)
-    hardware_concurrency: int | None = Field(default=None, ge=1, le=256)
-    device_memory_gb: float | None = Field(default=None, ge=0.25, le=128.0)
-    reduced_motion: bool = False
     page_hidden: bool = False
     webgl: bool = False
     webgl2: bool = False
@@ -90,9 +83,10 @@ def _derived_state(report: AvatarClientHealthReport) -> str:
 class AvatarClientHealthStore:
     """Durable, privacy-bounded evidence for Aura browser/device runtime health.
 
-    No IP address, user-agent string, browser fingerprint, model identifier, hostname or raw
-    error text is collected. Reports are scoped to the signed-in member and pruned to a small
-    rolling window because this evidence is operational diagnostics, not identity telemetry.
+    No IP address, user-agent string, viewport dimensions, CPU/memory details, browser
+    fingerprint, model identifier, hostname or raw error text is collected. Reports are scoped
+    to the signed-in member and pruned to a small rolling window because this evidence is
+    operational diagnostics, not identity telemetry.
     """
 
     def __init__(self, db_path: str | Path | None = None, *, keep_per_user: int = 24):
@@ -200,6 +194,8 @@ class AvatarClientHealthStore:
             "privacy_contract": {
                 "ip_address_collected": False,
                 "user_agent_collected": False,
+                "viewport_dimensions_collected": False,
+                "cpu_or_memory_details_collected": False,
                 "raw_renderer_error_collected": False,
                 "device_fingerprint_collected": False,
                 "coarse_client_class_only": True,
@@ -241,7 +237,7 @@ CLIENT_HEALTH_SCRIPT = r"""
   const HEALTH='/aura-intelligence/api/avatar/client-health';
   const STATUS='/aura-intelligence/api/avatar/status';
   const started=performance.now();
-  let serverStatus=null,rendererAttempted=false,rendererLoaded=false,modelLoaded=false,layered=false,modelLoadMs=null,errorCode='none';
+  let rendererAttempted=false,rendererLoaded=false,modelLoaded=false,layered=false,modelLoadMs=null,errorCode='none';
   let frames=0,frameStart=null,frameEnd=null,submitted=false;
 
   function classifyClient(){
@@ -277,13 +273,6 @@ CLIENT_HEALTH_SCRIPT = r"""
     const body={
       schema_version:1,
       client_class:classifyClient(),
-      mobile_hint:!!navigator.userAgentData?.mobile,
-      viewport_width:Math.max(1,Math.min(10000,window.innerWidth||document.documentElement.clientWidth||1)),
-      viewport_height:Math.max(1,Math.min(10000,window.innerHeight||document.documentElement.clientHeight||1)),
-      device_pixel_ratio:Math.max(.5,Math.min(8,Number(window.devicePixelRatio)||1)),
-      hardware_concurrency:Number.isFinite(Number(navigator.hardwareConcurrency))?Math.max(1,Math.min(256,Number(navigator.hardwareConcurrency))):null,
-      device_memory_gb:Number.isFinite(Number(navigator.deviceMemory))?Math.max(.25,Math.min(128,Number(navigator.deviceMemory))):null,
-      reduced_motion:!!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
       page_hidden:!!document.hidden,
       webgl:gl.webgl,
       webgl2:gl.webgl2,
@@ -297,7 +286,7 @@ CLIENT_HEALTH_SCRIPT = r"""
       renderer_error_code:errorCode,
     };
     try{
-      const response=await fetch(HEALTH,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const response=await fetch(HEALTH,{method:'POST',credentials:'same-origin',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       if(response.ok){const result=await response.json();document.dispatchEvent(new CustomEvent('aura:client-health',{detail:result}))}
     }catch(_){/* Client diagnostics must never interrupt Aura interaction. */}
   }
@@ -307,7 +296,6 @@ CLIENT_HEALTH_SCRIPT = r"""
     rendererAttempted=true;rendererLoaded=true;modelLoaded=true;layered=!!event.detail?.layeredPerformanceSupported;modelLoadMs=Math.max(0,performance.now()-started);
   });
   fetch(STATUS,{credentials:'same-origin'}).then(r=>r.ok?r.json():null).then(status=>{
-    serverStatus=status;
     rendererAttempted=!!(status?.model_valid&&status?.renderer_configured);
   }).catch(()=>{}).finally(()=>requestAnimationFrame(frameTick));
   setTimeout(submit,6500);
