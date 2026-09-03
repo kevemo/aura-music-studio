@@ -75,7 +75,7 @@ def test_public_membership_pricing_contract():
     assert pro.monthly_price == Decimal("9.99")
     assert pro.monthly_price_minor == 999
     assert pro.display_price == "£9.99"
-    assert "aurasec" in pro.public_dict()["features"]
+    assert AURASEC in pro.public_dict()["features"]
 
 
 def test_free_activates_after_owner_approval(tmp_path):
