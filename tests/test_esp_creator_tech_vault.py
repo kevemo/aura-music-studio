@@ -9,7 +9,7 @@ from aura_music_studio.esp_creator_tech_vault import CreatorTechVaultStore, Tech
 
 def _stores(tmp_path):
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
-    esp = EspStore(accounts.db_path)
+    esp = EspStore(accounts)
     return accounts, CreatorTechVaultStore(esp)
 
 
