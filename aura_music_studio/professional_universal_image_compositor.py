@@ -9,7 +9,6 @@ from PIL import Image, ImageOps
 from .professional_editor_renderer import _IMAGE_SUFFIXES, EditorExportResult, EditorRenderUnsupported
 from .professional_image_compositor import (
     AdvancedImageCompositor,
-    _apply_crop,
     _apply_effect,
     _apply_masks,
     _effect_state_at_time,
