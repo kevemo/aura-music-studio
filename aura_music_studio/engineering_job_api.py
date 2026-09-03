@@ -127,7 +127,7 @@ def _validate_entitlement(member, body: EngineeringJobRequest) -> None:
         _require(member, REGION_REPAINT)
         return
 
-    if body.operation == "smart_warp":
+    if body.operation in {"smart_warp", "groove_follow"}:
         _require(member, MULTITRACK_DAW)
         return
 
@@ -288,6 +288,17 @@ def submit_engineering_job(project_name: str, body: EngineeringJobRequest, reque
             raise HTTPException(409, "Smart Warp target performance input has no complete rights/provenance record")
         if len(target_input.beat_times_seconds) < 4:
             raise HTTPException(409, "Smart Warp target requires at least four detected timing anchors")
+    if body.operation == "groove_follow":
+        try:
+            target_input = get_input(project, str(body.target_performance_input_id or ""))
+        except KeyError as exc:
+            raise HTTPException(404, "Groove Follow target performance input not found") from exc
+        if not target_input.rights_confirmed or not target_input.metadata.get("rights_record_id"):
+            raise HTTPException(409, "Groove Follow target performance input has no complete rights/provenance record")
+        if len(target_input.beat_times_seconds) < 4:
+            raise HTTPException(409, "Groove Follow target requires at least four detected beats")
+        if len(target_input.onset_times_seconds) < 4:
+            raise HTTPException(409, "Groove Follow target requires at least four detected onsets")
 
     priority = 90 if member.plan.has(PRIORITY_QUEUE) else 15
     job = queue.submit(
