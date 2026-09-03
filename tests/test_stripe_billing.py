@@ -134,3 +134,48 @@ def test_subscription_cycle_rejects_billing_drift(field, value, message):
     invoice[field] = value
     with pytest.raises(ValueError, match=message):
         validate_subscription_cycle_invoice(invoice, _base_binding())
+
+
+def test_annual_pro_subscription_cycle_requires_exact_annual_amount():
+    binding = {
+        "user_id": "annual_user",
+        "plan_id": "pro",
+        "billing_period": "annual",
+        "stripe_customer_id": "cus_annual",
+        "stripe_subscription_id": "sub_annual",
+    }
+    invoice = {
+        "id": "in_annual",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "currency": "gbp",
+        "amount_paid": 9900,
+        "customer": "cus_annual",
+        "subscription": "sub_annual",
+    }
+    validate_subscription_cycle_invoice(invoice, binding)
+
+    invoice["amount_paid"] = 999
+    with pytest.raises(ValueError, match="paid amount"):
+        validate_subscription_cycle_invoice(invoice, binding)
+
+
+def test_annual_member_binding_fails_closed_without_authorised_annual_price():
+    binding = {
+        "user_id": "member_annual_user",
+        "plan_id": "base",
+        "billing_period": "annual",
+        "stripe_customer_id": "cus_member_annual",
+        "stripe_subscription_id": "sub_member_annual",
+    }
+    invoice = {
+        "id": "in_member_annual",
+        "status": "paid",
+        "billing_reason": "subscription_cycle",
+        "currency": "gbp",
+        "amount_paid": 499,
+        "customer": "cus_member_annual",
+        "subscription": "sub_member_annual",
+    }
+    with pytest.raises(ValueError, match="billing period is not authorised"):
+        validate_subscription_cycle_invoice(invoice, binding)
