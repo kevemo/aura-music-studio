@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import aura_music_studio.member_dashboard as dashboard
+from aura_music_studio.native_access import EffectiveNativeAccess
 
 
 def _client(monkeypatch, membership):
@@ -16,6 +17,16 @@ def _client(monkeypatch, membership):
     }
     monkeypatch.setattr(dashboard.accounts, "resolve_session", lambda _cookie: user)
     monkeypatch.setattr(dashboard.esp, "membership", lambda _user_id: membership)
+    monkeypatch.setattr(
+        dashboard.native_access,
+        "resolve",
+        lambda user_id: EffectiveNativeAccess(
+            user_id=user_id,
+            membership_plan_id="free",
+            membership_entitlements=frozenset(),
+            purchased_entitlements=frozenset(),
+        ),
+    )
     app = FastAPI()
     app.include_router(dashboard.router)
     return TestClient(app)
