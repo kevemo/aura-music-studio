@@ -32,8 +32,24 @@ def _b64decode(value: str) -> bytes:
         raise NativePayPalError("Invalid native checkout metadata encoding") from exc
 
 
+_PRODUCT_CODES = {
+    "aura_os": "o",
+    "aura_sec": "s",
+    "aura_os_sec_bundle": "b",
+}
+_PRODUCT_IDS = {value: key for key, value in _PRODUCT_CODES.items()}
+_PERIOD_CODES = {BillingPeriod.MONTHLY: "m", BillingPeriod.ANNUAL: "a"}
+_PERIODS = {value: key for key, value in _PERIOD_CODES.items()}
+_PAYPAL_REFERENCE_MAX = 120
+
+
 class NativeCheckoutMetadataSigner:
-    """Sign native entitlement identity before provider invoice creation."""
+    """Sign native entitlement identity before provider invoice creation.
+
+    New tokens use a compact v2 payload because PayPal Invoicing v2 caps
+    ``detail.reference`` at 120 characters. Verification remains backward-compatible
+    with the earlier JSON v1 token format so already-issued evidence can still settle.
+    """
 
     def __init__(self, secret: str | bytes | None = None) -> None:
         raw = secret if secret is not None else os.getenv("LSS_NATIVE_PAYPAL_METADATA_SECRET", "")
@@ -50,7 +66,7 @@ class NativeCheckoutMetadataSigner:
         founding_offer: bool = False,
     ) -> str:
         user_id = (user_id or "").strip()
-        if not user_id or len(user_id) > 200:
+        if not user_id or len(user_id) > 200 or "|" in user_id:
             raise NativePayPalError("Invalid native checkout user ID")
         product = get_native_product(product_id)
         try:
@@ -58,16 +74,20 @@ class NativeCheckoutMetadataSigner:
         except ValueError as exc:
             raise NativePayPalError(f"Unsupported billing period: {billing_period}") from exc
         product.price_minor_for(period, founding_offer=bool(founding_offer))
-        payload = {
-            "v": 1,
-            "user_id": user_id,
-            "product_id": product.id,
-            "billing_period": period.value,
-            "founding_offer": bool(founding_offer),
-        }
-        body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        body = "|".join(
+            (
+                "2",
+                user_id,
+                _PRODUCT_CODES[product.id],
+                _PERIOD_CODES[period],
+                "1" if founding_offer else "0",
+            )
+        ).encode("utf-8")
         signature = hmac.new(self._secret, body, hashlib.sha256).digest()
-        return f"{_b64encode(body)}.{_b64encode(signature)}"
+        token = f"{_b64encode(body)}.{_b64encode(signature)}"
+        if len(token) > _PAYPAL_REFERENCE_MAX:
+            raise NativePayPalError("Native checkout user ID is too long for the PayPal invoice reference")
+        return token
 
     def verify(self, token: str) -> dict:
         token = (token or "").strip()
@@ -79,6 +99,12 @@ class NativeCheckoutMetadataSigner:
         expected = hmac.new(self._secret, body, hashlib.sha256).digest()
         if not hmac.compare_digest(signature, expected):
             raise NativePayPalError("Native checkout metadata signature is invalid")
+
+        if body.startswith(b"{"):
+            return self._verify_v1_json(body)
+        return self._verify_v2_compact(body)
+
+    def _verify_v1_json(self, body: bytes) -> dict:
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -88,15 +114,39 @@ class NativeCheckoutMetadataSigner:
         required = {"user_id", "product_id", "billing_period", "founding_offer", "v"}
         if set(payload) != required:
             raise NativePayPalError("Native checkout metadata fields are invalid")
-        user_id = str(payload.get("user_id") or "").strip()
-        if not user_id or len(user_id) > 200:
-            raise NativePayPalError("Native checkout metadata user ID is invalid")
-        product = get_native_product(str(payload.get("product_id") or ""))
+        return self._validated_payload(
+            user_id=str(payload.get("user_id") or ""),
+            product_id=str(payload.get("product_id") or ""),
+            billing_period=payload.get("billing_period"),
+            founding_offer=payload.get("founding_offer"),
+        )
+
+    def _verify_v2_compact(self, body: bytes) -> dict:
         try:
-            period = BillingPeriod(payload.get("billing_period"))
+            version, user_id, product_code, period_code, founding_code = body.decode("utf-8").split("|", 4)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise NativePayPalError("Native checkout metadata payload is invalid") from exc
+        if version != "2" or product_code not in _PRODUCT_IDS or period_code not in _PERIODS:
+            raise NativePayPalError("Unsupported native checkout metadata version or code")
+        if founding_code not in {"0", "1"}:
+            raise NativePayPalError("Native checkout metadata founding-offer flag is invalid")
+        return self._validated_payload(
+            user_id=user_id,
+            product_id=_PRODUCT_IDS[product_code],
+            billing_period=_PERIODS[period_code],
+            founding_offer=founding_code == "1",
+        )
+
+    @staticmethod
+    def _validated_payload(*, user_id: str, product_id: str, billing_period, founding_offer) -> dict:
+        user_id = (user_id or "").strip()
+        if not user_id or len(user_id) > 200 or "|" in user_id:
+            raise NativePayPalError("Native checkout metadata user ID is invalid")
+        product = get_native_product(product_id)
+        try:
+            period = BillingPeriod(billing_period)
         except ValueError as exc:
             raise NativePayPalError("Native checkout metadata billing period is invalid") from exc
-        founding_offer = payload.get("founding_offer")
         if not isinstance(founding_offer, bool):
             raise NativePayPalError("Native checkout metadata founding-offer flag is invalid")
         product.price_minor_for(period, founding_offer=founding_offer)
@@ -105,6 +155,129 @@ class NativeCheckoutMetadataSigner:
             "product_id": product.id,
             "billing_period": period,
             "founding_offer": founding_offer,
+        }
+
+
+class NativePayPalInvoiceCreator:
+    """Create and send a native-product invoice from server-authoritative catalogue data.
+
+    The caller supplies an authenticated application's opaque user ID and the billing
+    email for delivery. Product identity, amount, currency and offer eligibility are
+    always recomputed from the canonical native-product catalogue. The signed identity
+    is written only to PayPal's documented ``detail.reference`` field.
+    """
+
+    def __init__(
+        self,
+        *,
+        paypal: PayPalWebhookVerifier | None = None,
+        metadata_signer: NativeCheckoutMetadataSigner | None = None,
+        post_request: Callable[..., object] | None = None,
+    ) -> None:
+        self.paypal = paypal or PayPalWebhookVerifier()
+        self.metadata_signer = metadata_signer or NativeCheckoutMetadataSigner()
+        self.post_request = post_request or requests.post
+
+    def create_and_send(
+        self,
+        *,
+        user_id: str,
+        billing_email: str,
+        product_id: str,
+        billing_period: BillingPeriod | str,
+        founding_offer: bool = False,
+    ) -> dict:
+        billing_email = (billing_email or "").strip().lower()
+        if (
+            not billing_email
+            or len(billing_email) > 254
+            or billing_email.count("@") != 1
+            or any(ch.isspace() for ch in billing_email)
+        ):
+            raise NativePayPalError("A valid PayPal billing email is required")
+
+        product = get_native_product(product_id)
+        try:
+            period = BillingPeriod(billing_period)
+        except ValueError as exc:
+            raise NativePayPalError(f"Unsupported billing period: {billing_period}") from exc
+        amount_minor = product.price_minor_for(period, founding_offer=bool(founding_offer))
+        amount = str((Decimal(amount_minor) / Decimal("100")).quantize(Decimal("0.01")))
+        reference = self.metadata_signer.sign(
+            user_id=user_id,
+            product_id=product.id,
+            billing_period=period,
+            founding_offer=bool(founding_offer),
+        )
+        if len(reference) > _PAYPAL_REFERENCE_MAX:
+            raise NativePayPalError("Native checkout metadata exceeds the PayPal invoice reference limit")
+
+        body = {
+            "detail": {
+                "currency_code": product.currency,
+                "reference": reference,
+                "payment_term": {"term_type": "DUE_ON_RECEIPT"},
+            },
+            "primary_recipients": [{"billing_info": {"email_address": billing_email}}],
+            "items": [
+                {
+                    "name": product.name,
+                    "quantity": "1",
+                    "unit_amount": {"currency_code": product.currency, "value": amount},
+                    "unit_of_measure": "AMOUNT",
+                }
+            ],
+            "configuration": {"partial_payment": {"allow_partial_payment": False}},
+        }
+        try:
+            token = self.paypal._access_token()
+            created = self.post_request(
+                f"{self.paypal.base_url}/v2/invoicing/invoices",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json=body,
+                timeout=10,
+            )
+        except (requests.RequestException, PayPalWebhookError) as exc:
+            raise NativePayPalError("PayPal native invoice creation failed") from exc
+        if getattr(created, "status_code", 500) != 201:
+            raise NativePayPalError("PayPal native invoice creation failed")
+        try:
+            created_payload = created.json() or {}
+        except (ValueError, TypeError) as exc:
+            raise NativePayPalError("PayPal returned an invalid native invoice response") from exc
+        invoice_id = str(created_payload.get("id") or "").strip() if isinstance(created_payload, dict) else ""
+        if not invoice_id or len(invoice_id) > 100 or "/" in invoice_id or "\\" in invoice_id:
+            raise NativePayPalError("PayPal did not return a valid native invoice ID")
+
+        try:
+            sent = self.post_request(
+                f"{self.paypal.base_url}/v2/invoicing/invoices/{invoice_id}/send",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                json={"send_to_recipient": True, "send_to_invoicer": False},
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            raise NativePayPalError("PayPal native invoice send failed") from exc
+        if getattr(sent, "status_code", 500) >= 400:
+            raise NativePayPalError("PayPal native invoice send failed")
+
+        return {
+            "provider": "paypal",
+            "invoice_id": invoice_id,
+            "product_id": product.id,
+            "billing_period": period.value,
+            "founding_offer": bool(founding_offer),
+            "amount_minor": amount_minor,
+            "currency": product.currency,
+            "sent": True,
         }
 
 
