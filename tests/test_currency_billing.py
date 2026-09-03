@@ -7,13 +7,13 @@ from aura_music_studio.subscriptions import SubscriptionLedger
 
 
 def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
-    member = payment_option("base")
+    basic = payment_option("base")
     pro = payment_option("pro")
-    assert member is not None and pro is not None
-    assert member.currency == "GBP"
-    assert member.amount == "4.99"
-    assert member.amount_minor == 499
-    assert member.amount_usd == "4.99"
+    assert basic is not None and pro is not None
+    assert basic.currency == "GBP"
+    assert basic.amount == "5.99"
+    assert basic.amount_minor == 599
+    assert basic.amount_usd == "5.99"
     assert pro.currency == "GBP"
     assert pro.amount == "9.99"
     assert pro.amount_minor == 999
@@ -21,9 +21,9 @@ def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
 
     public = public_payment_options()
     assert public[0]["currency"] == "GBP"
-    assert public[0]["amount"] == "4.99"
-    assert public[0]["amount_minor"] == 499
-    assert public[0]["amount_usd"] == "4.99"
+    assert public[0]["amount"] == "5.99"
+    assert public[0]["amount_minor"] == 599
+    assert public[0]["amount_usd"] == "5.99"
     assert public[1]["currency"] == "GBP"
     assert public[1]["amount"] == "9.99"
     assert public[1]["amount_minor"] == 999
@@ -38,6 +38,7 @@ def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
 
 
 def test_legacy_public_price_symbols_are_migrated_narrowly_to_gbp():
+    # This is deliberately historical migration coverage, not the current Basic price.
     text = "Basic $4.99 / month · Pro $9.99 / month · unrelated $14.99 value"
     migrated = rebrand_text(text)
     assert "Basic £4.99 / month" in migrated
