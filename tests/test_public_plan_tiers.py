@@ -11,12 +11,17 @@ def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert [PLANS[key].currency for key in ("free", "base", "pro")] == ["GBP", "GBP", "GBP"]
     assert str(PLANS["free"].monthly_price) == "0.00"
     assert str(PLANS["base"].monthly_price) == "5.99"
-    assert str(PLANS["pro"].monthly_price) == "14.99"
+    assert str(PLANS["pro"].monthly_price) == "9.99"
+    assert str(PLANS["pro"].annual_price) == "99.00"
     assert PLANS["base"].monthly_price_minor == 599
-    assert PLANS["pro"].monthly_price_minor == 1499
+    assert PLANS["base"].annual_price_minor is None
+    assert PLANS["pro"].monthly_price_minor == 999
+    assert PLANS["pro"].annual_price_minor == 9900
     assert PLANS["base"].display_price == "£5.99"
-    assert PLANS["pro"].display_price == "£14.99"
+    assert PLANS["pro"].display_price == "£9.99"
+    assert PLANS["pro"].display_annual_price == "£99.00"
     assert str(PLANS["base"].monthly_price_usd) == "5.99"
+    assert str(PLANS["pro"].monthly_price_usd) == "9.99"
 
     rows = public_plans()
     assert [row["name"] for row in rows] == ["Free", "Tier 2", "Unlimited Pro"]
@@ -25,6 +30,13 @@ def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert rows[1]["monthly_price_minor"] == 599
     assert rows[1]["display_price"] == "£5.99"
     assert rows[1]["monthly_price_usd"] == "5.99"
+    assert rows[2]["currency"] == "GBP"
+    assert rows[2]["monthly_price"] == "9.99"
+    assert rows[2]["annual_price"] == "99.00"
+    assert rows[2]["monthly_price_minor"] == 999
+    assert rows[2]["annual_price_minor"] == 9900
+    assert rows[2]["display_price"] == "£9.99"
+    assert rows[2]["display_annual_price"] == "£99.00"
 
 
 def test_subscription_entitlements_do_not_contain_esp_or_social_access_roles():
