@@ -10,7 +10,7 @@ from PIL import Image
 
 from aura_music_studio.professional_editor import ProfessionalEditorStore
 from aura_music_studio.professional_editor_renderer import EditorRenderUnsupported
-from aura_music_studio.professional_video_track_keyframe_compositor import (
+from aura_music_studio.professional_video_track_keyframe_universal_compositor import (
     TrackKeyframeUniversalVisualVideoCompositor,
     _track_opacity_keyframes,
 )
@@ -136,6 +136,8 @@ def test_real_grouped_track_opacity_keyframes_change_visible_pixels_over_time(tm
     assert '"professional_track_keyframe_compositor": true' in metadata
     assert '"track_opacity_keyframes_execute_in_sequence_time": true' in metadata
     assert '"unsupported_track_keyframes_fail_closed": true' in metadata
+    assert '"keyframed_track_effects_fail_closed": false' in metadata
+    assert '"supported_keyframed_track_effects_preserved": true' in metadata
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg required for fail-closed render test")
@@ -156,5 +158,6 @@ def test_production_render_api_routes_through_track_keyframe_compositor():
 
     source = inspect.getsource(professional_editor_render_api)
     assert "professional_video_track_keyframe_compositor" in source
+    assert "professional_video_track_keyframe_universal_compositor" in source
     assert "video_renderer = UniversalVisualVideoCompositor" in source
     assert "professional_keyframed_mask_video_compositor ->" in source
