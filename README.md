@@ -125,7 +125,7 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 - limited eligible creation/editing;
 - Cosmic Creation Coins may be used for eligible additional operations where configured.
 
-### Tier 2 — £5.99/month
+### Member — £4.99/month
 
 - increased creative access;
 - up to **5 eligible creations/edits per day** across the configured shared Music, Video and Game admission boundary;
@@ -133,9 +133,10 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 
 The cross-studio five-per-day admission counter is **server-authoritative, implemented and regression-tested**, including shared daily usage across eligible studio operations. Clients cannot override the server meter. Production launch still requires the authoritative plan/catalogue configuration and operational monitoring to match the approved commercial policy.
 
-### Tier 3 — Unlimited Pro — £14.99/month
+### Unlimited Pro — £9.99/month
 
 - highest normal enabled creative access;
+- AuraSec entitlement included with the subscription;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
 
@@ -168,15 +169,15 @@ The integration branch contains server-authoritative marketplace orders, provide
 
 The platform contains technical governance foundations for tenant/project isolation, role separation, privacy access/portability, deletion/retention, consent evidence, voice/digital-likeness boundaries, copyright/IP provenance, safety reporting/appeals, data minimisation, audit evidence, prompt-injection/connector security and human review for consequential matters.
 
-## Aura Sec
+## AuraSec
 
-**Aura Sec** is a separate security product inside the wider Elevate Souls Productions ecosystem.
+**AuraSec** is the security product inside the wider Elevate Souls Productions ecosystem. Unlimited Pro includes the AuraSec entitlement, while AuraSec can also be distributed and sold separately under its own commercial configuration.
 
 The repository includes substantial web/control-plane and bounded native-execution architecture for device state, command contracts, device proof, release trust, artifact verification, recovery/threat/vulnerability state and security administration. These controls are tested as software boundaries and must fail closed when production trust evidence is absent.
 
 A public commercial native-security release still requires real platform-native packaged clients, production signing/notarisation, approved device identity/attestation transport, secure updater/rollback distribution, production threat-intelligence operations, privacy/uninstall/performance validation and independent penetration/malware/phishing/ransomware benchmarking. Test verifiers, test keys and repository code are not represented as those external production attestations.
 
-Aura Sec native commercial readiness is tracked separately from the main Command Center web release.
+AuraSec native commercial readiness is tracked separately from the main Command Center web release.
 
 ## Security and architecture principles
 
@@ -191,7 +192,7 @@ Aura Sec native commercial readiness is tracked separately from the main Command
 - secrets are not exposed client-side;
 - public responses must not expose host filesystem paths;
 - expensive operations use background-job patterns where appropriate;
-- Aura Sec privileged actions use typed allowlisted commands rather than arbitrary shell/script execution;
+- AuraSec privileged actions use typed allowlisted commands rather than arbitrary shell/script execution;
 - canonical CI rejects concrete production-code placeholder implementations before the regression suite runs.
 
 ## Self-hosting and production control plane
@@ -222,7 +223,7 @@ A production release requires, at minimum, no unresolved P0 issues, an acceptabl
 
 Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a real restore drill, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
 
-The main Command Center and the Aura Sec full native commercial product may reach different release stages and must not be conflated.
+The main Command Center and the AuraSec full native commercial product may reach different release stages and must not be conflated.
 
 ## Final product identity
 
