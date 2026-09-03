@@ -260,3 +260,21 @@ def get_plan(plan_id: str) -> Plan:
     if key not in PLANS:
         raise ValueError(f"Unknown plan: {plan_id}")
     return PLANS[key]
+
+
+def require_feature(plan_id: str, feature: str) -> None:
+    plan = get_plan(plan_id)
+    if not plan.has(feature):
+        raise PermissionError(f"{feature} requires a higher Command Center membership tier")
+
+
+def public_plans() -> list[dict]:
+    return [PLANS[k].public_dict() for k in ("free", "base", "pro")]
+
+
+OWNERSHIP_NOTICE = (
+    "Elevate Souls Productions Content Creation Command Center and Elevate Souls Productions do not claim ownership of a "
+    "member's original inputs or eligible generated outputs. Rights in AI-assisted outputs remain subject to applicable "
+    "law, the licences of underlying open models, and any third-party/source-material rights. Members must have the rights "
+    "required for material they upload or ask the Studio to transform."
+)
