@@ -63,6 +63,11 @@ def test_aura3d_live_tuning_is_private_authored_only_and_reversible():
     assert "Undo 3D" in html
     assert "AuraLive3D=Object.freeze" in html
 
+    # Other runtime layers can update entity transforms, so suppression is reasserted each frame.
+    assert "function enforce3()" in html
+    assert "for(const [id,saved] of hidden3)" in html
+    assert "requestAnimationFrame(enforce3)" in html
+
     # More can restore only something this live session previously suppressed.
     assert "Array.from(hidden3.entries())" in html
     assert "All currently available authored ${kind} are already active." in html
