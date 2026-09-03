@@ -57,20 +57,28 @@ def subscription_price_id(
 
 
 def approved_checkout_period(user: dict[str, Any], plan_id: str, requested_period: BillingPeriod | str) -> BillingPeriod:
-    """Bind the initial paid Checkout Session to the exact owner-approved contract.
+    """Bind a paid Checkout Session to a safe, explicit membership contract.
 
-    Active members may select a different plan/period for a provider-backed plan change. The
-    subscription ledger owns when that paid change becomes effective. Pending members may buy
-    only the exact plan and period that ownership approved.
+    Pending members may buy only the exact plan and period that ownership approved. An already
+    active Basic/Pro account may not create a second Stripe subscription as an implicit upgrade,
+    downgrade or billing-period change. Those operations require a dedicated provider-backed
+    lifecycle flow so an existing paid period cannot be silently replaced or double-billed.
     """
     period = BillingPeriod(requested_period)
     plan = get_plan(plan_id)
     plan.price_for(period)
-    if str(user.get("status") or "") != "approved_pending_payment":
+    status = str(user.get("status") or "")
+    if status == "approved_pending_payment":
+        approved = billing_preferences.approved_period_for_user(str(user.get("id") or ""), plan.id)
+        if approved is not period:
+            raise ValueError("Checkout billing period does not match the owner-approved membership period")
         return period
-    approved = billing_preferences.approved_period_for_user(str(user.get("id") or ""), plan.id)
-    if approved is not period:
-        raise ValueError("Checkout billing period does not match the owner-approved membership period")
+
+    if status == "active" and str(user.get("plan_id") or "") in {"base", "pro"}:
+        raise ValueError(
+            "Active paid memberships cannot create a second Stripe subscription Checkout session; "
+            "use the verified subscription lifecycle for plan or billing-period changes"
+        )
     return period
 
 
