@@ -10,10 +10,10 @@ def test_current_public_membership_prices_are_gbp_and_use_authoritative_amounts(
 
     assert free.monthly_price == Decimal("0.00")
     assert tier_two.monthly_price == Decimal("5.99")
-    assert pro.monthly_price == Decimal("14.99")
+    assert pro.monthly_price == Decimal("9.99")
     assert {free.currency, tier_two.currency, pro.currency} == {"GBP"}
     assert tier_two.monthly_price_minor == 599
-    assert pro.monthly_price_minor == 1499
+    assert pro.monthly_price_minor == 999
 
 
 def test_current_customer_facing_plan_names_and_prices_are_exposed_without_changing_stable_ids():
@@ -24,9 +24,9 @@ def test_current_customer_facing_plan_names_and_prices_are_exposed_without_chang
     assert plans["base"]["name"] == "Tier 2"
     assert plans["pro"]["name"] == "Unlimited Pro"
     assert plans["base"]["display_price"] == "£5.99"
-    assert plans["pro"]["display_price"] == "£14.99"
+    assert plans["pro"]["display_price"] == "£9.99"
     assert plans["base"]["monthly_price_minor"] == 599
-    assert plans["pro"]["monthly_price_minor"] == 1499
+    assert plans["pro"]["monthly_price_minor"] == 999
 
 
 def test_legacy_price_values_are_not_present_in_current_plan_descriptions():
@@ -35,4 +35,4 @@ def test_legacy_price_values_are_not_present_in_current_plan_descriptions():
     )
 
     assert "£4.99" not in public_text
-    assert "£9.99" not in public_text
+    assert "£14.99" not in public_text
