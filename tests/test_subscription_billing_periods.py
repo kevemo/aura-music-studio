@@ -3,9 +3,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 
-import pytest
-
 from aura_music_studio.accounts import AccountStore
+from aura_music_studio.membership_billing_periods import MembershipBillingPreferenceStore
 from aura_music_studio.native_products import BillingPeriod
 from aura_music_studio.subscriptions import SubscriptionLedger, _advance_billing_period
 import aura_music_studio.subscriptions as subscriptions_module
@@ -20,9 +19,23 @@ def test_calendar_period_advancement_clamps_month_and_leap_year_boundaries():
     ) == datetime(2029, 2, 28, 12, 0, tzinfo=timezone.utc)
 
 
-def _approved_paid_user(tmp_path, plan_id: str = "pro"):
+def _approved_paid_user(
+    tmp_path,
+    plan_id: str = "pro",
+    *,
+    approved_billing_period: BillingPeriod | None = None,
+):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     signup = store.signup("period@example.com", "Period User", "verysecurepassword", plan_id)
+    if approved_billing_period is not None:
+        preferences = MembershipBillingPreferenceStore(store)
+        preferences.record_request(
+            user_id=signup.user_id,
+            membership_request_id=signup.membership_request_id,
+            plan_id=plan_id,
+            billing_period=approved_billing_period,
+        )
+        preferences.decide(signup.membership_request_id, approved=True)
     with sqlite3.connect(store.db_path) as con:
         con.execute(
             "UPDATE users SET status='approved_pending_payment', billing_status='awaiting_payment' WHERE id=?",
@@ -32,7 +45,10 @@ def _approved_paid_user(tmp_path, plan_id: str = "pro"):
 
 
 def test_annual_pro_payment_persists_period_price_and_calendar_year(tmp_path, monkeypatch):
-    store, user_id = _approved_paid_user(tmp_path)
+    store, user_id = _approved_paid_user(
+        tmp_path,
+        approved_billing_period=BillingPeriod.ANNUAL,
+    )
     fixed_now = datetime(2028, 2, 29, 9, 30, tzinfo=timezone.utc)
     monkeypatch.setattr(subscriptions_module, "_now", lambda: fixed_now)
 
@@ -62,16 +78,39 @@ def test_annual_pro_payment_persists_period_price_and_calendar_year(tmp_path, mo
     assert payment["billing_period"] == "annual"
 
 
-def test_member_annual_payment_fails_closed(tmp_path):
-    store, user_id = _approved_paid_user(tmp_path, "base")
+def test_annual_basic_payment_persists_5999_price_and_calendar_year(tmp_path, monkeypatch):
+    store, user_id = _approved_paid_user(
+        tmp_path,
+        "base",
+        approved_billing_period=BillingPeriod.ANNUAL,
+    )
+    fixed_now = datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(subscriptions_module, "_now", lambda: fixed_now)
+
     ledger = SubscriptionLedger(store)
-    with pytest.raises(ValueError, match="Annual billing is not available"):
-        ledger.verify_payment(
-            user_id,
-            "base",
-            "INVALID-MEMBER-ANNUAL",
-            billing_period=BillingPeriod.ANNUAL,
-        )
+    status = ledger.verify_payment(
+        user_id,
+        "base",
+        "ANNUAL-BASIC-2026",
+        billing_period=BillingPeriod.ANNUAL,
+    )
+
+    subscription = status["subscription"]
+    assert subscription["billing_period"] == "annual"
+    assert subscription["period_start"] == fixed_now.isoformat()
+    assert subscription["period_end"] == datetime(2027, 9, 3, 12, 0, tzinfo=timezone.utc).isoformat()
+
+    with sqlite3.connect(store.db_path) as con:
+        con.row_factory = sqlite3.Row
+        payment = con.execute(
+            "SELECT amount,amount_minor,currency,billing_period FROM subscription_payments WHERE payment_reference=?",
+            ("ANNUAL-BASIC-2026",),
+        ).fetchone()
+    assert payment is not None
+    assert payment["amount"] == "59.99"
+    assert payment["amount_minor"] == 5999
+    assert payment["currency"] == "GBP"
+    assert payment["billing_period"] == "annual"
 
 
 def test_legacy_subscription_rows_migrate_to_monthly_period(tmp_path):
