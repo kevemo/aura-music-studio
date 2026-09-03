@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from .game_forge_integrity import game_integrity_hash
+from .game_forge_live_copilot import inject_live_copilot
 from .game_forge_models import GameBuild, GameDNA
 from .game_forge_state_machine import state_machine_runtime_payload
 from .game_forge_store import game_dir, save_game
@@ -78,17 +79,30 @@ def render_state_machine_playtest(game: GameDNA) -> str:
     world = ensure_world(game)
     payload = state_machine_runtime_payload(game.id, world=world)
     html = render_world_events_playtest(game)
-    if not payload["entities"]:
-        return html
-    code = _AURA3D_STATE_MACHINE if game.dimension == "3d" and game.engine_target == "aura3d" else _AURA2D_STATE_MACHINE
-    return _inject_before_body(html, _machine_document(payload, code))
+    if payload["entities"]:
+        code = _AURA3D_STATE_MACHINE if game.dimension == "3d" and game.engine_target == "aura3d" else _AURA2D_STATE_MACHINE
+        html = _inject_before_body(html, _machine_document(payload, code))
+    return inject_live_copilot(html, game=game)
+
+
+def _decorate_delegated_build(game: GameDNA, html: str) -> tuple[GameDNA, str]:
+    """Add the dormant live-copilot bridge to a lower-layer build without changing Game DNA."""
+    if not game.latest_build:
+        raise ValueError("Delegated Game Forge build did not produce build metadata")
+    html = inject_live_copilot(html, game=game)
+    path = game_dir(game.id) / "builds" / game.latest_build.build_id / "play.html"
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    path.write_text(html, encoding="utf-8")
+    return game, html
 
 
 def build_state_machine_playtest(game: GameDNA) -> tuple[GameDNA, str]:
     world = ensure_world(game)
     payload = state_machine_runtime_payload(game.id, world=world)
     if not payload["entities"]:
-        return build_world_events_playtest(game)
+        game, html = build_world_events_playtest(game)
+        return _decorate_delegated_build(game, html)
     content_hash = game_integrity_hash(game)
     html = render_state_machine_playtest(game)
     runtime_name = (
