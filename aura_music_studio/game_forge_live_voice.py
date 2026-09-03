@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from html import escape
 from urllib.parse import quote, urlencode
 
 from .game_forge_models import GameDNA
