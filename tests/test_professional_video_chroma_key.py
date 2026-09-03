@@ -64,8 +64,8 @@ def _project(tmp_path, name="ChromaKeyProject"):
         height=90,
         fps=10.0,
         duration=1.0,
-        background="#0000ff",
     )
+    store.patch_sequence(sequence.id, {"background": "#0000ff"})
     track = store.create_track(sequence.id, kind="video", name="Keyed foreground")
     source = _make_green_source(project)
     item = store.create_item(
