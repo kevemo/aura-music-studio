@@ -256,12 +256,11 @@ PLANS: dict[str, Plan] = {
     ),
     "base": Plan(
         id="base",
-        name="Member",
-        monthly_price=Decimal("5.99"),
-        annual_price=Decimal("59.99"),
+        name="Basic",
+        monthly_price=Decimal("4.99"),
         currency="GBP",
         description=(
-            "£5.99/month or £59.99/year Basic tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
+            "£4.99/month Basic tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
             "The authoritative cross-studio daily allowance and any Cosmic Creation Coin overage are enforced separately "
             "by server-side usage/admission controls; this plan object defines feature entitlement rather than inventing "
             "a second usage counter. Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura "
