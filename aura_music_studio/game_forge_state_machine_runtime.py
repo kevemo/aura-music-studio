@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 from .game_forge_integrity import game_integrity_hash
+from .game_forge_live_3d import inject_live_3d_tuning
 from .game_forge_live_copilot import inject_live_copilot
 from .game_forge_models import GameBuild, GameDNA
 from .game_forge_state_machine import state_machine_runtime_payload
@@ -75,6 +76,11 @@ function machineFrame(ms){machineUpdate(ms/1000);requestAnimationFrame(machineFr
 """
 
 
+def _inject_live_layers(html: str, *, game: GameDNA) -> str:
+    html = inject_live_copilot(html, game=game)
+    return inject_live_3d_tuning(html, game=game)
+
+
 def render_state_machine_playtest(game: GameDNA) -> str:
     world = ensure_world(game)
     payload = state_machine_runtime_payload(game.id, world=world)
@@ -82,14 +88,14 @@ def render_state_machine_playtest(game: GameDNA) -> str:
     if payload["entities"]:
         code = _AURA3D_STATE_MACHINE if game.dimension == "3d" and game.engine_target == "aura3d" else _AURA2D_STATE_MACHINE
         html = _inject_before_body(html, _machine_document(payload, code))
-    return inject_live_copilot(html, game=game)
+    return _inject_live_layers(html, game=game)
 
 
 def _decorate_delegated_build(game: GameDNA, html: str) -> tuple[GameDNA, str]:
-    """Add the dormant live-copilot bridge to a lower-layer build without changing Game DNA."""
+    """Add private live-creation layers to a lower-layer build without changing Game DNA."""
     if not game.latest_build:
         raise ValueError("Delegated Game Forge build did not produce build metadata")
-    html = inject_live_copilot(html, game=game)
+    html = _inject_live_layers(html, game=game)
     path = game_dir(game.id) / "builds" / game.latest_build.build_id / "play.html"
     if not path.is_file():
         raise FileNotFoundError(path)
