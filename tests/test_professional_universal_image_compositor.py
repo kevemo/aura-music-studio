@@ -165,6 +165,8 @@ def test_real_image_designer_export_executes_universal_filters_without_mutating_
         "image.filter.duotone",
     ]
     assert metadata["universal_image_effect_instances_executed"] == 2
+    assert metadata["universal_image_effect_scopes_executed"] == ["item"]
+    assert metadata["supported_universal_image_effect_scopes"] == ["item", "track"]
     assert metadata["source_media_mutated"] is False
     assert metadata["source_refs"] == ["sources/universal_source.png"]
 
@@ -188,10 +190,69 @@ def test_universal_image_renderer_fails_closed_for_unknown_namespaced_filter(tmp
         UniversalImageCompositor(project).render_image_advanced(sequence.id)
 
 
-def test_universal_image_renderer_keeps_whole_track_contracts_fail_closed(tmp_path):
+def test_universal_image_renderer_executes_whole_track_contracts_without_mutating_source(tmp_path):
+    project, store, sequence, track, _item, source = _project(tmp_path)
+    before_sha = _sha256(source)
+    baseline = UniversalImageCompositor(project).render_image_advanced(sequence.id)
+    baseline_path = project / baseline.output_ref
+
+    store.add_effect(
+        "track",
+        track.id,
+        EditorEffect(type="image.filter.cinematic", parameters={"strength": 0.85}),
+    )
+    store.add_effect(
+        "track",
+        track.id,
+        EditorEffect(
+            type="image.filter.duotone",
+            mix=0.4,
+            parameters={"shadow": "#09111d", "highlight": "#ffd77a"},
+        ),
+    )
+    result = UniversalImageCompositor(project).render_image_advanced(sequence.id, frame_time=0.5)
+    output = project / result.output_ref
+
+    assert _sha256(source) == before_sha
+    with Image.open(baseline_path) as left, Image.open(output) as right:
+        assert ImageChops.difference(left.convert("RGB"), right.convert("RGB")).getbbox() is not None
+
+    metadata = json.loads((project / result.metadata_ref).read_text(encoding="utf-8"))
+    assert metadata["universal_image_effect_contracts_executed"] == [
+        "image.filter.cinematic",
+        "image.filter.duotone",
+    ]
+    assert metadata["universal_image_effect_instances_executed"] == 2
+    assert metadata["universal_image_effect_scopes_executed"] == ["track"]
+    assert metadata["supported_universal_image_effect_scopes"] == ["item", "track"]
+    assert metadata["source_media_mutated"] is False
+
+
+def test_universal_image_renderer_tracks_item_and_track_effect_scope_evidence(tmp_path):
+    project, store, sequence, track, item, _source = _project(tmp_path)
+    store.add_effect(
+        "item",
+        item.id,
+        EditorEffect(type="image.filter.cinematic", parameters={"strength": 0.4}),
+    )
+    store.add_effect(
+        "track",
+        track.id,
+        EditorEffect(
+            type="image.filter.duotone",
+            parameters={"shadow": "#000000", "highlight": "#ffffff"},
+        ),
+    )
+    result = UniversalImageCompositor(project).render_image_advanced(sequence.id)
+    metadata = json.loads((project / result.metadata_ref).read_text(encoding="utf-8"))
+    assert metadata["universal_image_effect_instances_executed"] == 2
+    assert metadata["universal_image_effect_scopes_executed"] == ["item", "track"]
+
+
+def test_universal_image_renderer_fails_closed_for_unknown_track_filter(tmp_path):
     project, store, sequence, track, _item, _source = _project(tmp_path)
-    store.add_effect("track", track.id, EditorEffect(type="image.filter.cinematic", parameters={"strength": 0.5}))
-    with pytest.raises(EditorRenderUnsupported, match="item-local"):
+    store.add_effect("track", track.id, EditorEffect(type="image.filter.future", parameters={}))
+    with pytest.raises(EditorRenderUnsupported, match="image.filter.future"):
         UniversalImageCompositor(project).render_image_advanced(sequence.id)
 
 
