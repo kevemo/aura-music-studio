@@ -36,6 +36,11 @@ FORBIDDEN_PURCHASABLE_AUTHORITIES: Final[frozenset[str]] = frozenset(
 
 
 def _normalise_public_memberships(memberships: list[dict]) -> list[dict]:
+    """Project stable internal membership IDs into current public names only.
+
+    Prices and descriptive commercial copy stay owned by ``plans.py``. This projection must not
+    carry independent price strings because that would create a second source that can drift.
+    """
     projected: list[dict] = []
     for item in memberships:
         public_item = deepcopy(item)
@@ -44,15 +49,6 @@ def _normalise_public_memberships(memberships: list[dict]) -> list[dict]:
         if public_name is None:
             raise RuntimeError(f"Unknown membership in public commercial catalogue: {plan_id}")
         public_item["name"] = public_name
-        if plan_id == "free":
-            description = str(public_item.get("description") or "")
-            public_item["description"] = description.replace(
-                "Music/video downloads and game creation unlock on Member.",
-                "Music/video downloads and game creation unlock on Basic.",
-            )
-        elif plan_id == "base":
-            description = str(public_item.get("description") or "")
-            public_item["description"] = description.replace("£4.99 Member tier", "£4.99 Basic tier")
         projected.append(public_item)
     return projected
 
