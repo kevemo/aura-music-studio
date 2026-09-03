@@ -12,9 +12,12 @@ _REQUIRED_STATE_ALIASES = {
     "welcoming": ("welcome", "welcoming", "greet", "greeting"),
     "listening": ("listen", "listening", "attentive"),
     "thinking": ("think", "thinking", "ponder"),
+    "tool_running": ("tool_running", "working", "work", "typing"),
     "speaking": ("speak", "speaking", "talk", "talking"),
     "celebrating": ("celebrate", "celebrating", "happy", "cheer"),
     "warning": ("warn", "warning", "concerned"),
+    "recording_coach": ("recording_coach", "recording-coach", "coach"),
+    "studio_engineer": ("studio_engineer", "studio-engineer", "engineer"),
 }
 
 # Oculus/OVR-style viseme channels are widely used by realtime-avatar pipelines. The
