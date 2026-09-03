@@ -11,7 +11,8 @@ def _production_env() -> dict[str, str]:
         "LSS_PUBLIC_BASE_URL": "https://studio.example.test",
         "STRIPE_SECRET_KEY": "sk_live_fixture_0123456789",
         "STRIPE_WEBHOOK_SECRET": "whsec_fixture_0123456789",
-        "STRIPE_BASE_PRICE_ID": "price_basic_fixture_0123456789",
+        "STRIPE_BASE_PRICE_ID": "price_basic_month_fixture_0123456789",
+        "STRIPE_BASE_ANNUAL_PRICE_ID": "price_basic_year_fixture_0123456789",
         "STRIPE_PRO_PRICE_ID": "price_pro_month_fixture_0123456789",
         "STRIPE_PRO_ANNUAL_PRICE_ID": "price_pro_year_fixture_0123456789",
     }
@@ -25,7 +26,14 @@ def test_complete_production_stripe_launch_contract_passes_without_network_evide
     assert report["deployment"] == "production"
     assert report["canonical_catalogue_ok"] is True
     assert report["public_base_url_acceptable"] is True
+    assert report["configured"]["STRIPE_BASE_ANNUAL_PRICE_ID"] is True
     assert report["configured"]["STRIPE_PRO_ANNUAL_PRICE_ID"] is True
+    assert report["canonical_prices"] == {
+        "basic_monthly_gbp": "5.99",
+        "basic_annual_gbp": "59.99",
+        "unlimited_pro_monthly_gbp": "9.99",
+        "unlimited_pro_annual_gbp": "99.00",
+    }
     assert report["production_settlement_proven"] is False
     assert report["network_probes_performed"] is False
     assert report["browser_return_is_payment_proof"] is False
@@ -36,14 +44,15 @@ def test_complete_production_stripe_launch_contract_passes_without_network_evide
     assert env["STRIPE_WEBHOOK_SECRET"] not in serialized
 
 
-def test_production_fails_closed_when_annual_pro_price_is_missing():
-    env = _production_env()
-    env.pop("STRIPE_PRO_ANNUAL_PRICE_ID")
-    report = build_stripe_launch_report(env)
+def test_production_fails_closed_when_any_annual_membership_price_is_missing():
+    for name in ("STRIPE_BASE_ANNUAL_PRICE_ID", "STRIPE_PRO_ANNUAL_PRICE_ID"):
+        env = _production_env()
+        env.pop(name)
+        report = build_stripe_launch_report(env)
 
-    assert report["ok"] is False
-    assert report["configured"]["STRIPE_PRO_ANNUAL_PRICE_ID"] is False
-    assert "STRIPE_PRO_ANNUAL_PRICE_ID" in report["missing_names"]
+        assert report["ok"] is False
+        assert report["configured"][name] is False
+        assert name in report["missing_names"]
 
 
 def test_production_rejects_test_secret_and_non_https_public_url():
