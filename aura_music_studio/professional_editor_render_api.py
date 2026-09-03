@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
+from .professional_chroma_key_video_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
     EditorRenderError,
@@ -17,7 +18,6 @@ from .professional_editor_renderer import (
     ProfessionalEditorRenderer,
 )
 from .professional_universal_image_compositor import UniversalImageCompositor
-from .professional_universal_scoped_visual_video_compositor import UniversalVisualVideoCompositor
 from .tenant_storage import project_path
 from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
 from .tier2_provider_guard import Tier2ProviderGuard
@@ -153,6 +153,8 @@ def render_editor_sequence(
                 raise PermissionError("Video export requires a membership tier with video downloads")
             # The scoped universal visual compositor keeps item effects non-destructive and applies
             # whole-track/adjustment effects only after every item on that track has been composed.
+            # Its chroma-key extension preserves clip alpha in a transient lossless derivative so
+            # green/blue/custom keyed pixels reveal lower tracks instead of being flattened to black.
             # It then delegates opacity/blend/final MP4 production to the established grouped
             # renderer, preserving project-local sources and the shared entitlement/metering path.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
@@ -258,5 +260,4 @@ __all__ = [
     "EditorRenderRequest",
     "_execute_video_render",
     "_sequence_has_non_normal_item_blend",
-    "_video_render_request_key",
 ]
