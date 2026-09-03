@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
+# The chroma-capable compositor extends professional_universal_scoped_visual_video_compositor,
+# retaining the existing scoped universal effect, grouped-track, mask and blend foundation.
 from .professional_chroma_key_video_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
