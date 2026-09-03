@@ -89,17 +89,25 @@ def _storage_details(env: Mapping[str, str]) -> tuple[bool, dict, list[str]]:
 
 
 def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool) -> tuple[bool, list[str], dict]:
-    names = ("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_BASE_PRICE_ID", "STRIPE_PRO_PRICE_ID")
+    names = (
+        "STRIPE_SECRET_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_BASE_PRICE_ID",
+        "STRIPE_PRO_PRICE_ID",
+        "STRIPE_PRO_ANNUAL_PRICE_ID",
+    )
     secret = _value(env, "STRIPE_SECRET_KEY")
     webhook = _value(env, "STRIPE_WEBHOOK_SECRET")
     base_price = _value(env, "STRIPE_BASE_PRICE_ID")
     pro_price = _value(env, "STRIPE_PRO_PRICE_ID")
+    pro_annual_price = _value(env, "STRIPE_PRO_ANNUAL_PRICE_ID")
 
     configured = {
         "STRIPE_SECRET_KEY": _secret_configured(env, "STRIPE_SECRET_KEY") and secret.startswith(("sk_live_", "sk_test_")),
         "STRIPE_WEBHOOK_SECRET": _secret_configured(env, "STRIPE_WEBHOOK_SECRET") and webhook.startswith("whsec_"),
         "STRIPE_BASE_PRICE_ID": _secret_configured(env, "STRIPE_BASE_PRICE_ID") and base_price.startswith("price_"),
         "STRIPE_PRO_PRICE_ID": _secret_configured(env, "STRIPE_PRO_PRICE_ID") and pro_price.startswith("price_"),
+        "STRIPE_PRO_ANNUAL_PRICE_ID": _secret_configured(env, "STRIPE_PRO_ANNUAL_PRICE_ID") and pro_annual_price.startswith("price_"),
     }
     missing = [name for name in names if not configured[name]]
     messages: list[str] = []
@@ -117,7 +125,11 @@ def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool
         "mode": "signed_stripe_webhook",
         "stripe_environment": "live" if secret.startswith("sk_live_") else "test" if secret.startswith("sk_test_") else "invalid",
         "verification_credentials_configured": configured["STRIPE_WEBHOOK_SECRET"],
-        "subscription_price_ids_configured": configured["STRIPE_BASE_PRICE_ID"] and configured["STRIPE_PRO_PRICE_ID"],
+        "subscription_price_ids_configured": (
+            configured["STRIPE_BASE_PRICE_ID"]
+            and configured["STRIPE_PRO_PRICE_ID"]
+            and configured["STRIPE_PRO_ANNUAL_PRICE_ID"]
+        ),
         "missing_credential_names": missing,
         "browser_return_is_payment_proof": False,
         "automatic_activation": True,
