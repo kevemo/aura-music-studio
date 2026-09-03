@@ -10,13 +10,15 @@ from .acestep_api import AceStepClient
 from .assets import AssetLibrary
 from .autotune import AutoTuneSettings, tune_vocal
 from .mastering import master, translation_report
+from .performance_inputs import get_input, register_input
 from .restoration import AudioRestorer
 from .separation import StemSeparator
 from .spatial import SpatialRenderer
+from .tempo_engine import conform_audio_to_tempo_map, tempo_map_from_performance_input
 
 
 class EngineeringJobRequest(BaseModel):
-    operation: Literal["split", "master", "autotune", "restore", "spatial", "cover", "repaint"]
+    operation: Literal["split", "master", "autotune", "restore", "spatial", "cover", "repaint", "smart_warp"]
     asset_id: str
     split_mode: str = "four_stems"
     master_preset: str = "universal"
@@ -41,20 +43,25 @@ class EngineeringJobRequest(BaseModel):
     transform_strength: float = Field(default=0.75, ge=0.0, le=1.0)
     repaint_start: float = Field(default=0.0, ge=0.0, le=3600.0)
     repaint_end: float | None = Field(default=None, ge=0.0, le=3600.0)
+    target_performance_input_id: str | None = Field(default=None, min_length=1, max_length=160)
+    source_bpm: float | None = Field(default=None, ge=30.0, le=300.0)
+    max_stretch_ratio: float = Field(default=1.8, ge=1.05, le=3.0)
+    crossfade_ms: float = Field(default=4.0, ge=0.0, le=20.0)
 
     @model_validator(mode="after")
     def validate_transform(self):
-        if self.operation not in {"cover", "repaint"}:
-            return self
-        if len(self.transform_prompt.strip()) < 3:
-            raise ValueError("Cover/remix and repaint jobs require a descriptive prompt")
-        if self.operation == "repaint":
-            if self.repaint_end is None:
-                raise ValueError("Region repaint requires repaint_end")
-            if self.repaint_end <= self.repaint_start:
-                raise ValueError("repaint_end must be greater than repaint_start")
-            if self.repaint_end - self.repaint_start > 120.0:
-                raise ValueError("A single region repaint is limited to 120 seconds")
+        if self.operation in {"cover", "repaint"}:
+            if len(self.transform_prompt.strip()) < 3:
+                raise ValueError("Cover/remix and repaint jobs require a descriptive prompt")
+            if self.operation == "repaint":
+                if self.repaint_end is None:
+                    raise ValueError("Region repaint requires repaint_end")
+                if self.repaint_end <= self.repaint_start:
+                    raise ValueError("repaint_end must be greater than repaint_start")
+                if self.repaint_end - self.repaint_start > 120.0:
+                    raise ValueError("A single region repaint is limited to 120 seconds")
+        if self.operation == "smart_warp" and not (self.target_performance_input_id or "").strip():
+            raise ValueError("Smart Warp requires target_performance_input_id")
         return self
 
 
@@ -269,6 +276,53 @@ def run_engineering_job(project: Path, payload: dict) -> dict:
             ),
             "report": report,
             "source_asset_id": record.id,
+        }
+
+    if request.operation == "smart_warp":
+        target_id = str(request.target_performance_input_id or "").strip()
+        try:
+            target_input = get_input(project, target_id)
+        except KeyError as exc:
+            raise ValueError("Smart Warp target performance input was not found") from exc
+        if not target_input.rights_confirmed or not target_input.metadata.get("rights_record_id"):
+            raise ValueError("Smart Warp target performance input has no complete rights/provenance record")
+        target_map, tempo_map_ref = tempo_map_from_performance_input(project, target_input)
+        target_input.metadata.update(
+            {
+                "tempo_map_ref": tempo_map_ref,
+                "tempo_map_id": target_map.id,
+                "tempo_mode": "variable" if target_map.variable else "fixed_detected",
+            }
+        )
+        register_input(project, target_input)
+        output = project / "output" / "tempo_follow" / record.id / f"{stem}_AuraSmartWarp_{uuid4().hex[:12]}.wav"
+        rendered, report = conform_audio_to_tempo_map(
+            source,
+            output,
+            target_map,
+            source_ref=Path(record.path).as_posix(),
+            source_bpm=request.source_bpm,
+            max_stretch_ratio=request.max_stretch_ratio,
+            crossfade_ms=request.crossfade_ms,
+        )
+        return {
+            "operation": "smart_warp",
+            "source_asset_id": record.id,
+            "target_performance_input_id": target_input.id,
+            "target_tempo_map_ref": tempo_map_ref,
+            "target_tempo_map": target_map.model_dump(mode="json"),
+            "output_ref": _public_output_ref(project, rendered),
+            "asset": _register_audio_asset(
+                project,
+                library,
+                rendered,
+                operation="smart_warp",
+                source_asset_id=record.id,
+            ),
+            "report": report.model_dump(mode="json"),
+            "audio_origin": "local_pitch_preserving_time_warp",
+            "source_preserved": True,
+            "final_audio": True,
         }
 
     if request.operation in {"cover", "repaint"}:
