@@ -20,13 +20,17 @@ from .game_forge_assets import (
 )
 from .game_forge_integrity import game_integrity_hash
 from .game_forge_models import ENGINE_REGISTRY, GameDNA
+from .game_forge_package_integrity import (
+    AURA_WEB_PACKAGE_SCHEMA_VERSION,
+    verify_aura_web_export,
+)
 from .game_forge_state_machine_runtime import private_play_html
 from .game_forge_store import game_dir, load_game
 from .plans import GAME_CREATE
 
 router = APIRouter(tags=["Aura Game Export"])
 
-AURA_WEB_EXPORT_VERSION = 2
+AURA_WEB_EXPORT_VERSION = AURA_WEB_PACKAGE_SCHEMA_VERSION
 ExportTarget = Literal["aura_web", "phaser4", "playcanvas", "babylon", "godot"]
 
 _EXPORT_CAPABILITIES: dict[str, dict] = {
@@ -34,11 +38,14 @@ _EXPORT_CAPABILITIES: dict[str, dict] = {
         "label": "Aura Web PWA Package",
         "production_ready": True,
         "executable_export": True,
-        "format": "deterministic_pwa_zip_v2",
+        "format": "deterministic_pwa_zip_v3_verified",
         "runtime": "existing reviewed Aura playtest runtime in a sandboxed installable shell",
         "installable_pwa": True,
         "offline_core": True,
         "verified_media_cache": "same_origin_on_demand",
+        "package_integrity": "sha256_all_payload_members",
+        "download_reverification": True,
+        "publisher_authenticity": "external_signing_gate",
     },
     "phaser4": {
         "label": "Phaser 4 adapter",
@@ -247,6 +254,23 @@ self.addEventListener('fetch',event=>{{if(event.request.method!=='GET')return;co
     return script.encode("utf-8")
 
 
+def _package_integrity(entries: dict[str, bytes]) -> dict:
+    return {
+        "algorithm": "sha256",
+        "coverage": "all_archive_members_except_manifest.json",
+        "files": [
+            {
+                "path": name,
+                "sha256": _sha256_bytes(data),
+                "byte_size": len(data),
+            }
+            for name, data in sorted(entries.items())
+        ],
+        "publisher_authenticity_verified": False,
+        "publisher_authenticity_gate": "independently trusted release signing",
+    }
+
+
 def create_aura_web_export(game: GameDNA) -> dict:
     content_hash = _validate_exportable(game, "aura_web")
     html = private_play_html(game).encode("utf-8")
@@ -279,6 +303,19 @@ def create_aura_web_export(game: GameDNA) -> dict:
     brand_art = _brand_art_bytes()
     export_seed = f"aura_web:v{AURA_WEB_EXPORT_VERSION}:{game.id}:{content_hash}".encode("utf-8")
     export_id = f"export_{hashlib.sha256(export_seed).hexdigest()[:32]}"
+
+    package_entries: dict[str, bytes] = {
+        "index.html": _pwa_index(game),
+        "play.html": html,
+        "manifest.webmanifest": _pwa_manifest(game, brand_art),
+        "service-worker.js": _service_worker(content_hash, [name for name, _ in media_bytes]),
+        "brand-icon.webp": brand_art,
+    }
+    for name, data in media_bytes:
+        if name in package_entries:
+            raise ValueError("Game export media path collides with a core package file")
+        package_entries[name] = data
+
     manifest = {
         "schema_version": AURA_WEB_EXPORT_VERSION,
         "export_id": export_id,
@@ -296,6 +333,7 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "content_hash": content_hash,
         },
         "assets": media_entries,
+        "package_integrity": _package_integrity(package_entries),
         "pwa": {
             "installable_shell": True,
             "offline_core_cache": True,
@@ -309,6 +347,8 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "game_rights_confirmed": True,
             "asset_rights_verified_before_export": True,
             "content_integrity_bound": True,
+            "package_payload_integrity_verified": True,
+            "publisher_authenticity_verified": False,
             "same_origin_media_only": True,
             "creator_private_paths_included": False,
             "server_secrets_included": False,
@@ -323,25 +363,30 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "https_required_for_installability_outside_localhost": True,
         },
     }
+    manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
     buffer = BytesIO()
     with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=9) as zf:
-        _write_zip_entry(zf, "index.html", _pwa_index(game))
-        _write_zip_entry(zf, "play.html", html)
-        _write_zip_entry(zf, "manifest.webmanifest", _pwa_manifest(game, brand_art))
-        _write_zip_entry(zf, "service-worker.js", _service_worker(content_hash, [name for name, _ in media_bytes]))
-        _write_zip_entry(zf, "brand-icon.webp", brand_art)
-        _write_zip_entry(
-            zf,
-            "manifest.json",
-            (json.dumps(manifest, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8"),
-        )
-        for name, data in sorted(media_bytes, key=lambda item: item[0]):
-            _write_zip_entry(zf, name, data)
+        for name in ("index.html", "play.html", "manifest.webmanifest", "service-worker.js", "brand-icon.webp"):
+            _write_zip_entry(zf, name, package_entries[name])
+        _write_zip_entry(zf, "manifest.json", manifest_bytes)
+        for name in sorted(entry for entry in package_entries if entry.startswith("media/")):
+            _write_zip_entry(zf, name, package_entries[name])
+
     payload = buffer.getvalue()
     target = _export_path(game.id, export_id)
     tmp = target.with_suffix(".zip.tmp")
     tmp.write_bytes(payload)
+    try:
+        verification = verify_aura_web_export(
+            tmp,
+            expected_export_id=export_id,
+            expected_game_id=game.id,
+            expected_content_hash=content_hash,
+        )
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     tmp.replace(target)
     return {
         "export_id": export_id,
@@ -358,6 +403,10 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "offline_core_cache": True,
         "verified_media_cache": "same_origin_on_demand",
         "deterministic_for_current_build": True,
+        "package_integrity_verified": bool(verification.get("valid")),
+        "package_verified_file_count": int(verification.get("verified_file_count") or 0),
+        "download_reverification": True,
+        "publisher_authenticity_verified": False,
         "creator_private_paths_included": False,
         "server_secrets_included": False,
         "llm_generated_executable_code_included": False,
@@ -414,6 +463,14 @@ def download_game_export(game_id: str, export_id: str, request: Request):
         raise HTTPException(404, "Game export not found") from exc
     if not path.is_file():
         raise HTTPException(404, "Game export not found")
+    try:
+        verify_aura_web_export(
+            path,
+            expected_export_id=export_id,
+            expected_game_id=game_id,
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(409, "Game export failed package integrity verification. Rebuild the export before download.") from exc
     return FileResponse(
         path,
         media_type="application/zip",
