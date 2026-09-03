@@ -4,11 +4,17 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 
 
+BILLING_MONTHLY = "monthly"
+BILLING_ANNUAL = "annual"
+BILLING_PERIODS = frozenset({BILLING_MONTHLY, BILLING_ANNUAL})
+
+
 @dataclass(frozen=True)
 class Plan:
     id: str
     name: str
     monthly_price: Decimal
+    annual_price: Decimal | None
     currency: str
     description: str
     confirmed_songs_per_day: int | None
@@ -25,8 +31,8 @@ class Plan:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
-        persisted integrations do not break while new code uses monthly_price + currency.
+        are GBP. Keep the attribute temporarily so parallel feature branches and persisted
+        integrations do not break while new code uses currency-aware canonical pricing.
         """
         return self.monthly_price
 
@@ -38,7 +44,13 @@ class Plan:
 
     @property
     def monthly_price_minor(self) -> int:
-        return int((self.monthly_price * Decimal("100")).to_integral_value())
+        return self.price_minor(BILLING_MONTHLY)
+
+    @property
+    def annual_price_minor(self) -> int | None:
+        if self.annual_price is None:
+            return None
+        return self.price_minor(BILLING_ANNUAL)
 
     @property
     def currency_symbol(self) -> str:
@@ -50,11 +62,31 @@ class Plan:
             return "Free"
         return f"{self.currency_symbol}{self.monthly_price}"
 
+    def price_for_period(self, billing_period: str) -> Decimal:
+        period = (billing_period or "").strip().lower()
+        if period == BILLING_MONTHLY:
+            return self.monthly_price
+        if period == BILLING_ANNUAL and self.annual_price is not None:
+            return self.annual_price
+        if period not in BILLING_PERIODS:
+            raise ValueError(f"Unknown billing period: {billing_period}")
+        raise ValueError(f"{self.name} does not offer {period} billing")
+
+    def price_minor(self, billing_period: str) -> int:
+        price = self.price_for_period(billing_period)
+        return int((price * Decimal("100")).to_integral_value())
+
     def public_dict(self) -> dict:
         data = asdict(self)
         data["monthly_price"] = str(self.monthly_price)
+        data["annual_price"] = str(self.annual_price) if self.annual_price is not None else None
         data["monthly_price_minor"] = self.monthly_price_minor
+        data["annual_price_minor"] = self.annual_price_minor
         data["display_price"] = self.display_price
+        data["billing_periods"] = [
+            period for period in (BILLING_MONTHLY, BILLING_ANNUAL)
+            if period == BILLING_MONTHLY or self.annual_price is not None
+        ]
         # Deprecated output alias for clients built before the GBP schema correction.
         data["monthly_price_usd"] = str(self.monthly_price)
         data["features"] = sorted(self.features)
@@ -199,6 +231,7 @@ PLANS: dict[str, Plan] = {
         id="free",
         name="Free",
         monthly_price=Decimal("0.00"),
+        annual_price=None,
         currency="GBP",
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
@@ -215,6 +248,7 @@ PLANS: dict[str, Plan] = {
         id="base",
         name="Tier 2",
         monthly_price=Decimal("5.99"),
+        annual_price=None,
         currency="GBP",
         description=(
             "£5.99 tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
@@ -232,18 +266,19 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Unlimited Pro",
-        monthly_price=Decimal("14.99"),
+        monthly_price=Decimal("9.99"),
+        annual_price=Decimal("99.00"),
         currency="GBP",
         description=(
-            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
-            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
-            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
-            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
-            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
-            "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
-            "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
-            "subject to marketplace entitlement, rights and governance gates."
+            "£9.99/month or £99/year Unlimited Pro tier with the highest enabled creative access and effectively unlimited "
+            "normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety "
+            "safeguards. Includes the complete enabled production stack: expanded instrument/performance types, editable "
+            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, "
+            "advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation "
+            "and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, "
+            "Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, "
+            "video/music sync, enabled export formats, and unlimited active Game Forge project workspaces. Eligible "
+            "song/game publishing remains subject to marketplace entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
