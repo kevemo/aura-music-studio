@@ -15,6 +15,7 @@ class Plan:
     regeneration_until_confirmed: bool
     image_poster_creations_per_day: int | None
     features: frozenset[str]
+    annual_price: Decimal | None = None
     studio_claims_output_ownership: bool = False
 
     def has(self, feature: str) -> bool:
@@ -25,8 +26,8 @@ class Plan:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
-        persisted integrations do not break while new code uses monthly_price + currency.
+        are GBP. Keep the attribute temporarily so parallel feature branches and persisted
+        integrations do not break while new code uses monthly_price + currency.
         """
         return self.monthly_price
 
@@ -41,6 +42,12 @@ class Plan:
         return int((self.monthly_price * Decimal("100")).to_integral_value())
 
     @property
+    def annual_price_minor(self) -> int | None:
+        if self.annual_price is None:
+            return None
+        return int((self.annual_price * Decimal("100")).to_integral_value())
+
+    @property
     def currency_symbol(self) -> str:
         return {"GBP": "£", "USD": "$", "EUR": "€"}.get(self.currency, self.currency + " ")
 
@@ -50,11 +57,30 @@ class Plan:
             return "Free"
         return f"{self.currency_symbol}{self.monthly_price}"
 
+    def price_for(self, period: str = "monthly") -> Decimal:
+        normalized = (period or "").strip().lower()
+        if normalized == "monthly":
+            return self.monthly_price
+        if normalized == "annual":
+            if self.annual_price is None:
+                raise ValueError(f"Annual billing is not available for plan: {self.id}")
+            return self.annual_price
+        raise ValueError(f"Unsupported billing period: {period}")
+
+    def price_minor_for(self, period: str = "monthly") -> int:
+        return int((self.price_for(period) * Decimal("100")).to_integral_value())
+
     def public_dict(self) -> dict:
         data = asdict(self)
         data["monthly_price"] = str(self.monthly_price)
         data["monthly_price_minor"] = self.monthly_price_minor
         data["display_price"] = self.display_price
+        if self.annual_price is not None:
+            data["annual_price"] = str(self.annual_price)
+            data["annual_price_minor"] = self.annual_price_minor
+        else:
+            data["annual_price"] = None
+            data["annual_price_minor"] = None
         # Deprecated output alias for clients built before the GBP schema correction.
         data["monthly_price_usd"] = str(self.monthly_price)
         data["features"] = sorted(self.features)
@@ -232,18 +258,19 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Unlimited Pro",
-        monthly_price=Decimal("14.99"),
+        monthly_price=Decimal("9.99"),
+        annual_price=Decimal("99.00"),
         currency="GBP",
         description=(
-            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
-            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
-            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
-            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
-            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
-            "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
-            "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
-            "subject to marketplace entitlement, rights and governance gates."
+            "£9.99/month or £99/year Unlimited Pro tier with the highest enabled creative access and effectively unlimited "
+            "normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety "
+            "safeguards. Includes the complete enabled production stack: expanded instrument/performance types, editable "
+            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, "
+            "advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and "
+            "deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, "
+            "Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, "
+            "video/music sync, enabled export formats, and unlimited active Game Forge project workspaces. Eligible "
+            "song/game publishing remains subject to marketplace entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
