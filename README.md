@@ -133,11 +133,13 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 
 The cross-studio five-per-day admission counter is **server-authoritative, implemented and regression-tested**, including shared daily usage across eligible studio operations. Clients cannot override the server meter. Production launch still requires the authoritative plan/catalogue configuration and operational monitoring to match the approved commercial policy.
 
-### Tier 3 — Unlimited Pro — £14.99/month
+### Tier 3 — Unlimited Pro — £9.99/month or £99/year
 
 - highest normal enabled creative access;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
+
+The monthly and annual Unlimited Pro prices are defined by the same server-authoritative plan catalogue used by checkout and verified renewal validation. Provider credentials and live Price IDs remain external configuration and fail closed when absent.
 
 Safety, privacy, consent and transparency protections are never paywalled.
 
