@@ -33,7 +33,7 @@ def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
     assert instructions["currency"] == "GBP"
     assert instructions["amount"] == "9.99"
     assert instructions["amount_minor"] == 999
-    assert instructions["display_amount"] == "£9.99"
+    assert instructions["display_amount"] == "£9.99/month"
     assert instructions["amount_usd"] == "9.99"
 
 
