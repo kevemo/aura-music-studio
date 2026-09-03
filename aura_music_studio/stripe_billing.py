@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from .accounts import AccountStore
 from .credit_wallet import CreditWalletStore
+from .native_products import BillingPeriod
 from .plans import get_plan
 from .subscriptions import SubscriptionLedger
 
@@ -46,6 +47,7 @@ class StripeConfig:
     base_price_id: str
     pro_price_id: str
     settlement_label: str
+    pro_annual_price_id: str = ""
 
     @classmethod
     def from_env(cls) -> "StripeConfig":
@@ -56,26 +58,45 @@ class StripeConfig:
             base_price_id=(os.getenv("STRIPE_BASE_PRICE_ID") or "").strip(),
             pro_price_id=(os.getenv("STRIPE_PRO_PRICE_ID") or "").strip(),
             settlement_label=(os.getenv("LSS_STRIPE_SETTLEMENT_LABEL") or "").strip(),
+            pro_annual_price_id=(os.getenv("STRIPE_PRO_ANNUAL_PRICE_ID") or "").strip(),
         )
 
     @property
     def checkout_configured(self) -> bool:
+        # Existing monthly checkout remains configured independently of the optional annual price.
         return bool(self.secret_key and self.public_base_url and self.base_price_id and self.pro_price_id)
+
+    @property
+    def annual_pro_checkout_configured(self) -> bool:
+        return bool(self.secret_key and self.public_base_url and self.pro_annual_price_id)
 
     @property
     def webhook_configured(self) -> bool:
         return bool(self.webhook_secret)
 
-    def price_id(self, plan_id: str) -> str:
+    def price_id(self, plan_id: str, billing_period: BillingPeriod | str = BillingPeriod.MONTHLY) -> str:
         plan = get_plan(plan_id)
-        if plan.id == "base":
+        try:
+            period = BillingPeriod(billing_period)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported billing period: {billing_period}") from exc
+
+        # Validate the commercial catalogue before consulting provider configuration. This makes
+        # unsupported annual tiers fail closed even if an operator accidentally sets a price id.
+        plan.price_for(period)
+        if period is BillingPeriod.ANNUAL:
+            if plan.id != "pro":
+                raise ValueError(f"Annual Stripe checkout is not available for {plan.name}")
+            value = self.pro_annual_price_id
+        elif plan.id == "base":
             value = self.base_price_id
         elif plan.id == "pro":
             value = self.pro_price_id
         else:
-            raise ValueError("Stripe subscription checkout accepts Basic or Pro only")
+            raise ValueError("Stripe subscription checkout accepts Member or Unlimited Pro only")
         if not value:
-            raise ValueError(f"Stripe price id is not configured for {plan.name}")
+            cadence = "annual" if period is BillingPeriod.ANNUAL else "monthly"
+            raise ValueError(f"Stripe {cadence} price id is not configured for {plan.name}")
         return value
 
 
@@ -157,11 +178,20 @@ class StripeEvidenceStore:
                     stripe_customer_id TEXT UNIQUE,
                     stripe_subscription_id TEXT UNIQUE,
                     plan_id TEXT NOT NULL,
+                    billing_period TEXT NOT NULL DEFAULT 'monthly',
                     status TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
                 """
+            )
+            columns = {str(row[1]) for row in con.execute("PRAGMA table_info(stripe_customer_bindings)").fetchall()}
+            if "billing_period" not in columns:
+                con.execute(
+                    "ALTER TABLE stripe_customer_bindings ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly'"
+                )
+            con.execute(
+                "UPDATE stripe_customer_bindings SET billing_period='monthly' WHERE billing_period IS NULL OR billing_period=''"
             )
 
     def begin_event(self, event: dict[str, Any], raw_body: bytes) -> dict[str, Any]:
@@ -195,19 +225,33 @@ class StripeEvidenceStore:
                 (status, (error or "")[:500] or None, _iso(), event_id),
             )
 
-    def bind_subscription(self, user_id: str, customer_id: str, subscription_id: str, plan_id: str, status: str = "active") -> None:
+    def bind_subscription(
+        self,
+        user_id: str,
+        customer_id: str,
+        subscription_id: str,
+        plan_id: str,
+        status: str = "active",
+        billing_period: BillingPeriod | str = BillingPeriod.MONTHLY,
+    ) -> None:
         if not customer_id or not subscription_id:
             raise ValueError("Stripe customer and subscription ids are required")
+        try:
+            period = BillingPeriod(billing_period)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported billing period: {billing_period}") from exc
+        get_plan(plan_id).price_for(period)
         with self._connect() as con:
             con.execute(
                 """INSERT INTO stripe_customer_bindings
-                   (user_id,stripe_customer_id,stripe_subscription_id,plan_id,status,updated_at)
-                   VALUES (?,?,?,?,?,?)
+                   (user_id,stripe_customer_id,stripe_subscription_id,plan_id,billing_period,status,updated_at)
+                   VALUES (?,?,?,?,?,?,?)
                    ON CONFLICT(user_id) DO UPDATE SET
                      stripe_customer_id=excluded.stripe_customer_id,
                      stripe_subscription_id=excluded.stripe_subscription_id,
-                     plan_id=excluded.plan_id,status=excluded.status,updated_at=excluded.updated_at""",
-                (user_id, customer_id, subscription_id, plan_id, status, _iso()),
+                     plan_id=excluded.plan_id,billing_period=excluded.billing_period,
+                     status=excluded.status,updated_at=excluded.updated_at""",
+                (user_id, customer_id, subscription_id, plan_id, period.value, status, _iso()),
             )
 
     def binding(self, *, subscription_id: str | None = None, customer_id: str | None = None) -> dict | None:
@@ -252,10 +296,20 @@ class StripeClient:
             raise RuntimeError("Stripe returned an invalid response")
         return body
 
-    def subscription_checkout(self, user: dict[str, Any], plan_id: str) -> dict[str, Any]:
+    def subscription_checkout(
+        self,
+        user: dict[str, Any],
+        plan_id: str,
+        billing_period: BillingPeriod | str = BillingPeriod.MONTHLY,
+    ) -> dict[str, Any]:
         plan = get_plan(plan_id)
+        try:
+            period = BillingPeriod(billing_period)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported billing period: {billing_period}") from exc
+        plan.price_for(period)
         base = _clean_base_url(self.config.public_base_url)
-        price_id = self.config.price_id(plan.id)
+        price_id = self.config.price_id(plan.id, period)
         return self._post(
             "/v1/checkout/sessions",
             {
@@ -268,9 +322,11 @@ class StripeClient:
                 "cancel_url": f"{base}/membership/payment?stripe=cancelled",
                 "metadata[user_id]": str(user["id"]),
                 "metadata[plan_id]": plan.id,
+                "metadata[billing_period]": period.value,
                 "metadata[purchase_kind]": "subscription",
                 "subscription_data[metadata][user_id]": str(user["id"]),
                 "subscription_data[metadata][plan_id]": plan.id,
+                "subscription_data[metadata][billing_period]": period.value,
             },
         )
 
@@ -344,6 +400,7 @@ credit_store = CreditWalletStore(accounts.db_path)
 
 class SubscriptionCheckoutRequest(BaseModel):
     plan_id: str = Field(pattern="^(base|pro)$")
+    billing_period: str = Field(default="monthly", pattern="^(monthly|annual)$")
 
 
 class CreditCheckoutRequest(BaseModel):
@@ -374,8 +431,10 @@ def stripe_status():
     return {
         "provider": "stripe",
         "checkout_configured": config.checkout_configured,
+        "annual_pro_checkout_configured": config.annual_pro_checkout_configured,
         "webhook_configured": config.webhook_configured,
         "subscription_plans": ["base", "pro"],
+        "subscription_billing_periods": {"base": ["monthly"], "pro": ["monthly", "annual"]},
         "credit_topups_configured": bool(packs),
         "bank_details_stored_in_application": False,
         "settlement_destination": "Configured privately in the Stripe Dashboard",
@@ -402,7 +461,10 @@ def create_subscription_checkout(body: SubscriptionCheckoutRequest, request: Req
     if not config.checkout_configured:
         raise HTTPException(503, "Stripe subscription checkout is not configured")
     try:
-        session = StripeClient(config).subscription_checkout(user, body.plan_id)
+        period = BillingPeriod(body.billing_period)
+        # A missing annual provider price is configuration failure for this checkout only; it
+        # must not make existing monthly Member/Pro checkout appear globally unconfigured.
+        session = StripeClient(config).subscription_checkout(user, body.plan_id, period)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(502, str(exc)) from exc
     url = str(session.get("url") or "")
@@ -412,6 +474,7 @@ def create_subscription_checkout(body: SubscriptionCheckoutRequest, request: Req
         "provider": "stripe",
         "checkout_session_id": session.get("id"),
         "checkout_url": url,
+        "billing_period": period.value,
         "automatic_activation_from_redirect": False,
         "activation_source": "verified_stripe_webhook",
         "esp_role_effect": "none",
@@ -511,15 +574,36 @@ async def stripe_webhook(request: Request):
                     raise ValueError("Free plan cannot be activated from Stripe")
                 if user.get("status") == "approved_pending_payment" and user.get("requested_plan_id") != plan.id:
                     raise ValueError("Stripe plan does not match the owner-approved requested plan")
-                if int(obj.get("amount_total") or -1) != plan.monthly_price_minor:
+                period = BillingPeriod(str(metadata.get("billing_period") or "monthly"))
+                expected_amount_minor = plan.price_minor_for(period)
+                if int(obj.get("amount_total") or -1) != expected_amount_minor:
                     raise ValueError("Stripe Checkout amount does not match the configured membership price")
                 if str(obj.get("currency") or "").upper() != plan.currency:
                     raise ValueError("Stripe Checkout currency does not match the membership currency")
                 customer_id = str(obj.get("customer") or "")
                 subscription_id = str(obj.get("subscription") or "")
-                status = subscriptions.verify_payment(user_id, plan.id, f"stripe:checkout:{obj.get('id')}")
-                evidence_store.bind_subscription(user_id, customer_id, subscription_id, plan.id, "active")
-                result = {"processed": True, "kind": "subscription", "plan_id": plan.id, "user_id": user_id, "subscription": status["subscription"]}
+                status = subscriptions.verify_payment(
+                    user_id,
+                    plan.id,
+                    f"stripe:checkout:{obj.get('id')}",
+                    billing_period=period,
+                )
+                evidence_store.bind_subscription(
+                    user_id,
+                    customer_id,
+                    subscription_id,
+                    plan.id,
+                    "active",
+                    billing_period=period,
+                )
+                result = {
+                    "processed": True,
+                    "kind": "subscription",
+                    "plan_id": plan.id,
+                    "billing_period": period.value,
+                    "user_id": user_id,
+                    "subscription": status["subscription"],
+                }
 
             elif purchase_kind == "credit_topup":
                 if user.get("status") != "active":
@@ -553,11 +637,30 @@ async def stripe_webhook(request: Request):
                 if not binding:
                     raise ValueError("Stripe renewal invoice has no local subscription binding")
                 plan = get_plan(binding["plan_id"])
+                period = BillingPeriod(str(binding.get("billing_period") or "monthly"))
                 if str(obj.get("currency") or "").upper() != plan.currency:
                     raise ValueError("Stripe renewal invoice currency does not match the subscription")
-                status = subscriptions.verify_payment(binding["user_id"], plan.id, f"stripe:invoice:{obj.get('id')}")
+                try:
+                    amount_paid = int(obj.get("amount_paid"))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Stripe renewal invoice has no valid paid amount") from exc
+                if amount_paid != plan.price_minor_for(period):
+                    raise ValueError("Stripe renewal invoice paid amount does not match the configured membership price")
+                status = subscriptions.verify_payment(
+                    binding["user_id"],
+                    plan.id,
+                    f"stripe:invoice:{obj.get('id')}",
+                    billing_period=period,
+                )
                 evidence_store.set_binding_status(binding["user_id"], "active")
-                result = {"processed": True, "kind": "subscription_renewal", "user_id": binding["user_id"], "plan_id": plan.id, "subscription": status["subscription"]}
+                result = {
+                    "processed": True,
+                    "kind": "subscription_renewal",
+                    "user_id": binding["user_id"],
+                    "plan_id": plan.id,
+                    "billing_period": period.value,
+                    "subscription": status["subscription"],
+                }
             else:
                 result = {"processed": False, "ignored": True, "reason": f"unsupported_invoice_reason:{reason or 'unknown'}"}
 
