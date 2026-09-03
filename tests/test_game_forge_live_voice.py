@@ -10,6 +10,7 @@ from aura_music_studio.game_forge_live_voice import (
     MAX_VOICE_COMMAND_CHARS,
     VOICE_CHANNEL_QUERY,
     VOICE_MESSAGE_TYPE,
+    VOICE_READY_MESSAGE_TYPE,
     install_live_voice_host_bridge,
     live_voice_host_fragment,
     new_voice_channel,
@@ -38,6 +39,7 @@ def test_voice_channel_is_bounded_unpersisted_capability_shape():
     assert re.fullmatch(r"[A-Za-z0-9_-]+", first)
     assert MAX_VOICE_COMMAND_CHARS == 240
     assert VOICE_MESSAGE_TYPE == "aura-live-command-v1"
+    assert VOICE_READY_MESSAGE_TYPE == "aura-live-ready-v1"
     assert VOICE_CHANNEL_QUERY == "aura_live_channel"
     assert voice_permissions_policy() == "microphone=(self)"
 
@@ -77,10 +79,15 @@ def test_private_host_gets_parent_voice_bridge_without_weakening_sandbox():
     assert "id='aura-game-playtest-frame'" in html
     assert f"{VOICE_CHANNEL_QUERY}=" in html
     assert "id='aura-live-voice-controls'" in html
+    assert "id='aura-live-voice-button' type='button' disabled" in html
     assert "Talk to Aura" in html
     assert "SpeechRecognition" in html
     assert "frame.contentWindow.postMessage" in html
     assert "type:messageType,game_id:gameId,channel,command" in html
+    assert "event.source!==frame.contentWindow" in html
+    assert "data.type!==readyType||data.game_id!==gameId||data.channel!==channel" in html
+    assert "frameReady=true" in html
+    assert "if(!frameReady)" in html
     assert "sandbox='allow-scripts allow-pointer-lock'" in html
     assert "allow-same-origin" not in html
     assert "allow='gamepad'" in html
@@ -110,6 +117,7 @@ def test_live_copilot_receiver_requires_parent_game_type_channel_and_command_bou
     html = inject_live_copilot("<!doctype html><html><body></body></html>", game=game)
 
     assert f'"voice_message_type":"{VOICE_MESSAGE_TYPE}"' in html
+    assert f'"voice_ready_message_type":"{VOICE_READY_MESSAGE_TYPE}"' in html
     assert f'"voice_channel_query":"{VOICE_CHANNEL_QUERY}"' in html
     assert "new URLSearchParams(location.search)" in html
     assert "event.source!==window.parent" in html
@@ -117,6 +125,8 @@ def test_live_copilot_receiver_requires_parent_game_type_channel_and_command_bou
     assert "data.game_id!==String(liveCfg.game_id)" in html
     assert "data.channel!==liveVoiceChannel" in html
     assert "typeof data.command!=='string'||data.command.length>liveMaxCommand" in html
+    assert "type:liveCfg.voice_ready_message_type" in html
+    assert "window.parent.postMessage" in html
     assert "liveMic.hidden=true" in html
     assert "liveCommand(command)" in html
     assert "project_persistence:false" in html
@@ -128,7 +138,7 @@ def test_voice_host_fragment_rejects_invalid_channel_and_frame_id():
     channel = new_voice_channel()
     fragment = live_voice_host_fragment(game_id="game_voice_test", channel=channel)
     assert channel in fragment
-    assert "Only the resulting command enters the game." in fragment
+    assert "Connecting Aura to the private playtest" in fragment
     assert "browser/vendor speech services" not in fragment  # detailed privacy note stays server-side only
     with pytest.raises(ValueError):
         live_voice_host_fragment(game_id="game_voice_test", channel="bad channel")
