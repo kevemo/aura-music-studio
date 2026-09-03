@@ -41,7 +41,6 @@ def build_stripe_launch_report(environ: Mapping[str, str] | None = None) -> dict
     secret = _value(env, "STRIPE_SECRET_KEY")
     webhook = _value(env, "STRIPE_WEBHOOK_SECRET")
     base_monthly = _value(env, "STRIPE_BASE_PRICE_ID")
-    base_annual = _value(env, "STRIPE_BASE_ANNUAL_PRICE_ID")
     pro_monthly = _value(env, "STRIPE_PRO_PRICE_ID")
     pro_annual = _value(env, "STRIPE_PRO_ANNUAL_PRICE_ID")
     public_url = _value(env, "LSS_PUBLIC_BASE_URL")
@@ -50,7 +49,6 @@ def build_stripe_launch_report(environ: Mapping[str, str] | None = None) -> dict
         "STRIPE_SECRET_KEY": _valid_secret(secret, "sk_live_" if production else "sk_test_" if staging else "sk_"),
         "STRIPE_WEBHOOK_SECRET": _valid_secret(webhook, "whsec_"),
         "STRIPE_BASE_PRICE_ID": _valid_price_id(base_monthly),
-        "STRIPE_BASE_ANNUAL_PRICE_ID": _valid_price_id(base_annual),
         "STRIPE_PRO_PRICE_ID": _valid_price_id(pro_monthly),
         "STRIPE_PRO_ANNUAL_PRICE_ID": _valid_price_id(pro_annual),
     }
@@ -64,10 +62,13 @@ def build_stripe_launch_report(environ: Mapping[str, str] | None = None) -> dict
 
     basic = get_plan("base")
     pro = get_plan("pro")
+    basic_annual_disabled = basic.annual_price is None
     catalogue_ok = (
-        basic.currency == "GBP"
-        and str(basic.price_for(BillingPeriod.MONTHLY)) == "5.99"
-        and str(basic.price_for(BillingPeriod.ANNUAL)) == "59.99"
+        basic.name == "Basic"
+        and basic.currency == "GBP"
+        and str(basic.price_for(BillingPeriod.MONTHLY)) == "4.99"
+        and basic_annual_disabled
+        and pro.name == "Unlimited Pro"
         and pro.currency == "GBP"
         and str(pro.price_for(BillingPeriod.MONTHLY)) == "9.99"
         and str(pro.price_for(BillingPeriod.ANNUAL)) == "99.00"
@@ -79,7 +80,7 @@ def build_stripe_launch_report(environ: Mapping[str, str] | None = None) -> dict
     if not public_url_ok:
         messages.append("Stripe Checkout requires an allowed public base URL; production must use HTTPS.")
     if not catalogue_ok:
-        messages.append("The canonical Basic / Unlimited Pro commercial prices have drifted from the approved catalogue.")
+        messages.append("The canonical Free / Basic / Unlimited Pro catalogue has drifted from the approved pricing contract.")
 
     ok = not missing and public_url_ok and catalogue_ok
     return {
@@ -95,8 +96,8 @@ def build_stripe_launch_report(environ: Mapping[str, str] | None = None) -> dict
         "public_base_url_acceptable": public_url_ok,
         "canonical_catalogue_ok": catalogue_ok,
         "canonical_prices": {
-            "basic_monthly_gbp": "5.99",
-            "basic_annual_gbp": "59.99",
+            "basic_monthly_gbp": "4.99",
+            "basic_annual_available": False,
             "unlimited_pro_monthly_gbp": "9.99",
             "unlimited_pro_annual_gbp": "99.00",
         },
