@@ -86,6 +86,11 @@ function restoreSnapshot3(snapshot){
     item.e.scale={x:.000001,y:.000001,z:.000001};
   }
 }
+function enforce3(){
+  for(const [id,saved] of hidden3){const item=rows3(saved.kind).find(value=>value.row.id===id);if(!item)continue;item.state.taken=true;item.e.scale={x:.000001,y:.000001,z:.000001}}
+  requestAnimationFrame(enforce3);
+}
+requestAnimationFrame(enforce3);
 function remember3(){history3.push(snapshot3());if(history3.length>20)history3.shift()}
 function undo3(){const prior=history3.pop();if(!prior){say3('There is no Aura3D live tuning change to undo.');return false}restoreSnapshot3(prior);say3('Aura restored the previous Aura3D live tuning state.');return true}
 function adjust3(kind,delta){
