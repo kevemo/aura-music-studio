@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, ConfigDict
 
 from .accounts import AccountStore
 from .native_billing import NativeEntitlementLedger
-from .native_paypal import NativePayPalError, NativePayPalPaymentVerifier
+from .native_paypal import (
+    NativePayPalError,
+    NativePayPalInvoiceCreator,
+    NativePayPalPaymentVerifier,
+)
 from .native_paypal_lifecycle import NativePayPalLifecycleVerifier
+from .native_products import BillingPeriod, get_native_product
 
 router = APIRouter()
 
@@ -17,9 +23,20 @@ _LIFECYCLE_EVENTS = {
     "INVOICING.INVOICE.CANCELLED",
     "INVOICING.INVOICE.REFUNDED",
 }
+_MEMBER_COOKIE = "lss_session"
 
 _store = AccountStore()
 native_entitlements = NativeEntitlementLedger(_store.db_path)
+
+
+class NativeCheckoutRequest(BaseModel):
+    """User-selectable native checkout fields only; money and identity are server-owned."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: str
+    billing_period: BillingPeriod
+    founding_offer: bool = False
 
 
 def _payment_verifier() -> NativePayPalPaymentVerifier:
@@ -32,9 +49,78 @@ def _lifecycle_verifier() -> NativePayPalLifecycleVerifier:
     return NativePayPalLifecycleVerifier()
 
 
+def _checkout_creator() -> NativePayPalInvoiceCreator:
+    # Checkout configuration is deliberately lazy for the same reason as webhook verification:
+    # unrelated site startup remains available, while the native commerce boundary fails closed.
+    return NativePayPalInvoiceCreator()
+
+
+def _checkout_member(request: Request) -> dict:
+    authorization = request.headers.get("Authorization", "")
+    token = (
+        authorization[7:].strip()
+        if authorization.lower().startswith("bearer ")
+        else request.cookies.get(_MEMBER_COOKIE)
+    )
+    member = _store.resolve_session(token)
+    if not member:
+        raise HTTPException(401, "Authenticated member session required")
+    if str(member.get("status") or "").strip().lower() not in {"active", "owner"}:
+        raise HTTPException(403, "An active Command Center account is required for native checkout")
+    if not str(member.get("email") or "").strip():
+        raise HTTPException(409, "The member account requires a billing email before native checkout")
+    return member
+
+
 def _duplicate_event(exc: ValueError) -> bool:
     message = str(exc).lower()
     return "already been processed" in message
+
+
+@router.post("/billing/native/paypal/checkout")
+def native_paypal_checkout(payload: NativeCheckoutRequest, request: Request):
+    """Create and send a canonical native-product PayPal invoice for the signed-in member.
+
+    Browser input may select only the product, billing period and explicit founding-offer flag.
+    User identity and billing email are recovered from the authenticated account. Product name,
+    currency and amount are recomputed from ``native_products.py`` inside the invoice creator.
+    Payment never activates access here: only the verified PayPal webhook can mutate entitlement.
+    """
+
+    member = _checkout_member(request)
+    try:
+        product = get_native_product(payload.product_id)
+        # Validate period/offer compatibility before creating any provider resource.
+        product.price_minor_for(payload.billing_period, founding_offer=payload.founding_offer)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if payload.founding_offer and native_entitlements.has_product_purchase(member["id"], product.id):
+        raise HTTPException(409, "Founding pricing is only available for the first product term")
+
+    try:
+        creator = _checkout_creator()
+    except NativePayPalError as exc:
+        raise HTTPException(503, "Native PayPal checkout is not configured") from exc
+
+    try:
+        invoice = creator.create_and_send(
+            user_id=member["id"],
+            billing_email=member["email"],
+            product_id=product.id,
+            billing_period=payload.billing_period,
+            founding_offer=payload.founding_offer,
+        )
+    except NativePayPalError as exc:
+        message = str(exc)
+        status_code = 502 if "failed" in message.lower() else 400
+        raise HTTPException(status_code, message) from exc
+
+    return {
+        "created": True,
+        "payment_state": "awaiting_provider_payment",
+        **invoice,
+    }
 
 
 @router.post("/billing/native/paypal/webhook")
