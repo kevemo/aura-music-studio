@@ -92,6 +92,7 @@ from aura_music_studio.lyric_alignment_api import router as lyric_alignment_rout
 from aura_music_studio.lyric_alignment_portal import router as lyric_alignment_portal_router
 from aura_music_studio.media_studios import router as media_studios_router
 from aura_music_studio.member_dashboard import router as member_dashboard_router
+from aura_music_studio.native_commerce_api import router as native_commerce_router
 from aura_music_studio.output_api import router as output_router
 from aura_music_studio.owner_auth_portal import router as owner_auth_router
 from aura_music_studio.owner_authorization_migration import install_owner_authorization_migration
@@ -237,6 +238,10 @@ app.include_router(owner_user_intelligence_router)
 app.include_router(owner_user_directory_router)
 app.include_router(owner_users_legacy_router)
 app.include_router(provider_cost_governance_router)
+# Provider-authenticated native-product PayPal events are mounted on the production application
+# but intentionally omitted from OpenAPI. The route itself still performs strict signature,
+# authoritative-invoice, canonical-price and replay checks before native entitlements can mutate.
+app.include_router(native_commerce_router, include_in_schema=False)
 # Hardened Stripe subscription, Creation Coin and marketplace routes must be mounted once at the
 # production entrypoint so payment effects can only flow through provider-evidence controls.
 app.include_router(stripe_billing_hardening_router)
