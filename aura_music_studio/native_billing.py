@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Mapping, Protocol
 
@@ -41,19 +42,12 @@ def _add_year(value: datetime) -> datetime:
     try:
         return value.replace(year=value.year + 1)
     except ValueError:
-        # 29 February renews on the last valid day of February in a non-leap year.
         return value.replace(year=value.year + 1, month=2, day=28)
 
 
 @dataclass(frozen=True)
 class VerifiedNativePayment:
-    """Normalized evidence returned only after a provider adapter verifies the event.
-
-    This object is deliberately not accepted directly by the public ledger API. Callers
-    must provide a verifier which consumes the provider's raw signed/authenticated event
-    and returns this normalized result. A browser redirect or client-supplied purchase
-    claim therefore cannot activate an entitlement through this boundary.
-    """
+    """Normalized evidence returned only after a provider adapter verifies the event."""
 
     provider: str
     event_id: str
@@ -73,6 +67,34 @@ class NativePaymentVerifier(Protocol):
         """Verify provider authenticity and return normalized completed-payment evidence."""
 
 
+class NativeLifecycleKind(str, Enum):
+    CANCEL = "cancel"
+    REFUND = "refund"
+
+
+@dataclass(frozen=True)
+class VerifiedNativeLifecycleEvent:
+    """Provider-authenticated lifecycle evidence tied to a verified native payment.
+
+    ``payment_id`` is the provider payment whose current term is being cancelled or
+    refunded. The ledger never accepts browser/client lifecycle claims directly.
+    """
+
+    provider: str
+    event_id: str
+    payment_id: str
+    user_id: str
+    product_id: str
+    event_type: NativeLifecycleKind | str
+    occurred_at: datetime
+    verification_id: str = ""
+
+
+class NativeLifecycleVerifier(Protocol):
+    def verify(self, raw_event: bytes, headers: Mapping[str, str]) -> VerifiedNativeLifecycleEvent:
+        """Verify provider authenticity and return normalized lifecycle evidence."""
+
+
 @dataclass(frozen=True)
 class NativeEntitlementReceipt:
     user_id: str
@@ -86,13 +108,27 @@ class NativeEntitlementReceipt:
     event_id: str
 
 
+@dataclass(frozen=True)
+class NativeLifecycleReceipt:
+    user_id: str
+    product_id: str
+    event_type: str
+    entitlements: tuple[str, ...]
+    provider: str
+    payment_id: str
+    event_id: str
+    effective_at: str
+
+
 class NativeEntitlementLedger:
     """Server-authoritative Aura OS/Aura Sec purchase and entitlement ledger.
 
-    The ledger never writes to account, ESP membership, owner/admin, creator/agent, or
-    creative-plan tables. Its authority is intentionally limited to native-product
-    entitlements declared by ``native_products.py``.
+    This ledger is intentionally isolated from account roles, ESP roles, creative
+    memberships and Protected Data Authority. Provider evidence can mutate only the
+    native entitlements declared by ``native_products.py``.
     """
+
+    ACTIVE_STATUSES = ("active", "cancel_at_period_end")
 
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
@@ -139,6 +175,20 @@ class NativeEntitlementLedger:
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(user_id, entitlement)
                 );
+
+                CREATE TABLE IF NOT EXISTS native_lifecycle_events (
+                    provider TEXT NOT NULL,
+                    event_id TEXT NOT NULL,
+                    payment_id TEXT NOT NULL,
+                    verification_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    product_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    affected_entitlements TEXT NOT NULL,
+                    PRIMARY KEY(provider, event_id),
+                    UNIQUE(provider, event_type, payment_id)
+                );
                 """
             )
 
@@ -149,6 +199,12 @@ class NativeEntitlementLedger:
             raise ValueError(f"Invalid {label}")
         return cleaned
 
+    @staticmethod
+    def _require_raw_event(raw_event: bytes) -> bytes:
+        if not isinstance(raw_event, (bytes, bytearray)) or not raw_event:
+            raise ValueError("A raw provider event is required")
+        return bytes(raw_event)
+
     def process_verified_event(
         self,
         *,
@@ -156,13 +212,22 @@ class NativeEntitlementLedger:
         headers: Mapping[str, str],
         verifier: NativePaymentVerifier,
     ) -> NativeEntitlementReceipt:
-        """Verify and atomically activate entitlements for a completed native payment."""
-        if not isinstance(raw_event, (bytes, bytearray)) or not raw_event:
-            raise ValueError("A raw provider event is required")
-        evidence = verifier.verify(bytes(raw_event), headers)
+        evidence = verifier.verify(self._require_raw_event(raw_event), headers)
         if not isinstance(evidence, VerifiedNativePayment):
             raise TypeError("Native payment verifier returned unsupported evidence")
         return self._activate(evidence)
+
+    def process_verified_lifecycle_event(
+        self,
+        *,
+        raw_event: bytes,
+        headers: Mapping[str, str],
+        verifier: NativeLifecycleVerifier,
+    ) -> NativeLifecycleReceipt:
+        evidence = verifier.verify(self._require_raw_event(raw_event), headers)
+        if not isinstance(evidence, VerifiedNativeLifecycleEvent):
+            raise TypeError("Native lifecycle verifier returned unsupported evidence")
+        return self._apply_lifecycle(evidence)
 
     def _activate(self, evidence: VerifiedNativePayment) -> NativeEntitlementReceipt:
         provider = self._clean_identifier(evidence.provider, "payment provider")
@@ -188,7 +253,6 @@ class NativeEntitlementLedger:
         occurred_at = occurred_at.astimezone(timezone.utc)
 
         with self._connect() as con:
-            # Provider event IDs and captured payment IDs are both replay boundaries.
             if con.execute(
                 "SELECT 1 FROM native_payment_events WHERE provider=? AND event_id=?",
                 (provider, event_id),
@@ -211,7 +275,7 @@ class NativeEntitlementLedger:
             current_ends: list[datetime] = []
             for entitlement in product.entitlements:
                 row = con.execute(
-                    "SELECT period_end FROM native_entitlements WHERE user_id=? AND entitlement=? AND status='active'",
+                    "SELECT period_end FROM native_entitlements WHERE user_id=? AND entitlement=? AND status IN ('active','cancel_at_period_end')",
                     (user_id, entitlement),
                 ).fetchone()
                 end = _parse(row["period_end"]) if row else None
@@ -280,11 +344,105 @@ class NativeEntitlementLedger:
             event_id=event_id,
         )
 
+    def _apply_lifecycle(self, evidence: VerifiedNativeLifecycleEvent) -> NativeLifecycleReceipt:
+        provider = self._clean_identifier(evidence.provider, "payment provider")
+        event_id = self._clean_identifier(evidence.event_id, "provider event ID")
+        payment_id = self._clean_identifier(evidence.payment_id, "provider payment ID")
+        verification_id = self._clean_identifier(evidence.verification_id, "provider verification ID")
+        user_id = self._clean_identifier(evidence.user_id, "user ID")
+        product = get_native_product(evidence.product_id)
+        try:
+            event_type = NativeLifecycleKind(evidence.event_type)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported native lifecycle event: {evidence.event_type}") from exc
+        occurred_at = evidence.occurred_at
+        if occurred_at.tzinfo is None:
+            raise ValueError("Verified lifecycle timestamp must be timezone-aware")
+        occurred_at = occurred_at.astimezone(timezone.utc)
+
+        with self._connect() as con:
+            payment = con.execute(
+                """SELECT user_id,product_id,period_end FROM native_payment_events
+                   WHERE provider=? AND payment_id=?""",
+                (provider, payment_id),
+            ).fetchone()
+            if not payment:
+                raise ValueError("Lifecycle event does not reference a verified native payment")
+            if payment["user_id"] != user_id or payment["product_id"] != product.id:
+                raise ValueError("Lifecycle event identity does not match the verified native payment")
+            if con.execute(
+                "SELECT 1 FROM native_lifecycle_events WHERE provider=? AND event_id=?",
+                (provider, event_id),
+            ).fetchone():
+                raise ValueError("Provider lifecycle event has already been processed")
+            if con.execute(
+                "SELECT 1 FROM native_lifecycle_events WHERE provider=? AND event_type=? AND payment_id=?",
+                (provider, event_type.value, payment_id),
+            ).fetchone():
+                raise ValueError("Provider lifecycle transition has already been processed")
+
+            matching = con.execute(
+                """SELECT entitlement FROM native_entitlements
+                   WHERE user_id=? AND product_id=? AND last_provider=? AND last_payment_id=?
+                     AND status IN ('active','cancel_at_period_end')""",
+                (user_id, product.id, provider, payment_id),
+            ).fetchall()
+            affected = tuple(sorted(row["entitlement"] for row in matching))
+            now_iso = _iso(_utcnow())
+
+            if event_type is NativeLifecycleKind.CANCEL:
+                con.execute(
+                    """UPDATE native_entitlements SET status='cancel_at_period_end', updated_at=?
+                       WHERE user_id=? AND product_id=? AND last_provider=? AND last_payment_id=?
+                         AND status='active'""",
+                    (now_iso, user_id, product.id, provider, payment_id),
+                )
+                effective_at = payment["period_end"]
+            else:
+                con.execute(
+                    """UPDATE native_entitlements
+                       SET status='refunded', period_end=?, updated_at=?
+                       WHERE user_id=? AND product_id=? AND last_provider=? AND last_payment_id=?
+                         AND status IN ('active','cancel_at_period_end')""",
+                    (_iso(occurred_at), now_iso, user_id, product.id, provider, payment_id),
+                )
+                effective_at = _iso(occurred_at)
+
+            con.execute(
+                """INSERT INTO native_lifecycle_events
+                   (provider,event_id,payment_id,verification_id,user_id,product_id,event_type,
+                    occurred_at,affected_entitlements)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                (
+                    provider,
+                    event_id,
+                    payment_id,
+                    verification_id,
+                    user_id,
+                    product.id,
+                    event_type.value,
+                    _iso(occurred_at),
+                    ",".join(affected),
+                ),
+            )
+
+        return NativeLifecycleReceipt(
+            user_id=user_id,
+            product_id=product.id,
+            event_type=event_type.value,
+            entitlements=affected,
+            provider=provider,
+            payment_id=payment_id,
+            event_id=event_id,
+            effective_at=effective_at,
+        )
+
     def active_entitlements(self, user_id: str, *, at: datetime | None = None) -> frozenset[str]:
         checked_at = (at or _utcnow()).astimezone(timezone.utc)
         with self._connect() as con:
             rows = con.execute(
-                "SELECT entitlement,period_end FROM native_entitlements WHERE user_id=? AND status='active'",
+                """SELECT entitlement,period_end FROM native_entitlements
+                   WHERE user_id=? AND status IN ('active','cancel_at_period_end')""",
                 ((user_id or "").strip(),),
             ).fetchall()
         return frozenset(
