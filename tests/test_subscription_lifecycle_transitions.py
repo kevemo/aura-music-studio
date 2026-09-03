@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.membership_billing_periods import MembershipBillingPreferenceStore
@@ -9,7 +9,7 @@ from aura_music_studio.subscriptions import SubscriptionLedger
 import aura_music_studio.subscriptions as subscriptions_module
 
 
-def _approved_user(tmp_path, monkeypatch, *, plan_id: str = "base", period: BillingPeriod = BillingPeriod.MONTHLY):
+def _approved_user(tmp_path, *, plan_id: str = "base", period: BillingPeriod = BillingPeriod.MONTHLY):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     signup = store.signup("lifecycle@example.com", "Lifecycle User", "verysecurepassword", plan_id)
     prefs = MembershipBillingPreferenceStore(store)
@@ -31,7 +31,7 @@ def _at(monkeypatch, value: datetime) -> None:
 def test_verified_cross_plan_payment_is_scheduled_not_granted_early(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch)
+    store, user_id = _approved_user(tmp_path)
     ledger = SubscriptionLedger(store)
 
     initial = ledger.verify_payment(user_id, "base", "BASIC-CURRENT")
@@ -64,7 +64,7 @@ def test_verified_cross_plan_payment_is_scheduled_not_granted_early(tmp_path, mo
 def test_cross_period_payment_on_same_plan_waits_for_current_term_end(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch, plan_id="pro")
+    store, user_id = _approved_user(tmp_path, plan_id="pro")
     ledger = SubscriptionLedger(store)
     initial = ledger.verify_payment(user_id, "pro", "PRO-MONTH-CURRENT")
     current_end = datetime.fromisoformat(initial["subscription"]["period_end"])
@@ -79,10 +79,31 @@ def test_cross_period_payment_on_same_plan_waits_for_current_term_end(tmp_path, 
     assert ledger.get(user_id)["billing_period"] == "annual"
 
 
+def test_early_same_plan_renewal_is_scheduled_and_refundable_without_revoking_current_term(tmp_path, monkeypatch):
+    start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
+    _at(monkeypatch, start)
+    store, user_id = _approved_user(tmp_path)
+    ledger = SubscriptionLedger(store)
+    current = ledger.verify_payment(user_id, "base", "BASIC-CURRENT-RENEWAL-CASE")
+    current_end = current["subscription"]["period_end"]
+
+    _at(monkeypatch, datetime(2026, 9, 15, 9, 0, tzinfo=timezone.utc))
+    renewed = ledger.verify_payment(user_id, "base", "BASIC-NEXT-TERM")
+    assert renewed["user"]["plan_id"] == "base"
+    assert renewed["subscription"]["period_end"] == current_end
+    assert renewed["scheduled_transition"]["target_plan_id"] == "base"
+
+    refunded = ledger.record_verified_refund(user_id, "BASIC-NEXT-TERM", "REFUND-BASIC-NEXT")
+    assert refunded["refund_outcome"] == "future_transition_refunded_current_term_preserved"
+    assert refunded["user"]["plan_id"] == "base"
+    assert refunded["subscription"]["period_end"] == current_end
+    assert refunded["scheduled_transition"] is None
+
+
 def test_cancel_at_period_end_preserves_current_paid_access_then_returns_free(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch)
+    store, user_id = _approved_user(tmp_path)
     ledger = SubscriptionLedger(store)
     paid = ledger.verify_payment(user_id, "base", "BASIC-CANCEL")
     end = datetime.fromisoformat(paid["subscription"]["period_end"])
@@ -91,7 +112,7 @@ def test_cancel_at_period_end_preserves_current_paid_access_then_returns_free(tm
     assert canceled["user"]["plan_id"] == "base"
     assert canceled["subscription"]["status"] == "cancel_at_period_end"
 
-    _at(monkeypatch, end.replace(microsecond=0) - subscriptions_module.calendar.timedelta(seconds=1) if False else datetime(2026, 10, 4, 8, 59, 59, tzinfo=timezone.utc))
+    _at(monkeypatch, end - timedelta(seconds=1))
     assert ledger.enforce(store.get_user(user_id))["plan_id"] == "base"
 
     _at(monkeypatch, end)
@@ -103,7 +124,7 @@ def test_cancel_at_period_end_preserves_current_paid_access_then_returns_free(tm
 def test_cancel_with_prepaid_future_transition_preserves_both_paid_terms(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch)
+    store, user_id = _approved_user(tmp_path)
     ledger = SubscriptionLedger(store)
     current = ledger.verify_payment(user_id, "base", "BASIC-FIRST")
     first_end = datetime.fromisoformat(current["subscription"]["period_end"])
@@ -129,7 +150,7 @@ def test_cancel_with_prepaid_future_transition_preserves_both_paid_terms(tmp_pat
 def test_refund_of_future_transition_preserves_current_entitlement(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch)
+    store, user_id = _approved_user(tmp_path)
     ledger = SubscriptionLedger(store)
     ledger.verify_payment(user_id, "base", "BASIC-KEEP")
 
@@ -146,7 +167,7 @@ def test_refund_of_future_transition_preserves_current_entitlement(tmp_path, mon
 def test_refund_of_current_term_revokes_only_current_paid_entitlement(tmp_path, monkeypatch):
     start = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
     _at(monkeypatch, start)
-    store, user_id = _approved_user(tmp_path, monkeypatch)
+    store, user_id = _approved_user(tmp_path)
     ledger = SubscriptionLedger(store)
     ledger.verify_payment(user_id, "base", "BASIC-REFUND-NOW")
 
