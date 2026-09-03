@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from .accounts import AccountStore
 from .branding import ENDORSEMENT, PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .esp_command_center import EspStore
-from .native_access import NativeAccessResolver
+from .native_access import EffectiveNativeAccess, NativeAccessResolver
 from .native_products import AURA_SEC_ENTITLEMENT
 from .plans import PLANS
 
@@ -114,6 +114,26 @@ def _aura_sec_security_panel(access) -> str:
         "<a class='btn secondary' href='/account/native-products'>Manage Aura OS &amp; Aura Sec</a>"
         "</div></section>"
     )
+
+
+def _dashboard_native_access(user: dict) -> EffectiveNativeAccess:
+    """Resolve commercial native access from authoritative storage or fail closed.
+
+    A valid production session normally resolves to a persisted account. Tests and defensive
+    callers can still present an inconsistent session snapshot; that must never allow a plan
+    value carried by the session itself to manufacture Aura OS/Aura Sec entitlement.
+    """
+
+    user_id = str(user.get("id") or "").strip()
+    try:
+        return native_access.resolve(user_id)
+    except LookupError:
+        return EffectiveNativeAccess(
+            user_id=user_id,
+            membership_plan_id="free",
+            membership_entitlements=frozenset(),
+            purchased_entitlements=frozenset(),
+        )
 
 
 @router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
@@ -233,7 +253,7 @@ def member_dashboard(request: Request):
         for icon, title, copy in aura_features
     )
 
-    security_panel = _aura_sec_security_panel(native_access.resolve(user["id"]))
+    security_panel = _aura_sec_security_panel(_dashboard_native_access(user))
 
     if esp_status in {"active", "owner"}:
         label = "Owner" if esp_status == "owner" else (esp_role.replace("both", "Creator + Agent").title() or "ESP Member")
