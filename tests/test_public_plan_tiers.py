@@ -4,7 +4,7 @@ from aura_music_studio.plans import AURA_OS, AURASEC, PLANS, public_plans
 
 def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert list(PLANS) == ["free", "base", "pro"]
-    assert [PLANS[key].name for key in ("free", "base", "pro")] == ["Free", "Member", "Unlimited Pro"]
+    assert [PLANS[key].name for key in ("free", "base", "pro")] == ["Free", "Basic", "Unlimited Pro"]
     assert PLANS["base"].id == "base"
 
     # GBP is authoritative. The historical monthly_price_usd attribute remains a
@@ -20,7 +20,7 @@ def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert str(PLANS["base"].monthly_price_usd) == "4.99"
 
     rows = public_plans()
-    assert [row["name"] for row in rows] == ["Free", "Member", "Unlimited Pro"]
+    assert [row["name"] for row in rows] == ["Free", "Basic", "Unlimited Pro"]
     assert rows[1]["currency"] == "GBP"
     assert rows[1]["monthly_price"] == "4.99"
     assert rows[1]["monthly_price_minor"] == 499

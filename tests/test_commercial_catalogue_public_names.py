@@ -15,21 +15,20 @@ def test_public_catalogue_uses_basic_name_without_changing_internal_plan_identit
     assert memberships["pro"]["monthly_price"] == "9.99"
     assert memberships["pro"]["annual_price"] == "99.00"
 
-    # Compatibility boundary: the stable internal plan identity and historical name remain
-    # untouched so existing billing/session/test contracts cannot be silently reinterpreted.
+    # Compatibility boundary: the stable internal plan identity remains `base` while the
+    # customer-facing canonical name is Basic.
     internal = get_plan("base")
     assert internal.id == "base"
-    assert internal.name == "Member"
+    assert internal.name == "Basic"
 
 
-def test_public_catalogue_rewrites_retired_member_copy_only_in_projection():
+def test_public_catalogue_uses_canonical_basic_copy_without_retired_member_wording():
     catalogue = public_commercial_catalogue()
     memberships = {item["id"]: item for item in catalogue["memberships"]}
 
     assert "unlock on Basic" in memberships["free"]["description"]
-    assert "£4.99 Basic tier" in memberships["base"]["description"]
+    assert "£4.99/month Basic tier" in memberships["base"]["description"]
     assert "unlock on Member" not in memberships["free"]["description"]
     assert "£4.99 Member tier" not in memberships["base"]["description"]
 
-    # Source Plan objects remain unchanged; presentation normalization must not mutate them.
-    assert "£4.99 Member tier" in get_plan("base").description
+    assert "£4.99/month Basic tier" in get_plan("base").description

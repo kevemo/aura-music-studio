@@ -5,14 +5,14 @@ from aura_music_studio.plans import get_plan, public_plans
 
 def test_current_public_membership_prices_are_gbp_and_use_authoritative_amounts():
     free = get_plan("free")
-    member = get_plan("base")
+    basic = get_plan("base")
     pro = get_plan("pro")
 
     assert free.monthly_price == Decimal("0.00")
-    assert member.monthly_price == Decimal("4.99")
+    assert basic.monthly_price == Decimal("4.99")
     assert pro.monthly_price == Decimal("9.99")
-    assert {free.currency, member.currency, pro.currency} == {"GBP"}
-    assert member.monthly_price_minor == 499
+    assert {free.currency, basic.currency, pro.currency} == {"GBP"}
+    assert basic.monthly_price_minor == 499
     assert pro.monthly_price_minor == 999
 
 
@@ -21,7 +21,7 @@ def test_current_customer_facing_plan_names_and_prices_are_exposed_without_chang
 
     assert set(plans) == {"free", "base", "pro"}
     assert plans["free"]["name"] == "Free"
-    assert plans["base"]["name"] == "Member"
+    assert plans["base"]["name"] == "Basic"
     assert plans["pro"]["name"] == "Unlimited Pro"
     assert plans["base"]["display_price"] == "£4.99"
     assert plans["pro"]["display_price"] == "£9.99"
