@@ -11,11 +11,12 @@ from pydantic import BaseModel, Field
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
 # Production inheritance remains explicit for regression/audit tooling:
-# professional_video_track_keyframe_compositor -> professional_keyframed_mask_video_compositor ->
-# professional_chroma_key_video_compositor -> professional_universal_scoped_visual_video_compositor
-# -> grouped professional compositor. Automatic mask tracking and unsupported track automation
-# remain separate, fail-closed capabilities until genuine runtimes are wired and validated.
-from .professional_video_track_keyframe_compositor import UniversalVisualVideoCompositor
+# professional_video_track_keyframe_universal_compositor -> professional_video_track_keyframe_compositor ->
+# professional_keyframed_mask_video_compositor -> professional_chroma_key_video_compositor ->
+# professional_universal_scoped_visual_video_compositor -> grouped professional compositor.
+# Automatic mask tracking and unsupported track automation remain fail-closed; the existing safe
+# universal whole-track grade/mix keyframes remain executable alongside Wave 9 track opacity.
+from .professional_video_track_keyframe_universal_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
     EditorRenderError,
@@ -158,8 +159,8 @@ def render_editor_sequence(
                 raise PermissionError("Video export requires a membership tier with video downloads")
             # The production Video Studio renderer preserves grouped/scoped effect ordering, chroma
             # alpha and authored roto masks, then evaluates supported track-opacity automation after
-            # whole-track effects and before track blend. Unsupported track paths and automatic mask
-            # tracking remain explicitly fail-closed.
+            # whole-track effects and before track blend. Existing safe universal whole-track grade
+            # and mix keyframes remain executable; unsupported paths and automatic tracking fail closed.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
             result = _execute_video_render(
                 member,
@@ -257,10 +258,3 @@ def download_editor_export(project_name: str, filename: str, request: Request):
         },
     )
 
-
-__all__ = [
-    "router",
-    "EditorRenderRequest",
-    "_execute_video_render",
-    "_sequence_has_non_normal_item_blend",
-]
