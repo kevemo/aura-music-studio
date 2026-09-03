@@ -188,24 +188,3 @@ async def native_paypal_webhook(request: Request):
         if _duplicate_event(exc):
             return {"accepted": True, "duplicate": True}
         raise HTTPException(400, str(exc)) from exc
-
-
-def _compose_into_hardened_billing_router() -> None:
-    """Attach native commerce before the production app mounts its hardened billing router.
-
-    The production entrypoint performs extensive late router composition. Native commerce is
-    deliberately attached to the already-reliable hardened billing router at module import time,
-    before that billing router is copied into the FastAPI application. A private marker makes the
-    operation idempotent across repeated imports/reloads and prevents duplicate payment routes.
-    """
-
-    from .stripe_billing_hardening import router as hardened_billing_router
-
-    marker = "_native_commerce_router_composed"
-    if getattr(hardened_billing_router, marker, False):
-        return
-    hardened_billing_router.include_router(router)
-    setattr(hardened_billing_router, marker, True)
-
-
-_compose_into_hardened_billing_router()
