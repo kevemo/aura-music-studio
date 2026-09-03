@@ -28,16 +28,17 @@ def test_public_catalogue_exposes_same_pro_prices_and_periods():
     assert by_id["pro"]["supported_billing_periods"] == ["monthly", "annual"]
 
 
-def test_member_current_price_is_preserved_and_annual_is_not_invented():
-    member = get_plan("base")
+def test_basic_current_price_is_preserved_and_annual_is_not_invented():
+    basic = get_plan("base")
 
-    assert member.name == "Member"
-    assert member.monthly_price == Decimal("4.99")
-    assert member.monthly_price_minor == 499
-    assert member.annual_price is None
-    assert member.public_dict()["supported_billing_periods"] == ["monthly"]
+    assert basic.id == "base"
+    assert basic.name == "Basic"
+    assert basic.monthly_price == Decimal("4.99")
+    assert basic.monthly_price_minor == 499
+    assert basic.annual_price is None
+    assert basic.public_dict()["supported_billing_periods"] == ["monthly"]
     with pytest.raises(ValueError, match="Annual billing is not available"):
-        member.price_for("annual")
+        basic.price_for("annual")
 
 
 def test_period_lookup_fails_closed_for_unknown_period():
@@ -47,11 +48,11 @@ def test_period_lookup_fails_closed_for_unknown_period():
 
 def test_pricing_period_support_does_not_remove_pro_native_entitlements():
     pro = get_plan("pro")
-    member = get_plan("base")
+    basic = get_plan("base")
     free = get_plan("free")
 
-    assert pro.features > member.features > free.features
+    assert pro.features > basic.features > free.features
     assert AURA_OS in pro.features
     assert AURASEC in pro.features
-    assert AURA_OS not in member.features
-    assert AURASEC not in member.features
+    assert AURA_OS not in basic.features
+    assert AURASEC not in basic.features
