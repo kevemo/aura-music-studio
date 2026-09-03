@@ -5,9 +5,9 @@
 
 All accounts require approval by Elevate Souls Productions. New membership requests are routed to the configured ESP approval inbox for Kev or Mary to approve or reject.
 
-The public membership names are Free, Member and Unlimited Pro. For backwards compatibility with persisted accounts and integrations, the internal plan IDs remain `free`, `base` and `pro`.
+The public membership names are Free, Basic and Unlimited Pro. For backwards compatibility with persisted accounts and integrations, the internal plan IDs remain `free`, `base` and `pro`; some internal compatibility objects may still use the historical `Member` label for `base`.
 
-## Free — £0/month
+## Free — £0
 
 Designed to let a new member experience Aura and the Command Center before paying.
 
@@ -33,9 +33,9 @@ Not included:
 - Approved voice duplication
 - Audio-to-MIDI control transcription
 - Advanced repaint/remix/cover tools
-- AuraSec subscription entitlement
+- Aura OS/AuraSec subscription entitlement
 
-## Member — £4.99/month
+## Basic — £5.99/month or £59.99/year
 
 For users who want to create finished content regularly without needing the complete professional toolset.
 
@@ -52,14 +52,14 @@ Included:
 - Backing-track creation
 - Harmony Architect/basic backing-harmony workflow
 
-Member does not include the Unlimited Pro-only production suite such as full stem splitting, multitrack DAW, Sample Lab, Style DNA, advanced voice duplication, unlimited finished tracks or the AuraSec subscription entitlement.
+Basic does not include the Unlimited Pro-only production suite such as full stem splitting, multitrack DAW, Sample Lab, Style DNA, advanced voice duplication, unlimited finished tracks or the Aura OS/AuraSec subscription entitlement.
 
-## Unlimited Pro — £9.99/month
+## Unlimited Pro — £9.99/month or £99/year
 
 The highest enabled Command Center membership tier.
 
 Included:
-- Everything in Free and Member
+- Everything in Free and Basic
 - **Unlimited confirmed full tracks**
 - **Unlimited regeneration**
 - MP3 / WAV / FLAC downloads
@@ -80,34 +80,37 @@ Included:
 - Full Producer tools
 - Priority generation queue when queue prioritization is enabled
 - Every enabled Unlimited Pro Command Center production feature
-- **AuraSec entitlement included with the subscription**
+- **Aura OS and AuraSec commercial entitlements included with the subscription**
 
-AuraSec may also be distributed and sold separately under its own approved commercial catalogue. This document does not invent or hardcode a standalone AuraSec price.
+Aura OS and AuraSec may also be distributed and sold separately under the approved native-product catalogue. Those standalone purchases remain separate commercial entitlement sources and do not grant ESP organisational authority.
 
-## Member daily-track rule
+## Basic daily-track rule
 
-A Member-tier user starts a daily song slot when they generate a full track. Aura may regenerate that same unconfirmed project repeatedly without consuming another daily track. When the member presses **Confirm Track**, that song is marked confirmed and consumes the day's one-track allowance. They can continue using non-full-track tools, but another finished Member-tier track cannot be confirmed until the next daily allowance period.
+A Basic-tier user starts a daily song slot when they generate a full track. Aura may regenerate that same unconfirmed project repeatedly without consuming another daily track. When the member presses **Confirm Track**, that song is marked confirmed and consumes the day's one-track allowance. They can continue using non-full-track tools, but another finished Basic-tier track cannot be confirmed until the next daily allowance period.
 
 The current implementation uses the existing deterministic daily-boundary logic. Any future profile-timezone reset must preserve the same server-authoritative entitlement architecture.
 
 ## Approval and payment lifecycle
 
-1. User selects Free, Member or Unlimited Pro and signs up.
-2. The persisted requested plan ID remains `free`, `base` or `pro`.
+1. User selects Free, Basic or Unlimited Pro and a supported billing period.
+2. The persisted requested plan ID remains `free`, `base` or `pro`; paid monthly/annual intent is stored separately as an explicit billing-period preference.
 3. Account status becomes `pending_approval`.
 4. An approval request is sent through the configured ESP approval workflow.
-5. Kev or Mary approves or rejects the request through the configured single-use review flow.
+5. Kev or Mary approves or rejects the exact requested plan/period contract through the configured single-use review flow.
 6. Free becomes active immediately after approval.
-7. Approved Member/Unlimited Pro accounts become `approved_pending_payment`.
-8. The member receives the configured ESP payment instructions.
-9. Paid access activates only after payment is verified/admin-confirmed by the authoritative billing path.
-10. The membership engine exposes only the features included in the member's active plan.
+7. Approved Basic/Unlimited Pro accounts become `approved_pending_payment`.
+8. The member receives period-aware payment instructions only for the owner-approved contract.
+9. Paid access activates only after signed provider evidence or explicit owner/admin verification matches the exact canonical amount, currency, plan and approved billing period.
+10. Monthly terms advance by a real calendar month and annual terms by a real calendar year; fixed 31/365-day approximations are not the billing contract.
+11. The membership engine exposes only the features included in the member's active paid term.
 
-## Current PayPal payment links
+## Payment-provider routes
 
-The repository currently retains configured manual invoice/payment links for the paid membership plan IDs. Those provider links are deployment configuration and must charge the same authoritative GBP amounts as the plan catalogue: Member £4.99 and Unlimited Pro £9.99.
+Legacy/manual PayPal invoice links remain supported where explicitly configured, but a monthly fixed-price invoice is never reused for an annual purchase. Dedicated annual PayPal routes are deployment configuration and fail closed if absent.
 
-A browser redirect alone is not payment proof. Paid access activates only through the verified billing/admin-confirmation path.
+Stripe membership checkout uses separate deployment Price IDs for Basic monthly, Basic annual, Unlimited Pro monthly and Unlimited Pro annual. Pending users cannot create a Checkout Session for a plan or billing period different from the owner-approved request.
+
+A browser redirect alone is never payment proof. Paid access activates only through the verified provider/admin-confirmation path. Real-money provider settlement, refund and reconciliation remain external production-evidence gates.
 
 ## Ownership position
 
