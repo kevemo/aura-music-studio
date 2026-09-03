@@ -83,10 +83,26 @@ def chroma_key_filter(effect: dict[str, Any]) -> str:
 
 
 def effect_requires_alpha(effect: dict[str, Any]) -> bool:
-    return bool(
-        effect.get("enabled", True)
-        and str(effect.get("type") or "").strip().lower() == CHROMA_KEY_EFFECT
-        and _clamp(effect.get("mix"), 0.0, 1.0, 1.0) > 1e-8
+    if not effect.get("enabled", True):
+        return False
+    if str(effect.get("type") or "").strip().lower() != CHROMA_KEY_EFFECT:
+        return False
+    if _clamp(effect.get("mix"), 0.0, 1.0, 1.0) > 1e-8:
+        return True
+
+    # A base mix of zero can still become visible later in the timeline. Inspect authored mix
+    # keyframes before choosing the transient codec so an animated keyer can never be flattened by
+    # the ordinary yuv420p derivative path merely because its first/static value is dry.
+    keyframes = effect.get("keyframes") or {}
+    if not isinstance(keyframes, dict):
+        return False
+    points = keyframes.get("mix") or []
+    if not isinstance(points, list):
+        return False
+    return any(
+        isinstance(point, dict)
+        and _clamp(point.get("value"), 0.0, 1.0, 0.0) > 1e-8
+        for point in points
     )
 
 
