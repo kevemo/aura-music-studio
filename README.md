@@ -125,7 +125,7 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 - limited eligible creation/editing;
 - Cosmic Creation Coins may be used for eligible additional operations where configured.
 
-### Member — £4.99/month
+### Basic — £5.99/month or £59.99/year
 
 - increased creative access;
 - up to **5 eligible creations/edits per day** across the configured shared Music, Video and Game admission boundary;
@@ -133,10 +133,10 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 
 The cross-studio five-per-day admission counter is **server-authoritative, implemented and regression-tested**, including shared daily usage across eligible studio operations. Clients cannot override the server meter. Production launch still requires the authoritative plan/catalogue configuration and operational monitoring to match the approved commercial policy.
 
-### Unlimited Pro — £9.99/month
+### Unlimited Pro — £9.99/month or £99/year
 
 - highest normal enabled creative access;
-- AuraSec entitlement included with the subscription;
+- Aura OS and AuraSec commercial entitlement included with the subscription;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
 
