@@ -26,13 +26,6 @@ class _MemberMiddleware(BaseHTTPMiddleware):
 def _report(**overrides):
     payload = {
         "client_class": "desktop",
-        "mobile_hint": False,
-        "viewport_width": 1440,
-        "viewport_height": 900,
-        "device_pixel_ratio": 1.0,
-        "hardware_concurrency": 8,
-        "device_memory_gb": 8.0,
-        "reduced_motion": False,
         "page_hidden": False,
         "webgl": True,
         "webgl2": True,
@@ -72,7 +65,7 @@ def test_store_is_privacy_bounded_and_prunes_old_member_samples(tmp_path):
     store = AvatarClientHealthStore(tmp_path / "health.db", keep_per_user=4)
     for index in range(7):
         store.record("member-a", _report(frame_rate_fps=50.0 + index))
-    store.record("member-b", _report(client_class="mobile", mobile_hint=True, viewport_width=390))
+    store.record("member-b", _report(client_class="mobile"))
 
     summary = store.summary("member-a")
     assert summary["sample_count"] == 4
@@ -83,6 +76,8 @@ def test_store_is_privacy_bounded_and_prunes_old_member_samples(tmp_path):
     assert summary["operator_validation_still_required"] is True
     assert summary["privacy_contract"]["ip_address_collected"] is False
     assert summary["privacy_contract"]["user_agent_collected"] is False
+    assert summary["privacy_contract"]["viewport_dimensions_collected"] is False
+    assert summary["privacy_contract"]["cpu_or_memory_details_collected"] is False
     assert summary["privacy_contract"]["device_fingerprint_collected"] is False
 
     with sqlite3.connect(store.db_path) as con:
@@ -91,6 +86,9 @@ def test_store_is_privacy_bounded_and_prunes_old_member_samples(tmp_path):
         assert "user_agent" not in columns
         assert "hostname" not in columns
         assert "fingerprint" not in columns
+        assert "viewport_width" not in columns
+        assert "hardware_concurrency" not in columns
+        assert "device_memory" not in columns
         assert con.execute(
             "SELECT COUNT(*) FROM aura_avatar_client_health WHERE user_id='member-a'"
         ).fetchone()[0] == 4
@@ -157,7 +155,13 @@ def test_client_health_script_collects_coarse_runtime_evidence_only():
     assert "layeredPerformanceSupported" in script.text
     assert "navigator.userAgentData?.mobile" in script.text
     assert "navigator.userAgent" not in script.text.replace("navigator.userAgentData", "")
+    assert "navigator.hardwareConcurrency" not in script.text
+    assert "navigator.deviceMemory" not in script.text
+    assert "devicePixelRatio" not in script.text
+    assert "viewport_width" not in script.text
+    assert "viewport_height" not in script.text
     assert "navigator.geolocation" not in script.text
     assert "document.cookie" not in script.text
     assert "aura:client-health" in script.text
     assert "credentials:'same-origin'" in script.text
+    assert "keepalive:true" in script.text
