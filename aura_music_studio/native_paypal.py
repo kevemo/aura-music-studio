@@ -7,7 +7,9 @@ import json
 import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
+from typing import Callable, Mapping
+
+import requests
 
 from .native_billing import VerifiedNativePayment
 from .native_products import BillingPeriod, get_native_product
@@ -26,17 +28,12 @@ def _b64decode(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     try:
         return base64.urlsafe_b64decode((value + padding).encode("ascii"))
-    except Exception as exc:  # binascii.Error differs across Python versions
+    except Exception as exc:
         raise NativePayPalError("Invalid native checkout metadata encoding") from exc
 
 
 class NativeCheckoutMetadataSigner:
-    """Sign the native entitlement identity before a provider checkout is created.
-
-    The signed token contains only opaque account/product state. PayPal webhook data is
-    never allowed to select a user, product, billing period or founding-offer flag by
-    itself. The HMAC secret is server-only and must not have a development default.
-    """
+    """Sign native entitlement identity before provider invoice creation."""
 
     def __init__(self, secret: str | bytes | None = None) -> None:
         raw = secret if secret is not None else os.getenv("LSS_NATIVE_PAYPAL_METADATA_SECRET", "")
@@ -60,7 +57,6 @@ class NativeCheckoutMetadataSigner:
             period = BillingPeriod(billing_period)
         except ValueError as exc:
             raise NativePayPalError(f"Unsupported billing period: {billing_period}") from exc
-        # Canonical validation also rejects an invalid founding-offer combination.
         product.price_minor_for(period, founding_offer=bool(founding_offer))
         payload = {
             "v": 1,
@@ -112,14 +108,42 @@ class NativeCheckoutMetadataSigner:
         }
 
 
-class NativePayPalPaymentVerifier:
-    """Authenticate and normalize a PayPal invoice-paid event for native products.
+class NativePayPalInvoiceLoader:
+    """Retrieve the authoritative invoice after webhook authentication.
 
-    This adapter composes the repository's existing PayPal REST signature verifier.
-    Only a fully PAID invoice carrying server-signed native checkout metadata can be
-    converted into ``VerifiedNativePayment``. Exact canonical amount/currency checks
-    are performed here and again by ``NativeEntitlementLedger``.
+    PayPal's invoicing webhook payload is intentionally not treated as the source of
+    merchant reference metadata. The exact invoice is fetched server-to-server using
+    the same configured REST credentials as webhook verification.
     """
+
+    def __init__(self, webhook_verifier: PayPalWebhookVerifier) -> None:
+        self.webhook_verifier = webhook_verifier
+
+    def __call__(self, invoice_id: str) -> dict:
+        invoice_id = (invoice_id or "").strip()
+        if not invoice_id or len(invoice_id) > 100 or "/" in invoice_id or "\\" in invoice_id:
+            raise NativePayPalError("Invalid PayPal native invoice ID")
+        try:
+            response = requests.get(
+                f"{self.webhook_verifier.base_url}/v2/invoicing/invoices/{invoice_id}",
+                headers={
+                    "Authorization": f"Bearer {self.webhook_verifier._access_token()}",
+                    "Accept": "application/json",
+                },
+                timeout=10,
+            )
+        except requests.RequestException as exc:
+            raise NativePayPalError("PayPal native invoice retrieval failed") from exc
+        if response.status_code >= 400:
+            raise NativePayPalError("PayPal native invoice retrieval failed")
+        payload = response.json()
+        if not isinstance(payload, dict) or str(payload.get("id") or "").strip() != invoice_id:
+            raise NativePayPalError("PayPal returned an invalid native invoice resource")
+        return payload
+
+
+class NativePayPalPaymentVerifier:
+    """Authenticate and normalize a PayPal invoice-paid event for native products."""
 
     EVENT_TYPE = "INVOICING.INVOICE.PAID"
 
@@ -128,9 +152,11 @@ class NativePayPalPaymentVerifier:
         *,
         webhook_verifier: PayPalWebhookVerifier | None = None,
         metadata_signer: NativeCheckoutMetadataSigner | None = None,
+        invoice_loader: Callable[[str], dict] | None = None,
     ) -> None:
         self.webhook_verifier = webhook_verifier or PayPalWebhookVerifier()
         self.metadata_signer = metadata_signer or NativeCheckoutMetadataSigner()
+        self.invoice_loader = invoice_loader or NativePayPalInvoiceLoader(self.webhook_verifier)
 
     def verify(self, raw_event: bytes, headers: Mapping[str, str]) -> VerifiedNativePayment:
         if not isinstance(raw_event, (bytes, bytearray)) or not raw_event:
@@ -159,10 +185,17 @@ class NativePayPalPaymentVerifier:
         payment_id = str(resource.get("id") or "").strip()
         if not payment_id:
             raise NativePayPalError("PayPal native invoice ID is missing")
-        metadata = self.metadata_signer.verify(str(resource.get("custom_id") or ""))
+
+        invoice = self.invoice_loader(payment_id)
+        if not isinstance(invoice, dict) or str(invoice.get("id") or "").strip() != payment_id:
+            raise NativePayPalError("Authoritative PayPal invoice does not match the webhook resource")
+        if str(invoice.get("status") or "").upper() != "PAID":
+            raise NativePayPalError("Authoritative PayPal native invoice is not fully paid")
+        detail = invoice.get("detail") if isinstance(invoice.get("detail"), dict) else {}
+        metadata = self.metadata_signer.verify(str(detail.get("reference") or ""))
         product = get_native_product(metadata["product_id"])
 
-        amount = resource.get("amount") if isinstance(resource.get("amount"), dict) else {}
+        amount = invoice.get("amount") if isinstance(invoice.get("amount"), dict) else {}
         currency = str(amount.get("currency_code") or "").strip().upper()
         if currency != product.currency:
             raise NativePayPalError("PayPal native invoice currency does not match the canonical product")
@@ -176,6 +209,16 @@ class NativePayPalPaymentVerifier:
         )
         if amount_minor != expected_minor:
             raise NativePayPalError("PayPal native invoice amount does not match the canonical product price")
+
+        webhook_amount = resource.get("amount") if isinstance(resource.get("amount"), dict) else {}
+        if webhook_amount:
+            webhook_currency = str(webhook_amount.get("currency_code") or "").strip().upper()
+            try:
+                webhook_minor = int((Decimal(str(webhook_amount.get("value"))) * 100).quantize(Decimal("1")))
+            except (InvalidOperation, TypeError, ValueError):
+                raise NativePayPalError("PayPal webhook invoice amount is invalid") from None
+            if webhook_currency != currency or webhook_minor != amount_minor:
+                raise NativePayPalError("PayPal webhook and authoritative invoice amounts do not match")
 
         occurred_raw = str(event.get("create_time") or resource.get("update_time") or "").strip()
         if not occurred_raw:
