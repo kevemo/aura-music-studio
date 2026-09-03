@@ -37,6 +37,7 @@ from .safety_reports import member_router as member_safety_router, owner_router 
 from .stripe_billing import router as stripe_billing_router
 from .stripe_billing_hardening import router as stripe_billing_hardening_router
 from .stripe_commerce_receipts import router as stripe_commerce_receipts_router
+from .stripe_membership_checkout import router as stripe_membership_checkout_router
 from .tenant_storage import project_path
 from .video_audio_analysis_ingestion import router as video_audio_analysis_router
 from .video_image_to_video import router as video_image_to_video_router
@@ -72,6 +73,9 @@ router.include_router(owner_ip_rights_router)
 router.include_router(export_provenance_router)
 router.include_router(owner_export_provenance_router)
 router.include_router(stripe_commerce_receipts_router)
+# Membership checkout/status must resolve before the generic Stripe layers so owner-approved
+# plan/period contracts and Basic annual configuration are enforced before provider resource creation.
+router.include_router(stripe_membership_checkout_router)
 router.include_router(stripe_billing_hardening_router)
 router.include_router(stripe_billing_router)
 router.include_router(owner_finance_router)
