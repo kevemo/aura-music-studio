@@ -299,7 +299,7 @@ def _video_frame_rate(source: Path, *, timeout_seconds: float) -> float:
 
 def _has_keyframed_masks(item: dict[str, Any]) -> bool:
     return any(
-        bool(mask.get("enabled", True) and any(mask.get("keyframes") or {}).values())
+        bool(mask.get("enabled", True) and any((mask.get("keyframes") or {}).values()))
         for mask in item.get("masks") or []
     )
 
@@ -572,7 +572,7 @@ def _count_keyframed_masks(state: dict[str, Any], sequence_id: str) -> int:
             count += sum(
                 1
                 for mask in item.get("masks") or []
-                if mask.get("enabled", True) and any(mask.get("keyframes") or {}).values()
+                if mask.get("enabled", True) and any((mask.get("keyframes") or {}).values())
             )
     return count
 
