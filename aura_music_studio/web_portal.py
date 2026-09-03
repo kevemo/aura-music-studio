@@ -48,19 +48,28 @@ def _feature_names(plan_id: str) -> list[str]:
         return ["Song ideas and basic creation", "Basic AI lyrics", "Aura Producer planning", "Basic real-audio previews"]
     if plan_id == "base":
         return ["1 confirmed full track every day", "Unlimited regeneration until that track is confirmed", "MP3 + WAV finished downloads", "Basic mastering", "Audio/score uploads", "Backing-track creation", "Harmony tools"]
-    return ["Unlimited confirmed full tracks", "Unlimited regeneration", "All MP3/WAV/FLAC downloads", "Splitter + separated stems", "Full multitrack studio", "Advanced + reference mastering", "Cover/remix/repaint tools", "Sample Lab + Style DNA", "Harmony Architect", "Consent-approved voice duplication", "Automation + take lanes", "BandLab/stem exports", "Every enabled studio feature"]
+    return ["Unlimited confirmed full tracks", "Unlimited regeneration", "All MP3/WAV/FLAC downloads", "Splitter + separated stems", "Full multitrack studio", "Advanced + reference mastering", "Cover/remix/repaint tools", "Sample Lab + Style DNA", "Harmony Architect", "Consent-approved voice duplication", "Automation + take lanes", "BandLab/stem exports", "Aura OS + Aura Sec included", "Every enabled studio feature"]
 
 
 def _pricing_cards(selected: str | None = None) -> str:
     chunks = []
     for pid in ("free", "base", "pro"):
         plan = PLANS[pid]
-        price = "Free" if pid == "free" else f"${plan.monthly_price_usd}"
+        monthly = plan.display_price_for("monthly")
+        annual = ""
+        if plan.annual_price is not None and pid != "free":
+            annual = f"<div class='muted'>{escape(plan.display_price_for('annual'))} available</div>"
         cls = "card price-card pro" if pid == "pro" else "card price-card"
         badge = "<span class='badge'>FULL STUDIO</span>" if pid == "pro" else ""
         features = "".join(f"<li>{escape(x)}</li>" for x in _feature_names(pid))
-        cta = "Choose this plan" if selected != pid else "Selected"
-        chunks.append(f"<div class='{cls}'>{badge}<div class='eyebrow'>{escape(plan.name)}</div><div class='price'>{price}<small>{'' if pid=='free' else ' / month'}</small></div><p class='muted'>{escape(plan.description)}</p><ul class='features'>{features}</ul><a class='btn primary' href='/signup?plan={pid}'>{cta}</a></div>")
+        cta = "Choose monthly" if plan.annual_price is not None and pid != "free" else "Choose this plan"
+        if selected == pid:
+            cta = "Selected"
+        chunks.append(
+            f"<div class='{cls}'>{badge}<div class='eyebrow'>{escape(plan.name)}</div>"
+            f"<div class='price'>{escape(monthly)}</div>{annual}<p class='muted'>{escape(plan.description)}</p>"
+            f"<ul class='features'>{features}</ul><a class='btn primary' href='/signup?plan={pid}'>{cta}</a></div>"
+        )
     return "<div class='grid3'>" + "".join(chunks) + "</div>"
 
 
@@ -75,7 +84,7 @@ def home(request: Request):
 
 @router.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Base gives one confirmed full track per day with unlimited regenerations until confirmation. Pro removes the limits and unlocks every studio tool.</p>{_pricing_cards()}</section>"
+    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Member gives one confirmed full track per day with unlimited regenerations until confirmation. Unlimited Pro removes the limits, includes Aura OS and Aura Sec, and unlocks every enabled studio tool.</p>{_pricing_cards()}</section>"
     return _page("Pricing", body, request)
 
 
@@ -83,8 +92,11 @@ def pricing(request: Request):
 def signup_page(request: Request, plan: str = "free", error: str | None = None):
     plan = plan if plan in PLANS else "free"
     error_html = f"<div class='alert'>{escape(error)}</div>" if error else ""
-    options = "".join(f"<option value='{pid}' {'selected' if pid==plan else ''}>{escape(PLANS[pid].name)} — {'Free' if pid=='free' else '$'+str(PLANS[pid].monthly_price_usd)+'/month'}</option>" for pid in ("free","base","pro"))
-    body = f"""<div class='card form-card'><div class='eyebrow'>Membership request</div><h1>Create your account</h1><p class='muted'>Your request is sent to Elevate Souls Productions for approval before access is activated.</p>{error_html}
+    options = "".join(
+        f"<option value='{pid}' {'selected' if pid == plan else ''}>{escape(PLANS[pid].name)} — {escape(PLANS[pid].display_price_for('monthly'))}</option>"
+        for pid in ("free", "base", "pro")
+    )
+    body = f"""<div class='card form-card'><div class='eyebrow'>Membership request</div><h1>Create your account</h1><p class='muted'>Your request is sent to Elevate Souls Productions for approval before access is activated. Signup currently requests the monthly paid period; annual Unlimited Pro is presented separately and requires a period-aware verified checkout path.</p>{error_html}
 <form method='post' action='/signup'><div class='field'><label>Name</label><input name='display_name' required minlength='2' autocomplete='name'></div><div class='field'><label>Email</label><input type='email' name='email' required autocomplete='email'></div><div class='field'><label>Password</label><input type='password' name='password' required minlength='10' autocomplete='new-password'><div class='help'>Minimum 10 characters.</div></div><div class='field'><label>Membership</label><select name='plan_id'>{options}</select></div><button class='primary' type='submit'>Send membership request</button></form><p class='help'>Already have an account? <a href='/signin'>Sign in</a>.</p></div>"""
     return _page("Sign up", body, request)
 
@@ -96,7 +108,8 @@ def signup_submit(request: Request, display_name: str = Form(...), email: str = 
         notify_membership_request(approval_token=result.approval_token, applicant_email=result.email, display_name=result.display_name, plan_id=result.requested_plan)
     except Exception as exc:
         return signup_page(request, plan_id, str(exc))
-    body = f"""<div class='card form-card'><div class='eyebrow'>Request received</div><h1>Membership pending approval</h1><div class='alert good'>Your request for the <b>{escape(result.requested_plan.upper())}</b> tier has been sent to Elevate Souls Productions.</div><p>You will be able to sign in while pending, but studio access stays locked until the request is approved. Paid plans then require payment verification before activation.</p><a class='btn primary' href='/signin'>Continue to sign in</a></div>"""
+    requested_name = PLANS[result.requested_plan].name if result.requested_plan in PLANS else result.requested_plan
+    body = f"""<div class='card form-card'><div class='eyebrow'>Request received</div><h1>Membership pending approval</h1><div class='alert good'>Your request for the <b>{escape(requested_name)}</b> tier has been sent to Elevate Souls Productions.</div><p>You will be able to sign in while pending, but studio access stays locked until the request is approved. Paid plans then require payment verification before activation.</p><a class='btn primary' href='/signin'>Continue to sign in</a></div>"""
     return _page("Membership pending", body, request)
 
 
@@ -140,7 +153,11 @@ def dashboard(request: Request):
         state = "<div class='alert'>Your membership request is waiting for ESP approval. Studio generation is locked until approval.</div>"
     elif status == "approved_pending_payment":
         pay = payment_instructions(requested)
-        state = f"<div class='alert'>Your membership was approved. Complete the ${escape(str(pay.get('amount_usd','')))} payment and wait for payment verification to activate your plan.</div><a class='btn primary' target='_blank' rel='noopener' href='{escape(pay.get('url') or '', quote=True)}'>Open PayPal payment</a>"
+        state = (
+            f"<div class='alert'>Your membership was approved. Complete the {escape(str(pay.get('display_amount', '')))} payment "
+            "and wait for payment verification to activate your plan.</div>"
+            f"<a class='btn primary' target='_blank' rel='noopener' href='{escape(pay.get('url') or '', quote=True)}'>Open PayPal payment</a>"
+        )
     elif status == "active":
         state = f"<div class='alert good'>Your {escape(PLANS[active_plan].name)} membership is active.</div>"
     elif status == "rejected":
@@ -165,5 +182,7 @@ def dashboard(request: Request):
     <p class='muted'>Studio membership does not grant ESP Creator Network access. If you are already part of Elevate Souls Productions, submit your ESP status for owner verification. No ESP tools or training unlock until Mary or Kev approves the account.</p>
     <a class='btn primary' href='/command-center'>I am an Elevate Souls Productions Creator or Agent</a></section>
     """
-    body = f"""<div class='dashboard'><aside class='card sidebar'><div class='eyebrow'>Member</div><h3>{escape(user['display_name'])}</h3><p class='muted'>{escape(user['email'])}</p><div class='tier'>{escape((requested if status!='active' else active_plan).upper())}</div><p>Status: <b>{escape(status.replace('_',' '))}</b></p><form method='post' action='/signout'><button type='submit'>Sign out</button></form></aside><main><div class='eyebrow'>Studio dashboard</div><h1>Welcome to {escape(PRODUCT_NAME)}</h1>{state}<section class='section'><h2>Your creative tools</h2><div class='tiles'>{tiles}</div></section>{esp_request}</main></div>"""
+    tier_plan_id = active_plan if status == "active" else requested
+    tier_name = PLANS[tier_plan_id].name if tier_plan_id in PLANS else tier_plan_id
+    body = f"""<div class='dashboard'><aside class='card sidebar'><div class='eyebrow'>Member</div><h3>{escape(user['display_name'])}</h3><p class='muted'>{escape(user['email'])}</p><div class='tier'>{escape(tier_name)}</div><p>Status: <b>{escape(status.replace('_',' '))}</b></p><form method='post' action='/signout'><button type='submit'>Sign out</button></form></aside><main><div class='eyebrow'>Studio dashboard</div><h1>Welcome to {escape(PRODUCT_NAME)}</h1>{state}<section class='section'><h2>Your creative tools</h2><div class='tiles'>{tiles}</div></section>{esp_request}</main></div>"""
     return _page("Dashboard", body, request)
