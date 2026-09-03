@@ -73,14 +73,14 @@ def payment_option(plan_id: str, billing_period: str = BILLING_MONTHLY) -> Payme
 
 
 def public_payment_options() -> list[dict]:
+    # Keep the public checkout surface monthly-only until the verified PayPal event activation
+    # endpoint carries billing_period end to end. The canonical catalogue may expose annual
+    # pricing, but an incomplete activation path must never be advertised as purchasable.
     result = []
     for plan_id in ("base", "pro"):
         option = payment_option(plan_id, BILLING_MONTHLY)
         if option:
             result.append(option.public_dict())
-    # Annual Pro is intentionally advertised only when an explicit server-side payment route exists.
-    if os.getenv("LSS_PAYPAL_PRO_ANNUAL_URL", "").strip():
-        result.append(payment_option("pro", "annual").public_dict())
     return result
 
 
