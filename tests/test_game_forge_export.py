@@ -1,4 +1,5 @@
 import json
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from zipfile import ZipFile
@@ -7,6 +8,7 @@ import pytest
 
 import aura_music_studio.game_forge_export as exports
 from aura_music_studio.game_forge_models import GameBuild, GameDNA
+from aura_music_studio.game_forge_package_integrity import verify_aura_web_export
 
 
 def _game(content_hash: str = "a" * 64) -> GameDNA:
@@ -34,13 +36,58 @@ def _fake_webp(width: int = 384, height: int = 384) -> bytes:
     return b"RIFF" + len(body).to_bytes(4, "little") + body
 
 
+def _configured_export(tmp_path: Path, monkeypatch, *, content_hash: str = "d" * 64):
+    game = _game(content_hash)
+    media = tmp_path / "asset_test.wav"
+    media.write_bytes(b"RIFF-test-audio-bytes")
+    media_sha = exports._sha256_bytes(media.read_bytes())
+    row = {
+        "id": "asset_test",
+        "kind": "audio",
+        "label": "Test ambience",
+        "role": "ambient",
+        "media_url": "media/asset_test.wav",
+        "mime_type": "audio/wav",
+        "sha256": media_sha,
+        "byte_size": media.stat().st_size,
+    }
+
+    monkeypatch.setattr(exports, "game_integrity_hash", lambda _game: content_hash)
+    monkeypatch.setattr(exports, "asset_publication_blockers", lambda _game_id: [])
+    monkeypatch.setattr(exports, "private_play_html", lambda _game: "<!doctype html><title>Reviewed Game Runtime</title>")
+    monkeypatch.setattr(exports, "runtime_asset_manifest", lambda _game_id: [row])
+    monkeypatch.setattr(
+        exports,
+        "private_runtime_asset_path",
+        lambda _game_id, _filename: (media, SimpleNamespace(label="Test ambience")),
+    )
+    monkeypatch.setattr(exports, "_brand_art_bytes", lambda: _fake_webp())
+    monkeypatch.setattr(exports, "_export_path", lambda _game_id, export_id: tmp_path / f"{export_id}.zip")
+    return game, media
+
+
+def _copy_package(source: Path, target: Path, *, replace: dict[str, bytes] | None = None, duplicate: str | None = None):
+    replacements = replace or {}
+    with ZipFile(source, "r") as src, ZipFile(target, "w") as dst:
+        for info in src.infolist():
+            data = replacements.get(info.filename, src.read(info.filename))
+            dst.writestr(info.filename, data)
+        if duplicate is not None:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                dst.writestr(duplicate, b"duplicate payload")
+
+
 def test_external_adapters_are_truthfully_not_production_ready():
     caps = exports.export_capabilities()
     assert caps["production_ready_targets"] == ["aura_web"]
     assert caps["external_adapters_claimed_ready"] is False
     assert caps["targets"]["aura_web"]["installable_pwa"] is True
     assert caps["targets"]["aura_web"]["offline_core"] is True
-    assert caps["targets"]["aura_web"]["format"] == "deterministic_pwa_zip_v2"
+    assert caps["targets"]["aura_web"]["format"] == "deterministic_pwa_zip_v3_verified"
+    assert caps["targets"]["aura_web"]["package_integrity"] == "sha256_all_payload_members"
+    assert caps["targets"]["aura_web"]["download_reverification"] is True
+    assert caps["targets"]["aura_web"]["publisher_authenticity"] == "external_signing_gate"
     for target in ("phaser4", "playcanvas", "babylon", "godot"):
         assert caps["targets"][target]["production_ready"] is False
         assert caps["targets"][target]["executable_export"] is False
@@ -87,34 +134,8 @@ def test_webp_dimensions_are_derived_from_packaged_artwork():
     assert exports._webp_size(b"not-webp") is None
 
 
-def test_same_build_and_media_produce_identical_installable_export_bytes(tmp_path: Path, monkeypatch):
-    content_hash = "d" * 64
-    game = _game(content_hash)
-    media = tmp_path / "asset_test.wav"
-    media.write_bytes(b"RIFF-test-audio-bytes")
-    media_sha = exports._sha256_bytes(media.read_bytes())
-    row = {
-        "id": "asset_test",
-        "kind": "audio",
-        "label": "Test ambience",
-        "role": "ambient",
-        "media_url": "media/asset_test.wav",
-        "mime_type": "audio/wav",
-        "sha256": media_sha,
-        "byte_size": media.stat().st_size,
-    }
-
-    monkeypatch.setattr(exports, "game_integrity_hash", lambda _game: content_hash)
-    monkeypatch.setattr(exports, "asset_publication_blockers", lambda _game_id: [])
-    monkeypatch.setattr(exports, "private_play_html", lambda _game: "<!doctype html><title>Reviewed Game Runtime</title>")
-    monkeypatch.setattr(exports, "runtime_asset_manifest", lambda _game_id: [row])
-    monkeypatch.setattr(
-        exports,
-        "private_runtime_asset_path",
-        lambda _game_id, _filename: (media, SimpleNamespace(label="Test ambience")),
-    )
-    monkeypatch.setattr(exports, "_brand_art_bytes", lambda: _fake_webp())
-    monkeypatch.setattr(exports, "_export_path", lambda _game_id, export_id: tmp_path / f"{export_id}.zip")
+def test_same_build_and_media_produce_identical_installable_verified_export_bytes(tmp_path: Path, monkeypatch):
+    game, media = _configured_export(tmp_path, monkeypatch)
 
     first = exports.create_aura_web_export(game)
     first_bytes = (tmp_path / first["filename"]).read_bytes()
@@ -128,8 +149,24 @@ def test_same_build_and_media_produce_identical_installable_export_bytes(tmp_pat
     assert first["pwa_installable"] is True
     assert first["offline_core_cache"] is True
     assert first["verified_media_cache"] == "same_origin_on_demand"
+    assert first["package_integrity_verified"] is True
+    assert first["package_verified_file_count"] == 6
+    assert first["download_reverification"] is True
+    assert first["publisher_authenticity_verified"] is False
 
-    with ZipFile(tmp_path / first["filename"]) as zf:
+    path = tmp_path / first["filename"]
+    verification = verify_aura_web_export(
+        path,
+        expected_export_id=first["export_id"],
+        expected_game_id=game.id,
+        expected_content_hash=game.latest_build.content_hash,
+    )
+    assert verification["valid"] is True
+    assert verification["verified_file_count"] == 6
+    assert verification["asset_count"] == 1
+    assert verification["publisher_authenticity_verified"] is False
+
+    with ZipFile(path) as zf:
         assert set(zf.namelist()) == {
             "index.html",
             "play.html",
@@ -150,6 +187,11 @@ def test_same_build_and_media_produce_identical_installable_export_bytes(tmp_pat
         assert manifest["pwa"]["service_worker_external_origins_allowed"] is False
         assert manifest["provenance"]["server_secrets_included"] is False
         assert manifest["provenance"]["external_network_dependency_added"] is False
+        assert manifest["provenance"]["package_payload_integrity_verified"] is True
+        assert manifest["provenance"]["publisher_authenticity_verified"] is False
+        assert manifest["package_integrity"]["algorithm"] == "sha256"
+        assert manifest["package_integrity"]["coverage"] == "all_archive_members_except_manifest.json"
+        assert {row["path"] for row in manifest["package_integrity"]["files"]} == set(zf.namelist()) - {"manifest.json"}
         assert "rights confirmed" not in json.dumps(manifest)
 
         webmanifest = json.loads(zf.read("manifest.webmanifest"))
@@ -173,6 +215,44 @@ def test_same_build_and_media_produce_identical_installable_export_bytes(tmp_pat
         assert zf.read("media/asset_test.wav") == media.read_bytes()
 
 
+def test_package_verifier_rejects_tampered_media_and_core_payloads(tmp_path: Path, monkeypatch):
+    game, _media = _configured_export(tmp_path, monkeypatch)
+    result = exports.create_aura_web_export(game)
+    source = tmp_path / result["filename"]
+
+    tampered_media = tmp_path / "tampered-media.zip"
+    _copy_package(source, tampered_media, replace={"media/asset_test.wav": b"tampered media"})
+    with pytest.raises(ValueError, match="size verification|SHA-256 verification"):
+        verify_aura_web_export(tampered_media, expected_export_id=result["export_id"], expected_game_id=game.id)
+
+    tampered_core = tmp_path / "tampered-core.zip"
+    _copy_package(source, tampered_core, replace={"index.html": b"<html>changed</html>"})
+    with pytest.raises(ValueError, match="size verification|SHA-256 verification"):
+        verify_aura_web_export(tampered_core, expected_export_id=result["export_id"], expected_game_id=game.id)
+
+
+def test_package_verifier_rejects_duplicate_archive_paths(tmp_path: Path, monkeypatch):
+    game, _media = _configured_export(tmp_path, monkeypatch)
+    result = exports.create_aura_web_export(game)
+    source = tmp_path / result["filename"]
+    duplicate = tmp_path / "duplicate.zip"
+    _copy_package(source, duplicate, duplicate="index.html")
+    with pytest.raises(ValueError, match="duplicate member path"):
+        verify_aura_web_export(duplicate)
+
+
+def test_package_verifier_rejects_undeclared_archive_member(tmp_path: Path, monkeypatch):
+    game, _media = _configured_export(tmp_path, monkeypatch)
+    result = exports.create_aura_web_export(game)
+    source = tmp_path / result["filename"]
+    extra = tmp_path / "extra.zip"
+    _copy_package(source, extra)
+    with ZipFile(extra, "a") as zf:
+        zf.writestr("unexpected.txt", b"not declared")
+    with pytest.raises(ValueError, match="coverage mismatch"):
+        verify_aura_web_export(extra)
+
+
 def test_export_format_version_changes_deterministic_identity(monkeypatch, tmp_path: Path):
     content_hash = "f" * 64
     game = _game(content_hash)
@@ -183,9 +263,9 @@ def test_export_format_version_changes_deterministic_identity(monkeypatch, tmp_p
     monkeypatch.setattr(exports, "_brand_art_bytes", lambda: _fake_webp())
     monkeypatch.setattr(exports, "_export_path", lambda _game_id, export_id: tmp_path / f"{export_id}.zip")
     current = exports.create_aura_web_export(game)
-    legacy_seed = f"aura_web:{game.id}:{content_hash}".encode("utf-8")
-    legacy_id = f"export_{exports.hashlib.sha256(legacy_seed).hexdigest()[:32]}"
-    assert current["export_id"] != legacy_id
+    v2_seed = f"aura_web:v2:{game.id}:{content_hash}".encode("utf-8")
+    v2_id = f"export_{exports.hashlib.sha256(v2_seed).hexdigest()[:32]}"
+    assert current["export_id"] != v2_id
 
 
 def test_checksum_mismatch_blocks_export(tmp_path: Path, monkeypatch):
