@@ -4,7 +4,6 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 
 import aura_music_studio.stripe_membership_periods as stripe_periods
 from aura_music_studio.creative_version_autopromotion import router as overlay_router
@@ -106,25 +105,15 @@ def test_checkout_payload_carries_period_into_session_and_subscription_metadata(
     assert payload["subscription_data[metadata][billing_period]"] == "year"
 
 
-def _walk_routes(routes):
-    for route in routes:
-        nested = getattr(route, "routes", None)
-        if nested is not None:
-            yield from _walk_routes(nested)
-        else:
-            yield route
-
-
 def test_period_aware_checkout_route_precedes_legacy_subscription_route():
-    app = FastAPI()
-    app.include_router(overlay_router)
     matches = [
         route
-        for route in _walk_routes(app.router.routes)
+        for route in overlay_router.routes
         if getattr(route, "path", None) == "/billing/stripe/checkout/subscription"
     ]
     assert len(matches) >= 2
     assert matches[0].endpoint.__module__ == "aura_music_studio.stripe_membership_periods"
+    assert matches[1].endpoint.__module__ == "aura_music_studio.stripe_billing"
 
 
 def test_checkout_request_defaults_existing_clients_to_monthly():
