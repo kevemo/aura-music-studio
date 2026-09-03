@@ -128,8 +128,8 @@ def test_voice_host_fragment_rejects_invalid_channel_and_frame_id():
     channel = new_voice_channel()
     fragment = live_voice_host_fragment(game_id="game_voice_test", channel=channel)
     assert channel in fragment
-    assert "Browser speech" not in fragment
-    assert "browser/vendor speech services" not in fragment  # documentation stays server-side only
+    assert "Only the resulting command enters the game." in fragment
+    assert "browser/vendor speech services" not in fragment  # detailed privacy note stays server-side only
     with pytest.raises(ValueError):
         live_voice_host_fragment(game_id="game_voice_test", channel="bad channel")
     with pytest.raises(ValueError):
