@@ -136,6 +136,23 @@ class SubscriptionLedger:
             row = con.execute("SELECT * FROM subscription_state WHERE user_id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
+    def _enforce_pending_approval_contract(self, user: dict, plan_id: str, period: BillingPeriod) -> None:
+        """Prevent any provider from changing the owner-approved initial purchase contract."""
+        if user.get("status") != "approved_pending_payment":
+            return
+        if user.get("requested_plan_id") != plan_id:
+            raise ValueError("Payment plan does not match the owner-approved membership plan")
+
+        # Local import avoids a module cycle: the preference store itself is account/catalogue
+        # oriented and has no dependency on SubscriptionLedger.
+        from .membership_billing_periods import MembershipBillingPreferenceStore
+
+        approved_period = MembershipBillingPreferenceStore(self.store).approved_period_for_user(
+            user["id"], plan_id
+        )
+        if approved_period is not period:
+            raise ValueError("Payment billing period does not match the owner-approved membership period")
+
     def verify_payment(
         self,
         user_id: str,
@@ -159,6 +176,7 @@ class SubscriptionLedger:
             raise ValueError("User not found")
         if user.get("status") not in {"approved_pending_payment", "active"}:
             raise ValueError("Account approval is required before payment can activate a membership")
+        self._enforce_pending_approval_contract(user, plan.id, period)
 
         now = _now()
         existing = self.get(user_id)

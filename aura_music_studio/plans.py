@@ -180,7 +180,7 @@ FREE_FEATURES = frozenset({
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
-# compatibility. Customer-facing copy calls this tier "Member".
+# compatibility. Public catalogue presentation projects this tier as "Basic".
 BASE_FEATURES = FREE_FEATURES | frozenset({
     FULL_TRACK,
     BUILD_AROUND_UPLOAD,
@@ -247,7 +247,7 @@ PLANS: dict[str, Plan] = {
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
             "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
             "also play and test Game Forge builds that have passed the platform's public playtest safety/rating preflight. "
-            "Music/video downloads and game creation unlock on Member."
+            "Music/video downloads and game creation unlock on Basic."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -256,11 +256,11 @@ PLANS: dict[str, Plan] = {
     ),
     "base": Plan(
         id="base",
-        name="Member",
+        name="Basic",
         monthly_price=Decimal("4.99"),
         currency="GBP",
         description=(
-            "£4.99 Member tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
+            "£4.99/month Basic tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
             "The authoritative cross-studio daily allowance and any Cosmic Creation Coin overage are enforced separately "
             "by server-side usage/admission controls; this plan object defines feature entitlement rather than inventing "
             "a second usage counter. Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura "
