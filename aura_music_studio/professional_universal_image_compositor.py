@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import json
 from typing import Any, Literal
+from uuid import uuid4
 
 import numpy as np
 from PIL import Image, ImageOps
 
-from .professional_editor_renderer import _IMAGE_SUFFIXES, EditorExportResult, EditorRenderUnsupported
+from .professional_editor_renderer import (
+    _IMAGE_SUFFIXES,
+    EditorExportResult,
+    EditorRenderError,
+    EditorRenderUnsupported,
+)
 from .professional_image_compositor import (
     AdvancedImageCompositor,
     _apply_effect,
     _apply_masks,
+    _blend_operation,
     _effect_state_at_time,
     _mix_rgba,
     _state_at_time,
@@ -102,11 +109,31 @@ def _apply_universal_image_effect(image: Image.Image, effect: dict[str, Any], ti
 
 
 class UniversalImageCompositor(AdvancedImageCompositor):
-    """Execute shared Image Designer filter contracts on the established Pillow compositor."""
+    """Execute shared Image Designer filters at item and whole-track scope."""
 
     def __init__(self, project_dir):
         super().__init__(project_dir)
         self._universal_image_effects_executed: list[str] = []
+        self._universal_image_effect_scopes_executed: list[str] = []
+
+    def _apply_scoped_effect(
+        self,
+        image: Image.Image,
+        effect: dict[str, Any],
+        time: float,
+        *,
+        scope: Literal["item", "track"],
+    ) -> Image.Image:
+        kind = _effect_type(effect)
+        if kind in SUPPORTED_UNIVERSAL_IMAGE_EFFECTS:
+            rendered = _apply_universal_image_effect(image, effect, time)
+            if effect.get("enabled", True):
+                self._universal_image_effects_executed.append(kind)
+                self._universal_image_effect_scopes_executed.append(scope)
+            return rendered
+        if kind.startswith("image."):
+            raise EditorRenderUnsupported(f"Unsupported universal image effect: {kind}")
+        return _apply_effect(image, effect, time)
 
     def _layer_canvas(
         self,
@@ -136,15 +163,7 @@ class UniversalImageCompositor(AdvancedImageCompositor):
         layer = self._apply_crop(layer, item.get("crop") or {})
         layer = self._apply_colour(layer, item.get("color") or {})
         for effect in item.get("effects") or []:
-            kind = _effect_type(effect)
-            if kind in SUPPORTED_UNIVERSAL_IMAGE_EFFECTS:
-                layer = _apply_universal_image_effect(layer, effect, time)
-                if effect.get("enabled", True):
-                    self._universal_image_effects_executed.append(kind)
-            elif kind.startswith("image."):
-                raise EditorRenderUnsupported(f"Unsupported universal image effect: {kind}")
-            else:
-                layer = _apply_effect(layer, effect, time)
+            layer = self._apply_scoped_effect(layer, effect, time, scope="item")
         layer = _apply_masks(layer, item.get("masks") or [])
         layer, (x_offset, y_offset) = self._apply_transform(layer, item, {**track, "opacity": 1.0})
         full = Image.new("RGBA", (int(sequence["width"]), int(sequence["height"])), (0, 0, 0, 0))
@@ -161,42 +180,89 @@ class UniversalImageCompositor(AdvancedImageCompositor):
         quality: int = 92,
         frame_time: float = 0.0,
     ) -> EditorExportResult:
+        """Render an image sequence while executing universal filters at both supported scopes.
+
+        This mirrors the established advanced compositor's branch, mask, transform, blend and
+        export semantics, but routes both item and track effect stacks through the universal
+        dispatcher. The source project/media remain immutable; only a new export and its metadata
+        are written.
+        """
         state = self.store.public_state()
-        sequences, tracks, _items = self._branch_maps(state)
+        sequences, tracks, items = self._branch_maps(state)
         sequence = sequences.get(sequence_id)
-        if sequence is not None:
-            for track_id in sequence.get("track_ids", []):
-                track = tracks.get(track_id)
-                if not track or not track.get("enabled", True):
-                    continue
-                supported_track_effects = [
-                    _effect_type(effect)
-                    for effect in track.get("effects") or []
-                    if effect.get("enabled", True) and _effect_type(effect) in SUPPORTED_UNIVERSAL_IMAGE_EFFECTS
-                ]
-                if supported_track_effects:
-                    raise EditorRenderUnsupported(
-                        "Universal Image Designer filters are item-local in this renderer wave; "
-                        "apply them to an image/text layer rather than the whole track: "
-                        + ", ".join(sorted(set(supported_track_effects)))
-                    )
+        if sequence is None:
+            raise KeyError(sequence_id)
+        if sequence["kind"] != "image":
+            raise EditorRenderError("Universal image compositor requires an image sequence")
+        self._validate_sequence(sequence)
+        frame_time = max(0.0, min(float(sequence.get("duration") or 1.0), _finite(frame_time, 0.0)))
 
         self._universal_image_effects_executed = []
-        result = super().render_image_advanced(
-            sequence_id,
-            format=format,
-            quality=quality,
-            frame_time=frame_time,
+        self._universal_image_effect_scopes_executed = []
+        canvas = Image.new(
+            "RGBA",
+            (int(sequence["width"]), int(sequence["height"])),
+            self._hex_rgba(sequence.get("background")),
+        )
+        source_refs: list[str] = []
+        for track_id in sequence.get("track_ids", []):
+            raw_track = tracks.get(track_id)
+            if not raw_track or not raw_track.get("enabled", True) or not raw_track.get("visible", True):
+                continue
+            track = _state_at_time(raw_track, frame_time)
+            track_canvas = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            for item_id in track.get("item_ids", []):
+                item = items.get(item_id)
+                if not item or not item.get("enabled", True) or not item.get("visible", True):
+                    continue
+                layer, refs = self._layer_canvas(sequence, track, item, frame_time)
+                source_refs.extend(refs)
+                track_canvas = _blend_operation(track_canvas, layer, str(item.get("blend_mode") or "normal"))
+            for effect in track.get("effects") or []:
+                track_canvas = self._apply_scoped_effect(track_canvas, effect, frame_time, scope="track")
+            track_opacity = max(0.0, min(1.0, _finite(track.get("opacity"), 1.0)))
+            if track_opacity < 1.0:
+                track_canvas.putalpha(track_canvas.getchannel("A").point(lambda value: round(value * track_opacity)))
+            canvas = _blend_operation(canvas, track_canvas, str(track.get("blend_mode") or "normal"))
+
+        extension = "jpg" if format == "jpeg" else format
+        filename = f"{sequence_id}_{uuid4().hex[:12]}.{extension}"
+        output = self._output(filename)
+        temporary = output.with_name(output.name + ".part")
+        save_args: dict[str, Any] = {}
+        rendered = canvas
+        if format == "jpeg":
+            rendered = canvas.convert("RGB")
+            save_args["quality"] = max(1, min(100, int(quality)))
+        elif format == "webp":
+            save_args["quality"] = max(1, min(100, int(quality)))
+        rendered.save(temporary, format="JPEG" if format == "jpeg" else format.upper(), **save_args)
+        temporary.replace(output)
+
+        result = self._record_result(
+            sequence,
+            state,
+            output,
+            format,
+            "pillow-universal-image-compositor",
+            source_refs,
         )
         metadata_path = self.project_dir / result.metadata_ref
         payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         payload.update(
             {
+                "advanced_compositor": True,
+                "frame_time": frame_time,
+                "supports_masks": True,
+                "supports_effects": True,
+                "supports_blend_modes": True,
+                "supports_numeric_keyframes": True,
                 "universal_image_compositor": True,
                 "universal_image_effect_contracts_executed": sorted(set(self._universal_image_effects_executed)),
                 "universal_image_effect_instances_executed": len(self._universal_image_effects_executed),
+                "universal_image_effect_scopes_executed": sorted(set(self._universal_image_effect_scopes_executed)),
                 "supported_universal_image_effects": sorted(SUPPORTED_UNIVERSAL_IMAGE_EFFECTS),
-                "universal_image_track_effects_fail_closed": True,
+                "supported_universal_image_effect_scopes": ["item", "track"],
                 "source_media_mutated": False,
             }
         )
