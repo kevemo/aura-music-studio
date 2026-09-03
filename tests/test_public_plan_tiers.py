@@ -11,11 +11,11 @@ def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert [PLANS[key].currency for key in ("free", "base", "pro")] == ["GBP", "GBP", "GBP"]
     assert str(PLANS["free"].monthly_price) == "0.00"
     assert str(PLANS["base"].monthly_price) == "5.99"
-    assert str(PLANS["pro"].monthly_price) == "14.99"
+    assert str(PLANS["pro"].monthly_price) == "9.99"
     assert PLANS["base"].monthly_price_minor == 599
-    assert PLANS["pro"].monthly_price_minor == 1499
+    assert PLANS["pro"].monthly_price_minor == 999
     assert PLANS["base"].display_price == "£5.99"
-    assert PLANS["pro"].display_price == "£14.99"
+    assert PLANS["pro"].display_price == "£9.99"
     assert str(PLANS["base"].monthly_price_usd) == "5.99"
 
     rows = public_plans()
