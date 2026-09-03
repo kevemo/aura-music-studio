@@ -25,7 +25,7 @@ class Plan:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
+        are £4.99 / £9.99. Keep the attribute temporarily so parallel feature branches and
         persisted integrations do not break while new code uses monthly_price + currency.
         """
         return self.monthly_price
@@ -121,6 +121,7 @@ UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
 GAME_PLAYTEST = "game_playtest"
 GAME_CREATE = "game_create"
 GAME_CREATE_UNLIMITED = "game_create_unlimited"
+AURASEC = "aurasec"
 
 
 FREE_FEATURES = frozenset({
@@ -139,7 +140,7 @@ FREE_FEATURES = frozenset({
 })
 
 # Keep the internal BASE_* identifier and the public plan id "base" for backwards
-# compatibility. Customer-facing copy calls this tier "Tier 2".
+# compatibility. Customer-facing copy calls this tier "Member".
 BASE_FEATURES = FREE_FEATURES | frozenset({
     FULL_TRACK,
     BUILD_AROUND_UPLOAD,
@@ -191,6 +192,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
     GAME_CREATE_UNLIMITED,
+    AURASEC,
 })
 
 
@@ -204,7 +206,7 @@ PLANS: dict[str, Plan] = {
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
             "5 generated outputs per day, and those image/poster outputs can be saved and downloaded. Free members can "
             "also play and test Game Forge builds that have passed the platform's public playtest safety/rating preflight. "
-            "Music/video downloads and game creation unlock on Tier 2."
+            "Music/video downloads and game creation unlock on Member."
         ),
         confirmed_songs_per_day=0,
         regeneration_until_confirmed=False,
@@ -213,11 +215,11 @@ PLANS: dict[str, Plan] = {
     ),
     "base": Plan(
         id="base",
-        name="Tier 2",
-        monthly_price=Decimal("5.99"),
+        name="Member",
+        monthly_price=Decimal("4.99"),
         currency="GBP",
         description=(
-            "£5.99 tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
+            "£4.99 Member tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
             "The authoritative cross-studio daily allowance and any Cosmic Creation Coin overage are enforced separately "
             "by server-side usage/admission controls; this plan object defines feature entitlement rather than inventing "
             "a second usage counter. Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura "
@@ -232,18 +234,18 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Unlimited Pro",
-        monthly_price=Decimal("14.99"),
+        monthly_price=Decimal("9.99"),
         currency="GBP",
         description=(
-            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
-            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
-            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
-            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
-            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
-            "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
-            "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
-            "subject to marketplace entitlement, rights and governance gates."
+            "£9.99 Unlimited Pro tier with the highest enabled creative access and AuraSec included. Normal use is effectively "
+            "unlimited subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. "
+            "Includes the complete enabled production stack: expanded instrument/performance types, editable multitrack "
+            "build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
+            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
+            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
+            "voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled export formats, and "
+            "unlimited active Game Forge project workspaces. Eligible song/game publishing remains subject to marketplace "
+            "entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,

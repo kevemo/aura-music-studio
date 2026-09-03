@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 import pytest
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.plans import (
     APPROVED_VOICE_DUPLICATION,
+    AURASEC,
     FULL_TRACK,
     SAMPLE_LAB,
     STEM_SPLITTER,
@@ -43,8 +45,37 @@ def test_plan_progression():
     assert SAMPLE_LAB in pro.features
     assert APPROVED_VOICE_DUPLICATION not in base.features
     assert APPROVED_VOICE_DUPLICATION in pro.features
+    assert AURASEC not in free.features
+    assert AURASEC not in base.features
+    assert AURASEC in pro.features
     assert base.confirmed_songs_per_day == 1
     assert pro.confirmed_songs_per_day is None
+
+
+def test_public_membership_pricing_contract():
+    free = get_plan("free")
+    member = get_plan("base")
+    pro = get_plan("pro")
+
+    assert free.monthly_price == Decimal("0.00")
+    assert free.monthly_price_minor == 0
+    assert free.display_price == "Free"
+
+    # Keep the persisted/public identifier stable while exposing the approved customer-facing tier.
+    assert member.id == "base"
+    assert member.name == "Member"
+    assert member.currency == "GBP"
+    assert member.monthly_price == Decimal("4.99")
+    assert member.monthly_price_minor == 499
+    assert member.display_price == "£4.99"
+
+    assert pro.id == "pro"
+    assert pro.name == "Unlimited Pro"
+    assert pro.currency == "GBP"
+    assert pro.monthly_price == Decimal("9.99")
+    assert pro.monthly_price_minor == 999
+    assert pro.display_price == "£9.99"
+    assert "aurasec" in pro.public_dict()["features"]
 
 
 def test_free_activates_after_owner_approval(tmp_path):

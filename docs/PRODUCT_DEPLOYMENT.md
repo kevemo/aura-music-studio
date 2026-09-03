@@ -17,7 +17,7 @@ The integrated application and supporting private services include foundations f
 - installable PWA metadata and tightly scoped public service-worker behaviour;
 - sign-up, sign-in and account/session security;
 - membership approval and subscription lifecycle;
-- Free / Tier 2 / Unlimited Pro entitlement enforcement;
+- Free / Member / Unlimited Pro entitlement enforcement;
 - server-authoritative cross-studio usage/admission controls;
 - Cosmic Creation Coin catalogue, wallet and payment fulfilment controls;
 - private per-member projects and assets;
@@ -41,19 +41,21 @@ A module, route, UI label or adapter must not be represented as production-compl
 
 ## Authoritative membership model
 
-The public membership tiers are defined server-side in `aura_music_studio/plans.py`.
+The public membership tiers are defined server-side in `aura_music_studio/plans.py`. The compatibility IDs remain `free`, `base` and `pro`, while customer-facing names are Free, Member and Unlimited Pro.
 
 ### Free — £0
 
 Core Command Center exploration and limited eligible creative access. Current plan-level capabilities include Aura producer/songwriting assistance, starter creative tools, limited image/poster creation and public-safe Game Forge playtesting.
 
-### Tier 2 — £5.99/month
+### Member — £4.99/month
 
 Increased creative access across enabled Music, Video and Game workflows. The commercial target is up to **5 eligible creations/edits per day** across the defined cross-studio operation set, with eligible additional use handled through Cosmic Creation Coins where configured. The authoritative cross-studio allowance is enforced by the usage/admission layer rather than inferred from the plan object alone.
 
-### Unlimited Pro — £14.99/month
+### Unlimited Pro — £9.99/month
 
-Highest normal enabled creative access and effectively unlimited ordinary use, subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety, rights and legal safeguards. Eligible publishing remains subject to marketplace, entitlement, rights and accounting gates.
+Highest normal enabled creative access, **including the AuraSec entitlement**, and effectively unlimited ordinary use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety, rights and legal safeguards. Eligible publishing remains subject to marketplace, entitlement, rights and accounting gates.
+
+AuraSec can also be distributed and sold separately under its own approved commercial catalogue. This deployment document deliberately does not invent a standalone AuraSec price.
 
 Safety, privacy, consent and transparency protections are never paywalled.
 

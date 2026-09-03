@@ -14,6 +14,7 @@ from .owner_auth_portal import (
     owner_login_submit as secure_owner_login_submit,
     owner_logout as secure_owner_logout,
 )
+from .plans import get_plan
 from .public_address import PublicAddressManager
 from .subscriptions import SubscriptionLedger
 
@@ -110,6 +111,10 @@ def owner_dashboard(request: Request):
     if not _authorized(request):
         return RedirectResponse("/owner", status_code=303)
 
+    free_plan = get_plan("free")
+    member_plan = get_plan("base")
+    pro_plan = get_plan("pro")
+
     pending = store.pending_requests()
     if pending:
         pending_html = "".join(
@@ -129,12 +134,12 @@ def owner_dashboard(request: Request):
         payment_html = "<div class='card'><p class='muted'>No approved members are waiting for payment verification.</p></div>"
 
     body = f"""<div class='top'><div><div class='gold'><b>MARY & KEV · ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><div class='row'><a class='btn approve' href='/owner/users'>Users & ESP Access</a><a class='btn activate' href='/owner/backups'>Backups & Migration</a><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div></div>
-<div class='grid'><div class='card'><b>Free</b><h2>£0</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>Basic</b><h2>£4.99</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>Pro</b><h2>£9.99</h2><span class='muted'>Full Creative Studio access only unless separately ESP-approved</span></div></div>
+<div class='grid'><div class='card'><b>{escape(free_plan.name)}</b><h2>{escape(free_plan.display_price)}</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(member_plan.name)}</b><h2>{escape(member_plan.display_price)}</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(pro_plan.name)}</b><h2>{escape(pro_plan.display_price)}</h2><span class='muted'>Full Creative Studio access plus AuraSec entitlement unless separately governed</span></div></div>
 <div class='card'><div class='row'><div><h2>User & ESP management</h2><p class='muted'>Every account is listed in the protected owner directory. Mary/Kev can manage subscription entitlement separately from Regular / ESP Creator / ESP Agent / Both, review ESP access requests, niches, creation activity, training and progress.</p></div><a class='btn approve' href='/owner/users'>Open User Directory</a></div></div>
 {_address_panel()}
 <h2>Pending membership requests</h2>{pending_html}
 <h2>Approved — waiting for payment verification</h2>{payment_html}
-<div class='card'><h2>Monthly access rule</h2><p class='muted'>Each verified Basic/Pro payment grants a 31-day billing period. Another verified payment extends the existing paid-through date. When that period expires, the account automatically returns to payment-pending until renewal is verified. Duplicate payment references are rejected.</p></div>"""
+<div class='card'><h2>Monthly access rule</h2><p class='muted'>Each verified Member/Unlimited Pro payment grants a 31-day billing period. Another verified payment extends the existing paid-through date. When that period expires, the account automatically returns to payment-pending until renewal is verified. Duplicate payment references are rejected.</p></div>"""
     return _page(body)
 
 
@@ -164,8 +169,9 @@ def owner_activate_payment(
         status = subscriptions.verify_payment(user_id, plan_id, payment_reference)
         user = status["user"] or {}
         state = status["subscription"] or {}
+        plan_name = get_plan(plan_id).name
         message = (
-            f"Activated {escape(user.get('display_name','member'))} on {escape(plan_id.upper())}. "
+            f"Activated {escape(user.get('display_name','member'))} on {escape(plan_name)}. "
             f"Paid through {escape(state.get('period_end',''))}. Payment reference: {escape(payment_reference)}"
         )
         colour = "var(--green)"
