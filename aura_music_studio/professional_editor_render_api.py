@@ -16,7 +16,7 @@ from .professional_editor_renderer import (
     EditorRenderUnsupported,
     ProfessionalEditorRenderer,
 )
-from .professional_image_compositor import AdvancedImageCompositor
+from .professional_universal_image_compositor import UniversalImageCompositor
 from .professional_universal_visual_video_compositor import UniversalVisualVideoCompositor
 from .tenant_storage import project_path
 from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
@@ -162,8 +162,10 @@ def render_editor_sequence(
                 lambda: video_renderer.render_video_advanced(sequence_id),
             )
         else:
-            # Image exports are not one of the cross-Studio Tier 2 eligible operation classes.
-            image_renderer = AdvancedImageCompositor(_project(project_name))
+            # The universal Image Designer compositor consumes shared namespaced image contracts
+            # while inheriting the established non-destructive Pillow layer/mask/blend/keyframe
+            # renderer. Image exports stay local and are not one of the paid Tier 2 provider calls.
+            image_renderer = UniversalImageCompositor(_project(project_name))
             result = image_renderer.render_image_advanced(
                 sequence_id,
                 format=expected,
