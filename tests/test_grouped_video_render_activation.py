@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import aura_music_studio.professional_editor_render_api as api
+from aura_music_studio.professional_universal_visual_video_compositor import UniversalVisualVideoCompositor
+from aura_music_studio.professional_video_grouped_unified_compositor import GroupedUnifiedAdvancedVideoCompositor
 
 
 class _Plan:
@@ -63,10 +65,10 @@ class _Provenance:
         }
 
 
-def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
+def test_mp4_export_dispatches_to_universal_visual_compositor(monkeypatch):
     calls = {}
 
-    class _Grouped:
+    class _UniversalVisual:
         def __init__(self, project_dir):
             calls["project_dir"] = project_dir
 
@@ -77,7 +79,7 @@ def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
     monkeypatch.setattr(api, "_member", lambda request: _Member())
     monkeypatch.setattr(api, "_renderer", lambda project_name: _Renderer())
     monkeypatch.setattr(api, "_project", lambda project_name: Path("/tmp/grouped-video-project"))
-    monkeypatch.setattr(api, "GroupedUnifiedAdvancedVideoCompositor", _Grouped)
+    monkeypatch.setattr(api, "UniversalVisualVideoCompositor", _UniversalVisual)
     monkeypatch.setattr(api, "export_provenance_store", _Provenance())
 
     response = api.render_editor_sequence(
@@ -100,8 +102,15 @@ def test_mp4_export_dispatches_to_grouped_unified_compositor(monkeypatch):
     assert response["frame_time"] is None
 
 
-def test_render_api_no_longer_imports_legacy_unified_video_compositor():
+def test_universal_visual_compositor_preserves_grouped_unified_renderer_foundation():
+    # The new Chat 3 visual-contract execution layer is additive: it remains a subclass of the
+    # established grouped compositor, so masks/blends/grouped-track semantics are not bypassed.
+    assert issubclass(UniversalVisualVideoCompositor, GroupedUnifiedAdvancedVideoCompositor)
+
+
+def test_render_api_uses_universal_visual_compositor_without_reintroducing_legacy_unified_renderer():
     source = Path(api.__file__).read_text(encoding="utf-8")
-    assert "GroupedUnifiedAdvancedVideoCompositor(_project(project_name))" in source
+    assert "UniversalVisualVideoCompositor(_project(project_name))" in source
+    assert "from .professional_universal_visual_video_compositor import UniversalVisualVideoCompositor" in source
     assert "from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor" not in source
     assert not hasattr(api, "UnifiedAdvancedVideoCompositor")
