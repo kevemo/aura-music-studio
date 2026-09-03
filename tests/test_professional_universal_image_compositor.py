@@ -9,6 +9,7 @@ from PIL import Image, ImageChops, ImageStat
 
 from aura_music_studio.professional_editor import EditorEffect, EditorKeyframe, ProfessionalEditorStore
 from aura_music_studio.professional_editor_renderer import EditorRenderUnsupported
+from aura_music_studio.professional_image_compositor import AdvancedImageCompositor
 from aura_music_studio.professional_universal_image_compositor import (
     SUPPORTED_UNIVERSAL_IMAGE_EFFECTS,
     UniversalImageCompositor,
@@ -16,7 +17,6 @@ from aura_music_studio.professional_universal_image_compositor import (
     _cinematic_filter,
     _hex_rgb,
 )
-from aura_music_studio.professional_image_compositor import AdvancedImageCompositor
 
 
 def _sha256(path) -> str:
@@ -32,9 +32,6 @@ def _project(tmp_path):
         name="Universal Image",
         width=180,
         height=120,
-        fps=24.0,
-        duration=2.0,
-        background="#202020",
     )
     track = store.create_track(sequence.id, kind="image", name="Artwork")
     source = project / "sources" / "universal_source.png"
@@ -54,7 +51,7 @@ def _project(tmp_path):
         name="Source",
         source_ref="sources/universal_source.png",
         start=0.0,
-        duration=2.0,
+        duration=1.0,
     )
     return project, store, sequence, track, item, source
 
@@ -118,13 +115,13 @@ def test_cinematic_strength_keyframes_are_inspectable_at_frame_time():
         keyframes={
             "strength": [
                 EditorKeyframe(time=0.0, value=0.0, interpolation="linear"),
-                EditorKeyframe(time=2.0, value=1.0, interpolation="linear"),
+                EditorKeyframe(time=1.0, value=1.0, interpolation="linear"),
             ]
         },
     ).model_dump(mode="json")
     start = _apply_universal_image_effect(image, effect, 0.0)
-    middle = _apply_universal_image_effect(image, effect, 1.0)
-    end = _apply_universal_image_effect(image, effect, 2.0)
+    middle = _apply_universal_image_effect(image, effect, 0.5)
+    end = _apply_universal_image_effect(image, effect, 1.0)
     assert ImageChops.difference(image, start).getbbox() is None
     assert ImageChops.difference(image, middle).getbbox() is not None
     assert ImageChops.difference(middle, end).getbbox() is not None
