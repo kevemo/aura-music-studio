@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from .aura_avatar_client_health import router as avatar_client_health_router
 from .aura_avatar_validator import (
     GAZE_ANIMATION_ALIASES,
     GESTURE_ANIMATION_ALIASES,
@@ -16,6 +17,7 @@ from .aura_avatar_validator import (
 )
 
 router = APIRouter(tags=["Aura Avatar"])
+router.include_router(avatar_client_health_router)
 
 BROWSER_3D_RENDERER_IMPLEMENTED = True
 LAYERED_PERFORMANCE_RUNTIME_IMPLEMENTED = True
@@ -234,6 +236,8 @@ def avatar_status() -> dict:
             "animation_state_mapping": True,
             "animation_crossfade": True,
             "client_load_health": True,
+            "durable_privacy_bounded_client_health_evidence": True,
+            "client_health_can_promote_production_readiness": False,
             "layered_animation_api": True,
             "rig_authored_viseme_layering": True,
             "rig_authored_gaze_layering": True,
@@ -354,9 +358,13 @@ class AuraAvatarRuntimeMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/avatar-runtime.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        runtime_marker = "<script src='/aura-intelligence/avatar-runtime.js'></script>"
+        health_marker = "<script src='/aura-intelligence/avatar-client-health.js'></script>"
+        markers = runtime_marker + health_marker
+        if runtime_marker not in text:
+            text = text.replace("</body>", markers + "</body>")
+        elif health_marker not in text:
+            text = text.replace(runtime_marker, markers)
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]
