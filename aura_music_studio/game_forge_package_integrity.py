@@ -25,15 +25,25 @@ _REQUIRED_CORE_MEMBERS = {
 _ALLOWED_COMPRESSIONS = {ZIP_STORED, ZIP_DEFLATED}
 
 
-def _safe_member_name(info: ZipInfo) -> str:
-    name = str(info.filename or "")
+def _canonical_package_path(value: object, *, context: str) -> str:
+    name = str(value or "")
     if not name or "\x00" in name or "\\" in name:
-        raise ValueError("Game export contains an unsafe archive member name")
+        raise ValueError(f"{context} contains an unsafe path")
+    path = PurePosixPath(name)
+    if (
+        path.is_absolute()
+        or path.as_posix() != name
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or (path.parts and ":" in path.parts[0])
+    ):
+        raise ValueError(f"{context} contains a non-canonical or unsafe path")
+    return name
+
+
+def _safe_member_name(info: ZipInfo) -> str:
+    name = _canonical_package_path(info.filename, context="Game export archive member")
     if info.is_dir() or name.endswith("/"):
         raise ValueError("Game export contains an unexpected directory entry")
-    path = PurePosixPath(name)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise ValueError("Game export contains an unsafe archive member path")
     if info.flag_bits & 0x1:
         raise ValueError("Game export contains an encrypted archive member")
     if info.compress_type not in _ALLOWED_COMPRESSIONS:
@@ -93,10 +103,10 @@ def _integrity_records(manifest: dict) -> dict[str, dict]:
     for row in rows:
         if not isinstance(row, dict):
             raise ValueError("Game export package integrity record is malformed")
-        path = str(row.get("path") or "")
-        safe = PurePosixPath(path)
-        if not path or path.startswith("/") or "\\" in path or any(part in {"", ".", ".."} for part in safe.parts):
-            raise ValueError("Game export package integrity record contains an unsafe path")
+        path = _canonical_package_path(
+            row.get("path"),
+            context="Game export package integrity record",
+        )
         folded_path = path.casefold()
         if path in result or folded_path in folded:
             raise ValueError("Game export package integrity table contains a duplicate path")
@@ -200,10 +210,13 @@ def verify_aura_web_export(
                 if not isinstance(asset, dict):
                     raise ValueError("Game export manifest contains a malformed asset record")
                 asset_id = str(asset.get("id") or "")
-                media_url = str(asset.get("media_url") or "")
+                media_url = _canonical_package_path(
+                    asset.get("media_url"),
+                    context="Game export manifest media record",
+                )
                 if not asset_id or asset_id in asset_ids:
                     raise ValueError("Game export manifest contains a duplicate or empty asset id")
-                if not media_url.startswith("media/") or PurePosixPath(media_url).is_absolute() or ".." in PurePosixPath(media_url).parts:
+                if not media_url.startswith("media/"):
                     raise ValueError("Game export manifest contains an unsafe media path")
                 if media_url in asset_paths:
                     raise ValueError("Game export manifest contains a duplicate media path")
