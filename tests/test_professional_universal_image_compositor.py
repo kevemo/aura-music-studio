@@ -102,9 +102,11 @@ def test_duotone_preserves_alpha_and_wet_dry_mix():
     )
     assert full.getchannel("A").getextrema() == (73, 73)
     assert half.getchannel("A").getextrema() == (73, 73)
-    assert ImageChops.difference(image, full).getbbox() is not None
-    assert ImageChops.difference(image, half).getbbox() is not None
-    assert ImageChops.difference(full, half).getbbox() is not None
+    # Pillow's RGBA ``getbbox`` can ignore non-alpha differences when the alpha-difference
+    # band is all zero. Assert alpha preservation above and inspect RGB change explicitly.
+    assert ImageChops.difference(image.convert("RGB"), full.convert("RGB")).getbbox() is not None
+    assert ImageChops.difference(image.convert("RGB"), half.convert("RGB")).getbbox() is not None
+    assert ImageChops.difference(full.convert("RGB"), half.convert("RGB")).getbbox() is not None
 
 
 def test_cinematic_strength_keyframes_are_inspectable_at_frame_time():
@@ -123,8 +125,8 @@ def test_cinematic_strength_keyframes_are_inspectable_at_frame_time():
     middle = _apply_universal_image_effect(image, effect, 0.5)
     end = _apply_universal_image_effect(image, effect, 1.0)
     assert ImageChops.difference(image, start).getbbox() is None
-    assert ImageChops.difference(image, middle).getbbox() is not None
-    assert ImageChops.difference(middle, end).getbbox() is not None
+    assert ImageChops.difference(image.convert("RGB"), middle.convert("RGB")).getbbox() is not None
+    assert ImageChops.difference(middle.convert("RGB"), end.convert("RGB")).getbbox() is not None
 
 
 def test_real_image_designer_export_executes_universal_filters_without_mutating_source(tmp_path):
