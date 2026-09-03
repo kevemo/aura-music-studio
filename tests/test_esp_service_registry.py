@@ -14,7 +14,7 @@ from aura_music_studio.esp_service_registry import (
 
 def _stores(tmp_path):
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
-    esp = EspStore(accounts.db_path)
+    esp = EspStore(accounts)
     return accounts, esp, EspServiceRegistryStore(esp)
 
 
