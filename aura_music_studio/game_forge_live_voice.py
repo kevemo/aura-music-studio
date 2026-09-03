@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 from fastapi.responses import HTMLResponse
 
 VOICE_MESSAGE_TYPE = "aura-live-command-v1"
+VOICE_READY_MESSAGE_TYPE = "aura-live-ready-v1"
 VOICE_CHANNEL_QUERY = "aura_live_channel"
 MAX_VOICE_COMMAND_CHARS = 240
 _FRAME_ID = "aura-game-playtest-frame"
@@ -52,6 +53,7 @@ def live_voice_host_fragment(*, game_id: str, channel: str, frame_id: str = _FRA
     channel_json = json.dumps(str(channel), ensure_ascii=True).replace("</", "<\\/")
     frame_id_json = json.dumps(str(frame_id), ensure_ascii=True).replace("</", "<\\/")
     message_type_json = json.dumps(VOICE_MESSAGE_TYPE, ensure_ascii=True)
+    ready_type_json = json.dumps(VOICE_READY_MESSAGE_TYPE, ensure_ascii=True)
 
     return f"""
 <style id='aura-live-voice-host-style'>
@@ -61,8 +63,8 @@ def live_voice_host_fragment(*, game_id: str, channel: str, frame_id: str = _FRA
 @media(max-width:800px){{#aura-live-voice-controls{{right:8px;top:64px;max-width:calc(100vw - 16px);background:#03050ae8;padding:6px;border-radius:9px}}#aura-live-voice-status{{max-width:180px}}}}
 </style>
 <div id='aura-live-voice-controls' role='group' aria-label='Aura live voice controls'>
-  <button id='aura-live-voice-button' type='button' title='Speak one bounded live playtest change to Aura'>🎙️ Talk to Aura</button>
-  <small id='aura-live-voice-status' role='status' aria-live='polite'>Only the resulting command enters the game.</small>
+  <button id='aura-live-voice-button' type='button' disabled title='Speak one bounded live playtest change to Aura'>🎙️ Talk to Aura</button>
+  <small id='aura-live-voice-status' role='status' aria-live='polite'>Connecting Aura to the private playtest…</small>
 </div>
 <script id='aura-live-voice-host-script'>
 'use strict';
@@ -73,14 +75,24 @@ const status=document.getElementById('aura-live-voice-status');
 const gameId={game_id_json};
 const channel={channel_json};
 const messageType={message_type_json};
+const readyType={ready_type_json};
 const maxChars={MAX_VOICE_COMMAND_CHARS};
 const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+const speechAvailable=Boolean(Recognition);
+let frameReady=false;
 const say=(value)=>{{if(status)status.textContent=String(value||'').slice(0,180)}};
 if(!frame||!button||!status)return;
+window.addEventListener('message',event=>{{
+  const data=event.data;
+  if(event.source!==frame.contentWindow||!data||typeof data!=='object')return;
+  if(data.type!==readyType||data.game_id!==gameId||data.channel!==channel)return;
+  frameReady=true;
+  if(speechAvailable)button.disabled=false;
+  say(speechAvailable?'Aura voice bridge ready.':'Voice recognition is unavailable here. Typed live creation still works.');
+}});
 if(!Recognition){{
   button.disabled=true;
   button.title='Browser speech recognition is unavailable; use the typed Aura Live Creation command inside the game.';
-  say('Voice recognition is unavailable here. Typed live creation still works.');
   return;
 }}
 const recognition=new Recognition();
@@ -89,15 +101,16 @@ recognition.interimResults=false;
 recognition.maxAlternatives=1;
 recognition.lang=document.documentElement.lang||'en-GB';
 button.addEventListener('click',()=>{{
+  if(!frameReady){{say('Aura is still connecting to the private playtest.');return}}
   try{{recognition.start();button.disabled=true;say('Listening… speak one live playtest change.')}}
   catch(_error){{say('Voice input is already active.')}}
 }});
-recognition.onend=()=>{{button.disabled=false}};
-recognition.onerror=()=>{{button.disabled=false;say('Voice input was unavailable. Typed live creation still works.')}};
+recognition.onend=()=>{{button.disabled=!frameReady}};
+recognition.onerror=()=>{{button.disabled=!frameReady;say('Voice input was unavailable. Typed live creation still works.')}};
 recognition.onresult=(event)=>{{
   const command=String(event.results?.[0]?.[0]?.transcript||'').trim().slice(0,maxChars);
   if(!command){{say('No live command was detected.');return}}
-  if(!frame.contentWindow){{say('The private game frame is not ready.');return}}
+  if(!frameReady||!frame.contentWindow){{say('The private game frame is not ready.');return}}
   frame.contentWindow.postMessage({{type:messageType,game_id:gameId,channel,command}},'*');
   say(`Sent to Aura: ${{command}}`);
 }};
@@ -184,6 +197,7 @@ __all__ = [
     "MAX_VOICE_COMMAND_CHARS",
     "VOICE_CHANNEL_QUERY",
     "VOICE_MESSAGE_TYPE",
+    "VOICE_READY_MESSAGE_TYPE",
     "install_live_voice_host_bridge",
     "live_voice_host_fragment",
     "new_voice_channel",
