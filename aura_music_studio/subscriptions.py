@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .native_products import BillingPeriod
 from .plans import get_plan
 
 
@@ -50,17 +51,44 @@ def _ensure_payment_currency_columns(con: sqlite3.Connection) -> None:
     con.execute("UPDATE subscription_payments SET currency='GBP' WHERE currency IS NULL OR currency=''")
 
 
+def _ensure_billing_period_columns(con: sqlite3.Connection) -> None:
+    """Migrate monthly-only ledgers without changing historical entitlement duration."""
+    state_columns = _columns(con, "subscription_state")
+    if "billing_period" not in state_columns:
+        con.execute(
+            "ALTER TABLE subscription_state ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly'"
+        )
+    payment_columns = _columns(con, "subscription_payments")
+    if "billing_period" not in payment_columns:
+        con.execute(
+            "ALTER TABLE subscription_payments ADD COLUMN billing_period TEXT NOT NULL DEFAULT 'monthly'"
+        )
+    con.execute(
+        "UPDATE subscription_state SET billing_period='monthly' WHERE billing_period IS NULL OR billing_period=''"
+    )
+    con.execute(
+        "UPDATE subscription_payments SET billing_period='monthly' WHERE billing_period IS NULL OR billing_period=''"
+    )
+
+
+def _period_days(period: BillingPeriod) -> int:
+    # Preserve the existing 31-day monthly access contract. Annual access is a single
+    # prepaid 365-day period; Stripe renewals are separately validated against the same period.
+    return 365 if period is BillingPeriod.ANNUAL else 31
+
+
 class SubscriptionLedger:
-    """Tracks paid Pulsar-Frequency House periods independently of ESP access.
+    """Tracks paid Command Center periods independently of ESP access.
 
-    Free/Basic/Pro is the public creative subscription dimension. ESP Creator/Agent/Both
-    is a separate owner-controlled permission and never grants, extends, downgrades or
-    otherwise changes a creative subscription. Paid periods therefore fall back to Free
-    when they expire unless ownership has separately assigned an owner-comped entitlement.
+    Free/Member/Unlimited Pro is the public creative subscription dimension. ESP
+    Creator/Agent/Both is a separate owner-controlled permission and never grants, extends,
+    downgrades or otherwise changes a creative subscription. Paid periods therefore fall back
+    to Free when they expire unless ownership has separately assigned an owner-comped entitlement.
 
-    The historical ``esp_comped`` billing state is treated as a deprecated compatibility
-    value and is normalized to Free when encountered. This prevents legacy data from
-    silently reintroducing the retired role→subscription coupling.
+    The historical ``esp_comped`` billing state is treated as a deprecated compatibility value
+    and is normalized to Free when encountered. Existing monthly-only rows are migrated with an
+    explicit ``monthly`` period; annual billing is accepted only where the plan catalogue exposes
+    an authoritative annual price.
     """
 
     def __init__(self, store: AccountStore | None = None):
@@ -82,6 +110,7 @@ class SubscriptionLedger:
                     user_id TEXT PRIMARY KEY,
                     plan_id TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    billing_period TEXT NOT NULL DEFAULT 'monthly',
                     period_start TEXT NOT NULL,
                     period_end TEXT NOT NULL,
                     last_payment_reference TEXT,
@@ -98,6 +127,7 @@ class SubscriptionLedger:
                     amount TEXT,
                     amount_minor INTEGER,
                     currency TEXT NOT NULL DEFAULT 'GBP',
+                    billing_period TEXT NOT NULL DEFAULT 'monthly',
                     period_start TEXT NOT NULL,
                     period_end TEXT NOT NULL,
                     verified_at TEXT NOT NULL,
@@ -106,16 +136,33 @@ class SubscriptionLedger:
                 """
             )
             _ensure_payment_currency_columns(con)
+            _ensure_billing_period_columns(con)
 
     def get(self, user_id: str) -> dict | None:
         with self._connect() as con:
             row = con.execute("SELECT * FROM subscription_state WHERE user_id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
-    def verify_payment(self, user_id: str, plan_id: str, payment_reference: str, *, period_days: int = 31) -> dict:
+    def verify_payment(
+        self,
+        user_id: str,
+        plan_id: str,
+        payment_reference: str,
+        *,
+        period_days: int | None = None,
+        billing_period: BillingPeriod | str = BillingPeriod.MONTHLY,
+    ) -> dict:
         plan = get_plan(plan_id)
         if plan.id == "free":
             raise ValueError("Free membership does not require a subscription payment")
+        try:
+            period = BillingPeriod(billing_period)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported billing period: {billing_period}") from exc
+
+        # price_for is deliberately called before persistence so unsupported annual tiers fail closed.
+        amount_value = plan.price_for(period)
+        amount_minor = plan.price_minor_for(period)
         reference = (payment_reference or "").strip()
         if len(reference) < 3:
             raise ValueError("A PayPal/payment reference is required")
@@ -126,12 +173,16 @@ class SubscriptionLedger:
         if user.get("status") not in {"approved_pending_payment", "active"}:
             raise ValueError("Account approval is required before payment can activate a membership")
 
+        effective_days = _period_days(period) if period_days is None else int(period_days)
+        if effective_days <= 0:
+            raise ValueError("Subscription period must be positive")
+
         now = _now()
         existing = self.get(user_id)
         existing_end = _parse(existing.get("period_end")) if existing else None
         start = existing_end if existing_end and existing_end > now else now
-        end = start + timedelta(days=period_days)
-        amount = str(plan.monthly_price)
+        end = start + timedelta(days=effective_days)
+        amount = str(amount_value)
 
         with self._connect() as con:
             duplicate = con.execute(
@@ -142,8 +193,8 @@ class SubscriptionLedger:
 
             con.execute(
                 """INSERT INTO subscription_payments
-                   (id,user_id,plan_id,payment_reference,amount_usd,amount,amount_minor,currency,period_start,period_end,verified_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id,user_id,plan_id,payment_reference,amount_usd,amount,amount_minor,currency,billing_period,period_start,period_end,verified_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     uuid4().hex,
                     user_id,
@@ -151,8 +202,9 @@ class SubscriptionLedger:
                     reference,
                     amount,  # deprecated compatibility mirror
                     amount,
-                    plan.monthly_price_minor,
+                    amount_minor,
                     plan.currency,
+                    period.value,
                     _iso(start),
                     _iso(end),
                     _iso(now),
@@ -160,16 +212,17 @@ class SubscriptionLedger:
             )
             con.execute(
                 """INSERT INTO subscription_state
-                   (user_id,plan_id,status,period_start,period_end,last_payment_reference,updated_at)
-                   VALUES (?,?, 'active', ?, ?, ?, ?)
+                   (user_id,plan_id,status,billing_period,period_start,period_end,last_payment_reference,updated_at)
+                   VALUES (?,?, 'active', ?, ?, ?, ?, ?)
                    ON CONFLICT(user_id) DO UPDATE SET
                      plan_id=excluded.plan_id,
                      status='active',
+                     billing_period=excluded.billing_period,
                      period_start=excluded.period_start,
                      period_end=excluded.period_end,
                      last_payment_reference=excluded.last_payment_reference,
                      updated_at=excluded.updated_at""",
-                (user_id, plan.id, _iso(start), _iso(end), reference, _iso(now)),
+                (user_id, plan.id, period.value, _iso(start), _iso(end), reference, _iso(now)),
             )
             con.execute(
                 "UPDATE users SET status='active', plan_id=?, requested_plan_id=?, billing_status='active' WHERE id=?",
@@ -210,9 +263,8 @@ class SubscriptionLedger:
         if state and state.get("status") == "active" and end and end > now:
             return user
 
-        # A paid Basic/Pro period has ended. Keep the account usable on the permanent Free
-        # creative tier. ESP role state is stored in esp_memberships and is deliberately
-        # untouched here.
+        # A paid Member/Unlimited Pro period has ended. Keep the account usable on the
+        # permanent Free creative tier. ESP role state is deliberately untouched here.
         with self._connect() as con:
             if state:
                 con.execute(
