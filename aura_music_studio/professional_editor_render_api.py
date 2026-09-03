@@ -17,7 +17,7 @@ from .professional_editor_renderer import (
     ProfessionalEditorRenderer,
 )
 from .professional_universal_image_compositor import UniversalImageCompositor
-from .professional_universal_visual_video_compositor import UniversalVisualVideoCompositor
+from .professional_universal_scoped_visual_video_compositor import UniversalVisualVideoCompositor
 from .tenant_storage import project_path
 from .tier2_daily_meter import TIER2_PLAN_ID, UNLIMITED_PRO_PLAN_ID
 from .tier2_provider_guard import Tier2ProviderGuard
@@ -151,10 +151,10 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            # The universal visual compositor consumes shared namespaced catalogue contracts,
-            # pre-renders only project-local transient derivatives, then delegates the rest of
-            # the established grouped timeline/mask/blend pipeline. The final result is still a
-            # genuine MP4 export and source media remains untouched.
+            # The scoped universal visual compositor keeps item effects non-destructive and applies
+            # whole-track/adjustment effects only after every item on that track has been composed.
+            # It then delegates opacity/blend/final MP4 production to the established grouped
+            # renderer, preserving project-local sources and the shared entitlement/metering path.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
             result = _execute_video_render(
                 member,
