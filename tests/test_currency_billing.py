@@ -15,7 +15,7 @@ def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
     assert basic.amount_minor == 599
     assert basic.amount_usd == "5.99"
     assert pro.currency == "GBP"
-    assert pro.amount_minor == 1499
+    assert pro.amount_minor == 999
 
     public = public_payment_options()
     assert public[0]["currency"] == "GBP"
@@ -25,10 +25,10 @@ def test_payment_options_are_currency_explicit_and_keep_legacy_alias():
 
     instructions = payment_instructions("pro")
     assert instructions["currency"] == "GBP"
-    assert instructions["amount"] == "14.99"
-    assert instructions["amount_minor"] == 1499
-    assert instructions["display_amount"] == "£14.99"
-    assert instructions["amount_usd"] == "14.99"
+    assert instructions["amount"] == "9.99"
+    assert instructions["amount_minor"] == 999
+    assert instructions["display_amount"] == "£9.99"
+    assert instructions["amount_usd"] == "9.99"
 
 
 def test_legacy_public_price_symbols_are_migrated_narrowly_to_gbp():
@@ -95,17 +95,17 @@ def test_verified_payment_writes_canonical_and_compatibility_amounts(tmp_path):
         )
 
     ledger = SubscriptionLedger(store)
-    status = ledger.verify_payment(signup.user_id, "pro", "PAYMENT-GBP-1499")
+    status = ledger.verify_payment(signup.user_id, "pro", "PAYMENT-GBP-999")
     assert status["user"]["plan_id"] == "pro"
 
     with sqlite3.connect(store.db_path) as con:
         con.row_factory = sqlite3.Row
         row = con.execute(
             "SELECT amount_usd,amount,amount_minor,currency FROM subscription_payments WHERE payment_reference=?",
-            ("PAYMENT-GBP-1499",),
+            ("PAYMENT-GBP-999",),
         ).fetchone()
     assert row is not None
-    assert row["amount_usd"] == "14.99"
-    assert row["amount"] == "14.99"
-    assert row["amount_minor"] == 1499
+    assert row["amount_usd"] == "9.99"
+    assert row["amount"] == "9.99"
+    assert row["amount_minor"] == 999
     assert row["currency"] == "GBP"
