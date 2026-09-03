@@ -109,7 +109,7 @@ def _paid_base_invoice() -> dict:
         "status": "paid",
         "billing_reason": "subscription_cycle",
         "currency": "gbp",
-        "amount_paid": 599,
+        "amount_paid": 499,
         "customer": "cus_bound",
         "subscription": "sub_bound",
     }
@@ -122,7 +122,7 @@ def test_subscription_cycle_requires_exact_bound_paid_invoice():
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
-        ("amount_paid", 598, "paid amount"),
+        ("amount_paid", 498, "paid amount"),
         ("currency", "usd", "currency"),
         ("customer", "cus_other", "customer"),
         ("subscription", "sub_other", "subscription"),
