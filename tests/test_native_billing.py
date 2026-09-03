@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aura_music_studio.native_billing import NativeEntitlementLedger, VerifiedNativePayment
+from aura_music_studio.native_billing import (
+    NativeEntitlementLedger,
+    VerifiedNativeLifecycleEvent,
+    VerifiedNativePayment,
+)
 from aura_music_studio.native_products import AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT
 
 
@@ -13,7 +17,7 @@ NOW = datetime(2026, 1, 31, 12, 0, tzinfo=timezone.utc)
 
 
 class StubVerifier:
-    def __init__(self, evidence: VerifiedNativePayment):
+    def __init__(self, evidence):
         self.evidence = evidence
         self.calls = 0
 
@@ -42,9 +46,35 @@ def payment(**overrides) -> VerifiedNativePayment:
     return VerifiedNativePayment(**values)
 
 
+def lifecycle(**overrides) -> VerifiedNativeLifecycleEvent:
+    values = {
+        "provider": "paypal",
+        "event_id": "WH-LIFE-1",
+        "payment_id": "CAPTURE-1",
+        "verification_id": "VERIFY-LIFE-1",
+        "user_id": "user-1",
+        "product_id": "aura_sec",
+        "event_type": "cancel",
+        "occurred_at": datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc),
+    }
+    values.update(overrides)
+    return VerifiedNativeLifecycleEvent(**values)
+
+
 def process(ledger: NativeEntitlementLedger, evidence: VerifiedNativePayment):
     verifier = StubVerifier(evidence)
     receipt = ledger.process_verified_event(
+        raw_event=b"signed-provider-event",
+        headers={"x-provider-signature": "verified-by-adapter"},
+        verifier=verifier,
+    )
+    assert verifier.calls == 1
+    return receipt
+
+
+def process_lifecycle(ledger: NativeEntitlementLedger, evidence: VerifiedNativeLifecycleEvent):
+    verifier = StubVerifier(evidence)
+    receipt = ledger.process_verified_lifecycle_event(
         raw_event=b"signed-provider-event",
         headers={"x-provider-signature": "verified-by-adapter"},
         verifier=verifier,
@@ -177,7 +207,114 @@ def test_payment_metadata_is_persisted_without_role_or_esp_columns(tmp_path):
     with sqlite3.connect(db) as con:
         payment_columns = {row[1] for row in con.execute("PRAGMA table_info(native_payment_events)")}
         entitlement_columns = {row[1] for row in con.execute("PRAGMA table_info(native_entitlements)")}
+        lifecycle_columns = {row[1] for row in con.execute("PRAGMA table_info(native_lifecycle_events)")}
 
     forbidden = {"role", "esp_role", "is_owner", "is_admin", "creator", "agent", "plan_id"}
     assert payment_columns.isdisjoint(forbidden)
     assert entitlement_columns.isdisjoint(forbidden)
+    assert lifecycle_columns.isdisjoint(forbidden)
+
+
+def test_verified_cancellation_keeps_paid_term_then_expires(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+
+    receipt = process_lifecycle(ledger, lifecycle(event_type="cancel"))
+
+    assert receipt.event_type == "cancel"
+    assert receipt.entitlements == (AURA_SEC_ENTITLEMENT,)
+    assert receipt.effective_at.startswith("2026-02-28T12:00:00")
+    assert ledger.active_entitlements(
+        "user-1", at=datetime(2026, 2, 20, 12, 0, tzinfo=timezone.utc)
+    ) == frozenset({AURA_SEC_ENTITLEMENT})
+    assert ledger.active_entitlements(
+        "user-1", at=datetime(2026, 3, 1, 12, 0, tzinfo=timezone.utc)
+    ) == frozenset()
+
+
+def test_verified_refund_revokes_current_term_immediately(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+    refund_at = datetime(2026, 2, 10, 12, 0, tzinfo=timezone.utc)
+
+    receipt = process_lifecycle(
+        ledger,
+        lifecycle(event_type="refund", occurred_at=refund_at),
+    )
+
+    assert receipt.event_type == "refund"
+    assert receipt.entitlements == (AURA_SEC_ENTITLEMENT,)
+    assert ledger.active_entitlements(
+        "user-1", at=datetime(2026, 2, 10, 12, 1, tzinfo=timezone.utc)
+    ) == frozenset()
+
+
+def test_lifecycle_requires_verified_matching_payment_identity(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+
+    with pytest.raises(ValueError, match="verified native payment"):
+        process_lifecycle(ledger, lifecycle(payment_id="UNKNOWN"))
+    with pytest.raises(ValueError, match="identity"):
+        process_lifecycle(ledger, lifecycle(event_id="WH-LIFE-2", user_id="user-2"))
+    with pytest.raises(ValueError, match="identity"):
+        process_lifecycle(ledger, lifecycle(event_id="WH-LIFE-3", product_id="aura_os"))
+
+
+def test_lifecycle_replay_and_transition_replay_are_rejected(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+    process_lifecycle(ledger, lifecycle(event_type="cancel"))
+
+    with pytest.raises(ValueError, match="event"):
+        process_lifecycle(ledger, lifecycle(event_type="cancel"))
+    with pytest.raises(ValueError, match="transition"):
+        process_lifecycle(ledger, lifecycle(event_id="WH-LIFE-2", event_type="cancel"))
+
+
+def test_old_payment_refund_cannot_revoke_a_later_renewal(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+    renewal_time = datetime(2026, 2, 28, 12, 0, tzinfo=timezone.utc)
+    process(
+        ledger,
+        payment(
+            event_id="WH-EVENT-2",
+            payment_id="CAPTURE-2",
+            verification_id="VERIFY-2",
+            occurred_at=renewal_time,
+        ),
+    )
+
+    receipt = process_lifecycle(
+        ledger,
+        lifecycle(
+            event_id="WH-LIFE-OLD-REFUND",
+            event_type="refund",
+            occurred_at=datetime(2026, 3, 5, 12, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert receipt.entitlements == ()
+    assert ledger.active_entitlements(
+        "user-1", at=datetime(2026, 3, 5, 12, 1, tzinfo=timezone.utc)
+    ) == frozenset({AURA_SEC_ENTITLEMENT})
+
+
+def test_refund_after_cancel_revokes_remaining_paid_access(tmp_path):
+    ledger = NativeEntitlementLedger(tmp_path / "native.sqlite3")
+    process(ledger, payment())
+    process_lifecycle(ledger, lifecycle(event_type="cancel"))
+
+    process_lifecycle(
+        ledger,
+        lifecycle(
+            event_id="WH-LIFE-2",
+            event_type="refund",
+            occurred_at=datetime(2026, 2, 15, 12, 0, tzinfo=timezone.utc),
+        ),
+    )
+
+    assert ledger.active_entitlements(
+        "user-1", at=datetime(2026, 2, 15, 12, 1, tzinfo=timezone.utc)
+    ) == frozenset()
