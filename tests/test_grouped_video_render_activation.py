@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import aura_music_studio.professional_editor_render_api as api
-from aura_music_studio.professional_universal_scoped_visual_video_compositor import UniversalVisualVideoCompositor
+from aura_music_studio.professional_chroma_key_video_compositor import UniversalVisualVideoCompositor
 from aura_music_studio.professional_video_grouped_unified_compositor import GroupedUnifiedAdvancedVideoCompositor
 
 
@@ -103,9 +103,9 @@ def test_mp4_export_dispatches_to_universal_visual_compositor(monkeypatch):
 
 
 def test_universal_visual_compositor_preserves_grouped_unified_renderer_foundation():
-    # The scoped Chat 3 visual-contract execution layer remains a subclass of the established
-    # grouped compositor, so masks/blends/grouped-track semantics are not bypassed while track
-    # effects gain a real post-composition execution stage.
+    # The chroma-capable Chat 3 visual-contract execution layer remains a subclass of the
+    # established grouped compositor, so masks/blends/grouped-track semantics are not bypassed
+    # while chroma key and whole-track effects execute at their correct professional stages.
     assert issubclass(UniversalVisualVideoCompositor, GroupedUnifiedAdvancedVideoCompositor)
 
 
@@ -113,7 +113,7 @@ def test_render_api_uses_universal_visual_compositor_without_reintroducing_legac
     source = Path(api.__file__).read_text(encoding="utf-8")
     assert "UniversalVisualVideoCompositor(_project(project_name))" in source
     assert (
-        "from .professional_universal_scoped_visual_video_compositor import UniversalVisualVideoCompositor"
+        "from .professional_chroma_key_video_compositor import UniversalVisualVideoCompositor"
         in source
     )
     assert "from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor" not in source
