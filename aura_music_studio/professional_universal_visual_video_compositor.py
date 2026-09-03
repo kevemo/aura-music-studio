@@ -17,6 +17,7 @@ from .professional_video_grouped_unified_compositor import GroupedUnifiedAdvance
 SUPPORTED_UNIVERSAL_VIDEO_EFFECTS = frozenset(
     {
         "video.grade.basic",
+        "video.fx.blur",
         "video.fx.vignette",
         "video.fx.film_grain",
         "video.fx.chromatic_aberration",
@@ -79,6 +80,12 @@ def _universal_visual_filter(effect: dict[str, Any]) -> str:
             f"colorbalance=rm={_ff(warmth)}:gm={_ff(green)}:bm={_ff(-warmth)}:"
             f"rh={_ff(warmth)}:gh={_ff(green)}:bh={_ff(-warmth)}:pl=1"
         )
+
+    if kind == "video.fx.blur":
+        radius = _clamp(params.get("radius", params.get("sigma")), 0.0, 100.0, 4.0)
+        if radius <= 1e-8:
+            return "null"
+        return f"gblur=sigma={_ff(radius)}"
 
     if kind == "video.fx.vignette":
         amount = _clamp(params.get("amount"), -1.0, 1.0, 0.25)
@@ -312,7 +319,11 @@ class UniversalVisualVideoCompositor(GroupedUnifiedAdvancedVideoCompositor):
 
             metadata_path = self.project_dir / result.metadata_ref
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
-            inherited_refs = {str(value) for value in payload.get("source_refs") or [] if str(value).strip()}
+            inherited_refs = {
+                str(value)
+                for value in payload.get("source_refs") or []
+                if str(value).strip() and not str(value).startswith("work/editor_universal_visual_effects/")
+            }
             inherited_refs.update(original_refs)
             payload.update(
                 {
