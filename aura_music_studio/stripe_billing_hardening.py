@@ -47,13 +47,18 @@ _REFUND_EVENT_TYPES = frozenset({"refund.created", "refund.updated", "refund.fai
 def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[str, Any]) -> None:
     """Fail closed before a recurring Stripe invoice is allowed to extend access.
 
-    The signed event must still describe the exact locally-bound subscription/customer and
-    the exact configured plan price. This prevents a dashboard-side price/coupon/configuration
+    The signed event must still describe the exact locally-bound subscription/customer, billing
+    period and configured plan price. This prevents dashboard-side price/coupon/configuration
     drift from silently extending a different or underpaid local entitlement.
     """
     plan = get_plan(str(binding.get("plan_id") or ""))
     if plan.id == "free":
         raise ValueError("Free plan cannot be renewed from Stripe")
+    billing_period = str(binding.get("billing_period") or "monthly").strip().lower()
+    try:
+        expected_amount_minor = plan.price_minor_for(billing_period)
+    except ValueError as exc:
+        raise ValueError("Stripe renewal billing period is not authorised for this membership") from exc
     if str(invoice.get("status") or "").lower() != "paid":
         raise ValueError("Stripe renewal invoice is not paid")
     if str(invoice.get("currency") or "").upper() != plan.currency:
@@ -62,7 +67,7 @@ def validate_subscription_cycle_invoice(invoice: dict[str, Any], binding: dict[s
         amount_paid = int(invoice.get("amount_paid"))
     except (TypeError, ValueError) as exc:
         raise ValueError("Stripe renewal invoice has no valid paid amount") from exc
-    if amount_paid != plan.monthly_price_minor:
+    if amount_paid != expected_amount_minor:
         raise ValueError("Stripe renewal invoice paid amount does not match the configured membership price")
 
     expected_customer = str(binding.get("stripe_customer_id") or "")
