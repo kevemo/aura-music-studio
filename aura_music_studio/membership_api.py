@@ -15,13 +15,14 @@ from .billing import payment_instructions, public_payment_options
 from .branding import PRODUCT_FULL_NAME, TAGLINE
 from .mailer import notify_membership_decision, notify_membership_request
 from .membership import MembershipService
+from .membership_billing_periods import period_days, verify_catalog_payment
 from .paypal_webhooks import (
     PayPalWebhookError,
     PayPalWebhookEvidenceStore,
     PayPalWebhookVerifier,
     validate_invoice_paid_event,
 )
-from .plans import OWNERSHIP_NOTICE, get_plan, public_plans
+from .plans import BILLING_MONTH, BILLING_YEAR, OWNERSHIP_NOTICE, get_plan, normalize_billing_period, public_plans
 from .subscriptions import SubscriptionLedger
 
 router = APIRouter()
@@ -50,12 +51,14 @@ class PaymentActivationRequest(BaseModel):
     user_id: str
     plan_id: str
     payment_reference: str
+    billing_period: str = BILLING_MONTH
 
 
 class PayPalEventActivationRequest(BaseModel):
     user_id: str
     plan_id: str
     event_id: str
+    billing_period: str = BILLING_MONTH
 
 
 def session_token(request: Request) -> str | None:
@@ -75,6 +78,18 @@ def require_admin(x_lss_admin_key: str | None) -> None:
         raise HTTPException(403, "ESP administrator authorization required")
 
 
+def _payment_options_for_plan(plan_id: str) -> list[dict]:
+    return [item for item in public_payment_options() if item.get("plan_id") == plan_id]
+
+
+def _period_for_plan(plan_id: str, billing_period: str) -> tuple[object, str]:
+    plan = get_plan(plan_id)
+    period = normalize_billing_period(billing_period)
+    if plan.id == "free" or not plan.supports_billing_period(period):
+        raise ValueError(f"{plan.name} does not support {period} paid membership billing")
+    return plan, period
+
+
 @router.get("/plans")
 def plans():
     return {
@@ -85,7 +100,12 @@ def plans():
         "approval_email": "elevatesoulsproductions@gmail.com",
         "base_policy": "1 confirmed full track per day; unlimited regenerations until confirmation",
         "pro_policy": "unlimited confirmed tracks and complete studio feature set",
-        "paid_billing_period_days": 31,
+        # Compatibility field for existing monthly-only clients.
+        "paid_billing_period_days": period_days(BILLING_MONTH),
+        "billing_period_days": {
+            BILLING_MONTH: period_days(BILLING_MONTH),
+            BILLING_YEAR: period_days(BILLING_YEAR),
+        },
     }
 
 
@@ -126,7 +146,9 @@ def login(payload: LoginRequest, response: Response):
     )
     profile = memberships.profile(token)
     if profile["status"] == "approved_pending_payment":
-        profile["payment"] = payment_instructions(user["requested_plan_id"])
+        plan_id = user["requested_plan_id"]
+        profile["payment"] = payment_instructions(plan_id)
+        profile["payment_options"] = _payment_options_for_plan(plan_id)
     return {"session_token": token, "member": profile}
 
 
@@ -148,7 +170,9 @@ def me(request: Request):
     if profile["status"] == "approved_pending_payment":
         user = store.resolve_session(token)
         if user:
-            profile["payment"] = payment_instructions(user["requested_plan_id"])
+            plan_id = user["requested_plan_id"]
+            profile["payment"] = payment_instructions(plan_id)
+            profile["payment_options"] = _payment_options_for_plan(plan_id)
     return profile
 
 
@@ -243,6 +267,9 @@ def membership_decision(token: str = Form(...), decision: str = Form(...), decid
         subject_user_id=before["user_id"],
         details={"requested_plan_id": plan_id},
     )
+    # Approval remains independent from billing-period selection. The compatibility email
+    # continues to expose the monthly path while authenticated member APIs expose every
+    # catalogue-supported period for the approved plan.
     payment = payment_instructions(plan_id) if approved else None
     notify_membership_decision(
         applicant_email=before["email"],
@@ -261,7 +288,7 @@ def membership_decision(token: str = Form(...), decision: str = Form(...), decid
 
 
 @router.get("/membership/payment")
-def current_payment(request: Request):
+def current_payment(request: Request, billing_period: str = BILLING_MONTH):
     token = session_token(request)
     try:
         member = memberships.from_session(token, require_active=False)
@@ -273,7 +300,15 @@ def current_payment(request: Request):
             "status": member.user.get("status"),
             "billing_period_end": (member.subscription or {}).get("period_end"),
         }
-    return payment_instructions(member.user["requested_plan_id"])
+    plan_id = member.user["requested_plan_id"]
+    try:
+        selected = payment_instructions(plan_id, billing_period)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        **selected,
+        "payment_options": _payment_options_for_plan(plan_id),
+    }
 
 
 @router.post("/webhooks/paypal")
@@ -330,21 +365,25 @@ def activate_paypal_event(
     if not user:
         raise HTTPException(404, "User not found")
     try:
-        plan = get_plan(payload.plan_id)
+        plan, period = _period_for_plan(payload.plan_id, payload.billing_period)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if plan.id == "free":
-        raise HTTPException(400, "Free membership does not require PayPal activation")
     if user.get("requested_plan_id") != plan.id:
         raise HTTPException(400, "Requested membership plan does not match the activation plan")
     try:
         payment_reference = validate_invoice_paid_event(
             evidence["payload"],
-            expected_amount_minor=plan.monthly_price_minor,
+            expected_amount_minor=plan.price_minor(period),
             expected_currency=plan.currency,
             expected_email=user.get("email") or "",
         )
-        status = subscriptions.verify_payment(payload.user_id, plan.id, payment_reference)
+        status = verify_catalog_payment(
+            subscriptions,
+            payload.user_id,
+            plan.id,
+            payment_reference,
+            billing_period=period,
+        )
     except (PayPalWebhookError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -356,6 +395,7 @@ def activate_paypal_event(
         subject_user_id=activated_user.get("id"),
         details={
             "plan_id": activated_user.get("plan_id"),
+            "billing_period": period,
             "paypal_event_id": payload.event_id,
             "paypal_resource_id": evidence.get("resource_id"),
             "billing_period_end": subscription.get("period_end"),
@@ -365,6 +405,7 @@ def activate_paypal_event(
         "activated": True,
         "user_id": activated_user.get("id"),
         "plan_id": activated_user.get("plan_id"),
+        "billing_period": period,
         "billing_status": activated_user.get("billing_status"),
         "billing_period_end": subscription.get("period_end"),
         "paypal_event_id": payload.event_id,
@@ -375,7 +416,14 @@ def activate_paypal_event(
 def activate_payment(payload: PaymentActivationRequest, x_lss_admin_key: str | None = Header(default=None)):
     require_admin(x_lss_admin_key)
     try:
-        status = subscriptions.verify_payment(payload.user_id, payload.plan_id, payload.payment_reference)
+        plan, period = _period_for_plan(payload.plan_id, payload.billing_period)
+        status = verify_catalog_payment(
+            subscriptions,
+            payload.user_id,
+            plan.id,
+            payload.payment_reference,
+            billing_period=period,
+        )
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     user = status["user"] or {}
@@ -386,6 +434,7 @@ def activate_payment(payload: PaymentActivationRequest, x_lss_admin_key: str | N
         subject_user_id=user.get("id"),
         details={
             "plan_id": user.get("plan_id"),
+            "billing_period": period,
             "billing_period_end": subscription.get("period_end"),
             "payment_reference_last4": payload.payment_reference[-4:] if payload.payment_reference else None,
         },
@@ -394,6 +443,7 @@ def activate_payment(payload: PaymentActivationRequest, x_lss_admin_key: str | N
         "activated": True,
         "user_id": user.get("id"),
         "plan_id": user.get("plan_id"),
+        "billing_period": period,
         "billing_status": user.get("billing_status"),
         "billing_period_end": subscription.get("period_end"),
         "payment_reference": payload.payment_reference,
