@@ -177,7 +177,6 @@ class SubscriptionLedger:
         return dict(row) if row else None
 
     def _enforce_pending_approval_contract(self, user: dict, plan_id: str, period: BillingPeriod) -> None:
-        """Prevent any provider from changing the owner-approved initial purchase contract."""
         if user.get("status") != "approved_pending_payment":
             return
         if user.get("requested_plan_id") != plan_id:
@@ -241,9 +240,9 @@ class SubscriptionLedger:
     ) -> dict:
         """Record verified payment and activate or schedule its exact paid entitlement.
 
-        Initial purchases and same-plan/same-period renewals may update the current paid-through
-        state immediately. A verified cross-plan or cross-period purchase while another paid term
-        is still active is scheduled for the current term end so no unearned entitlement is granted.
+        If a paid term is already active, any additional verified payment is a prepaid future
+        term and is scheduled for the existing period end. This includes same-plan renewals,
+        making future refunds/cancellation reversible without corrupting the current entitlement.
         """
         plan = get_plan(plan_id)
         if plan.id == "free":
@@ -275,14 +274,6 @@ class SubscriptionLedger:
         end = _advance_billing_period(start, period)
         amount = str(amount_decimal)
 
-        changing_contract = bool(
-            active_existing
-            and (
-                existing.get("plan_id") != plan.id
-                or existing.get("billing_period") != period.value
-            )
-        )
-
         with self._connect() as con:
             self._insert_payment(
                 con,
@@ -298,7 +289,7 @@ class SubscriptionLedger:
                 verified_at=now,
             )
 
-            if changing_contract:
+            if active_existing:
                 pending = con.execute(
                     "SELECT id FROM subscription_transitions WHERE user_id=? AND status='scheduled'",
                     (user_id,),
