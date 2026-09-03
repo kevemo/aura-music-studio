@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
+from .native_products import BillingPeriod
+
 
 @dataclass(frozen=True)
 class Plan:
@@ -16,17 +18,32 @@ class Plan:
     image_poster_creations_per_day: int | None
     features: frozenset[str]
     studio_claims_output_ownership: bool = False
+    annual_price: Decimal | None = None
 
     def has(self, feature: str) -> bool:
         return feature in self.features
+
+    def price_for(self, period: BillingPeriod | str) -> Decimal:
+        try:
+            billing_period = BillingPeriod(period)
+        except ValueError as exc:
+            raise ValueError(f"Unsupported billing period: {period}") from exc
+        if billing_period is BillingPeriod.MONTHLY:
+            return self.monthly_price
+        if self.annual_price is None:
+            raise ValueError(f"Annual billing is not configured for plan {self.id}")
+        return self.annual_price
+
+    def price_minor_for(self, period: BillingPeriod | str) -> int:
+        return int((self.price_for(period) * Decimal("100")).to_integral_value())
 
     @property
     def monthly_price_usd(self) -> Decimal:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
-        persisted integrations do not break while new code uses monthly_price + currency.
+        are GBP. Keep the attribute temporarily so parallel feature branches and persisted
+        integrations do not break while new code uses monthly_price + currency.
         """
         return self.monthly_price
 
@@ -38,7 +55,13 @@ class Plan:
 
     @property
     def monthly_price_minor(self) -> int:
-        return int((self.monthly_price * Decimal("100")).to_integral_value())
+        return self.price_minor_for(BillingPeriod.MONTHLY)
+
+    @property
+    def annual_price_minor(self) -> int | None:
+        if self.annual_price is None:
+            return None
+        return self.price_minor_for(BillingPeriod.ANNUAL)
 
     @property
     def currency_symbol(self) -> str:
@@ -50,10 +73,22 @@ class Plan:
             return "Free"
         return f"{self.currency_symbol}{self.monthly_price}"
 
+    def display_price_for(self, period: BillingPeriod | str) -> str:
+        price = self.price_for(period)
+        if price == 0:
+            return "Free"
+        suffix = "/month" if BillingPeriod(period) is BillingPeriod.MONTHLY else "/year"
+        return f"{self.currency_symbol}{price}{suffix}"
+
     def public_dict(self) -> dict:
         data = asdict(self)
         data["monthly_price"] = str(self.monthly_price)
         data["monthly_price_minor"] = self.monthly_price_minor
+        data["annual_price"] = str(self.annual_price) if self.annual_price is not None else None
+        data["annual_price_minor"] = self.annual_price_minor
+        data["supported_billing_periods"] = [BillingPeriod.MONTHLY.value]
+        if self.annual_price is not None:
+            data["supported_billing_periods"].append(BillingPeriod.ANNUAL.value)
         data["display_price"] = self.display_price
         # Deprecated output alias for clients built before the GBP schema correction.
         data["monthly_price_usd"] = str(self.monthly_price)
@@ -210,6 +245,7 @@ PLANS: dict[str, Plan] = {
         regeneration_until_confirmed=False,
         image_poster_creations_per_day=5,
         features=FREE_FEATURES,
+        annual_price=Decimal("0.00"),
     ),
     "base": Plan(
         id="base",
@@ -232,15 +268,15 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Unlimited Pro",
-        monthly_price=Decimal("14.99"),
+        monthly_price=Decimal("9.99"),
         currency="GBP",
         description=(
-            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
-            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
-            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
-            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
-            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
+            "£9.99/month or £99/year Unlimited Pro tier with the highest enabled creative access and effectively unlimited "
+            "normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. "
+            "Includes the complete enabled production stack: expanded instrument/performance types, editable multitrack "
+            "build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
+            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision "
+            "history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
             "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
             "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
             "subject to marketplace entitlement, rights and governance gates."
@@ -249,6 +285,7 @@ PLANS: dict[str, Plan] = {
         regeneration_until_confirmed=True,
         image_poster_creations_per_day=None,
         features=PRO_FEATURES,
+        annual_price=Decimal("99.00"),
     ),
 }
 
