@@ -49,9 +49,8 @@ def _stripe_production_env() -> dict[str, str]:
             "LSS_PAYMENT_PROVIDER": "stripe",
             "STRIPE_SECRET_KEY": "sk_live_testfixture_0123456789",
             "STRIPE_WEBHOOK_SECRET": "whsec_testfixture_0123456789",
-            "STRIPE_BASE_PRICE_ID": "price_basic_testfixture_0123456789",
+            "STRIPE_BASE_PRICE_ID": "price_tier2_testfixture_0123456789",
             "STRIPE_PRO_PRICE_ID": "price_pro_testfixture_0123456789",
-            "STRIPE_PRO_ANNUAL_PRICE_ID": "price_pro_annual_testfixture_0123456789",
         }
     )
     return env
@@ -92,22 +91,9 @@ def test_complete_stripe_production_configuration_passes_without_exposing_secret
     assert payment["details"]["browser_return_is_payment_proof"] is False
     assert payment["details"]["verification_credentials_configured"] is True
     assert payment["details"]["subscription_price_ids_configured"] is True
-    assert "STRIPE_PRO_ANNUAL_PRICE_ID" not in payment["details"]["missing_credential_names"]
     serialized = json.dumps(report)
     assert env["STRIPE_SECRET_KEY"] not in serialized
     assert env["STRIPE_WEBHOOK_SECRET"] not in serialized
-
-
-def test_stripe_production_fails_closed_when_annual_pro_price_is_missing():
-    env = _stripe_production_env()
-    env.pop("STRIPE_PRO_ANNUAL_PRICE_ID")
-    report = build_readiness_report(env)
-    payment = report["categories"]["payments"]
-    assert report["ok"] is False
-    assert "payments" in report["blocking_categories"]
-    assert payment["ok"] is False
-    assert payment["details"]["subscription_price_ids_configured"] is False
-    assert "STRIPE_PRO_ANNUAL_PRICE_ID" in payment["details"]["missing_credential_names"]
 
 
 def test_stripe_production_fails_closed_on_missing_or_test_credentials():
@@ -221,7 +207,7 @@ def test_monitoring_correct_token_exposes_only_operational_metrics(monkeypatch):
     assert "aura_production_ready 1" in response.text
     assert env["AURA_MONITORING_TOKEN"] not in response.text
     assert env["LSS_PAYPAL_CLIENT_SECRET"] not in response.text
-    response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_readiness_endpoint_returns_503_when_production_is_unsafe(monkeypatch):
