@@ -4,11 +4,30 @@ from dataclasses import asdict, dataclass
 from decimal import Decimal
 
 
+BILLING_MONTH = "month"
+BILLING_YEAR = "year"
+SUPPORTED_BILLING_PERIODS = frozenset({BILLING_MONTH, BILLING_YEAR})
+
+# Current owner-approved creative commercial target. These constants are the single
+# authoritative price source for Unlimited Pro; checkout, renewals and public/account
+# presentation must derive from this plan catalogue rather than repeat price literals.
+UNLIMITED_PRO_MONTHLY_GBP = Decimal("9.99")
+UNLIMITED_PRO_ANNUAL_GBP = Decimal("99.00")
+
+
+def normalize_billing_period(value: str | None) -> str:
+    period = (value or BILLING_MONTH).strip().lower()
+    if period not in SUPPORTED_BILLING_PERIODS:
+        raise ValueError(f"Unsupported billing period: {value}")
+    return period
+
+
 @dataclass(frozen=True)
 class Plan:
     id: str
     name: str
     monthly_price: Decimal
+    annual_price: Decimal | None
     currency: str
     description: str
     confirmed_songs_per_day: int | None
@@ -20,13 +39,32 @@ class Plan:
     def has(self, feature: str) -> bool:
         return feature in self.features
 
+    def supports_billing_period(self, period: str) -> bool:
+        normalized = normalize_billing_period(period)
+        if self.id == "free":
+            return False
+        if normalized == BILLING_MONTH:
+            return self.monthly_price > 0
+        return self.annual_price is not None and self.annual_price > 0
+
+    def price(self, period: str = BILLING_MONTH) -> Decimal:
+        normalized = normalize_billing_period(period)
+        if normalized == BILLING_MONTH:
+            return self.monthly_price
+        if self.annual_price is None:
+            raise ValueError(f"{self.name} does not have an annual billing option")
+        return self.annual_price
+
+    def price_minor(self, period: str = BILLING_MONTH) -> int:
+        return int((self.price(period) * Decimal("100")).to_integral_value())
+
     @property
     def monthly_price_usd(self) -> Decimal:
         """Deprecated compatibility alias.
 
         Historic code named the price field USD even though the authoritative public prices
-        are £5.99 / £14.99. Keep the attribute temporarily so parallel feature branches and
-        persisted integrations do not break while new code uses monthly_price + currency.
+        are GBP. Keep the attribute temporarily so parallel feature branches and persisted
+        integrations do not break while new code uses currency-aware prices.
         """
         return self.monthly_price
 
@@ -38,7 +76,13 @@ class Plan:
 
     @property
     def monthly_price_minor(self) -> int:
-        return int((self.monthly_price * Decimal("100")).to_integral_value())
+        return self.price_minor(BILLING_MONTH)
+
+    @property
+    def annual_price_minor(self) -> int | None:
+        if self.annual_price is None:
+            return None
+        return self.price_minor(BILLING_YEAR)
 
     @property
     def currency_symbol(self) -> str:
@@ -50,11 +94,31 @@ class Plan:
             return "Free"
         return f"{self.currency_symbol}{self.monthly_price}"
 
+    @property
+    def display_annual_price(self) -> str | None:
+        if self.annual_price is None:
+            return None
+        return f"{self.currency_symbol}{self.annual_price}"
+
     def public_dict(self) -> dict:
         data = asdict(self)
         data["monthly_price"] = str(self.monthly_price)
+        data["annual_price"] = str(self.annual_price) if self.annual_price is not None else None
         data["monthly_price_minor"] = self.monthly_price_minor
+        data["annual_price_minor"] = self.annual_price_minor
         data["display_price"] = self.display_price
+        data["display_annual_price"] = self.display_annual_price
+        data["billing_options"] = [
+            {
+                "period": period,
+                "price": str(self.price(period)),
+                "price_minor": self.price_minor(period),
+                "currency": self.currency,
+                "display_price": f"{self.currency_symbol}{self.price(period)}",
+            }
+            for period in (BILLING_MONTH, BILLING_YEAR)
+            if self.supports_billing_period(period)
+        ]
         # Deprecated output alias for clients built before the GBP schema correction.
         data["monthly_price_usd"] = str(self.monthly_price)
         data["features"] = sorted(self.features)
@@ -199,6 +263,7 @@ PLANS: dict[str, Plan] = {
         id="free",
         name="Free",
         monthly_price=Decimal("0.00"),
+        annual_price=None,
         currency="GBP",
         description=(
             "Explore Aura songwriting/producer help and core creative tools. Image and poster creation includes up to "
@@ -215,9 +280,10 @@ PLANS: dict[str, Plan] = {
         id="base",
         name="Tier 2",
         monthly_price=Decimal("5.99"),
+        annual_price=None,
         currency="GBP",
         description=(
-            "£5.99 tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
+            "£5.99 monthly tier with increased creative access, project editing and enabled Music, Video and Game capabilities. "
             "The authoritative cross-studio daily allowance and any Cosmic Creation Coin overage are enforced separately "
             "by server-side usage/admission controls; this plan object defines feature entitlement rather than inventing "
             "a second usage counter. Includes upload-to-song production, MP3/WAV, standard instrument choices and FX, Aura "
@@ -232,18 +298,19 @@ PLANS: dict[str, Plan] = {
     "pro": Plan(
         id="pro",
         name="Unlimited Pro",
-        monthly_price=Decimal("14.99"),
+        monthly_price=UNLIMITED_PRO_MONTHLY_GBP,
+        annual_price=UNLIMITED_PRO_ANNUAL_GBP,
         currency="GBP",
         description=(
-            "£14.99 Unlimited Pro tier with the highest enabled creative access and effectively unlimited normal use subject "
-            "to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the "
-            "complete enabled production stack: expanded instrument/performance types, editable multitrack build-around "
-            "production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom Aura Tune, "
-            "detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
-            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, "
-            "consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled "
-            "export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains "
-            "subject to marketplace entitlement, rights and governance gates."
+            "Unlimited Pro is £9.99 monthly or £99 annually, with the highest enabled creative access and effectively unlimited "
+            "normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. "
+            "Includes the complete enabled production stack: expanded instrument/performance types, editable multitrack "
+            "build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
+            "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
+            "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
+            "voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled export formats, and "
+            "unlimited active Game Forge project workspaces. Eligible song/game publishing remains subject to marketplace "
+            "entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
