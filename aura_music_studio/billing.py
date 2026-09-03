@@ -49,15 +49,16 @@ def payment_option(
     plan = get_plan(plan_id)
     period = _period(billing_period)
 
-    # Resolve through the authoritative plan catalogue first. This deliberately fails
-    # closed for combinations such as Member + annual rather than inventing a price.
+    # Resolve through the authoritative plan catalogue first. Unsupported combinations
+    # fail closed here rather than allowing a payment route to invent a price or period.
     amount_value = plan.price_for(period)
     amount_minor = plan.price_minor_for(period)
     if plan.id == "free":
         return None
 
     if plan.id == "base":
-        # The current Member plan is monthly-only. plan.price_for() above enforces that.
+        # Basic is intentionally monthly-only. plan.price_for() above rejects annual before
+        # any provider URL is considered, so provider configuration cannot create a new tier.
         url = (os.getenv("LSS_PAYPAL_BASE_URL") or DEFAULT_BASE_PAYPAL_URL).strip()
     elif plan.id == "pro":
         if period is BillingPeriod.MONTHLY:
@@ -96,9 +97,9 @@ def payment_option(
 def public_payment_options() -> list[dict]:
     """Return currently configured default monthly manual-payment routes.
 
-    Annual Unlimited Pro is intentionally not advertised as a PayPal route here unless the
-    caller requests it explicitly through ``payment_option`` after the dedicated annual URL is
-    configured. The public plan catalogue remains the authority for annual price availability.
+    Unlimited Pro annual pricing remains visible through the canonical plan catalogue. Its
+    annual manual PayPal route is returned only when explicitly requested and separately
+    configured. Basic has no annual creative subscription period.
     """
     result = []
     for plan_id in ("base", "pro"):
