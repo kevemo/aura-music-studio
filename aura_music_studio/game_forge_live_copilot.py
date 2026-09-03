@@ -18,10 +18,10 @@ def _runtime_kind(game: GameDNA) -> str:
 def inject_live_copilot(html: str, *, game: GameDNA) -> str:
     """Inject a creator-only, browser-local Aura live-play copilot.
 
-    The stored Game Forge build remains unchanged. This wrapper is added only when the authenticated
-    private playtest frame is served, so public-test snapshots and export bundles never inherit
-    creator controls. Commands are a closed declarative mutation set: no eval, generated source,
-    fetch/XHR/WebSocket path, remote assets, or persistent Game DNA mutation is introduced.
+    The generated bridge is inert by default and activates only on the authenticated private
+    playtest-frame URL for this exact game. Public gallery frames and exported play.html files keep
+    the bridge hidden/inert. Commands are a closed declarative mutation set: no eval, generated
+    source, fetch/XHR/WebSocket path, remote assets, or persistent Game DNA mutation is introduced.
     """
     if _MARKER in html:
         return html
@@ -46,20 +46,21 @@ def inject_live_copilot(html: str, *, game: GameDNA) -> str:
 
     fragment = r"""
 <style id='aura-live-copilot-style'>
-#aura-live-scenery{position:fixed;inset:0;z-index:3;pointer-events:none;transition:background .45s ease,backdrop-filter .45s ease}
+#aura-live-scenery{display:none;position:fixed;inset:0;z-index:3;pointer-events:none;transition:background .45s ease,backdrop-filter .45s ease}
 #aura-live-scenery[data-mode='day']{background:transparent}
 #aura-live-scenery[data-mode='night']{background:linear-gradient(180deg,#04112b88,#01040dcc);backdrop-filter:brightness(.64) saturate(.82)}
 #aura-live-scenery[data-mode='sunset']{background:linear-gradient(180deg,#ff985944,#812f6555 55%,#11082766)}
 #aura-live-scenery[data-mode='storm']{background:linear-gradient(180deg,#26384c88,#070b12aa);backdrop-filter:brightness(.72) contrast(1.12) saturate(.7)}
 #aura-live-scenery[data-mode='fog']{background:linear-gradient(180deg,#dce7ee66,#9eadb877);backdrop-filter:contrast(.78) brightness(1.06)}
 #aura-live-scenery[data-mode='neon']{background:linear-gradient(135deg,#ff25d322,#00d9ff24,#6b45ff22);backdrop-filter:saturate(1.35) contrast(1.08)}
-#aura-live-copilot{position:fixed;right:12px;top:12px;z-index:30;width:min(390px,calc(100vw - 24px));padding:10px;border:1px solid #ffffff38;border-radius:14px;background:#050713e8;color:#fff;font:13px/1.35 system-ui,sans-serif;box-shadow:0 14px 42px #0009;backdrop-filter:blur(12px)}
+#aura-live-copilot{display:none;position:fixed;right:12px;top:12px;z-index:30;width:min(390px,calc(100vw - 24px));padding:10px;border:1px solid #ffffff38;border-radius:14px;background:#050713e8;color:#fff;font:13px/1.35 system-ui,sans-serif;box-shadow:0 14px 42px #0009;backdrop-filter:blur(12px)}
 #aura-live-copilot strong{display:block;font-size:14px;margin-bottom:3px}
 #aura-live-copilot small{display:block;color:#bbc6dc;margin-bottom:8px}
 #aura-live-copilot-row{display:flex;gap:6px}
 #aura-live-copilot input{min-width:0;flex:1;background:#0b1020;color:#fff;border:1px solid #ffffff2f;border-radius:9px;padding:8px 9px}
 #aura-live-copilot button{background:#18213b;color:#fff;border:1px solid #ffffff30;border-radius:9px;padding:8px 9px;font-weight:800;cursor:pointer}
 #aura-live-copilot-status{margin-top:7px;color:#cfe6ff;min-height:18px}
+html[data-aura-live-creator='1'] #aura-live-scenery,html[data-aura-live-creator='1'] #aura-live-copilot{display:block}
 </style>
 <div id='aura-live-scenery' data-mode='day' aria-hidden='true'></div>
 <div id='aura-live-copilot' role='region' aria-label='Aura live creation copilot'>
@@ -79,6 +80,13 @@ def inject_live_copilot(html: str, *, game: GameDNA) -> str:
 (()=>{
 const liveCfg=JSON.parse(document.getElementById('aura-live-copilot-config').textContent||'{}');
 const livePanel=document.getElementById('aura-live-copilot');
+const liveExpectedPath=`/api/game-forge/games/${encodeURIComponent(String(liveCfg.game_id||''))}/playtest-frame`;
+if(location.pathname!==liveExpectedPath){
+  document.getElementById('aura-live-scenery')?.remove();
+  livePanel?.remove();
+  return;
+}
+document.documentElement.dataset.auraLiveCreator='1';
 const liveInput=document.getElementById('aura-live-command');
 const liveApply=document.getElementById('aura-live-apply');
 const liveUndo=document.getElementById('aura-live-undo');
