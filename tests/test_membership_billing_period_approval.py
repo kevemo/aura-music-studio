@@ -8,6 +8,7 @@ from aura_music_studio.membership import MembershipService
 from aura_music_studio.membership_billing_periods import MembershipBillingPreferenceStore
 from aura_music_studio.native_products import BillingPeriod
 from aura_music_studio.paypal_webhooks import PayPalWebhookEvidenceStore
+from aura_music_studio.plans import get_plan
 from aura_music_studio.subscriptions import SubscriptionLedger
 import aura_music_studio.membership_api as membership_api
 
@@ -66,7 +67,23 @@ def _invoice_event(event_id: str, email: str, amount: str) -> dict:
     }
 
 
-def test_signup_records_annual_period_for_pro_and_basic(monkeypatch, tmp_path):
+def test_canonical_three_tier_catalogue_and_periods_do_not_drift():
+    free = get_plan("free")
+    basic = get_plan("base")
+    pro = get_plan("pro")
+
+    assert free.name == "Free"
+    assert str(free.price_for(BillingPeriod.MONTHLY)) == "0.00"
+    assert basic.name == "Basic"
+    assert str(basic.price_for(BillingPeriod.MONTHLY)) == "4.99"
+    with pytest.raises(ValueError, match="Annual billing is not available"):
+        basic.price_for(BillingPeriod.ANNUAL)
+    assert pro.name == "Unlimited Pro"
+    assert str(pro.price_for(BillingPeriod.MONTHLY)) == "9.99"
+    assert str(pro.price_for(BillingPeriod.ANNUAL)) == "99.00"
+
+
+def test_signup_records_annual_pro_period_and_rejects_basic_annual(monkeypatch, tmp_path):
     store, preferences = _install_isolated_membership_api(monkeypatch, tmp_path)
 
     pro_response = membership_api.signup(
@@ -86,22 +103,19 @@ def test_signup_records_annual_period_for_pro_and_basic(monkeypatch, tmp_path):
     assert pro_preference["billing_period"] == "annual"
     assert pro_preference["status"] == "requested"
 
-    basic_response = membership_api.signup(
-        membership_api.SignupRequest(
-            email="basic-annual@example.com",
-            display_name="Basic Annual",
-            password="verysecurepassword",
-            plan_id="base",
-            billing_period=BillingPeriod.ANNUAL,
+    with pytest.raises(HTTPException) as exc_info:
+        membership_api.signup(
+            membership_api.SignupRequest(
+                email="basic-annual@example.com",
+                display_name="Basic Annual",
+                password="verysecurepassword",
+                plan_id="base",
+                billing_period=BillingPeriod.ANNUAL,
+            )
         )
-    )
-    assert basic_response["requested_plan"] == "base"
-    assert basic_response["requested_billing_period"] == "annual"
-    basic_user = store.get_user_by_email("basic-annual@example.com")
-    basic_preference = preferences.for_user(basic_user["id"])
-    assert basic_preference is not None
-    assert basic_preference["billing_period"] == "annual"
-    assert basic_preference["status"] == "requested"
+    assert exc_info.value.status_code == 400
+    assert "Annual billing is not available" in str(exc_info.value.detail)
+    assert store.get_user_by_email("basic-annual@example.com") is None
 
 
 def test_legacy_approved_membership_without_preference_defaults_monthly(tmp_path):
@@ -149,46 +163,16 @@ def test_annual_approval_rejects_monthly_paypal_amount_and_accepts_exact_annual(
     assert state["billing_period"] == "annual"
 
 
-def test_basic_annual_canonical_amount_is_5999_minor(monkeypatch, tmp_path):
+def test_basic_annual_preference_is_rejected_before_payment_activation(monkeypatch, tmp_path):
     store, preferences = _install_isolated_membership_api(monkeypatch, tmp_path)
     result = store.signup("basic-paid@example.com", "Basic Paid", "verysecurepassword", "base")
-    preferences.record_request(
-        user_id=result.user_id,
-        membership_request_id=result.membership_request_id,
-        plan_id="base",
-        billing_period=BillingPeriod.ANNUAL,
-    )
-    store.decide_membership(result.approval_token, "approve", "Kev")
-    preferences.decide(result.membership_request_id, approved=True)
-
-    wrong_event = _invoice_event("WH-BASIC-MONTHLY-WRONG", result.email, "5.99")
-    membership_api.paypal_events.record(wrong_event, "TX-BASIC-WRONG")
-    with pytest.raises(HTTPException) as exc_info:
-        membership_api.activate_paypal_event(
-            membership_api.PayPalEventActivationRequest(
-                user_id=result.user_id,
-                plan_id="base",
-                event_id="WH-BASIC-MONTHLY-WRONG",
-            ),
-            x_lss_admin_key="period-test-admin",
-        )
-    assert "amount does not match" in str(exc_info.value.detail)
-
-    annual_event = _invoice_event("WH-BASIC-ANNUAL", result.email, "59.99")
-    membership_api.paypal_events.record(annual_event, "TX-BASIC-ANNUAL")
-    activated = membership_api.activate_paypal_event(
-        membership_api.PayPalEventActivationRequest(
+    with pytest.raises(ValueError, match="Annual billing is not available"):
+        preferences.record_request(
             user_id=result.user_id,
+            membership_request_id=result.membership_request_id,
             plan_id="base",
-            event_id="WH-BASIC-ANNUAL",
-        ),
-        x_lss_admin_key="period-test-admin",
-    )
-    assert activated["plan_id"] == "base"
-    assert activated["billing_period"] == "annual"
-    state = membership_api.subscriptions.get(result.user_id)
-    assert state is not None
-    assert state["billing_period"] == "annual"
+            billing_period=BillingPeriod.ANNUAL,
+        )
 
 
 def test_plans_contract_no_longer_claims_fixed_31_day_period():
