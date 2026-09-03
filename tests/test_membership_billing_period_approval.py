@@ -4,7 +4,6 @@ from fastapi import HTTPException
 import pytest
 
 from aura_music_studio.accounts import AccountStore
-from aura_music_studio.audit import AuditLedger
 from aura_music_studio.membership import MembershipService
 from aura_music_studio.membership_billing_periods import MembershipBillingPreferenceStore
 from aura_music_studio.native_products import BillingPeriod
@@ -67,10 +66,10 @@ def _invoice_event(event_id: str, email: str, amount: str) -> dict:
     }
 
 
-def test_signup_records_annual_pro_period_and_rejects_member_annual(monkeypatch, tmp_path):
+def test_signup_records_annual_period_for_pro_and_basic(monkeypatch, tmp_path):
     store, preferences = _install_isolated_membership_api(monkeypatch, tmp_path)
 
-    response = membership_api.signup(
+    pro_response = membership_api.signup(
         membership_api.SignupRequest(
             email="signup-annual@example.com",
             display_name="Annual Signup",
@@ -79,27 +78,30 @@ def test_signup_records_annual_pro_period_and_rejects_member_annual(monkeypatch,
             billing_period=BillingPeriod.ANNUAL,
         )
     )
-    assert response["requested_plan"] == "pro"
-    assert response["requested_billing_period"] == "annual"
-    user = store.get_user_by_email("signup-annual@example.com")
-    preference = preferences.for_user(user["id"])
-    assert preference is not None
-    assert preference["billing_period"] == "annual"
-    assert preference["status"] == "requested"
+    assert pro_response["requested_plan"] == "pro"
+    assert pro_response["requested_billing_period"] == "annual"
+    pro_user = store.get_user_by_email("signup-annual@example.com")
+    pro_preference = preferences.for_user(pro_user["id"])
+    assert pro_preference is not None
+    assert pro_preference["billing_period"] == "annual"
+    assert pro_preference["status"] == "requested"
 
-    with pytest.raises(HTTPException) as exc_info:
-        membership_api.signup(
-            membership_api.SignupRequest(
-                email="invalid-member-annual@example.com",
-                display_name="Invalid Annual",
-                password="verysecurepassword",
-                plan_id="base",
-                billing_period=BillingPeriod.ANNUAL,
-            )
+    basic_response = membership_api.signup(
+        membership_api.SignupRequest(
+            email="basic-annual@example.com",
+            display_name="Basic Annual",
+            password="verysecurepassword",
+            plan_id="base",
+            billing_period=BillingPeriod.ANNUAL,
         )
-    assert exc_info.value.status_code == 400
-    assert "Annual billing is not available" in str(exc_info.value.detail)
-    assert store.get_user_by_email("invalid-member-annual@example.com") is None
+    )
+    assert basic_response["requested_plan"] == "base"
+    assert basic_response["requested_billing_period"] == "annual"
+    basic_user = store.get_user_by_email("basic-annual@example.com")
+    basic_preference = preferences.for_user(basic_user["id"])
+    assert basic_preference is not None
+    assert basic_preference["billing_period"] == "annual"
+    assert basic_preference["status"] == "requested"
 
 
 def test_legacy_approved_membership_without_preference_defaults_monthly(tmp_path):
@@ -141,6 +143,48 @@ def test_annual_approval_rejects_monthly_paypal_amount_and_accepts_exact_annual(
     )
     assert activated["activated"] is True
     assert activated["plan_id"] == "pro"
+    assert activated["billing_period"] == "annual"
+    state = membership_api.subscriptions.get(result.user_id)
+    assert state is not None
+    assert state["billing_period"] == "annual"
+
+
+def test_basic_annual_canonical_amount_is_5999_minor(monkeypatch, tmp_path):
+    store, preferences = _install_isolated_membership_api(monkeypatch, tmp_path)
+    result = store.signup("basic-paid@example.com", "Basic Paid", "verysecurepassword", "base")
+    preferences.record_request(
+        user_id=result.user_id,
+        membership_request_id=result.membership_request_id,
+        plan_id="base",
+        billing_period=BillingPeriod.ANNUAL,
+    )
+    store.decide_membership(result.approval_token, "approve", "Kev")
+    preferences.decide(result.membership_request_id, approved=True)
+
+    wrong_event = _invoice_event("WH-BASIC-MONTHLY-WRONG", result.email, "5.99")
+    membership_api.paypal_events.record(wrong_event, "TX-BASIC-WRONG")
+    with pytest.raises(HTTPException) as exc_info:
+        membership_api.activate_paypal_event(
+            membership_api.PayPalEventActivationRequest(
+                user_id=result.user_id,
+                plan_id="base",
+                event_id="WH-BASIC-MONTHLY-WRONG",
+            ),
+            x_lss_admin_key="period-test-admin",
+        )
+    assert "amount does not match" in str(exc_info.value.detail)
+
+    annual_event = _invoice_event("WH-BASIC-ANNUAL", result.email, "59.99")
+    membership_api.paypal_events.record(annual_event, "TX-BASIC-ANNUAL")
+    activated = membership_api.activate_paypal_event(
+        membership_api.PayPalEventActivationRequest(
+            user_id=result.user_id,
+            plan_id="base",
+            event_id="WH-BASIC-ANNUAL",
+        ),
+        x_lss_admin_key="period-test-admin",
+    )
+    assert activated["plan_id"] == "base"
     assert activated["billing_period"] == "annual"
     state = membership_api.subscriptions.get(result.user_id)
     assert state is not None
