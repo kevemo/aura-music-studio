@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import aura_music_studio.member_dashboard as dashboard
 from aura_music_studio.brand_migration import rebrand_text
+from aura_music_studio.native_access import EffectiveNativeAccess
 
 
 def test_public_home_presentation_migration_is_current_truthful_and_idempotent():
@@ -49,12 +50,22 @@ def _client(monkeypatch, membership):
     }
     monkeypatch.setattr(dashboard.accounts, "resolve_session", lambda _cookie: user)
     monkeypatch.setattr(dashboard.esp, "membership", lambda _user_id: membership)
+    monkeypatch.setattr(
+        dashboard.native_access,
+        "resolve",
+        lambda user_id: EffectiveNativeAccess(
+            user_id=user_id,
+            membership_plan_id="free",
+            membership_entitlements=frozenset(),
+            purchased_entitlements=frozenset(),
+        ),
+    )
     app = FastAPI()
     app.include_router(dashboard.router)
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_separate_aura_sec_product(monkeypatch):
+def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_truthful_aura_sec_product(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
@@ -78,10 +89,13 @@ def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_
     assert "marketplace participation remains opt-in" in text
 
     assert "Aura Sec Security Center" in text
-    assert "Separate security product · same account" in text
-    assert "protection entitlement is separate from ordinary creative membership" in text
+    assert "Aura Sec available · same account" in text
+    assert "included with Unlimited Pro" in text
+    assert "can also be purchased separately where offered" in text
+    assert "Commercial access never grants native device trust by itself" in text
     assert "The browser is a member-safe control plane only" in text
     assert "href='/aura-sec'" in text
+    assert "href='/account/native-products'" in text
     assert text.count("<article class='tool'>") == 8
     assert "<section class='security'>" in text
 
@@ -105,11 +119,12 @@ def test_dashboard_aura_sec_entry_never_exposes_native_authority_links(monkeypat
     assert "cannot" in text and "access command-signing keys" in text
 
 
-def test_approved_esp_member_gets_private_hub_and_separate_aura_sec_entry(monkeypatch):
+def test_approved_esp_member_gets_private_hub_and_truthful_aura_sec_entry(monkeypatch):
     response = _client(monkeypatch, {"status": "active", "roles": "creator"}).get("/dashboard")
     assert response.status_code == 200
     text = response.text
     assert "Aura Sec Security Center" in text
+    assert "Aura Sec available · same account" in text
     assert "href='/aura-sec'" in text
     assert "Private Elevate Souls Productions Area" in text
     assert "additional areas inside this same Pulsar-Frequency House account" in text
