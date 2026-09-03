@@ -11,6 +11,7 @@ from .assets import AssetLibrary
 from .daw import load_session, public_session, save_session
 from .engineering_jobs import EngineeringJobRequest
 from .jobs import StudioJobQueue
+from .performance_inputs import get_input
 from .plans import (
     ADVANCED_AUTOTUNE,
     ADVANCED_MASTERING,
@@ -124,6 +125,10 @@ def _validate_entitlement(member, body: EngineeringJobRequest) -> None:
 
     if body.operation == "repaint":
         _require(member, REGION_REPAINT)
+        return
+
+    if body.operation == "smart_warp":
+        _require(member, MULTITRACK_DAW)
         return
 
     raise HTTPException(400, "Unsupported engineering operation")
@@ -274,6 +279,15 @@ def submit_engineering_job(project_name: str, body: EngineeringJobRequest, reque
             raise HTTPException(404, "Reference asset not found") from exc
         if reference.kind != "audio":
             raise HTTPException(400, "Reference mastering requires an audio asset")
+    if body.operation == "smart_warp":
+        try:
+            target_input = get_input(project, str(body.target_performance_input_id or ""))
+        except KeyError as exc:
+            raise HTTPException(404, "Smart Warp target performance input not found") from exc
+        if not target_input.rights_confirmed or not target_input.metadata.get("rights_record_id"):
+            raise HTTPException(409, "Smart Warp target performance input has no complete rights/provenance record")
+        if len(target_input.beat_times_seconds) < 4:
+            raise HTTPException(409, "Smart Warp target requires at least four detected timing anchors")
 
     priority = 90 if member.plan.has(PRIORITY_QUEUE) else 15
     job = queue.submit(
