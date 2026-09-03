@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_dlp import redact_text, sanitize_audit_details
 
 
 def _now() -> str:
@@ -18,6 +19,8 @@ class AuditLedger:
 
     The chain is not a substitute for external immutable logging, but it makes silent row
     modification detectable and gives ESP a provider-independent history from day one.
+    Every append passes through Aura Sec DLP before persistence so callers cannot accidentally
+    place credentials or direct personal data into the long-lived security ledger.
     """
 
     def __init__(self, store: AccountStore | None = None):
@@ -64,6 +67,9 @@ class AuditLedger:
         details: dict | None = None,
     ) -> dict:
         occurred_at = _now()
+        safe_actor = redact_text(actor or "ESP administrator", max_length=160)
+        safe_action = redact_text(action or "unspecified", max_length=160)
+        safe_details = sanitize_audit_details(details or {})
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             previous = con.execute(
@@ -73,10 +79,10 @@ class AuditLedger:
             payload = {
                 "id": uuid4().hex,
                 "occurred_at": occurred_at,
-                "actor": (actor or "ESP administrator")[:160],
-                "action": action[:160],
+                "actor": safe_actor,
+                "action": safe_action,
                 "subject_user_id": subject_user_id,
-                "details": details or {},
+                "details": safe_details,
                 "previous_hash": previous_hash,
             }
             entry_hash = self._hash(payload)
