@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 
+from .native_products import AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT
+
 
 @dataclass(frozen=True)
 class Plan:
@@ -121,7 +123,11 @@ UNLIMITED_CONFIRMED_SONGS = "unlimited_confirmed_songs"
 GAME_PLAYTEST = "game_playtest"
 GAME_CREATE = "game_create"
 GAME_CREATE_UNLIMITED = "game_create_unlimited"
-AURASEC = "aurasec"
+
+# Command Center memberships and standalone native products share one canonical entitlement
+# vocabulary so a subscription grant cannot diverge from the native-device authorization layer.
+AURA_OS = AURA_OS_ENTITLEMENT
+AURASEC = AURA_SEC_ENTITLEMENT
 
 
 FREE_FEATURES = frozenset({
@@ -192,6 +198,7 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     BANDLAB_EXPORT,
     PRIORITY_QUEUE,
     GAME_CREATE_UNLIMITED,
+    AURA_OS,
     AURASEC,
 })
 
@@ -237,15 +244,15 @@ PLANS: dict[str, Plan] = {
         monthly_price=Decimal("9.99"),
         currency="GBP",
         description=(
-            "£9.99 Unlimited Pro tier with the highest enabled creative access and AuraSec included. Normal use is effectively "
-            "unlimited subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse and safety safeguards. "
-            "Includes the complete enabled production stack: expanded instrument/performance types, editable multitrack "
-            "build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
+            "£9.99 Unlimited Pro tier with the highest enabled creative access, Aura OS Assistant/Overlay and Aura Sec included. "
+            "Normal use is effectively unlimited subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse "
+            "and safety safeguards. Includes the complete enabled production stack: expanded instrument/performance types, editable "
+            "multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved native plugin racks, advanced/custom "
             "Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, automation and deep revision history, "
             "advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, Harmony Architect, consent-approved "
-            "voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled export formats, and "
-            "unlimited active Game Forge project workspaces. Eligible song/game publishing remains subject to marketplace "
-            "entitlement, rights and governance gates."
+            "voice duplication, neural amp processing, immersive spatial audio, video/music sync, enabled export formats, and unlimited "
+            "active Game Forge project workspaces. Eligible song/game publishing remains subject to marketplace entitlement, rights and "
+            "governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,
