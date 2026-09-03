@@ -5,7 +5,7 @@
   "expanded_ecosystem_denominator": true,
   "integration_branch": "development/full-site-build",
   "verified_integration_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
-  "verified_at": "2026-09-03T14:20:00+01:00",
+  "verified_at": "2026-09-03T14:24:00+01:00",
   "confidence": "HIGH_FOR_REPOSITORY_STATE_MEDIUM_FOR_EXTERNAL_PRODUCTION",
   "release_decision": "NO_GO",
   "completion_ladder": {
@@ -141,8 +141,8 @@
       "test_state": "passing_exact_pr_head_before_merge",
       "security_state": "bounded",
       "production_state": "blocked",
-      "evidence": ["PR #424 integrated Unlimited Pro £9.99/month + £99/year while preserving Member £4.99/month and Aura OS/Aura Sec entitlements", "Native Aura OS/Aura Sec catalogue integrated"],
-      "blockers": ["Account/public UI convergence", "Verified provider renewal upgrade downgrade anti-drift evidence", "Production payment evidence"]
+      "evidence": ["PR #424 integrated Unlimited Pro £9.99/month + £99/year while preserving Member £4.99/month and Aura OS/Aura Sec entitlements", "Native Aura OS/Aura Sec catalogue integrated", "PR #429 canonical combined commercial catalogue anti-drift projection under validation"],
+      "blockers": ["PR #429 anti-drift/public projection not yet merged", "Account/public UI route consumption", "Verified provider renewal upgrade downgrade evidence", "Production payment evidence"]
     },
     {
       "capability_id": "core.universal_platform_services",
@@ -243,7 +243,7 @@
       "test_state": "partial",
       "security_state": "consent_and_rights_bounded",
       "production_state": "not_complete",
-      "evidence": ["Existing audio FX/pedal registry and AI chain designer", "Issue #418/PR #420 completion contract"],
+      "evidence": ["Existing audio FX/pedal registry and AI chain designer", "Issue #418/PR #420 completion contract", "PR #426 performance-aware Audio-to-MIDI control transcription under validation"],
       "blockers": ["Deep executable instrument/sample/DSP/vocal catalogue", "Prompt-to-editable shared graph workflow across full accepted domain", "Voice realtime/provider/native boundaries"]
     },
     {
@@ -311,7 +311,7 @@
       "test_state": "passing_foundations",
       "security_state": "bounded_runtime",
       "production_state": "external_for_some_targets",
-      "evidence": ["Prompt-to-game/scene/visual-script foundations", "PR #421 export package integrity under validation"],
+      "evidence": ["Prompt-to-game/scene/visual-script foundations", "PR #427 atomic Game Forge export integrity hardening under validation"],
       "blockers": ["Issue #418 prompt-to-editable reusable system graph depth", "Expanded engine/runtime libraries", "External signing/export target evidence"]
     },
     {
@@ -379,8 +379,8 @@
       "test_state": "passing_integrated_slices",
       "security_state": "provider_authenticated_fail_closed",
       "production_state": "external_e2e_missing",
-      "evidence": ["PR #410 verified native entitlement ledger", "PR #411 cancellation/refund lifecycle", "PR #412 PayPal verifier", "PR #413 authoritative invoice identity", "PR #414 canonical invoices", "PR #415 lifecycle verifier", "PR #416 webhook admission", "PR #422 production mount under validation"],
-      "blockers": ["PR #422 mount not yet merged", "Account/public UI convergence", "Production PayPal credential/webhook/payment/refund/reconciliation evidence"]
+      "evidence": ["PR #410 verified native entitlement ledger", "PR #411 cancellation/refund lifecycle", "PR #412 PayPal verifier", "PR #413 authoritative invoice identity", "PR #414 canonical invoices", "PR #415 lifecycle verifier", "PR #416 webhook admission", "PR #422 production mount awaiting current-base reconciliation", "PR #428 authenticated canonical native PayPal checkout under validation"],
+      "blockers": ["PR #422 production mount must reconcile/merge first", "PR #428 checkout not yet merged", "Account/public UI convergence", "Production PayPal credential/webhook/payment/refund/reconciliation evidence"]
     },
     {
       "capability_id": "aura.central_assistant",
@@ -470,18 +470,46 @@
   ],
   "active_coordination": [
     {
-      "pr": 421,
-      "owner_chat": "CHAT 4",
-      "base_sha": "e698463400a363d814d039c09edb478087000f3e",
-      "state": "OPEN_DIVERGED_FROM_CURRENT",
-      "scope": "Game Forge export package integrity; current head must reconcile/revalidate against 792e65de..."
-    },
-    {
       "pr": 422,
       "owner_chat": "CHAT 5",
       "base_sha": "e698463400a363d814d039c09edb478087000f3e",
       "state": "OPEN_DIVERGED_FROM_CURRENT",
-      "scope": "Mount verified native PayPal webhook; current head must reconcile/revalidate against 792e65de..."
+      "scope": "Mount verified native PayPal webhook; must replay/reconcile against 792e65de... before merge"
+    },
+    {
+      "pr": 426,
+      "owner_chat": "CHAT 2",
+      "base_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
+      "state": "OPEN_EXACT_BASE",
+      "scope": "Performance-aware Audio-to-MIDI control transcription"
+    },
+    {
+      "pr": 427,
+      "owner_chat": "CHAT 4",
+      "base_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
+      "state": "OPEN_EXACT_BASE",
+      "scope": "Atomic Game Forge export integrity hardening; supersedes #421"
+    },
+    {
+      "pr": 428,
+      "owner_chat": "CHAT 5",
+      "base_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
+      "state": "OPEN_EXACT_BASE_WITH_DEPENDENCY",
+      "scope": "Authenticated native PayPal checkout; dependency #422 should land first"
+    },
+    {
+      "pr": 429,
+      "owner_chat": "CHAT 1",
+      "base_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
+      "state": "OPEN_EXACT_BASE",
+      "scope": "One canonical public commercial catalogue projection with anti-drift authority boundaries"
+    },
+    {
+      "pr": 430,
+      "owner_chat": "CHAT 6",
+      "base_sha": "792e65de7a48ec36b89a2e3ccab54ee70e4d3770",
+      "state": "OPEN_EXACT_BASE",
+      "scope": "Schema-v3 master completion register refresh"
     }
   ],
   "production_evidence_gates": [
@@ -506,9 +534,10 @@
     "PR #409 integrated Groove & Timing Editor with real-audio humanisation.",
     "PR #416 integrated native PayPal webhook admission boundary.",
     "Issue #418 created and PR #420 integrated the authoritative Aura Effect/System Creator + deep universal studio library completion contract.",
+    "Stale pricing replays #402 and #417 closed in favour of PR #424.",
     "PR #423 integrated privacy-bounded durable Aura 3D client health evidence.",
     "PR #424 integrated the canonical Unlimited Pro £9.99/month + £99/year period model while preserving Member pricing and Aura OS/Aura Sec entitlements.",
-    "Stale pricing replays #402 and #417 closed in favour of PR #424."
+    "PR #421 closed superseded by exact-base atomic replay PR #427."
   ],
   "audit_notes": [
     "Older code-complete statements apply to narrower web/control-plane scope and do not close the expanded ecosystem denominator.",
