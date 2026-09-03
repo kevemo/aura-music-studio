@@ -42,7 +42,7 @@ def test_live_copilot_is_bounded_reversible_and_private_frame_gated():
     html = inject_live_copilot(base, game=game)
 
     assert html.count("id='aura-live-copilot'") == 1
-    assert f"/api/game-forge/games/${{encodeURIComponent(String(liveCfg.game_id||''))}}/playtest-frame" in html
+    assert "/api/game-forge/games/${encodeURIComponent(String(liveCfg.game_id||''))}/playtest-frame" in html
     assert "location.pathname!==liveExpectedPath" in html
     assert "data-aura-live-creator='1'" in html
     assert "display:none" in html
