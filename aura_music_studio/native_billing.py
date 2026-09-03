@@ -437,6 +437,22 @@ class NativeEntitlementLedger:
             effective_at=effective_at,
         )
 
+    def has_product_purchase(self, user_id: str, product_id: str) -> bool:
+        """Return whether verified payment history exists for this user/product pair.
+
+        This is intentionally history-based rather than active-entitlement based so a refunded,
+        cancelled or expired first term can never make a founding offer available again.
+        """
+
+        cleaned_user_id = self._clean_identifier(user_id, "user ID")
+        product = get_native_product(product_id)
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT 1 FROM native_payment_events WHERE user_id=? AND product_id=? LIMIT 1",
+                (cleaned_user_id, product.id),
+            ).fetchone()
+        return row is not None
+
     def active_entitlements(self, user_id: str, *, at: datetime | None = None) -> frozenset[str]:
         checked_at = (at or _utcnow()).astimezone(timezone.utc)
         with self._connect() as con:
