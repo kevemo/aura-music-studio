@@ -8,6 +8,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .accounts import AccountStore
 from .branding import PRODUCT_FULL_NAME, TAGLINE
+from .commercial_catalogue import PUBLIC_MEMBERSHIP_NAMES
+from .membership_billing_periods import MembershipBillingPreferenceStore
 from .owner_auth import owner_authorized
 from .owner_auth_portal import (
     owner_login as secure_owner_login,
@@ -21,6 +23,7 @@ from .subscriptions import SubscriptionLedger
 router = APIRouter()
 store = AccountStore()
 subscriptions = SubscriptionLedger(store)
+billing_preferences = MembershipBillingPreferenceStore(store)
 public_address = PublicAddressManager()
 
 CSS = """
@@ -54,7 +57,13 @@ def _payment_queue() -> list[dict]:
                FROM users WHERE status='approved_pending_payment'
                ORDER BY approved_at ASC"""
         ).fetchall()
-        return [dict(row) for row in rows]
+        result: list[dict] = []
+        for row in rows:
+            item = dict(row)
+            period = billing_preferences.approved_period_for_user(item["id"], item["requested_plan_id"])
+            item["billing_period"] = period.value
+            result.append(item)
+        return result
     finally:
         con.close()
 
@@ -112,13 +121,13 @@ def owner_dashboard(request: Request):
         return RedirectResponse("/owner", status_code=303)
 
     free_plan = get_plan("free")
-    member_plan = get_plan("base")
+    basic_plan = get_plan("base")
     pro_plan = get_plan("pro")
 
     pending = store.pending_requests()
     if pending:
         pending_html = "".join(
-            f"""<div class='card'><div class='row'><div><b>{escape(item['display_name'])}</b><br><span class='muted'>{escape(item['email'])}</span></div><span class='pill'>{escape(item['requested_plan_id'].upper())}</span></div><p class='muted'>Requested: {escape(item['created_at'])}</p><p>Use the secure approval link sent to the ESP membership inbox to approve or reject this request.</p></div>"""
+            f"""<div class='card'><div class='row'><div><b>{escape(item['display_name'])}</b><br><span class='muted'>{escape(item['email'])}</span></div><span class='pill'>{escape(PUBLIC_MEMBERSHIP_NAMES.get(item['requested_plan_id'], item['requested_plan_id']))}</span></div><p class='muted'>Requested: {escape(item['created_at'])}</p><p>Use the secure approval link sent to the ESP membership inbox to approve or reject this request.</p></div>"""
             for item in pending
         )
     else:
@@ -127,19 +136,19 @@ def owner_dashboard(request: Request):
     payment_rows = _payment_queue()
     if payment_rows:
         payment_html = "".join(
-            f"""<div class='card'><div class='row'><div><b>{escape(item['display_name'])}</b><br><span class='muted'>{escape(item['email'])}</span><br><small>User ID: {escape(item['id'])}</small></div><span class='pill'>{escape(item['requested_plan_id'].upper())}</span></div><p class='muted'>Approved: {escape(item.get('approved_at') or '')}</p><form method='post' action='/owner/activate-payment'><input type='hidden' name='user_id' value='{escape(item['id'], quote=True)}'><input type='hidden' name='plan_id' value='{escape(item['requested_plan_id'], quote=True)}'><div class='row' style='justify-content:flex-start'><input name='payment_reference' placeholder='Payment transaction/invoice reference' required><button class='activate'>Verify payment + activate 31 days</button></div></form></div>"""
+            f"""<div class='card'><div class='row'><div><b>{escape(item['display_name'])}</b><br><span class='muted'>{escape(item['email'])}</span><br><small>User ID: {escape(item['id'])}</small></div><span class='pill'>{escape(PUBLIC_MEMBERSHIP_NAMES.get(item['requested_plan_id'], item['requested_plan_id']))} · {escape(item['billing_period'].title())}</span></div><p class='muted'>Approved: {escape(item.get('approved_at') or '')}</p><form method='post' action='/owner/activate-payment'><input type='hidden' name='user_id' value='{escape(item['id'], quote=True)}'><input type='hidden' name='plan_id' value='{escape(item['requested_plan_id'], quote=True)}'><div class='row' style='justify-content:flex-start'><input name='payment_reference' placeholder='Payment transaction/invoice reference' required><button class='activate'>Verify payment + activate approved {escape(item['billing_period'])} term</button></div></form></div>"""
             for item in payment_rows
         )
     else:
         payment_html = "<div class='card'><p class='muted'>No approved members are waiting for payment verification.</p></div>"
 
     body = f"""<div class='top'><div><div class='gold'><b>MARY & KEV · ESP OWNER CONTROL</b></div><h1>{escape(PRODUCT_FULL_NAME)}</h1><p class='muted'>{escape(TAGLINE)}</p></div><div class='row'><a class='btn approve' href='/owner/users'>Users & ESP Access</a><a class='btn activate' href='/owner/backups'>Backups & Migration</a><form method='post' action='/owner/logout'><button class='reject'>Sign out</button></form></div></div>
-<div class='grid'><div class='card'><b>{escape(free_plan.name)}</b><h2>{escape(free_plan.display_price)}</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(member_plan.name)}</b><h2>{escape(member_plan.display_price)}</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(pro_plan.name)}</b><h2>{escape(pro_plan.display_price)}</h2><span class='muted'>Full Creative Studio access plus AuraSec entitlement unless separately governed</span></div></div>
+<div class='grid'><div class='card'><b>{escape(PUBLIC_MEMBERSHIP_NAMES['free'])}</b><h2>{escape(free_plan.display_price)}</h2><span class='muted'>Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(PUBLIC_MEMBERSHIP_NAMES['base'])}</b><h2>{escape(basic_plan.display_price_for('monthly'))}</h2><span class='muted'>{escape(basic_plan.display_price_for('annual'))} available · Creative Studio access only unless separately ESP-approved</span></div><div class='card'><b>{escape(PUBLIC_MEMBERSHIP_NAMES['pro'])}</b><h2>{escape(pro_plan.display_price_for('monthly'))}</h2><span class='muted'>{escape(pro_plan.display_price_for('annual'))} available · Full Creative Studio access plus Aura OS/AuraSec entitlement unless separately governed</span></div></div>
 <div class='card'><div class='row'><div><h2>User & ESP management</h2><p class='muted'>Every account is listed in the protected owner directory. Mary/Kev can manage subscription entitlement separately from Regular / ESP Creator / ESP Agent / Both, review ESP access requests, niches, creation activity, training and progress.</p></div><a class='btn approve' href='/owner/users'>Open User Directory</a></div></div>
 {_address_panel()}
 <h2>Pending membership requests</h2>{pending_html}
 <h2>Approved — waiting for payment verification</h2>{payment_html}
-<div class='card'><h2>Monthly access rule</h2><p class='muted'>Each verified Member/Unlimited Pro payment grants a 31-day billing period. Another verified payment extends the existing paid-through date. When that period expires, the account automatically returns to payment-pending until renewal is verified. Duplicate payment references are rejected.</p></div>"""
+<div class='card'><h2>Billing-period rule</h2><p class='muted'>Verified Basic/Unlimited Pro payments must match the owner-approved plan and billing period. Monthly terms advance by a real calendar month and annual terms by a real calendar year. Browser returns are never payment proof, duplicate payment references are rejected, and ESP organisational roles remain separate from commercial subscription entitlement.</p></div>"""
     return _page(body)
 
 
@@ -166,13 +175,20 @@ def owner_activate_payment(
     if not _authorized(request):
         return RedirectResponse("/owner", status_code=303)
     try:
-        status = subscriptions.verify_payment(user_id, plan_id, payment_reference)
+        period = billing_preferences.approved_period_for_user(user_id, plan_id)
+        status = subscriptions.verify_payment(
+            user_id,
+            plan_id,
+            payment_reference,
+            billing_period=period,
+        )
         user = status["user"] or {}
         state = status["subscription"] or {}
-        plan_name = get_plan(plan_id).name
+        plan_name = PUBLIC_MEMBERSHIP_NAMES.get(plan_id, get_plan(plan_id).name)
         message = (
-            f"Activated {escape(user.get('display_name','member'))} on {escape(plan_name)}. "
-            f"Paid through {escape(state.get('period_end',''))}. Payment reference: {escape(payment_reference)}"
+            f"Activated {escape(user.get('display_name','member'))} on {escape(plan_name)} "
+            f"({escape(period.value)}). Paid through {escape(state.get('period_end',''))}. "
+            f"Payment reference: {escape(payment_reference)}"
         )
         colour = "var(--green)"
     except Exception as exc:
