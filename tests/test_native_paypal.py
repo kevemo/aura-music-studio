@@ -26,7 +26,7 @@ class FakePayPalWebhookVerifier:
         return self.result
 
 
-def _event(*, token: str, amount: str = "4.99", currency: str = "GBP", status: str = "PAID") -> bytes:
+def _event(*, amount: str = "4.99", currency: str = "GBP", status: str = "PAID") -> bytes:
     return json.dumps(
         {
             "id": "WH-evt-1",
@@ -35,15 +35,31 @@ def _event(*, token: str, amount: str = "4.99", currency: str = "GBP", status: s
             "resource": {
                 "id": "INV2-native-1",
                 "status": status,
-                "custom_id": token,
                 "amount": {"currency_code": currency, "value": amount},
             },
         }
     ).encode("utf-8")
 
 
+def _invoice(*, token: str, amount: str = "4.99", currency: str = "GBP", status: str = "PAID") -> dict:
+    return {
+        "id": "INV2-native-1",
+        "status": status,
+        "detail": {"reference": token},
+        "amount": {"currency_code": currency, "value": amount},
+    }
+
+
 def _headers() -> dict[str, str]:
     return {"PayPal-Transmission-Id": "tx-verified-1"}
+
+
+def _verifier(*, signer, invoice: dict, webhook_result: bool = True):
+    return NativePayPalPaymentVerifier(
+        webhook_verifier=FakePayPalWebhookVerifier(webhook_result),
+        metadata_signer=signer,
+        invoice_loader=lambda invoice_id: invoice if invoice_id == "INV2-native-1" else {},
+    )
 
 
 def test_metadata_signer_round_trip_binds_native_identity():
@@ -54,9 +70,7 @@ def test_metadata_signer_round_trip_binds_native_identity():
         billing_period=BillingPeriod.ANNUAL,
         founding_offer=True,
     )
-
     payload = signer.verify(token)
-
     assert payload["user_id"] == "user-123"
     assert payload["product_id"] == "aura_sec"
     assert payload["billing_period"] is BillingPeriod.ANNUAL
@@ -68,7 +82,6 @@ def test_metadata_signer_rejects_tampering():
     token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
     body, signature = token.split(".", 1)
     tampered = ("A" if body[0] != "A" else "B") + body[1:] + "." + signature
-
     with pytest.raises(NativePayPalError, match="signature|payload|encoding"):
         signer.verify(tampered)
 
@@ -82,29 +95,21 @@ def test_metadata_signer_has_no_weak_default(monkeypatch):
 def test_founder_offer_cannot_be_signed_for_wrong_product_or_period():
     signer = NativeCheckoutMetadataSigner(SECRET)
     with pytest.raises(ValueError):
-        signer.sign(
-            user_id="user-123",
-            product_id="aura_os",
-            billing_period="annual",
-            founding_offer=True,
-        )
+        signer.sign(user_id="user-123", product_id="aura_os", billing_period="annual", founding_offer=True)
     with pytest.raises(ValueError):
-        signer.sign(
-            user_id="user-123",
-            product_id="aura_sec",
-            billing_period="monthly",
-            founding_offer=True,
-        )
+        signer.sign(user_id="user-123", product_id="aura_sec", billing_period="monthly", founding_offer=True)
 
 
-def test_verified_invoice_becomes_exact_native_payment_evidence():
+def test_verified_invoice_becomes_exact_native_payment_evidence_from_authoritative_reference():
     signer = NativeCheckoutMetadataSigner(SECRET)
     token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
     webhook = FakePayPalWebhookVerifier(True)
-    verifier = NativePayPalPaymentVerifier(webhook_verifier=webhook, metadata_signer=signer)
-
-    evidence = verifier.verify(_event(token=token), _headers())
-
+    verifier = NativePayPalPaymentVerifier(
+        webhook_verifier=webhook,
+        metadata_signer=signer,
+        invoice_loader=lambda invoice_id: _invoice(token=token),
+    )
+    evidence = verifier.verify(_event(), _headers())
     assert evidence.provider == "paypal"
     assert evidence.event_id == "WH-evt-1"
     assert evidence.payment_id == "INV2-native-1"
@@ -118,59 +123,81 @@ def test_verified_invoice_becomes_exact_native_payment_evidence():
     assert webhook.calls
 
 
-def test_paypal_signature_failure_is_fail_closed():
+def test_webhook_payload_cannot_supply_or_override_native_identity():
     signer = NativeCheckoutMetadataSigner(SECRET)
     token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
-    verifier = NativePayPalPaymentVerifier(
-        webhook_verifier=FakePayPalWebhookVerifier(False),
-        metadata_signer=signer,
+    payload = json.loads(_event().decode("utf-8"))
+    payload["resource"]["custom_id"] = signer.sign(
+        user_id="attacker", product_id="aura_sec", billing_period="monthly"
     )
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token))
+    evidence = verifier.verify(json.dumps(payload).encode("utf-8"), _headers())
+    assert evidence.user_id == "user-123"
+    assert evidence.product_id == "aura_os"
 
+
+def test_paypal_signature_failure_is_fail_closed_before_invoice_trust():
+    signer = NativeCheckoutMetadataSigner(SECRET)
+    token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token), webhook_result=False)
     with pytest.raises(NativePayPalError, match="signature verification failed"):
-        verifier.verify(_event(token=token), _headers())
+        verifier.verify(_event(), _headers())
 
 
-def test_verified_paypal_event_cannot_override_signed_product_or_price():
+def test_authoritative_invoice_id_and_paid_state_must_match_webhook():
     signer = NativeCheckoutMetadataSigner(SECRET)
     token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
-    verifier = NativePayPalPaymentVerifier(
-        webhook_verifier=FakePayPalWebhookVerifier(True),
-        metadata_signer=signer,
-    )
+    wrong = _invoice(token=token)
+    wrong["id"] = "INV2-other"
+    verifier = _verifier(signer=signer, invoice=wrong)
+    with pytest.raises(NativePayPalError, match="does not match"):
+        verifier.verify(_event(), _headers())
 
-    with pytest.raises(NativePayPalError, match="amount does not match"):
-        verifier.verify(_event(token=token, amount="7.99"), _headers())
-
-
-def test_verified_paypal_event_rejects_wrong_currency_or_unpaid_state():
-    signer = NativeCheckoutMetadataSigner(SECRET)
-    token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
-    verifier = NativePayPalPaymentVerifier(
-        webhook_verifier=FakePayPalWebhookVerifier(True),
-        metadata_signer=signer,
-    )
-
-    with pytest.raises(NativePayPalError, match="currency"):
-        verifier.verify(_event(token=token, currency="USD"), _headers())
+    unpaid = _invoice(token=token, status="UNPAID")
+    verifier = _verifier(signer=signer, invoice=unpaid)
     with pytest.raises(NativePayPalError, match="not fully paid"):
-        verifier.verify(_event(token=token, status="PARTIALLY_PAID"), _headers())
+        verifier.verify(_event(), _headers())
 
 
-def test_verified_paypal_event_requires_signed_metadata_and_transmission_identity():
+def test_verified_paypal_event_cannot_override_authoritative_product_or_price():
     signer = NativeCheckoutMetadataSigner(SECRET)
-    verifier = NativePayPalPaymentVerifier(
-        webhook_verifier=FakePayPalWebhookVerifier(True),
-        metadata_signer=signer,
-    )
-    missing_metadata = json.loads(_event(token="").decode("utf-8"))
-    missing_metadata["resource"].pop("custom_id")
+    token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token, amount="7.99"))
+    with pytest.raises(NativePayPalError, match="amount does not match"):
+        verifier.verify(_event(amount="7.99"), _headers())
 
+
+def test_webhook_and_authoritative_invoice_amounts_must_agree():
+    signer = NativeCheckoutMetadataSigner(SECRET)
+    token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token))
+    with pytest.raises(NativePayPalError, match="webhook and authoritative invoice amounts"):
+        verifier.verify(_event(amount="7.99"), _headers())
+
+
+def test_verified_paypal_event_rejects_wrong_currency_or_unpaid_webhook_state():
+    signer = NativeCheckoutMetadataSigner(SECRET)
+    token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token, currency="USD"))
+    with pytest.raises(NativePayPalError, match="currency"):
+        verifier.verify(_event(currency="USD"), _headers())
+
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token))
+    with pytest.raises(NativePayPalError, match="not fully paid"):
+        verifier.verify(_event(status="PARTIALLY_PAID"), _headers())
+
+
+def test_verified_paypal_event_requires_authoritative_signed_reference_and_transmission_identity():
+    signer = NativeCheckoutMetadataSigner(SECRET)
+    invoice = _invoice(token="")
+    verifier = _verifier(signer=signer, invoice=invoice)
     with pytest.raises(NativePayPalError, match="metadata token"):
-        verifier.verify(json.dumps(missing_metadata).encode("utf-8"), _headers())
+        verifier.verify(_event(), _headers())
 
     token = signer.sign(user_id="user-123", product_id="aura_os", billing_period="monthly")
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token))
     with pytest.raises(NativePayPalError, match="transmission ID"):
-        verifier.verify(_event(token=token), {})
+        verifier.verify(_event(), {})
 
 
 def test_founding_aura_sec_invoice_uses_exact_2499_contract():
@@ -181,13 +208,8 @@ def test_founding_aura_sec_invoice_uses_exact_2499_contract():
         billing_period="annual",
         founding_offer=True,
     )
-    verifier = NativePayPalPaymentVerifier(
-        webhook_verifier=FakePayPalWebhookVerifier(True),
-        metadata_signer=signer,
-    )
-
-    evidence = verifier.verify(_event(token=token, amount="24.99"), _headers())
-
+    verifier = _verifier(signer=signer, invoice=_invoice(token=token, amount="24.99"))
+    evidence = verifier.verify(_event(amount="24.99"), _headers())
     assert evidence.product_id == "aura_sec"
     assert evidence.billing_period is BillingPeriod.ANNUAL
     assert evidence.founding_offer is True
