@@ -44,9 +44,26 @@ def _clean_text(value: str | None, *, label: str, maximum: int, required: bool =
 
 def _canonical_json(value: Any) -> str:
     try:
-        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
     except (TypeError, ValueError) as exc:
-        raise ValueError("Catalogue metadata must be JSON serializable") from exc
+        raise ValueError("Catalogue metadata must be strict JSON serializable") from exc
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON number is not allowed: {value}")
+
+
+def _validate_strict_json(payload: str) -> None:
+    try:
+        json.loads(payload, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Effect graph must serialize as strict finite JSON") from exc
 
 
 def _json_object(value: Mapping[str, Any] | None, label: str) -> str:
@@ -239,7 +256,6 @@ class AuraEffectCatalog:
         metadata = metadata or CatalogMetadata()
         scope_value, scope_key, owner = self._validate_scope(scope, scope_id, owner_user_id)
         materialized = composer.materialize_defaults(graph)
-        report = composer.validate(materialized, context)
         category = _clean_text(metadata.category, label="Category", maximum=80, required=True)
         now = _now()
 
@@ -259,6 +275,17 @@ class AuraEffectCatalog:
                     f"Catalogue version conflict: expected {expected_latest_version}, current {latest_version}"
                 )
 
+            if metadata.migration_from_version is not None:
+                source_version = int(metadata.migration_from_version)
+                if source_version > latest_version:
+                    raise ValueError("Migration source version does not exist")
+                source = con.execute(
+                    "SELECT 1 FROM aura_effect_catalog_versions WHERE catalog_id=? AND version=?",
+                    (materialized.id, source_version),
+                ).fetchone()
+                if not source:
+                    raise ValueError("Migration source version does not exist")
+
             if entry:
                 if entry["scope"] != scope_value or entry["scope_id"] != scope_key:
                     raise ValueError("Catalogue scope cannot change for an existing graph id")
@@ -266,6 +293,8 @@ class AuraEffectCatalog:
                     raise ValueError("Catalogue ownership cannot change for an existing graph id")
                 if entry["domain"] != materialized.domain.value:
                     raise ValueError("Catalogue domain cannot change for an existing graph id")
+                if entry["category"] != category:
+                    raise ValueError("Catalogue category cannot change for an existing graph id")
             else:
                 con.execute(
                     """INSERT INTO aura_effect_catalog_entries
@@ -290,6 +319,8 @@ class AuraEffectCatalog:
             stored_graph = replace(materialized, version=version)
             validation = _report_dict(composer.validate(stored_graph, context))
             requirements = validation["requirements"]
+            graph_json = graph_canonical_json(stored_graph)
+            _validate_strict_json(graph_json)
             digest = graph_digest(stored_graph)
             con.execute(
                 """INSERT INTO aura_effect_catalog_versions
@@ -302,7 +333,7 @@ class AuraEffectCatalog:
                     version,
                     metadata.implementation_state,
                     metadata.commercial_use_state,
-                    graph_canonical_json(stored_graph),
+                    graph_json,
                     digest,
                     1 if validation["valid"] else 0,
                     _canonical_json(validation),
@@ -315,9 +346,8 @@ class AuraEffectCatalog:
             )
             con.execute(
                 """UPDATE aura_effect_catalog_entries
-                   SET category=?,title=?,description=?,tags_json=?,updated_at=? WHERE catalog_id=?""",
+                   SET title=?,description=?,tags_json=?,updated_at=? WHERE catalog_id=?""",
                 (
-                    category,
                     stored_graph.title,
                     stored_graph.description,
                     _canonical_json(list(stored_graph.tags)),
@@ -494,28 +524,30 @@ class AuraEffectCatalog:
                 raise ValueError(f"Unsupported catalogue state: {state_value}")
             clauses.append("v.state=?")
             values.append(state_value)
-        query = _clean_text(text, label="Search text", maximum=200)
-        if query:
-            clauses.append("(LOWER(e.title) LIKE ? OR LOWER(e.description) LIKE ? OR LOWER(e.category) LIKE ?)")
-            like = f"%{query.lower()}%"
-            values.extend([like, like, like])
+        query = _clean_text(text, label="Search text", maximum=200).lower()
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         max_results = max(1, min(int(limit), 200))
+        scan_limit = min(2000, max_results * 10) if (tags or query) else max_results
         sql = (
             "SELECT e.*,v.* FROM aura_effect_catalog_entries e "
             "JOIN aura_effect_catalog_versions v ON v.catalog_id=e.catalog_id"
             + where
             + " ORDER BY v.created_at DESC, e.catalog_id ASC, v.version DESC LIMIT ?"
         )
-        values.append(max_results * 4 if tags else max_results)
+        values.append(scan_limit)
         with self._connect() as con:
             rows = con.execute(sql, values).fetchall()
         required_tags = {tag.strip().lower() for tag in tags if tag.strip()}
         records: list[CatalogVersion] = []
         for row in rows:
             record = self._record(row)
-            if required_tags and not required_tags.issubset({tag.lower() for tag in record.tags}):
+            record_tags = {tag.lower() for tag in record.tags}
+            if required_tags and not required_tags.issubset(record_tags):
                 continue
+            if query:
+                haystack = " ".join((record.title, record.description, record.category, " ".join(record.tags))).lower()
+                if query not in haystack:
+                    continue
             records.append(record)
             if len(records) >= max_results:
                 break
@@ -526,7 +558,7 @@ class AuraEffectCatalog:
         validation = json.loads(row["validation_json"])
         accessibility = json.loads(row["accessibility_json"])
         safety = json.loads(row["safety_json"])
-        tags = tuple(json.loads(row["tags_json"]))
+        graph = _graph_from_json(row["graph_json"])
         return CatalogVersion(
             catalog_id=row["catalog_id"],
             version=int(row["version"]),
@@ -535,9 +567,9 @@ class AuraEffectCatalog:
             owner_user_id=row["owner_user_id"],
             domain=row["domain"],
             category=row["category"],
-            title=row["title"],
-            description=row["description"],
-            tags=tags,
+            title=graph.title,
+            description=graph.description,
+            tags=graph.tags,
             state=row["state"],
             implementation_state=row["implementation_state"],
             commercial_use_state=row["commercial_use_state"],
@@ -558,8 +590,8 @@ class AuraEffectCatalog:
 
 def _graph_from_json(payload: str) -> EffectGraph:
     try:
-        data = json.loads(payload)
-    except json.JSONDecodeError as exc:
+        data = json.loads(payload, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError("Stored effect graph JSON is invalid") from exc
     if not isinstance(data, dict):
         raise ValueError("Stored effect graph must be an object")
