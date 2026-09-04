@@ -4,11 +4,12 @@ import os
 from html import escape
 from urllib.parse import quote
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .accounts import AccountStore
 from .billing import payment_instructions
+from .billing_history import BillingHistoryService
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .mailer import notify_membership_request
 from .membership import MembershipService
@@ -106,6 +107,76 @@ def _pending_payment_html(user: dict, plan_id: str) -> str:
         f"<div class='alert'>Your membership was approved for <b>{escape(display)}</b>. "
         "A verified payment-provider route for this billing period must be configured before activation. "
         "No browser return can activate paid access by itself.</div>"
+    )
+
+
+def _request_session_token(request: Request) -> str | None:
+    auth = request.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return request.cookies.get(COOKIE_NAME)
+
+
+def _billing_account(request: Request) -> dict:
+    user = store.resolve_session(_request_session_token(request))
+    if not user:
+        raise HTTPException(401, "Authenticated account session required")
+    return user
+
+
+def _billing_history_html(history: dict) -> str:
+    subscription = history.get("subscription") or {}
+    scheduled = history.get("scheduled_transition") or {}
+    account = history.get("account") or {}
+    current = (
+        f"<div class='card'><div class='eyebrow'>Current account billing</div>"
+        f"<h2>{escape(str(account.get('plan_name') or 'Free'))}</h2>"
+        f"<p>Status: <b>{escape(str(account.get('billing_status') or 'not required').replace('_',' '))}</b></p>"
+        + (
+            f"<p class='muted'>{escape(str(subscription.get('billing_period') or ''))} term · "
+            f"{escape(str(subscription.get('period_start') or ''))} → {escape(str(subscription.get('period_end') or ''))}</p>"
+            if subscription else
+            "<p class='muted'>No current paid subscription term is recorded.</p>"
+        )
+        + (
+            f"<p class='muted'>Scheduled: {escape(str(scheduled.get('target_plan_name') or scheduled.get('target_plan_id') or ''))} "
+            f"({escape(str(scheduled.get('target_billing_period') or ''))}) from {escape(str(scheduled.get('effective_at') or ''))}.</p>"
+            if scheduled else ""
+        )
+        + "</div>"
+    )
+
+    payments = history.get("payments") or []
+    if payments:
+        payment_cards = "".join(
+            f"<div class='tile'><strong>{escape(str(item.get('display_amount') or ''))} · {escape(str(item.get('plan_name') or ''))}</strong>"
+            f"<span class='muted'>{escape(str(item.get('billing_period') or ''))} billing<br>"
+            f"Verified record: {escape(str(item.get('verified_at') or ''))}<br>"
+            f"Receipt: {escape(str(item.get('receipt_reference') or ''))}<br>"
+            f"Payment reference: {escape(str(item.get('payment_reference') or ''))}</span></div>"
+            for item in payments
+        )
+    else:
+        payment_cards = "<div class='tile'><strong>No paid records yet</strong><span class='muted'>Verified subscription payments will appear here.</span></div>"
+
+    refunds = history.get("refunds") or []
+    if refunds:
+        refund_cards = "".join(
+            f"<div class='tile'><strong>Refund recorded</strong><span class='muted'>"
+            f"{escape(str(item.get('outcome_label') or 'Verified refund recorded'))}<br>"
+            f"Verified record: {escape(str(item.get('verified_at') or ''))}<br>"
+            f"Receipt: {escape(str(item.get('receipt_reference') or ''))}<br>"
+            f"Refund reference: {escape(str(item.get('refund_reference') or ''))}</span></div>"
+            for item in refunds
+        )
+    else:
+        refund_cards = "<div class='tile'><strong>No refund records</strong><span class='muted'>Verified refunds will appear here without inventing an amount the ledger does not store.</span></div>"
+
+    return (
+        current
+        + f"<section class='section'><div class='eyebrow'>Payment records</div><h2>Receipts & payment history</h2><div class='tiles'>{payment_cards}</div></section>"
+        + f"<section class='section'><div class='eyebrow'>Refund records</div><h2>Refund history</h2><div class='tiles'>{refund_cards}</div></section>"
+        + "<div class='alert'>This page is a read-only view of server-recorded verified billing events. It does not fabricate provider invoice URLs, and viewing this page does not independently re-verify bank or provider settlement.</div>"
     )
 
 
@@ -209,6 +280,27 @@ def signout(request: Request):
     return response
 
 
+@router.get("/auth/me/billing-history")
+def billing_history_json(request: Request):
+    user = _billing_account(request)
+    return BillingHistoryService(store).for_user(user["id"])
+
+
+@router.get("/auth/billing-history", response_class=HTMLResponse)
+def billing_history_page(request: Request):
+    user = store.resolve_session(_request_session_token(request))
+    if not user:
+        return RedirectResponse("/signin", status_code=303)
+    history = BillingHistoryService(store).for_user(user["id"])
+    body = (
+        "<section class='section'><div class='eyebrow'>Your account</div><h1>Billing history</h1>"
+        "<p>View the subscription payments and refunds recorded for this signed-in account. This page is read-only.</p>"
+        "<div class='navlinks'><a class='btn' href='/dashboard'>Back to dashboard</a></div></section>"
+        + _billing_history_html(history)
+    )
+    return _page("Billing history", body, request)
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard(request: Request):
     token = request.cookies.get(COOKIE_NAME)
@@ -256,5 +348,5 @@ def dashboard(request: Request):
     """
     tier_plan_id = active_plan if status == "active" else requested
     tier_name = PLANS[tier_plan_id].name if tier_plan_id in PLANS else tier_plan_id
-    body = f"""<div class='dashboard'><aside class='card sidebar'><div class='eyebrow'>Member</div><h3>{escape(user['display_name'])}</h3><p class='muted'>{escape(user['email'])}</p><div class='tier'>{escape(tier_name)}</div><p>Status: <b>{escape(status.replace('_',' '))}</b></p><form method='post' action='/signout'><button type='submit'>Sign out</button></form></aside><main><div class='eyebrow'>Studio dashboard</div><h1>Welcome to {escape(PRODUCT_NAME)}</h1>{state}<section class='section'><h2>Your creative tools</h2><div class='tiles'>{tiles}</div></section>{esp_request}</main></div>"""
+    body = f"""<div class='dashboard'><aside class='card sidebar'><div class='eyebrow'>Member</div><h3>{escape(user['display_name'])}</h3><p class='muted'>{escape(user['email'])}</p><div class='tier'>{escape(tier_name)}</div><p>Status: <b>{escape(status.replace('_',' '))}</b></p><p><a class='btn ghost' href='/auth/billing-history'>Billing history</a></p><form method='post' action='/signout'><button type='submit'>Sign out</button></form></aside><main><div class='eyebrow'>Studio dashboard</div><h1>Welcome to {escape(PRODUCT_NAME)}</h1>{state}<section class='section'><h2>Your creative tools</h2><div class='tiles'>{tiles}</div></section>{esp_request}</main></div>"""
     return _page("Dashboard", body, request)
