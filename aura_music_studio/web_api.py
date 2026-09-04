@@ -5,40 +5,11 @@ import re
 from html.parser import HTMLParser
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import HTMLResponse
-from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field, HttpUrl
 
 from .web_access import AuraWebGateway
-from .web_portal import billing_history_json, billing_history_page
 
 router = APIRouter(prefix="/web", tags=["Aura Web"])
-
-# `api.py` includes the legacy web portal and this web API router into the same FastAPI app. FastAPI
-# copies child routes when a parent router is included, so late portal composition can leave a route
-# present on `web_portal.router` but absent from the already-built app. Keep explicit absolute copies
-# of the two customer billing-history GET routes on this independently mounted router. The canonical
-# production entrypoint runs exact path+method deduplication after all routers are composed, so a
-# normal startup still exposes one reachable handler per path while a stale parent-router snapshot
-# cannot silently hide billing history.
-router.routes.extend(
-    [
-        APIRoute(
-            path="/auth/me/billing-history",
-            endpoint=billing_history_json,
-            methods=["GET"],
-            name="billing_history_json_compat",
-        ),
-        APIRoute(
-            path="/auth/billing-history",
-            endpoint=billing_history_page,
-            methods=["GET"],
-            name="billing_history_page_compat",
-            response_class=HTMLResponse,
-            include_in_schema=False,
-        ),
-    ]
-)
 
 
 class _TextExtractor(HTMLParser):
