@@ -18,6 +18,7 @@ from .stripe_billing import (
     accounts,
     credit_packs,
 )
+from .subscription_lifecycle_api import router as subscription_lifecycle_router
 
 router = APIRouter(tags=["Stripe Membership Checkout"])
 billing_preferences = MembershipBillingPreferenceStore(accounts)
@@ -44,8 +45,6 @@ def subscription_price_id(
     plan = get_plan(plan_id)
     if plan.id == "free":
         raise ValueError("Free membership does not use Stripe subscription checkout")
-    # Canonical catalogue validation deliberately rejects unsupported periods, including
-    # Basic annual billing. Provider configuration can never create a new public tier/period.
     plan.price_for(period)
     if period is BillingPeriod.MONTHLY:
         return config.price_id(plan.id)
@@ -57,13 +56,6 @@ def subscription_price_id(
 
 
 def approved_checkout_period(user: dict[str, Any], plan_id: str, requested_period: BillingPeriod | str) -> BillingPeriod:
-    """Bind a paid Checkout Session to a safe, explicit membership contract.
-
-    Pending members may buy only the exact plan and period that ownership approved. An already
-    active Basic/Pro account may not create a second Stripe subscription as an implicit upgrade,
-    downgrade or billing-period change. Those operations require a dedicated provider-backed
-    lifecycle flow so an existing paid period cannot be silently replaced or double-billed.
-    """
     period = BillingPeriod(requested_period)
     plan = get_plan(plan_id)
     plan.price_for(period)
@@ -73,7 +65,6 @@ def approved_checkout_period(user: dict[str, Any], plan_id: str, requested_perio
         if approved is not period:
             raise ValueError("Checkout billing period does not match the owner-approved membership period")
         return period
-
     if status == "active" and str(user.get("plan_id") or "") in {"base", "pro"}:
         raise ValueError(
             "Active paid memberships cannot create a second Stripe subscription Checkout session; "
@@ -85,10 +76,7 @@ def approved_checkout_period(user: dict[str, Any], plan_id: str, requested_perio
 def _configured_periods(config: StripeConfig) -> dict[str, dict[str, bool]]:
     shared = bool(config.secret_key and config.public_base_url)
     return {
-        "base": {
-            "monthly": bool(shared and config.base_price_id),
-            "annual": False,
-        },
+        "base": {"monthly": bool(shared and config.base_price_id), "annual": False},
         "pro": {
             "monthly": bool(shared and config.pro_price_id),
             "annual": bool(shared and (os.getenv("STRIPE_PRO_ANNUAL_PRICE_ID") or "").strip()),
@@ -102,11 +90,7 @@ def membership_stripe_status():
     periods = _configured_periods(config)
     return {
         "provider": "stripe",
-        "checkout_configured": bool(
-            config.secret_key
-            and config.public_base_url
-            and any(any(values.values()) for values in periods.values())
-        ),
+        "checkout_configured": bool(config.secret_key and config.public_base_url and any(any(values.values()) for values in periods.values())),
         "webhook_configured": config.webhook_configured,
         "subscription_plans": ["base", "pro"],
         "subscription_billing_periods": periods,
@@ -125,7 +109,6 @@ def membership_subscription_checkout(body: MembershipSubscriptionCheckoutRequest
         plan = get_plan(body.plan_id)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
-
     config = StripeConfig.from_env()
     if not config.secret_key or not config.public_base_url:
         raise HTTPException(503, "Stripe subscription checkout is not configured")
@@ -153,7 +136,6 @@ def membership_subscription_checkout(body: MembershipSubscriptionCheckoutRequest
         )
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(502, str(exc)) from exc
-
     url = str(session.get("url") or "")
     if not url.startswith("https://checkout.stripe.com/"):
         raise HTTPException(502, "Stripe did not return a trusted Checkout URL")
@@ -170,6 +152,9 @@ def membership_subscription_checkout(body: MembershipSubscriptionCheckoutRequest
         "activation_source": "verified_stripe_webhook",
         "esp_role_effect": "none",
     }
+
+
+router.include_router(subscription_lifecycle_router)
 
 
 __all__ = [
