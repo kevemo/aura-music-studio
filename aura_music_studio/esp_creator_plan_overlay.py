@@ -28,6 +28,7 @@ from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
 from .shared_sky_streaming_studios import router as shared_sky_router
+from .shared_sky_worker_control import router as shared_sky_worker_control_router
 from .universal_creative_library import router as universal_creative_library_router
 
 router = APIRouter()
@@ -51,6 +52,7 @@ router.include_router(support_center_router)
 router.include_router(support_sla_router)
 router.include_router(broadcast_tech_router)
 router.include_router(shared_sky_router)
+router.include_router(shared_sky_worker_control_router)
 router.include_router(creator_tech_vault_router)
 router.include_router(service_registry_router)
 router.include_router(social_media_library_router)
