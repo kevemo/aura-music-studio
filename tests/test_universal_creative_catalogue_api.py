@@ -97,3 +97,20 @@ def test_missing_membership_context_is_denied():
     with pytest.raises(HTTPException) as exc:
         universal_studio_menus(SimpleNamespace(state=SimpleNamespace()), domain="music")
     assert exc.value.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        SimpleNamespace(),
+        SimpleNamespace(plan=None),
+        SimpleNamespace(plan=SimpleNamespace()),
+        SimpleNamespace(plan=SimpleNamespace(id="")),
+        SimpleNamespace(plan=SimpleNamespace(id=123)),
+    ],
+)
+def test_malformed_membership_plan_context_is_denied(member):
+    request = SimpleNamespace(state=SimpleNamespace(member=member))
+    with pytest.raises(HTTPException) as exc:
+        universal_studio_menus(request, domain="music")
+    assert exc.value.status_code == 401
