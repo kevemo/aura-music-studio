@@ -10,10 +10,12 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .aura_live_overlay_effect_packs import router as live_overlay_effect_packs_router
 from .aura_live_overlay_effects import router as live_overlay_effects_router
 
 router = APIRouter(tags=["Aura LIVE Interactive Overlays"])
 router.include_router(live_overlay_effects_router)
+router.include_router(live_overlay_effect_packs_router)
 DB_PATH = Path(os.getenv("AURA_LIVE_OVERLAY_DB", "data/aura_live_overlay.sqlite3"))
 
 
