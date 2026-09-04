@@ -26,9 +26,9 @@ def test_universal_routes_are_reachable_on_production_app_and_specific_before_ca
     assert "/command-center/api/universal-library/runtime-effects" in paths
     assert "/command-center/api/universal-library" in paths
     assert "/command-center/api/universal-library/{item_id:path}" in paths
-    assert paths.index("/command-center/api/universal-library/menus") < paths.index(
-        "/command-center/api/universal-library/{item_id:path}"
-    )
+    catchall_index = paths.index("/command-center/api/universal-library/{item_id:path}")
+    assert paths.index("/command-center/api/universal-library/menus") < catchall_index
+    assert paths.index("/command-center/api/universal-library/runtime-effects") < catchall_index
 
 
 def test_studio_menu_api_returns_canonical_effect_bands():
