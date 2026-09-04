@@ -257,6 +257,7 @@ def _route_signature_exists(app, path: str, method: str) -> bool:
 def install_universal_creative_routes(app) -> None:
     """Bind specific Universal Library handlers before the legacy catch-all."""
     from .aura_effect_system_api import effect_system_route_registrations
+    from .aura_effect_system_extended_api import effect_system_extended_route_registrations
     from .universal_creative_library import universal_library, universal_library_item
 
     prefix = "/command-center/api/universal-library"
@@ -271,6 +272,7 @@ def install_universal_creative_routes(app) -> None:
         (f"{prefix}/runtime-effects/{{item_id:path}}/preview-plan", universal_runtime_effect_preview_plan, "POST"),
         (f"{prefix}/runtime-effects/{{item_id:path}}", universal_runtime_effect_item, "GET"),
         *effect_system_route_registrations(prefix),
+        *effect_system_extended_route_registrations(prefix),
         (f"{prefix}/{{item_id:path}}", universal_library_item, "GET"),
     )
     for path, endpoint, method in registrations:
