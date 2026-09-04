@@ -10,7 +10,7 @@ from .accounts import AccountStore
 from .audit import AuditLedger
 from .csrf_tokens import CSRF_HEADER, SessionCsrfService
 from .membership_api import require_admin
-from .stripe_billing import StripeClient, StripeConfig, evidence_store
+from .stripe_billing import StripeClient, StripeConfig, _clean_base_url, evidence_store
 from .subscriptions import SubscriptionLedger
 
 router = APIRouter(tags=["Membership Subscription Lifecycle"])
@@ -127,6 +127,36 @@ def _set_stripe_cancel_at_period_end(binding: dict[str, Any], *, enabled: bool) 
         raise HTTPException(502, f"Stripe did not confirm the bound subscription {operation}")
 
 
+def _stripe_payment_method_portal(binding: dict[str, Any]) -> str:
+    _subscription_id, customer_id = _provider_subscription_identity(binding)
+    config = StripeConfig.from_env()
+    if not config.secret_key or not config.public_base_url:
+        raise HTTPException(503, "Stripe payment-method management is not configured")
+    try:
+        return_url = f"{_clean_base_url(config.public_base_url)}/dashboard"
+    except ValueError as exc:
+        raise HTTPException(503, "Stripe payment-method management has an invalid public return URL") from exc
+    try:
+        provider = StripeClient(config)._post(
+            "/v1/billing_portal/sessions",
+            {
+                "customer": customer_id,
+                "return_url": return_url,
+                "flow_data[type]": "payment_method_update",
+                "flow_data[after_completion][type]": "redirect",
+                "flow_data[after_completion][redirect][return_url]": return_url,
+            },
+        )
+    except RuntimeError as exc:
+        raise HTTPException(502, "Stripe could not create a payment-method management session") from exc
+    if str(provider.get("customer") or "") != customer_id:
+        raise HTTPException(502, "Stripe did not confirm the bound customer for payment-method management")
+    url = str(provider.get("url") or "")
+    if not url.startswith("https://billing.stripe.com/"):
+        raise HTTPException(502, "Stripe did not return a trusted Billing Portal URL")
+    return url
+
+
 def _safe_subscription_status(status: dict[str, Any]) -> dict[str, Any]:
     user = dict(status.get("user") or {})
     state = dict(status.get("subscription") or {})
@@ -228,6 +258,28 @@ def resume_membership_subscription(request: Request):
     return result
 
 
+@router.post("/membership/subscription/payment-method")
+def membership_subscription_payment_method(request: Request):
+    user = _signed_in_user(request)
+    _require_cookie_csrf(request, action="manage membership payment method")
+    user_id = str(user["id"])
+    _active_paid_period(user)
+    binding = _stripe_binding_for_user(user_id)
+    if not binding:
+        raise HTTPException(409, "This membership is not managed by Stripe")
+    portal_url = _stripe_payment_method_portal(binding)
+    return {
+        "provider": "stripe",
+        "portal_url": portal_url,
+        "flow": "payment_method_update",
+        "payment_method_management_only": True,
+        "plan_or_billing_period_change_enabled_by_this_endpoint": False,
+        "entitlement_changed": False,
+        "browser_return_is_payment_proof": False,
+        "esp_role_effect": "none",
+    }
+
+
 @router.post("/admin/membership/record-verified-refund")
 def record_verified_membership_refund(payload: VerifiedRefundRequest, x_lss_admin_key: str | None = Header(default=None)):
     require_admin(x_lss_admin_key)
@@ -258,6 +310,7 @@ def record_verified_membership_refund(payload: VerifiedRefundRequest, x_lss_admi
 __all__ = [
     "VerifiedRefundRequest",
     "cancel_membership_subscription",
+    "membership_subscription_payment_method",
     "membership_subscription_status",
     "record_verified_membership_refund",
     "resume_membership_subscription",
