@@ -95,12 +95,7 @@ class MediaPlaneSettings:
 
 
 class SharedSkyMediaPlane:
-    """Durable control-plane contract for contribution ingest and media nodes.
-
-    This does not itself terminate RTMP/SRT/WebRTC media. It issues short-lived signed
-    contribution credentials, records/revokes sessions, and tracks authenticated media-node
-    heartbeats so a deployed ingest service can use the same durable ownership boundary.
-    """
+    """Durable control-plane contract for contribution ingest and media nodes."""
 
     def __init__(self, db_path: str | os.PathLike | None = None):
         self.db_path = str(db_path or shared_sky.db_path)
@@ -145,6 +140,16 @@ class SharedSkyMediaPlane:
                 );
                 """
             )
+
+    def _require_owned_broadcast(self, user_id: str, broadcast_id: str) -> dict:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM shared_sky_broadcasts WHERE id=? AND user_id=?",
+                (broadcast_id, user_id),
+            ).fetchone()
+        if not row:
+            raise KeyError(broadcast_id)
+        return dict(row)
 
     def _token(self, *, session_id: str, user_id: str, broadcast_id: str, expires_at: datetime) -> str:
         secret = _signing_secret()
@@ -208,7 +213,7 @@ class SharedSkyMediaPlane:
         return result
 
     def create_session(self, user_id: str, body: IngestSessionCreate) -> dict:
-        shared_sky.broadcast(user_id, body.broadcast_id)
+        self._require_owned_broadcast(user_id, body.broadcast_id)
         settings = MediaPlaneSettings.from_env()
         if not settings.signing_configured:
             raise RuntimeError("Shared Sky ingest signing is not configured")
@@ -222,21 +227,14 @@ class SharedSkyMediaPlane:
         now = _now()
         expires = now + timedelta(seconds=body.ttl_seconds)
         session_id = uuid4().hex
-        token = self._token(
-            session_id=session_id,
-            user_id=user_id,
-            broadcast_id=body.broadcast_id,
-            expires_at=expires,
-        )
+        token = self._token(session_id=session_id, user_id=user_id, broadcast_id=body.broadcast_id, expires_at=expires)
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
         node_id = selected.get("node_id") if selected else None
         with self._connect() as con:
             con.execute(
-                """
-                INSERT INTO shared_sky_ingest_sessions(
+                """INSERT INTO shared_sky_ingest_sessions(
                     id,user_id,broadcast_id,token_hash,node_id,state,issued_at,expires_at
-                ) VALUES(?,?,?,?,?,'issued',?,?)
-                """,
+                ) VALUES(?,?,?,?,?,'issued',?,?)""",
                 (session_id, user_id, body.broadcast_id, token_hash, node_id, _iso(now), _iso(expires)),
             )
         ingest_url = f"{ingest_base}/{quote(body.broadcast_id, safe='')}/{quote(token, safe='')}"
@@ -253,8 +251,7 @@ class SharedSkyMediaPlane:
     def revoke(self, user_id: str, session_id: str) -> dict:
         with self._connect() as con:
             row = con.execute(
-                "SELECT * FROM shared_sky_ingest_sessions WHERE id=? AND user_id=?",
-                (session_id, user_id),
+                "SELECT * FROM shared_sky_ingest_sessions WHERE id=? AND user_id=?", (session_id, user_id)
             ).fetchone()
             if not row:
                 raise KeyError(session_id)
@@ -279,8 +276,7 @@ class SharedSkyMediaPlane:
         stamp = _iso()
         with self._connect() as con:
             con.execute(
-                """
-                INSERT INTO shared_sky_media_nodes(
+                """INSERT INTO shared_sky_media_nodes(
                     node_id,region,ingest_protocols,capacity,active_sessions,healthy,public_ingest_base,last_seen_at
                 ) VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(node_id) DO UPDATE SET
@@ -290,8 +286,7 @@ class SharedSkyMediaPlane:
                     active_sessions=excluded.active_sessions,
                     healthy=excluded.healthy,
                     public_ingest_base=excluded.public_ingest_base,
-                    last_seen_at=excluded.last_seen_at
-                """,
+                    last_seen_at=excluded.last_seen_at""",
                 (
                     body.node_id,
                     body.region,
@@ -386,11 +381,4 @@ def owner_media_plane_status(request: Request):
     return media_plane.status()
 
 
-__all__ = [
-    "IngestSessionCreate",
-    "MediaPlaneSettings",
-    "NodeHeartbeat",
-    "SharedSkyMediaPlane",
-    "media_plane",
-    "router",
-]
+__all__ = ["IngestSessionCreate", "MediaPlaneSettings", "NodeHeartbeat", "SharedSkyMediaPlane", "media_plane", "router"]
