@@ -24,10 +24,27 @@ def _bool_env(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _safe_worker_rows(rows: list[dict]) -> list[dict]:
+    """Project worker health without returning provider/relay error text."""
+    safe: list[dict] = []
+    for row in rows:
+        safe.append(
+            {
+                "worker_id": str(row.get("worker_id") or ""),
+                "status": str(row.get("status") or "unknown")[:32],
+                "last_seen_at": row.get("last_seen_at"),
+                "last_claimed_schedule_id": row.get("last_claimed_schedule_id"),
+                "healthy": bool(row.get("healthy")),
+                "error_present": bool(str(row.get("last_error") or "")),
+            }
+        )
+    return safe
+
+
 def _runtime_snapshot() -> dict:
     settings = WorkerSettings.from_env()
     worker = SharedSkyWorker(shared_sky, settings=settings, worker_id="owner-runtime-probe")
-    workers = worker.worker_health(stale_after_seconds=180)
+    workers = _safe_worker_rows(worker.worker_health(stale_after_seconds=180))
     active_workers = [row for row in workers if row.get("healthy")]
     owner_status = shared_sky.owner_status()
     relay_health = relay.health().__dict__
@@ -42,6 +59,7 @@ def _runtime_snapshot() -> dict:
             "retry_seconds": settings.retry_seconds,
             "healthy_workers": len(active_workers),
             "workers": workers,
+            "raw_worker_errors_exposed": False,
         },
         "relay": relay_health,
         "vault": owner_status.get("vault", {}),
