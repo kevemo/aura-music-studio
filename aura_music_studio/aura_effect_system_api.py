@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .aura_effect_system_creator import EffectNodeSpec, EffectSystemSpec, compile_effect_system, make_effect_system
+from .aura_effect_system_portal import effect_system_creator_page
 from .aura_effect_system_project import (
     apply_effect_system,
     list_saved_effect_systems,
@@ -282,6 +283,7 @@ def restore_member_effect_system_revision(project_name: str, revision_id: str, r
 def effect_system_route_registrations(prefix: str) -> tuple[tuple[str, Any, str], ...]:
     base = f"{prefix}/effect-systems"
     return (
+        ("/creative/effect-system-creator", effect_system_creator_page, "GET"),
         (f"{base}/compose", compose_member_effect_system, "POST"),
         (f"{base}/projects/{{project_name}}", list_member_effect_systems, "GET"),
         (f"{base}/projects/{{project_name}}/save", save_member_effect_system, "POST"),
