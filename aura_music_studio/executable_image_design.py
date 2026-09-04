@@ -35,7 +35,8 @@ def _rgba(value: str) -> tuple[int, int, int, int]:
     payload = value[1:]
     if len(payload) == 6:
         payload += "FF"
-    return tuple(int(payload[index : index + 2], 16) for index in range(0, 8, 2))  # type: ignore[return-value]
+    values = tuple(int(payload[index : index + 2], 16) for index in range(0, 8, 2))
+    return values[0], values[1], values[2], values[3]
 
 
 def _valid_id(value: str, *, label: str) -> str:
@@ -274,18 +275,12 @@ def _pattern(layer: PatternLayer) -> Image.Image:
     draw = ImageDraw.Draw(image)
     foreground = _rgba(layer.foreground)
     cell = layer.cell_size
-
     if layer.pattern == "checker":
         for y in range(0, layer.height, cell):
             for x in range(0, layer.width, cell):
                 if ((x // cell) + (y // cell)) % 2 == 0:
                     draw.rectangle(
-                        (
-                            x,
-                            y,
-                            min(layer.width - 1, x + cell - 1),
-                            min(layer.height - 1, y + cell - 1),
-                        ),
+                        (x, y, min(layer.width - 1, x + cell - 1), min(layer.height - 1, y + cell - 1)),
                         fill=foreground,
                     )
     elif layer.pattern == "stripes":
@@ -341,6 +336,8 @@ def _text_layer(layer: TextLayer) -> Image.Image:
         + line_height * len(lines)
         + layer.line_spacing * max(0, len(lines) - 1)
     )
+    if height > _MAX_LAYER_DIMENSION or layer.width * height > _MAX_LAYER_PIXELS:
+        raise ValueError("Rendered text layer exceeds the image design safety limit")
     image = Image.new("RGBA", (layer.width, max(1, height)), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     y = layer.padding
@@ -363,12 +360,7 @@ def _shape(layer: ShapeLayer) -> Image.Image:
     draw = ImageDraw.Draw(image)
     box = (0, 0, layer.width - 1, layer.height - 1)
     drawing = draw.rectangle if layer.shape == "rectangle" else draw.ellipse
-    drawing(
-        box,
-        fill=_rgba(layer.fill),
-        outline=_rgba(layer.outline),
-        width=layer.stroke_width,
-    )
+    drawing(box, fill=_rgba(layer.fill), outline=_rgba(layer.outline), width=layer.stroke_width)
     return image
 
 
@@ -400,7 +392,6 @@ def _blend_layer(base: Image.Image, layer_image: Image.Image, layer: ImageLayerB
     overlay.alpha_composite(layer_image, dest=(layer.x, layer.y))
     if layer.blend == "normal":
         return Image.alpha_composite(base, overlay)
-
     base_rgb = base.convert("RGB")
     overlay_rgb = overlay.convert("RGB")
     blended_rgb = (
@@ -408,8 +399,6 @@ def _blend_layer(base: Image.Image, layer_image: Image.Image, layer: ImageLayerB
         if layer.blend == "multiply"
         else ImageChops.screen(base_rgb, overlay_rgb)
     )
-    # A blend mode needs an existing backdrop. Where the backdrop is transparent, use the
-    # layer's own colour instead of multiplying it by implicit black.
     blended_rgb = Image.composite(blended_rgb, overlay_rgb, base.getchannel("A"))
     blended = blended_rgb.convert("RGBA")
     blended.putalpha(overlay.getchannel("A"))
@@ -442,9 +431,8 @@ def _render_layer(
         image = _shape(layer)
     elif isinstance(layer, TextLayer):
         image = _text_layer(layer)
-    else:  # pragma: no cover - discriminated union rejects unknown layer kinds
+    else:
         raise ValueError("Unsupported image design layer")
-
     if layer.mask is not None:
         image = _apply_mask(image, layer.mask)
     return _apply_opacity(image, layer.opacity)
@@ -456,19 +444,13 @@ def render_image_design_document(
     *,
     assets: Mapping[str, str | Path] | None = None,
 ) -> dict:
-    """Render an editable, bounded Image Designer document into a real image.
-
-    Raster layers reference caller/server-bound asset IDs rather than file paths inside the
-    document. The document can embed the existing allowlisted ImageEffectGraph per raster layer,
-    keeping effects editable instead of flattening them into an opaque provider result.
-    """
+    """Render one bounded editable Image Designer document into a real image."""
     asset_map = assets or {}
     canvas = Image.new("RGBA", (document.width, document.height), _rgba(document.background))
     asset_digests: dict[str, str] = {}
     effect_fingerprints: dict[str, str] = {}
     rendered_layer_ids: list[str] = []
     skipped_layer_ids: list[str] = []
-
     for layer in document.layers:
         if not layer.visible or layer.opacity <= 0:
             skipped_layer_ids.append(layer.id)
@@ -487,7 +469,6 @@ def render_image_design_document(
     format_name = "JPEG" if suffix in {".jpg", ".jpeg"} else suffix.removeprefix(".").upper()
     output.save(temporary, format=format_name)
     temporary.replace(target)
-
     return {
         "rendered": True,
         "document_fingerprint": document.fingerprint(),
@@ -527,10 +508,7 @@ def save_image_design_preset(
     return target
 
 
-def load_image_design_preset(
-    directory: str | Path,
-    preset_name: str,
-) -> ImageDesignDocument:
+def load_image_design_preset(directory: str | Path, preset_name: str) -> ImageDesignDocument:
     if not _SAFE_PRESET_NAME.fullmatch(preset_name):
         raise ValueError("Preset name contains unsupported characters")
     root = Path(directory).resolve()
