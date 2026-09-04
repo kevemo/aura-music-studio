@@ -9,6 +9,9 @@ from .esp_social_tiktok_analytics import router as tiktok_analytics_router
 from .esp_social_tiktok_scope_upgrade import router as tiktok_scope_upgrade_router
 
 router = APIRouter(tags=["esp-social-publish-queue"])
+# Provider OAuth endpoints are registered directly on the canonical Social Management router.
+# Keep this child router focused on publish-queue and analytics surfaces so provider-specific OAuth
+# routes cannot be lost or duplicated when FastAPI flattens nested routers.
 # The TikTok statistics extension is mounted first so its live capability/sync endpoints
 # replace the earlier truthful "adapter pending" placeholders only when video.list is
 # actually present. The separate scope-upgrade router remains available for explicit
