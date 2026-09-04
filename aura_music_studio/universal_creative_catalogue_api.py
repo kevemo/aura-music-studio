@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .creative_catalogue import get_catalogue_item, search_catalogue
+from .creative_effect_entitlements import PUBLIC_COIN_UNIT, store as effect_entitlement_store
+from .membership_api import require_admin
 from .studio_catalogue_menus import EFFECT_BANDS, STUDIO_MENUS, public_studio_catalogue
 
 router = APIRouter(
@@ -24,11 +26,28 @@ class RuntimePreviewRequest(BaseModel):
     mix: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
+class EffectPurchaseRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=120)
+
+
+class EffectRefundRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=128)
+    reference: str = Field(min_length=1, max_length=180)
+    reason: str = Field(default="Effect purchase refund", min_length=2, max_length=240)
+
+
 def _require_member(request: Request):
     member = getattr(request.state, "member", None)
     if member is None:
         raise HTTPException(401, "Membership context unavailable")
     return member
+
+
+def _member_user_id(member) -> str:
+    user_id = str(getattr(member, "user_id", "") or "").strip()
+    if not user_id:
+        raise HTTPException(401, "Active member account required")
+    return user_id
 
 
 def _validate_studio(studio: str | None) -> str | None:
@@ -47,7 +66,7 @@ def _validate_band(entitlement: str | None) -> Literal["core", "silver", "gold"]
     return selected  # type: ignore[return-value]
 
 
-def _runtime_row(item) -> dict:
+def _runtime_row(item, *, owned: bool | None = None) -> dict:
     row = item.public()
     expected_price = _ALLOWED_BANDS[item.entitlement]
     if item.ccc_price != expected_price:  # pragma: no cover - import/runtime integrity boundary
@@ -65,8 +84,11 @@ def _runtime_row(item) -> dict:
             },
             "preview_compile_available": item.runtime == "ffmpeg_audio",
             "entitlement_price_authoritative": True,
+            "coin_unit": PUBLIC_COIN_UNIT,
         }
     )
+    if owned is not None:
+        row["owned"] = bool(owned)
     return row
 
 
@@ -79,6 +101,7 @@ def universal_studio_menus(request: Request, domain: str | None = None):
         raise HTTPException(400, str(exc)) from exc
     payload["plan"] = member.plan.id
     payload["catalogue_contract"] = "original_first_party"
+    payload["coin_unit"] = PUBLIC_COIN_UNIT
     return payload
 
 
@@ -90,50 +113,154 @@ def universal_runtime_effects(
     entitlement: str | None = None,
 ):
     member = _require_member(request)
+    user_id = _member_user_id(member)
     selected_studio = _validate_studio(studio)
     selected_band = _validate_band(entitlement)
+    purchased_ids = {row["effect_id"] for row in effect_entitlement_store.list_owned(user_id)}
+    items = search_catalogue(q.strip(), studio=selected_studio, entitlement=selected_band)
     rows = [
-        _runtime_row(item)
-        for item in search_catalogue(q.strip(), studio=selected_studio, entitlement=selected_band)
+        _runtime_row(item, owned=item.entitlement == "core" or item.id in purchased_ids)
+        for item in items
     ]
     return {
         "items": rows,
         "count": len(rows),
         "backend_executable_count": sum(1 for row in rows if row["backend_executable"]),
+        "owned_count": sum(1 for row in rows if row["owned"]),
         "plan": member.plan.id,
         "query": q.strip(),
         "studio": selected_studio,
         "entitlement": selected_band,
         "effect_bands": [band.public() for band in EFFECT_BANDS],
+        "coin_unit": PUBLIC_COIN_UNIT,
         "purchase_entitlement_separate_from_subscription": True,
-        "owned_state_included": False,
-        "owned_state_reason": "Account purchase entitlements are resolved by the server-authoritative Coin ledger in a separate commercial slice.",
+        "owned_state_included": True,
+        "individual_purchase_scope": "permanent_account_unlock",
     }
+
+
+@router.get("/runtime-effects/owned")
+def universal_owned_runtime_effects(request: Request):
+    member = _require_member(request)
+    user_id = _member_user_id(member)
+    purchased = effect_entitlement_store.list_owned(user_id)
+    purchased_ids = {row["effect_id"] for row in purchased}
+    premium_items = [item for item in search_catalogue("") if item.id in purchased_ids]
+    return {
+        "items": [_runtime_row(item, owned=True) for item in premium_items],
+        "count": len(premium_items),
+        "coin_unit": PUBLIC_COIN_UNIT,
+        "core_effects_implicitly_included": True,
+        "individual_purchase_scope": "permanent_account_unlock",
+    }
+
+
+@router.get("/runtime-effects/{item_id:path}/entitlement")
+def universal_runtime_effect_entitlement(item_id: str, request: Request):
+    member = _require_member(request)
+    user_id = _member_user_id(member)
+    try:
+        entitlement = effect_entitlement_store.has_entitlement(user_id, item_id)
+    except ValueError as exc:
+        if "not found" in str(exc).casefold():
+            raise HTTPException(404, str(exc)) from exc
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "entitlement": entitlement,
+        "coin_unit": PUBLIC_COIN_UNIT,
+        "individual_purchase_scope": "permanent_account_unlock",
+    }
+
+
+@router.post("/runtime-effects/{item_id:path}/purchase")
+def universal_runtime_effect_purchase(item_id: str, body: EffectPurchaseRequest, request: Request):
+    member = _require_member(request)
+    user_id = _member_user_id(member)
+    try:
+        result = effect_entitlement_store.purchase(
+            user_id,
+            item_id,
+            idempotency_key=body.idempotency_key,
+            actor="member",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.casefold():
+            raise HTTPException(404, message) from exc
+        if "insufficient" in message.casefold():
+            raise HTTPException(402, message) from exc
+        raise HTTPException(400, message) from exc
+    return {
+        **result,
+        "coin_unit": PUBLIC_COIN_UNIT,
+        "individual_purchase_scope": "permanent_account_unlock",
+        "subscription_changed": False,
+    }
+
+
+@router.post("/admin/runtime-effects/{item_id:path}/refund")
+def universal_runtime_effect_refund(
+    item_id: str,
+    body: EffectRefundRequest,
+    x_lss_admin_key: str | None = Header(default=None),
+):
+    require_admin(x_lss_admin_key)
+    try:
+        result = effect_entitlement_store.refund_and_revoke(
+            body.user_id,
+            item_id,
+            reference=body.reference,
+            reason=body.reason,
+            actor="admin_key",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.casefold():
+            raise HTTPException(404, message) from exc
+        raise HTTPException(400, message) from exc
+    return {**result, "coin_unit": PUBLIC_COIN_UNIT, "subscription_changed": False}
 
 
 @router.get("/runtime-effects/{item_id:path}")
 def universal_runtime_effect_item(item_id: str, request: Request):
     member = _require_member(request)
+    user_id = _member_user_id(member)
     try:
         item = get_catalogue_item(item_id)
+        entitlement = effect_entitlement_store.has_entitlement(user_id, item_id)
     except KeyError as exc:
         raise HTTPException(404, "Creative catalogue item not found") from exc
-    return {"item": _runtime_row(item), "plan": member.plan.id}
+    except ValueError as exc:
+        if "not found" in str(exc).casefold():
+            raise HTTPException(404, str(exc)) from exc
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "item": _runtime_row(item, owned=bool(entitlement["owned"])),
+        "entitlement": entitlement,
+        "plan": member.plan.id,
+        "coin_unit": PUBLIC_COIN_UNIT,
+    }
 
 
 @router.post("/runtime-effects/{item_id:path}/preview-plan")
 def universal_runtime_effect_preview_plan(item_id: str, body: RuntimePreviewRequest, request: Request):
     """Compile bounded parameters into the real renderer plan without mutating project media.
 
-    This endpoint proves that a catalogue item maps to an executable renderer primitive. The
-    actual project apply/render workflow remains separately authorised by project and entitlement
-    boundaries and is not bypassed here.
+    Preview-plan remains available for catalogue discovery. Actual project apply/render must check
+    this account entitlement before premium runtime execution; that apply boundary is the next
+    integration slice and is deliberately not faked here.
     """
-    _require_member(request)
+    member = _require_member(request)
+    user_id = _member_user_id(member)
     try:
         item = get_catalogue_item(item_id)
         effect = item.build_effect(body.parameters, enabled=body.enabled, mix=body.mix)
         chain = item.preview_filter_chain(body.parameters) if body.enabled else ""
+        entitlement = effect_entitlement_store.has_entitlement(user_id, item_id)
     except KeyError as exc:
         raise HTTPException(404, "Creative catalogue item not found") from exc
     except (TypeError, ValueError) as exc:
@@ -150,7 +277,23 @@ def universal_runtime_effect_preview_plan(item_id: str, body: RuntimePreviewRequ
         "filter_chain": chain,
         "project_media_mutated": False,
         "backend_executable": True,
+        "owned": bool(entitlement["owned"]),
+        "coin_unit": PUBLIC_COIN_UNIT,
+        "preview_does_not_grant_apply_access": True,
     }
 
 
-__all__ = ["RuntimePreviewRequest", "router", "universal_runtime_effects", "universal_runtime_effect_preview_plan", "universal_studio_menus"]
+__all__ = [
+    "EffectPurchaseRequest",
+    "EffectRefundRequest",
+    "RuntimePreviewRequest",
+    "router",
+    "universal_owned_runtime_effects",
+    "universal_runtime_effect_entitlement",
+    "universal_runtime_effect_item",
+    "universal_runtime_effect_purchase",
+    "universal_runtime_effect_preview_plan",
+    "universal_runtime_effect_refund",
+    "universal_runtime_effects",
+    "universal_studio_menus",
+]
