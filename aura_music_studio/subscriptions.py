@@ -312,26 +312,28 @@ class SubscriptionLedger:
                         _iso(now),
                     ),
                 )
-                return self.status(user_id)
-
-            con.execute(
-                """INSERT INTO subscription_state
-                   (user_id,plan_id,status,billing_period,period_start,period_end,last_payment_reference,updated_at)
-                   VALUES (?,?, 'active', ?, ?, ?, ?, ?)
-                   ON CONFLICT(user_id) DO UPDATE SET
-                     plan_id=excluded.plan_id,
-                     status='active',
-                     billing_period=excluded.billing_period,
-                     period_start=excluded.period_start,
-                     period_end=excluded.period_end,
-                     last_payment_reference=excluded.last_payment_reference,
-                     updated_at=excluded.updated_at""",
-                (user_id, plan.id, period.value, _iso(start), _iso(end), reference, _iso(now)),
-            )
-            con.execute(
-                "UPDATE users SET status='active', plan_id=?, requested_plan_id=?, billing_status='active' WHERE id=?",
-                (plan.id, plan.id, user_id),
-            )
+            else:
+                con.execute(
+                    """INSERT INTO subscription_state
+                       (user_id,plan_id,status,billing_period,period_start,period_end,last_payment_reference,updated_at)
+                       VALUES (?,?, 'active', ?, ?, ?, ?, ?)
+                       ON CONFLICT(user_id) DO UPDATE SET
+                         plan_id=excluded.plan_id,
+                         status='active',
+                         billing_period=excluded.billing_period,
+                         period_start=excluded.period_start,
+                         period_end=excluded.period_end,
+                         last_payment_reference=excluded.last_payment_reference,
+                         updated_at=excluded.updated_at""",
+                    (user_id, plan.id, period.value, _iso(start), _iso(end), reference, _iso(now)),
+                )
+                con.execute(
+                    "UPDATE users SET status='active', plan_id=?, requested_plan_id=?, billing_status='active' WHERE id=?",
+                    (plan.id, plan.id, user_id),
+                )
+        # Status is read only after the transaction exits so a separate connection can see the
+        # newly committed transition/state. Returning from inside the transaction would expose a
+        # stale view and can make a verified prepaid term appear to have vanished.
         return self.status(user_id)
 
     def cancel_at_period_end(self, user_id: str) -> dict:
