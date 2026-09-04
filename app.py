@@ -138,6 +138,8 @@ from aura_music_studio.stripe_billing_hardening import router as stripe_billing_
 from aura_music_studio.system_api import router as system_router
 from aura_music_studio.take_api import router as take_router
 from aura_music_studio.take_portal import router as take_portal_router
+from aura_music_studio.universal_creative_catalogue_api import router as universal_creative_catalogue_router
+from aura_music_studio.universal_creative_library import router as universal_creative_library_router
 from aura_music_studio.usage_tracking import CreativeUsageMiddleware
 from aura_music_studio.vocal_api import router as vocal_router
 from aura_music_studio.voice_house_api import router as voice_house_router
@@ -222,6 +224,10 @@ app.include_router(creative_studio_integration_router)
 app.include_router(creative_project_continuity_router)
 app.include_router(creative_project_router)
 app.include_router(creative_media_preview_router)
+# Universal catalogue routes are mounted directly on the canonical production app. Specific
+# menu/runtime endpoints must precede the legacy /{item_id:path} catch-all so they are reachable.
+app.include_router(universal_creative_catalogue_router)
+app.include_router(universal_creative_library_router)
 app.include_router(creative_library_router)
 app.include_router(pulsar_player_router)
 app.include_router(creative_workspace_router)
