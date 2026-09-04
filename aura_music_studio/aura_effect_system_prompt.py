@@ -44,16 +44,28 @@ def _normalize_prompt(prompt: str) -> str:
     return normalized
 
 
+def _alias_pattern(alias: str) -> str:
+    """Match an intent alias as a complete token/phrase, never as a substring.
+
+    This keeps short aliases such as ``gain`` from matching unrelated words such as
+    ``again`` while preserving multi-word and hyphenated catalogue phrases.
+    """
+    return rf"(?<!\w){re.escape(alias)}(?!\w)"
+
+
 def _first_alias_position(text: str, aliases: tuple[str, ...]) -> int | None:
-    positions = [text.find(alias) for alias in aliases]
-    positions = [position for position in positions if position >= 0]
+    positions: list[int] = []
+    for alias in aliases:
+        match = re.search(_alias_pattern(alias), text, flags=re.IGNORECASE)
+        if match:
+            positions.append(match.start())
     return min(positions) if positions else None
 
 
 def _numeric_after_alias(text: str, aliases: tuple[str, ...], *, unit: str) -> float | None:
     for alias in aliases:
         match = re.search(
-            rf"{re.escape(alias)}[^0-9+-]{{0,28}}([+-]?\d+(?:\.\d+)?)\s*{re.escape(unit)}\b",
+            rf"{_alias_pattern(alias)}[^0-9+-]{{0,28}}([+-]?\d+(?:\.\d+)?)\s*{re.escape(unit)}\b",
             text,
             flags=re.IGNORECASE,
         )
@@ -65,7 +77,7 @@ def _numeric_after_alias(text: str, aliases: tuple[str, ...], *, unit: str) -> f
 def _percent_after_alias(text: str, aliases: tuple[str, ...]) -> float | None:
     for alias in aliases:
         match = re.search(
-            rf"{re.escape(alias)}[^0-9]{{0,28}}(\d+(?:\.\d+)?)\s*%",
+            rf"{_alias_pattern(alias)}[^0-9]{{0,28}}(\d+(?:\.\d+)?)\s*%",
             text,
             flags=re.IGNORECASE,
         )
