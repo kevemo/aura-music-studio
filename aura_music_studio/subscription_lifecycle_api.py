@@ -45,14 +45,14 @@ def _signed_in_user(request: Request) -> dict[str, Any]:
     return user
 
 
-def _require_cookie_csrf(request: Request) -> None:
+def _require_cookie_csrf(request: Request, *, action: str) -> None:
     if _bearer_token(request):
         return
     session_token = request.cookies.get(_COOKIE_NAME) or ""
     supplied = request.headers.get(CSRF_HEADER) or ""
     if not SessionCsrfService(store).verify(session_token, supplied):
         raise HTTPException(403, {
-            "message": "A valid session-bound CSRF token is required to cancel membership",
+            "message": f"A valid session-bound CSRF token is required to {action}",
             "security_gate": "session_csrf",
             "csrf_token_endpoint": "/auth/csrf-token",
             "csrf_header": CSRF_HEADER,
@@ -65,38 +65,66 @@ def _stripe_binding_for_user(user_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def _require_locally_cancellable(user: dict[str, Any]) -> None:
+def _active_paid_period(user: dict[str, Any]) -> tuple[dict[str, Any], datetime]:
     state = subscriptions.get(str(user.get("id") or ""))
     if user.get("plan_id") == "free" or not state:
-        raise HTTPException(409, "An active paid subscription is required for cancellation")
-    if state.get("status") not in {"active", "cancel_at_period_end"}:
-        raise HTTPException(409, "An active paid subscription is required for cancellation")
+        raise HTTPException(409, "An active paid subscription is required")
     try:
         period_end = datetime.fromisoformat(str(state.get("period_end") or ""))
     except ValueError as exc:
         raise HTTPException(409, "The paid subscription period is not valid") from exc
     if period_end <= datetime.now(timezone.utc):
+        raise HTTPException(409, "An active paid subscription is required")
+    return state, period_end
+
+
+def _require_locally_cancellable(user: dict[str, Any]) -> None:
+    state, _period_end = _active_paid_period(user)
+    if state.get("status") not in {"active", "cancel_at_period_end"}:
         raise HTTPException(409, "An active paid subscription is required for cancellation")
 
 
-def _schedule_stripe_cancellation(user_id: str, binding: dict[str, Any]) -> None:
+def _require_locally_resumable(user: dict[str, Any]) -> None:
+    state, _period_end = _active_paid_period(user)
+    transition = subscriptions.scheduled_transition(str(user.get("id") or ""))
+    cancellation_scheduled = bool(
+        user.get("billing_status") == "cancel_at_period_end"
+        or state.get("status") == "cancel_at_period_end"
+        or (transition and int(transition.get("cancel_at_period_end") or 0))
+    )
+    if not cancellation_scheduled:
+        raise HTTPException(409, "Membership renewal is not currently scheduled for cancellation")
+
+
+def _provider_subscription_identity(binding: dict[str, Any]) -> tuple[str, str]:
     subscription_id = str(binding.get("stripe_subscription_id") or "")
     customer_id = str(binding.get("stripe_customer_id") or "")
     if not subscription_id.startswith("sub_") or not customer_id.startswith("cus_"):
-        raise HTTPException(503, "Stripe subscription binding is not safe for cancellation")
+        raise HTTPException(503, "Stripe subscription binding is not safe for renewal changes")
+    return subscription_id, customer_id
+
+
+def _set_stripe_cancel_at_period_end(binding: dict[str, Any], *, enabled: bool) -> None:
+    subscription_id, customer_id = _provider_subscription_identity(binding)
     config = StripeConfig.from_env()
     if not config.secret_key:
-        raise HTTPException(503, "Stripe subscription cancellation is not configured")
+        operation = "cancellation" if enabled else "renewal resume"
+        raise HTTPException(503, f"Stripe subscription {operation} is not configured")
     try:
-        provider = StripeClient(config)._post(f"/v1/subscriptions/{subscription_id}", {"cancel_at_period_end": "true"})
+        provider = StripeClient(config)._post(
+            f"/v1/subscriptions/{subscription_id}",
+            {"cancel_at_period_end": "true" if enabled else "false"},
+        )
     except RuntimeError as exc:
-        raise HTTPException(502, "Stripe could not schedule subscription cancellation") from exc
+        operation = "schedule subscription cancellation" if enabled else "resume subscription renewal"
+        raise HTTPException(502, f"Stripe could not {operation}") from exc
     if (
         str(provider.get("id") or "") != subscription_id
         or str(provider.get("customer") or "") != customer_id
-        or provider.get("cancel_at_period_end") is not True
+        or provider.get("cancel_at_period_end") is not enabled
     ):
-        raise HTTPException(502, "Stripe did not confirm the bound subscription cancellation")
+        operation = "cancellation" if enabled else "renewal resume"
+        raise HTTPException(502, f"Stripe did not confirm the bound subscription {operation}")
 
 
 def _safe_subscription_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -149,13 +177,13 @@ def membership_subscription_status(request: Request):
 @router.post("/membership/subscription/cancel")
 def cancel_membership_subscription(request: Request):
     user = _signed_in_user(request)
-    _require_cookie_csrf(request)
+    _require_cookie_csrf(request, action="cancel membership renewal")
     user_id = str(user["id"])
     _require_locally_cancellable(user)
     binding = _stripe_binding_for_user(user_id)
     provider = "manual_or_non_stripe"
     if binding and binding.get("stripe_subscription_id"):
-        _schedule_stripe_cancellation(user_id, binding)
+        _set_stripe_cancel_at_period_end(binding, enabled=True)
         provider = "stripe"
     try:
         status = subscriptions.cancel_at_period_end(user_id)
@@ -169,6 +197,33 @@ def cancel_membership_subscription(request: Request):
         "access_removed_immediately": False,
         "renewal_provider": provider,
         "provider_cancellation_confirmed": provider == "stripe",
+    })
+    return result
+
+
+@router.post("/membership/subscription/resume")
+def resume_membership_subscription(request: Request):
+    user = _signed_in_user(request)
+    _require_cookie_csrf(request, action="resume membership renewal")
+    user_id = str(user["id"])
+    _require_locally_resumable(user)
+    binding = _stripe_binding_for_user(user_id)
+    provider = "manual_or_non_stripe"
+    if binding and binding.get("stripe_subscription_id"):
+        _set_stripe_cancel_at_period_end(binding, enabled=False)
+        provider = "stripe"
+    try:
+        status = subscriptions.resume_renewal(user_id)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if provider == "stripe":
+        evidence_store.set_binding_status(user_id, "active")
+    result = _safe_subscription_status(status)
+    result.update({
+        "renewal_resumed": True,
+        "access_changed_immediately": False,
+        "renewal_provider": provider,
+        "provider_resume_confirmed": provider == "stripe",
     })
     return result
 
@@ -205,5 +260,6 @@ __all__ = [
     "cancel_membership_subscription",
     "membership_subscription_status",
     "record_verified_membership_refund",
+    "resume_membership_subscription",
     "router",
 ]
