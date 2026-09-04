@@ -189,7 +189,7 @@ def test_keyframed_mask_opacity_and_crop_execute_together(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="FFmpeg required for fail-closed mask tests")
-def test_mask_crop_does_not_bypass_tracking_or_other_mask_safety_boundaries(tmp_path):
+def test_mask_crop_does_not_bypass_tracking_or_unsupported_colour_safety_boundaries(tmp_path):
     project, store, sequence, _track, item, _source = _project(tmp_path)
     store.patch_item(item.id, {"crop": {"left": 0.2}})
     store.add_mask(
@@ -208,7 +208,7 @@ def test_mask_crop_does_not_bypass_tracking_or_other_mask_safety_boundaries(tmp_
         item2.id,
         {
             "crop": {"left": 0.2},
-            "color": {"brightness": 0.2},
+            "color": {"temperature": 0.2},
         },
     )
     store2.add_mask(item2.id, EditorMask(shape="rectangle", points=[(0.0, 0.0), (1.0, 1.0)]))
@@ -225,6 +225,7 @@ def test_production_render_api_routes_through_mask_crop_compositor():
     from aura_music_studio import professional_editor_render_api
 
     source = inspect.getsource(professional_editor_render_api)
-    assert "professional_video_mask_crop_compositor" in source
+    assert "professional_video_mask_effects_colour_compositor" in source
+    assert "professional_video_mask_crop_compositor ->" in source
     assert "professional_video_track_keyframe_universal_compositor ->" in source
     assert "video_renderer = UniversalVisualVideoCompositor" in source

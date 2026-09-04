@@ -11,13 +11,14 @@ from pydantic import BaseModel, Field
 from .export_provenance import store as export_provenance_store
 from .plans import AUTOMATION, BASIC_TIMELINE, MUSIC_VIDEO_DOWNLOAD
 # Production inheritance remains explicit for regression/audit tooling:
-# professional_video_mask_crop_compositor -> professional_video_track_keyframe_universal_compositor ->
-# professional_video_track_keyframe_compositor -> professional_keyframed_mask_video_compositor ->
-# professional_chroma_key_video_compositor -> professional_universal_scoped_visual_video_compositor ->
-# grouped professional compositor.
-# Wave 11 allows authored masks to coexist with crop because alpha-safe mask derivatives execute
-# before grouped crop. Automatic mask tracking and unsupported track automation remain fail-closed.
-from .professional_video_mask_crop_compositor import UniversalVisualVideoCompositor
+# professional_video_mask_effects_colour_compositor -> professional_video_mask_crop_compositor ->
+# professional_video_track_keyframe_universal_compositor -> professional_video_track_keyframe_compositor ->
+# professional_keyframed_mask_video_compositor -> professional_chroma_key_video_compositor ->
+# professional_universal_scoped_visual_video_compositor -> grouped professional compositor.
+# Wave 12 allows supported item effects + authored masks + actually rendered item colour controls
+# to coexist in their established non-destructive stage order. Automatic tracking, unsupported
+# colour controls and unsupported automation paths remain fail-closed.
+from .professional_video_mask_effects_colour_compositor import UniversalVisualVideoCompositor
 from .professional_editor import ProfessionalEditorStore
 from .professional_editor_renderer import (
     EditorRenderError,
@@ -158,11 +159,11 @@ def render_editor_sequence(
         if sequence["kind"] == "video":
             if not member.plan.has(MUSIC_VIDEO_DOWNLOAD):
                 raise PermissionError("Video export requires a membership tier with video downloads")
-            # The production Video Studio renderer preserves grouped/scoped effect ordering, chroma
-            # alpha and authored roto masks, evaluates mask alpha before crop, and then evaluates
-            # supported track-opacity automation after whole-track effects and before track blend.
-            # Existing safe universal whole-track grade/mix keyframes remain executable; unsupported
-            # paths and automatic tracking continue to fail closed.
+            # The production Video Studio renderer preserves grouped/scoped ordering: supported item
+            # effects feed the alpha-safe authored-mask derivative, crop is applied afterward, then
+            # rendered item colour controls execute before the established transform/blend/track
+            # stages. Existing track automation remains executable; unsupported colour paths and
+            # automatic tracking continue to fail closed.
             video_renderer = UniversalVisualVideoCompositor(_project(project_name))
             result = _execute_video_render(
                 member,
