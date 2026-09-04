@@ -30,13 +30,13 @@ def _system(*, version: int = 1, gain_db: float = 2.0):
             EffectNodeSpec(
                 id="gain",
                 catalogue_item_id="music.fx.gain",
-                parameters={"gain_db": gain_db},
+                parameters={"db": gain_db},
                 mix=1.0,
             ),
             EffectNodeSpec(
                 id="space",
                 catalogue_item_id="music.fx.reverb",
-                parameters={"room_size": 0.35},
+                parameters={"predelay_ms": 30.0, "mix": 0.35},
                 mix=0.25,
             ),
         ],
