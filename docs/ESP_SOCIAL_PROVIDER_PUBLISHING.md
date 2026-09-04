@@ -10,6 +10,7 @@ Implemented automatic publishing surfaces are:
 | --- | --- | --- |
 | Facebook Pages | `facebook_pages_graph` | Page post |
 | Instagram | `instagram_graph` | Post, reel |
+| Threads | `threads_graph` | Single post: text, one image, or one video |
 | TikTok | `tiktok_content_posting` | Video |
 | YouTube | `youtube_data_v3` | Video, short |
 
@@ -20,6 +21,8 @@ The authoritative capability resolver is `aura_music_studio.esp_social_publish_c
 ## Connection models
 
 TikTok, Instagram and YouTube use the private ESP member OAuth flow. Their provider applications, scopes and callbacks must be configured in the deployment before the Connections screen offers authorization.
+
+Threads provider execution is implemented in the publishing runtime, but this slice does not claim a completed member-facing Threads OAuth connection flow. A Threads connection can become publishable only when it already has a valid approved `social-oauth://` or restricted `social-token://` credential reference, is explicitly connected, enables automatic publishing and activates `threads_graph`. A dedicated Threads OAuth UX and token-lifecycle flow remains separate work; the Connections UI must not claim it exists until that flow is implemented and verified.
 
 Facebook Pages uses a separate bounded member OAuth flow because Page publishing requires explicit Page selection and Page-specific permission verification. Before redirecting to Meta, the member must supply the numeric Facebook Page ID they intend to authorize. The callback verifies the required Page-publishing permissions and resolves only that exact Page from the authorized account; it never silently selects a different Page when several are available.
 
@@ -105,11 +108,15 @@ Publishable media references come through the ESP Social Media Library. The reso
 
 Provider-pulled URLs must use public HTTPS. Localhost/private-network targets are rejected. Creative Project files are accepted only when provenance resolves to a real Creative Element inside the tenant project directory.
 
+Threads image/video publishing deliberately accepts only a provider-accessible public HTTPS URL. A server-local creative file is not silently uploaded or exposed by the Threads adapter; it remains blocked until a separately reviewed provider-safe materialization/publication path exists.
+
 ## Queue and crash safety
 
 A due variant is atomically claimed before an external provider call and moves from `queued` to `publishing`. Provider job identifiers are persisted as soon as they are received, and existing provider jobs are polled before new work is claimed.
 
 If a worker crashes after a provider request may have begun but before a provider job ID is safely stored, the item enters an ambiguous-state review path rather than being blindly replayed. A single-worker lease prevents concurrent consumers from publishing the same deployment queue.
+
+Threads follows the same crash-safety rule. Container creation returns a stored provider job ID before publication. Polling checks the container state first; `IN_PROGRESS` stays pending, `ERROR`/`EXPIRED` fail closed, `FINISHED` is published through the provider endpoint, and an already-`PUBLISHED` container is treated as provider-confirmed rather than blindly published a second time.
 
 ## Provider-specific boundaries
 
@@ -123,6 +130,12 @@ Facebook Page token expiry currently requires reconnect; the runtime does not cl
 
 `instagram_graph` supports the implemented Professional-account post/reel path. Planning can include additional Instagram formats, but unsupported planned formats remain planning-only.
 
+### Threads
+
+`threads_graph` implements Meta's bounded two-stage single-post flow: create a media container, check provider processing state, then publish the finished container. This release supports text-only posts or exactly one approved image/video. Image/video media must already have a public HTTPS URL that passes the ESP Social Media Library resolver.
+
+Carousel publishing, replies, quote posts, locations, topic tags, analytics and inbox behavior are not claimed by this adapter. The runtime also does not claim that Threads member OAuth is connected merely because the adapter exists; provider application setup, authorization scopes, token lifecycle and app review remain authoritative external requirements.
+
 ### TikTok
 
 `tiktok_content_posting` implements video Direct Post with provider creator-info/privacy/consent checks and provider status polling. TikTok photo planning does not imply photo publishing.
@@ -133,6 +146,6 @@ Facebook Page token expiry currently requires reconnect; the runtime does not cl
 
 ## Deployment truth
 
-Code completion does not manufacture third-party authorization. Production provider calls still require the real provider applications, credentials, scopes, review/audit status and permissions required by Meta, TikTok, Google/YouTube or Instagram for the intended account and visibility.
+Code completion does not manufacture third-party authorization. Production provider calls still require the real provider applications, credentials, scopes, review/audit status and permissions required by Meta, TikTok, Google/YouTube, Instagram or Threads for the intended account and visibility.
 
 The Connections UI reports those boundaries rather than presenting them as unfinished application placeholders: provider-authorized capabilities are enabled only when the runtime and deployment can truthfully support them.
