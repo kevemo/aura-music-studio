@@ -12,7 +12,7 @@ import numpy as np
 import yaml
 from pydantic import BaseModel, Field
 
-from .transcription import audio_to_midi
+from .transcription import audio_to_midi, transcription_metadata
 
 PerformanceInputKind = Literal[
     "rhythm",
@@ -214,14 +214,35 @@ def analyse_performance_input(
     if kind in {"rhythm", "beatbox"}:
         rhythm_to_midi(y, sr, midi_path, bpm=bpm, onset_frames=np.asarray(onset_frames), hop_length=hop)
         item.midi_ref = _relative(project, midi_path)
+        item.metadata.update({
+            "midi_transcription_mode": "rhythm_onset_guide",
+            "midi_symbolic_guide_only": True,
+            "midi_final_audio": False,
+        })
         item.generation_context = (
             f"Use performance guide {item.id} as the rhythmic/groove anchor. Preserve its human onset pattern and feel; "
             f"detected working tempo is approximately {bpm:.2f} BPM. Build realistic performed instruments around the groove rather than quantising away its character."
         )
     elif kind in {"hum", "melody", "instrument"}:
         try:
-            audio_to_midi(source, midi_path)
+            # Hums and explicit melody guides are bounded to one dominant pitched line. An
+            # instrument guide may use the optional polyphonic-capable runtime when present,
+            # while auto mode still fails back to truthful monophonic pYIN transcription.
+            mode = "monophonic" if kind in {"hum", "melody"} else "auto"
+            audio_to_midi(source, midi_path, bpm=bpm, mode=mode)
+            report = transcription_metadata(midi_path)
+            if report and report.get("source_sha256") != _sha256_for_metadata(source):
+                raise RuntimeError("Transcription provenance does not match the source audio")
             item.midi_ref = _relative(project, midi_path)
+            item.metadata.update({
+                "midi_transcription": report,
+                "midi_transcription_mode": report.get("mode_requested", mode) if report else mode,
+                "midi_transcription_engine": report.get("engine") if report else None,
+                "midi_output_sha256": report.get("output_sha256") if report else None,
+                "midi_note_count": report.get("note_count") if report else None,
+                "midi_symbolic_guide_only": True,
+                "midi_final_audio": False,
+            })
         except Exception as exc:
             item.metadata["midi_warning"] = f"{type(exc).__name__}: {exc}"
         if kind in {"hum", "melody"}:
@@ -243,6 +264,16 @@ def analyse_performance_input(
             f"Use performance guide {item.id} only as a user-authorised sonic/reference guide. Do not copy protected material verbatim; preserve only requested high-level musical attributes."
         )
     return item
+
+
+def _sha256_for_metadata(path: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def register_input(project: Path, item: PerformanceInput) -> PerformanceInput:
