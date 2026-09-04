@@ -18,6 +18,7 @@ from .stripe_billing import (
     accounts,
     credit_packs,
 )
+from .subscription_lifecycle_api import router as subscription_lifecycle_router
 
 router = APIRouter(tags=["Stripe Membership Checkout"])
 billing_preferences = MembershipBillingPreferenceStore(accounts)
@@ -170,6 +171,11 @@ def membership_subscription_checkout(body: MembershipSubscriptionCheckoutRequest
         "activation_source": "verified_stripe_webhook",
         "esp_role_effect": "none",
     }
+
+
+# Subscription status/cancel/refund controls share the canonical commercial router so the
+# production application exposes one membership authority rather than a parallel billing stack.
+router.include_router(subscription_lifecycle_router)
 
 
 __all__ = [
