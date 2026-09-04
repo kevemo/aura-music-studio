@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import aura_music_studio.professional_editor_render_api as api
-from aura_music_studio.professional_video_track_keyframe_compositor import UniversalVisualVideoCompositor
+from aura_music_studio.professional_video_track_keyframe_bridge import UniversalVisualVideoCompositor
 from aura_music_studio.professional_video_grouped_unified_compositor import GroupedUnifiedAdvancedVideoCompositor
 
 
@@ -103,8 +103,8 @@ def test_mp4_export_dispatches_to_universal_visual_compositor(monkeypatch):
 
 
 def test_universal_visual_compositor_preserves_grouped_unified_renderer_foundation():
-    # Track automation extends the Wave 8 keyframed-mask/chroma stack and remains a descendant of
-    # the established grouped renderer rather than bypassing masks, blend or grouped-track state.
+    # Track automation extends the established keyframed-mask/chroma/grouped stack through the
+    # compatibility bridge rather than bypassing masks, blend or grouped-track state.
     assert issubclass(UniversalVisualVideoCompositor, GroupedUnifiedAdvancedVideoCompositor)
 
 
@@ -112,9 +112,10 @@ def test_render_api_uses_universal_visual_compositor_without_reintroducing_legac
     source = Path(api.__file__).read_text(encoding="utf-8")
     assert "UniversalVisualVideoCompositor(_project(project_name))" in source
     assert (
-        "from .professional_video_track_keyframe_compositor import UniversalVisualVideoCompositor"
+        "from .professional_video_track_keyframe_bridge import UniversalVisualVideoCompositor"
         in source
     )
+    assert "professional_video_track_keyframe_compositor ->" in source
     assert "professional_keyframed_mask_video_compositor ->" in source
     assert "from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor" not in source
     assert not hasattr(api, "UnifiedAdvancedVideoCompositor")
