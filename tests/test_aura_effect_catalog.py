@@ -126,7 +126,7 @@ def test_draft_versions_are_immutable_and_optimistic_conflicts_fail_closed(tmp_p
     catalog = AuraEffectCatalog(tmp_path / "catalog.sqlite3")
     composer = _composer()
     first = catalog.save_draft(
-        _graph(amount=0.25),
+        _graph(amount=0.25, title="Warm Vocal"),
         composer=composer,
         context=_context(),
         scope="user",
@@ -149,7 +149,10 @@ def test_draft_versions_are_immutable_and_optimistic_conflicts_fail_closed(tmp_p
     assert second.version == 2
     assert catalog.load_graph(first.catalog_id, 1).nodes[1].parameters["amount"] == 0.25
     assert catalog.load_graph(first.catalog_id, 2).nodes[1].parameters["amount"] == 0.75
-    assert catalog.history(first.catalog_id)[0].version == 2
+    history = catalog.history(first.catalog_id)
+    assert [item.version for item in history] == [2, 1]
+    assert history[0].title == "Warmer Vocal"
+    assert history[1].title == "Warm Vocal"
 
     with pytest.raises(ValueError, match="version conflict"):
         catalog.save_draft(
@@ -160,6 +163,56 @@ def test_draft_versions_are_immutable_and_optimistic_conflicts_fail_closed(tmp_p
             scope_id="user-1",
             owner_user_id="user-1",
             expected_latest_version=1,
+        )
+
+
+def test_migration_source_must_reference_real_earlier_version(tmp_path):
+    catalog = AuraEffectCatalog(tmp_path / "catalog.sqlite3")
+    with pytest.raises(ValueError, match="Migration source version does not exist"):
+        catalog.save_draft(
+            _graph(),
+            composer=_composer(),
+            context=_context(),
+            scope="user",
+            scope_id="user-1",
+            owner_user_id="user-1",
+            metadata=CatalogMetadata(migration_from_version=99),
+        )
+
+
+def test_category_scope_domain_and_owner_are_stable_for_existing_catalog_id(tmp_path):
+    catalog = AuraEffectCatalog(tmp_path / "catalog.sqlite3")
+    catalog.save_draft(
+        _graph(),
+        composer=_composer(),
+        context=_context(),
+        scope="user",
+        scope_id="user-1",
+        owner_user_id="user-1",
+        metadata=CatalogMetadata(category="audio_fx"),
+    )
+    with pytest.raises(ValueError, match="category cannot change"):
+        catalog.save_draft(
+            _graph(title="Reclassified"),
+            composer=_composer(),
+            context=_context(),
+            scope="user",
+            scope_id="user-1",
+            owner_user_id="user-1",
+            metadata=CatalogMetadata(category="mastering"),
+        )
+
+
+def test_non_finite_parameter_values_cannot_enter_persistent_catalogue(tmp_path):
+    catalog = AuraEffectCatalog(tmp_path / "catalog.sqlite3")
+    with pytest.raises(ValueError, match="strict finite JSON"):
+        catalog.save_draft(
+            _graph(amount=float("nan")),
+            composer=_composer(),
+            context=_context(),
+            scope="user",
+            scope_id="user-1",
+            owner_user_id="user-1",
         )
 
 
@@ -289,11 +342,11 @@ def test_preview_lifecycle_requires_artifact_for_ready_state(tmp_path):
     assert ready.preview_ref == "artifact:preview-123"
 
 
-def test_search_filters_scope_domain_state_tags_and_text(tmp_path):
+def test_search_filters_scope_domain_state_tags_and_version_specific_text(tmp_path):
     catalog = AuraEffectCatalog(tmp_path / "catalog.sqlite3")
     composer = _composer()
     first = catalog.save_draft(
-        _graph(),
+        _graph(title="Warm Vocal"),
         composer=composer,
         context=_context(),
         scope="user",
@@ -302,6 +355,15 @@ def test_search_filters_scope_domain_state_tags_and_text(tmp_path):
         metadata=CatalogMetadata(category="audio_fx"),
     )
     catalog.publish(first.catalog_id, first.version, composer=composer, context=_context())
+    catalog.save_draft(
+        _graph(title="Completely Renamed"),
+        composer=composer,
+        context=_context(),
+        scope="user",
+        scope_id="user-1",
+        owner_user_id="user-1",
+        metadata=CatalogMetadata(category="audio_fx", migration_from_version=1),
+    )
 
     other = EffectGraph(
         id="user.other_effect",
@@ -329,9 +391,11 @@ def test_search_filters_scope_domain_state_tags_and_text(tmp_path):
         domain="music",
         state="published",
         tags=("warm",),
-        text="vocal",
+        text="warm vocal",
     )
-    assert [(item.catalog_id, item.version) for item in found] == [("user.warm_vocal", 1)]
+    assert [(item.catalog_id, item.version, item.title) for item in found] == [
+        ("user.warm_vocal", 1, "Warm Vocal")
+    ]
 
 
 def test_user_scope_cannot_impersonate_another_owner(tmp_path):
