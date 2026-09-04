@@ -12,11 +12,14 @@ from .billing import payment_instructions
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .mailer import notify_membership_request
 from .membership import MembershipService
+from .membership_billing_periods import MembershipBillingPreferenceStore
+from .native_products import BillingPeriod
 from .plans import PLANS, OWNERSHIP_NOTICE
 
 router = APIRouter()
 store = AccountStore()
 memberships = MembershipService(store)
+billing_preferences = MembershipBillingPreferenceStore(store)
 COOKIE_NAME = "lss_session"
 
 CSS = """
@@ -55,22 +58,55 @@ def _pricing_cards(selected: str | None = None) -> str:
     chunks = []
     for pid in ("free", "base", "pro"):
         plan = PLANS[pid]
-        monthly = plan.display_price_for("monthly")
+        monthly = plan.display_price_for(BillingPeriod.MONTHLY)
         annual = ""
+        actions = f"<a class='btn primary' href='/signup?plan={pid}&billing_period=monthly'>Choose this plan</a>"
         if plan.annual_price is not None and pid != "free":
-            annual = f"<div class='muted'>{escape(plan.display_price_for('annual'))} available</div>"
+            annual = f"<div class='muted'>{escape(plan.display_price_for(BillingPeriod.ANNUAL))} available</div>"
+            actions = (
+                f"<a class='btn primary' href='/signup?plan={pid}&billing_period=monthly'>Choose monthly</a> "
+                f"<a class='btn' href='/signup?plan={pid}&billing_period=annual'>Choose yearly</a>"
+            )
         cls = "card price-card pro" if pid == "pro" else "card price-card"
         badge = "<span class='badge'>FULL STUDIO</span>" if pid == "pro" else ""
         features = "".join(f"<li>{escape(x)}</li>" for x in _feature_names(pid))
-        cta = "Choose monthly" if plan.annual_price is not None and pid != "free" else "Choose this plan"
         if selected == pid:
-            cta = "Selected"
+            badge = badge or "<span class='badge'>SELECTED</span>"
         chunks.append(
             f"<div class='{cls}'>{badge}<div class='eyebrow'>{escape(plan.name)}</div>"
             f"<div class='price'>{escape(monthly)}</div>{annual}<p class='muted'>{escape(plan.description)}</p>"
-            f"<ul class='features'>{features}</ul><a class='btn primary' href='/signup?plan={pid}'>{cta}</a></div>"
+            f"<ul class='features'>{features}</ul>{actions}</div>"
         )
     return "<div class='grid3'>" + "".join(chunks) + "</div>"
+
+
+def _period_value(value: str) -> BillingPeriod:
+    try:
+        return BillingPeriod(value)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported billing period: {value}") from exc
+
+
+def _pending_payment_html(user: dict, plan_id: str) -> str:
+    plan = PLANS[plan_id]
+    period = billing_preferences.approved_period_for_user(user["id"], plan_id)
+    display = plan.display_price_for(period)
+    try:
+        pay = payment_instructions(plan_id, period)
+    except ValueError:
+        pay = None
+    if pay and pay.get("url"):
+        url = escape(str(pay.get("url") or ""), quote=True)
+        return (
+            f"<div class='alert'>Your membership was approved for <b>{escape(display)}</b>. "
+            "Complete payment and wait for verified provider confirmation to activate your plan.</div>"
+            f"<a class='btn primary' target='_blank' rel='noopener' href='{url}'>Open verified payment route</a>"
+        )
+    return (
+        f"<div class='alert'>Your membership was approved for <b>{escape(display)}</b>. "
+        "A verified payment-provider route for this billing period must be configured before activation. "
+        "No browser return can activate paid access by itself.</div>"
+    )
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -78,38 +114,71 @@ def home(request: Request):
     body = f"""
 <section class='hero'><div><div class='eyebrow'>AI music creation · real audio · professional workflow</div><h1>Make music with <span>Aura.</span></h1><p>Create original songs, professional backing tracks, harmonies, stems, remixes and mastered releases inside one intelligent studio. Symbolic notation can guide the music, but the finished sound stays real-audio-first.</p><div class='navlinks'><a class='btn primary' href='/signup'>Start creating</a><a class='btn' href='/pricing'>Compare plans</a></div></div>
 <div class='hero-card'><div class='eyebrow'>Aura Producer</div><h2>One studio. One creative brain.</h2><p class='muted'>Lyrics → arrangement → instruments → vocals → harmonies → mix → master → export.</p><div class='meter'><i></i></div><p><b>Real-audio final master</b><br><span class='muted'>No MIDI/SoundFont substitution as finished music.</span></p></div></section>
-<section class='section'><div class='eyebrow'>Memberships</div><h2>Start basic. Unlock the whole studio.</h2><p>All memberships require approval by Elevate Souls Productions before access activates. Paid plans move to payment only after approval.</p>{_pricing_cards()}</section>"""
+<section class='section'><div class='eyebrow'>Memberships</div><h2>Start basic. Unlock the whole studio.</h2><p>All memberships require approval by Elevate Souls Productions before access activates. Paid plans move to verified payment only after approval.</p>{_pricing_cards()}</section>"""
     return _page("Home", body, request)
 
 
 @router.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Member gives one confirmed full track per day with unlimited regenerations until confirmation. Unlimited Pro removes the limits, includes Aura OS and Aura Sec, and unlocks every enabled studio tool.</p>{_pricing_cards()}</section>"
+    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Basic is £4.99/month. Unlimited Pro is £9.99/month or £99/year, includes Aura OS and Aura Sec entitlement, and unlocks the highest enabled creative access.</p>{_pricing_cards()}</section>"
     return _page("Pricing", body, request)
 
 
 @router.get("/signup", response_class=HTMLResponse)
-def signup_page(request: Request, plan: str = "free", error: str | None = None):
+def signup_page(
+    request: Request,
+    plan: str = "free",
+    billing_period: str = BillingPeriod.MONTHLY.value,
+    error: str | None = None,
+):
     plan = plan if plan in PLANS else "free"
+    try:
+        selected_period = _period_value(billing_period)
+    except ValueError:
+        selected_period = BillingPeriod.MONTHLY
     error_html = f"<div class='alert'>{escape(error)}</div>" if error else ""
     options = "".join(
-        f"<option value='{pid}' {'selected' if pid == plan else ''}>{escape(PLANS[pid].name)} — {escape(PLANS[pid].display_price_for('monthly'))}</option>"
+        f"<option value='{pid}' {'selected' if pid == plan else ''}>{escape(PLANS[pid].name)} — {escape(PLANS[pid].display_price_for(BillingPeriod.MONTHLY))}</option>"
         for pid in ("free", "base", "pro")
     )
-    body = f"""<div class='card form-card'><div class='eyebrow'>Membership request</div><h1>Create your account</h1><p class='muted'>Your request is sent to Elevate Souls Productions for approval before access is activated. Signup currently requests the monthly paid period; annual Unlimited Pro is presented separately and requires a period-aware verified checkout path.</p>{error_html}
-<form method='post' action='/signup'><div class='field'><label>Name</label><input name='display_name' required minlength='2' autocomplete='name'></div><div class='field'><label>Email</label><input type='email' name='email' required autocomplete='email'></div><div class='field'><label>Password</label><input type='password' name='password' required minlength='10' autocomplete='new-password'><div class='help'>Minimum 10 characters.</div></div><div class='field'><label>Membership</label><select name='plan_id'>{options}</select></div><button class='primary' type='submit'>Send membership request</button></form><p class='help'>Already have an account? <a href='/signin'>Sign in</a>.</p></div>"""
+    period_options = (
+        f"<option value='monthly' {'selected' if selected_period is BillingPeriod.MONTHLY else ''}>Monthly</option>"
+        f"<option value='annual' {'selected' if selected_period is BillingPeriod.ANNUAL else ''}>Yearly — Unlimited Pro only (£99/year)</option>"
+    )
+    body = f"""<div class='card form-card'><div class='eyebrow'>Membership request</div><h1>Create your account</h1><p class='muted'>Your plan and billing period are part of the request Kev or Mary approves. Basic is monthly-only; Unlimited Pro can be monthly or yearly. Paid access activates only after verified payment evidence.</p>{error_html}
+<form method='post' action='/signup'><div class='field'><label>Name</label><input name='display_name' required minlength='2' autocomplete='name'></div><div class='field'><label>Email</label><input type='email' name='email' required autocomplete='email'></div><div class='field'><label>Password</label><input type='password' name='password' required minlength='10' autocomplete='new-password'><div class='help'>Minimum 10 characters.</div></div><div class='field'><label>Membership</label><select name='plan_id'>{options}</select></div><div class='field'><label>Billing period</label><select name='billing_period'>{period_options}</select><div class='help'>Yearly billing is available for Unlimited Pro only.</div></div><button class='primary' type='submit'>Send membership request</button></form><p class='help'>Already have an account? <a href='/signin'>Sign in</a>.</p></div>"""
     return _page("Sign up", body, request)
 
 
 @router.post("/signup", response_class=HTMLResponse)
-def signup_submit(request: Request, display_name: str = Form(...), email: str = Form(...), password: str = Form(...), plan_id: str = Form("free")):
+def signup_submit(
+    request: Request,
+    display_name: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    plan_id: str = Form("free"),
+    billing_period: str = Form(BillingPeriod.MONTHLY.value),
+):
     try:
-        result = store.signup(email, display_name, password, plan_id)
-        notify_membership_request(approval_token=result.approval_token, applicant_email=result.email, display_name=result.display_name, plan_id=result.requested_plan)
+        canonical_plan, period = billing_preferences.validate(plan_id, billing_period)
+        result = store.signup(email, display_name, password, canonical_plan)
+        billing_preferences.record_request(
+            user_id=result.user_id,
+            membership_request_id=result.membership_request_id,
+            plan_id=result.requested_plan,
+            billing_period=period,
+        )
+        notify_membership_request(
+            approval_token=result.approval_token,
+            applicant_email=result.email,
+            display_name=result.display_name,
+            plan_id=result.requested_plan,
+        )
     except Exception as exc:
-        return signup_page(request, plan_id, str(exc))
+        return signup_page(request, plan_id, billing_period, str(exc))
     requested_name = PLANS[result.requested_plan].name if result.requested_plan in PLANS else result.requested_plan
-    body = f"""<div class='card form-card'><div class='eyebrow'>Request received</div><h1>Membership pending approval</h1><div class='alert good'>Your request for the <b>{escape(requested_name)}</b> tier has been sent to Elevate Souls Productions.</div><p>You will be able to sign in while pending, but studio access stays locked until the request is approved. Paid plans then require payment verification before activation.</p><a class='btn primary' href='/signin'>Continue to sign in</a></div>"""
+    period_label = "yearly" if period is BillingPeriod.ANNUAL else "monthly"
+    body = f"""<div class='card form-card'><div class='eyebrow'>Request received</div><h1>Membership pending approval</h1><div class='alert good'>Your request for the <b>{escape(requested_name)}</b> tier on <b>{escape(period_label)}</b> billing has been sent to Elevate Souls Productions.</div><p>You will be able to sign in while pending, but studio access stays locked until the request is approved. Paid plans then require verified payment before activation.</p><a class='btn primary' href='/signin'>Continue to sign in</a></div>"""
     return _page("Membership pending", body, request)
 
 
@@ -150,16 +219,19 @@ def dashboard(request: Request):
     requested = user.get("requested_plan_id") or user.get("plan_id") or "free"
     active_plan = user.get("plan_id") or "free"
     if status == "pending_approval":
-        state = "<div class='alert'>Your membership request is waiting for ESP approval. Studio generation is locked until approval.</div>"
+        preference = billing_preferences.for_user(user["id"])
+        requested_period = (preference or {}).get("billing_period") or BillingPeriod.MONTHLY.value
+        state = f"<div class='alert'>Your {escape(requested_period)} membership request is waiting for ESP approval. Studio generation is locked until approval.</div>"
     elif status == "approved_pending_payment":
-        pay = payment_instructions(requested)
-        state = (
-            f"<div class='alert'>Your membership was approved. Complete the {escape(str(pay.get('display_amount', '')))} payment "
-            "and wait for payment verification to activate your plan.</div>"
-            f"<a class='btn primary' target='_blank' rel='noopener' href='{escape(pay.get('url') or '', quote=True)}'>Open PayPal payment</a>"
-        )
+        try:
+            state = _pending_payment_html(user, requested)
+        except ValueError as exc:
+            state = f"<div class='alert'>Billing approval needs owner review: {escape(str(exc))}</div>"
     elif status == "active":
-        state = f"<div class='alert good'>Your {escape(PLANS[active_plan].name)} membership is active.</div>"
+        subscription = memberships.subscriptions.get(user["id"]) if active_plan != "free" else None
+        period = (subscription or {}).get("billing_period")
+        period_copy = f" · {escape(str(period))} billing" if period else ""
+        state = f"<div class='alert good'>Your {escape(PLANS[active_plan].name)} membership is active{period_copy}.</div>"
     elif status == "rejected":
         state = "<div class='alert'>This membership request was not approved.</div>"
     else:
