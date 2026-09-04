@@ -25,6 +25,7 @@ def test_prompt_composes_real_multi_node_ffmpeg_chain_in_prompt_order():
     assert "acompressor=" in result["ffmpeg_filter_chain"]
     assert result["source_media_mutated"] is False
     assert result["project_mutated"] is False
+    assert result["required_entitlement_bands"] == ["gold"]
 
 
 def test_prompt_parameters_are_extracted_then_bounded_by_catalogue_contracts():
@@ -48,6 +49,13 @@ def test_prompt_reports_required_bands_without_claiming_entitlement():
     assert result["required_entitlement_bands"] == ["silver", "gold"]
     assert result["entitlement_verified"] is False
     assert result["preview_required_before_apply"] is True
+
+
+def test_core_only_prompt_has_no_paid_entitlement_requirement():
+    result = compose_effect_system_from_prompt("High pass at 100 Hz and add reverb 20%.")
+
+    assert result["required_entitlement_bands"] == []
+    assert result["entitlement_verified"] is False
 
 
 def test_prompt_is_deterministic_and_auditable():
