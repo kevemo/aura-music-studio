@@ -11,6 +11,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .esp_niche import require_esp_hub_member
@@ -348,7 +349,15 @@ def _member(request: Request):
 def create_ingest_session(body: IngestSessionCreate, request: Request):
     member, _ = _member(request)
     try:
-        return {"session": media_plane.create_session(member.user_id, body)}
+        payload = {"session": media_plane.create_session(member.user_id, body)}
+        return JSONResponse(
+            content=payload,
+            headers={
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
     except KeyError as exc:
         raise HTTPException(404, "Shared Sky broadcast not found") from exc
     except (RuntimeError, ValueError) as exc:
