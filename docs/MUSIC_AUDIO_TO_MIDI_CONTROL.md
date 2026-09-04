@@ -42,6 +42,19 @@ The monophonic path now:
 - retains pYIN voicing confidence in the provenance report;
 - writes a normal editable `.mid`/`.midi` file compatible with the existing DAW.
 
+## Performance Input provenance binding
+
+Performance Inputs now consume the transcription provenance instead of only storing a MIDI path.
+
+- `hum` and `melody` inputs explicitly request `monophonic` mode so the product does not accidentally overclaim polyphonic transcription.
+- `instrument` inputs request `auto`, allowing the optional polyphonic-capable runtime when available while preserving the truthful pYIN fallback.
+- the detected Performance Input BPM is passed into transcription so MIDI timing is aligned to the analysed source rather than a fixed default tempo;
+- the sidecar source SHA-256 is checked against the actual project audio before the MIDI reference is accepted;
+- engine, requested mode, source/output hashes and note count are persisted in `PerformanceInput.metadata`;
+- Performance Input metadata repeats `midi_symbolic_guide_only: true` and `midi_final_audio: false` so downstream DAW/import surfaces cannot mistake the control layer for a release master.
+
+Rhythm and beatbox guides also carry explicit guide-only/final-audio-false metadata.
+
 ## Provenance sidecar
 
 Every successful transcription writes a sibling `<name>.mid.aura.json` sidecar containing:
