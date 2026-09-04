@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
 from pydantic import BaseModel, Field
 
 ImageEffectKind = Literal[
@@ -18,6 +18,17 @@ ImageEffectKind = Literal[
     "grayscale",
     "invert",
     "posterize",
+    "autocontrast",
+    "equalize",
+    "solarize",
+    "unsharp_mask",
+    "emboss",
+    "edge_enhance",
+    "find_edges",
+    "sepia",
+    "vignette",
+    "pixelate",
+    "duotone",
 ]
 
 _SAFE_PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
@@ -79,6 +90,41 @@ def _preserve_alpha(rgb: Image.Image, alpha: Image.Image) -> Image.Image:
     return rgba
 
 
+def _rgb_effect(image: Image.Image, transform) -> Image.Image:
+    alpha = image.getchannel("A")
+    effected = transform(image.convert("RGB"))
+    return _preserve_alpha(effected, alpha)
+
+
+def _solarize_threshold(amount: float) -> int:
+    strength = min(max(amount / 4.0, 0.0), 1.0)
+    return round(255 * (1.0 - strength))
+
+
+def _apply_vignette(image: Image.Image, amount: float) -> Image.Image:
+    strength = min(max(amount / 4.0, 0.0), 1.0)
+    if strength <= 0.0:
+        return image.copy()
+    gradient = Image.radial_gradient("L").resize(
+        image.size,
+        resample=Image.Resampling.BILINEAR,
+    )
+    edge_mask = gradient.point(lambda value: round(255 - (value * strength)))
+    rgb_mask = Image.merge("RGB", (edge_mask, edge_mask, edge_mask))
+    effected = ImageChops.multiply(image.convert("RGB"), rgb_mask)
+    return _preserve_alpha(effected, image.getchannel("A"))
+
+
+def _apply_pixelate(image: Image.Image, radius: float) -> Image.Image:
+    block_size = max(2, round(radius))
+    width, height = image.size
+    reduced = image.resize(
+        (max(1, width // block_size), max(1, height // block_size)),
+        resample=Image.Resampling.BOX,
+    )
+    return reduced.resize((width, height), resample=Image.Resampling.NEAREST)
+
+
 def _apply_node(image: Image.Image, node: ImageEffectNode) -> Image.Image:
     if not node.enabled or node.mix <= 0.0:
         return image
@@ -98,11 +144,56 @@ def _apply_node(image: Image.Image, node: ImageEffectNode) -> Image.Image:
     elif node.kind == "grayscale":
         effected = _preserve_alpha(ImageOps.grayscale(image), alpha)
     elif node.kind == "invert":
-        rgb = ImageOps.invert(image.convert("RGB"))
-        effected = _preserve_alpha(rgb, alpha)
+        effected = _rgb_effect(image, ImageOps.invert)
     elif node.kind == "posterize":
-        rgb = ImageOps.posterize(image.convert("RGB"), node.bits)
-        effected = _preserve_alpha(rgb, alpha)
+        effected = _rgb_effect(image, lambda rgb: ImageOps.posterize(rgb, node.bits))
+    elif node.kind == "autocontrast":
+        effected = _rgb_effect(image, ImageOps.autocontrast)
+    elif node.kind == "equalize":
+        effected = _rgb_effect(image, ImageOps.equalize)
+    elif node.kind == "solarize":
+        threshold = _solarize_threshold(node.amount)
+        effected = _rgb_effect(image, lambda rgb: ImageOps.solarize(rgb, threshold))
+    elif node.kind == "unsharp_mask":
+        effected = _rgb_effect(
+            image,
+            lambda rgb: rgb.filter(
+                ImageFilter.UnsharpMask(
+                    radius=node.radius,
+                    percent=round(node.amount * 100),
+                    threshold=3,
+                )
+            ),
+        )
+    elif node.kind == "emboss":
+        effected = _rgb_effect(image, lambda rgb: rgb.filter(ImageFilter.EMBOSS))
+    elif node.kind == "edge_enhance":
+        effected = _rgb_effect(image, lambda rgb: rgb.filter(ImageFilter.EDGE_ENHANCE_MORE))
+    elif node.kind == "find_edges":
+        effected = _rgb_effect(image, lambda rgb: rgb.filter(ImageFilter.FIND_EDGES))
+    elif node.kind == "sepia":
+        effected = _rgb_effect(
+            image,
+            lambda rgb: ImageOps.colorize(
+                ImageOps.grayscale(rgb),
+                black="#24150D",
+                white="#F4D8A6",
+            ),
+        )
+    elif node.kind == "vignette":
+        effected = _apply_vignette(image, node.amount)
+    elif node.kind == "pixelate":
+        effected = _apply_pixelate(image, node.radius)
+        effected.putalpha(alpha)
+    elif node.kind == "duotone":
+        effected = _rgb_effect(
+            image,
+            lambda rgb: ImageOps.colorize(
+                ImageOps.grayscale(rgb),
+                black="#2A163B",
+                white="#F5D98A",
+            ),
+        )
     else:  # pragma: no cover - pydantic rejects unknown effect kinds
         raise ValueError("Unsupported image effect node")
     return _blend(original, effected.convert("RGBA"), node.mix)
@@ -183,6 +274,7 @@ def load_image_effect_preset(
 
 __all__ = [
     "ImageEffectGraph",
+    "ImageEffectKind",
     "ImageEffectNode",
     "load_image_effect_preset",
     "render_image_effect_graph",
