@@ -25,8 +25,15 @@ from .daw import (
     trim_clip,
     waveform_peaks,
 )
+from .daw_midi import (
+    _public_clip as _midi_public_clip,
+    _safe_midi_path,
+    _save_document as _save_midi_document,
+    read_midi_document,
+)
+from .midi_humanisation import MIDI_HUMANISATION_VERSION, MidiHumanizeRequest, humanize_midi_document
 from .mixer import render_session
-from .plans import AUTOMATION, BASIC_TIMELINE, DEEP_REVISION_HISTORY, MULTITRACK_DAW
+from .plans import AUDIO_TO_MIDI_CONTROL, AUTOMATION, BASIC_TIMELINE, DEEP_REVISION_HISTORY, MULTITRACK_DAW
 from .revisions import create_revision
 from .session import Clip
 from .tenant_storage import project_path
@@ -367,6 +374,65 @@ def automation(project_name: str, track_id: str, body: AutomationRequest, reques
         raise HTTPException(400, "Invalid automation lane") from exc
     save_session(project, session)
     return lane.model_dump()
+
+
+@router.post("/projects/{project_name}/daw/midi/{clip_id}/humanize")
+def humanize_midi_clip(project_name: str, clip_id: str, body: MidiHumanizeRequest, request: Request):
+    member = _member(request)
+    if not member.plan.has(AUDIO_TO_MIDI_CONTROL):
+        raise HTTPException(403, "MIDI performance humanisation requires the Pro MIDI tools")
+    project = _project(project_name)
+    session = _session(project)
+    try:
+        track, clip = find_clip(session, clip_id)
+    except KeyError as exc:
+        raise HTTPException(404, "MIDI clip not found") from exc
+    if clip.kind != "midi" or not clip.source:
+        raise HTTPException(400, "Clip is not editable MIDI")
+    try:
+        source = _safe_midi_path(project, str(clip.source))
+        document = read_midi_document(source)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(409, "MIDI file is unavailable") from exc
+
+    _snapshot(project, member, f"Before humanising MIDI · {clip.name}")
+    humanized = humanize_midi_document(document, body, bpm=session.bpm)
+    _save_midi_document(project, session, clip, humanized)
+    clip.metadata.update({
+        "midi_humanized": True,
+        "midi_humanisation_version": MIDI_HUMANISATION_VERSION,
+        "midi_humanisation_seed": body.seed,
+        "midi_humanisation_timing_ms": body.timing_ms,
+        "midi_humanisation_velocity_range": body.velocity_range,
+        "midi_humanisation_duration_percent": body.duration_percent,
+    })
+    session.generation_history.append({
+        "action": "midi_humanize",
+        "clip_id": clip.id,
+        "track_id": track.id,
+        "engine_version": MIDI_HUMANISATION_VERSION,
+        "timing_ms": body.timing_ms,
+        "velocity_range": body.velocity_range,
+        "duration_percent": body.duration_percent,
+        "seed": body.seed,
+        "preserve_first_downbeat": body.preserve_first_downbeat,
+    })
+    save_session(project, session)
+    return {
+        "clip": _midi_public_clip(project_name, track, clip, humanized),
+        "document": humanized.model_dump(mode="json"),
+        "humanisation": {
+            "engine_version": MIDI_HUMANISATION_VERSION,
+            "timing_ms": body.timing_ms,
+            "velocity_range": body.velocity_range,
+            "duration_percent": body.duration_percent,
+            "seed": body.seed,
+            "preserve_first_downbeat": body.preserve_first_downbeat,
+        },
+        "symbolic_guide_only": True,
+        "audio_rendered": False,
+        "final_audio": False,
+    }
 
 
 @router.post("/projects/{project_name}/daw/render")
