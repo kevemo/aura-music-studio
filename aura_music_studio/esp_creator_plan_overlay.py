@@ -32,7 +32,6 @@ from .shared_sky_media_plane import (
     media_node_heartbeat,
     owner_media_plane_status,
     revoke_ingest_session,
-    router as shared_sky_media_plane_router,
 )
 from .shared_sky_streaming_studios import router as shared_sky_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
@@ -59,7 +58,6 @@ router.include_router(support_center_router)
 router.include_router(support_sla_router)
 router.include_router(broadcast_tech_router)
 router.include_router(shared_sky_router)
-router.include_router(shared_sky_media_plane_router)
 router.include_router(creator_tech_vault_router)
 router.include_router(service_registry_router)
 router.include_router(social_media_library_router)
@@ -74,27 +72,6 @@ def _route_mounted(path: str, method: str) -> bool:
     )
 
 
-if not _route_mounted("/owner/shared-sky/api/scheduler/status", "GET"):
-    router.add_api_route(
-        "/owner/shared-sky/api/scheduler/status",
-        scheduler_status,
-        methods=["GET"],
-        tags=["Shared Sky Streaming Studios Scheduler"],
-    )
-if not _route_mounted("/owner/shared-sky/api/scheduler/run-due", "POST"):
-    router.add_api_route(
-        "/owner/shared-sky/api/scheduler/run-due",
-        scheduler_run_due,
-        methods=["POST"],
-        tags=["Shared Sky Streaming Studios Scheduler"],
-    )
-if not _route_mounted("/owner/shared-sky/api/media-plane", "GET"):
-    router.add_api_route(
-        "/owner/shared-sky/api/media-plane",
-        owner_media_plane_status,
-        methods=["GET"],
-        tags=["Shared Sky Media Plane"],
-    )
 if not _route_mounted("/shared-sky/api/ingest-sessions", "POST"):
     router.add_api_route(
         "/shared-sky/api/ingest-sessions",
@@ -116,6 +93,27 @@ if not _route_mounted("/shared-sky/internal/media-nodes/heartbeat", "POST"):
         methods=["POST"],
         include_in_schema=False,
         tags=["Shared Sky Media Plane"],
+    )
+if not _route_mounted("/owner/shared-sky/api/media-plane", "GET"):
+    router.add_api_route(
+        "/owner/shared-sky/api/media-plane",
+        owner_media_plane_status,
+        methods=["GET"],
+        tags=["Shared Sky Media Plane"],
+    )
+if not _route_mounted("/owner/shared-sky/api/scheduler/status", "GET"):
+    router.add_api_route(
+        "/owner/shared-sky/api/scheduler/status",
+        scheduler_status,
+        methods=["GET"],
+        tags=["Shared Sky Streaming Studios Scheduler"],
+    )
+if not _route_mounted("/owner/shared-sky/api/scheduler/run-due", "POST"):
+    router.add_api_route(
+        "/owner/shared-sky/api/scheduler/run-due",
+        scheduler_run_due,
+        methods=["POST"],
+        tags=["Shared Sky Streaming Studios Scheduler"],
     )
 
 
