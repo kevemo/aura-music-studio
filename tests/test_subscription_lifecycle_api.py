@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.audit import AuditLedger
+from aura_music_studio.csrf_tokens import CSRF_HEADER, SessionCsrfService
 from aura_music_studio.membership_billing_periods import MembershipBillingPreferenceStore
 from aura_music_studio.subscriptions import SubscriptionLedger
 import aura_music_studio.subscription_lifecycle_api as lifecycle_api
@@ -78,6 +79,29 @@ def test_member_cancel_preserves_current_paid_access(tmp_path, monkeypatch):
     assert payload["plan_id"] == "base"
     assert payload["cancel_at_period_end"] is True
     assert payload["subscription"]["status"] == "cancel_at_period_end"
+
+
+def test_cookie_member_cancel_requires_session_bound_csrf(tmp_path, monkeypatch):
+    store, ledger, _user_id, token = _paid_user(tmp_path)
+    client = _client(monkeypatch, store, ledger)
+    client.cookies.set("lss_session", token)
+
+    denied = client.post("/membership/subscription/cancel")
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["security_gate"] == "session_csrf"
+
+    csrf = SessionCsrfService(store).issue(token)["token"]
+    response = client.post(
+        "/membership/subscription/cancel",
+        headers={CSRF_HEADER: csrf},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["cancellation_requested"] is True
+    assert payload["access_removed_immediately"] is False
+    assert payload["plan_id"] == "base"
+    assert payload["cancel_at_period_end"] is True
 
 
 def test_verified_refund_requires_admin_and_never_returns_provider_references(tmp_path, monkeypatch):
