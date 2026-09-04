@@ -77,11 +77,11 @@ def test_track_keyframe_authoring_participates_in_undo_redo(tmp_path):
     assert "track.opacity" in _track(store, track_id)["keyframes"]
 
     undone = store.undo()
-    assert undone["operation"] if isinstance(undone, dict) else undone.operation == "set_keyframes"
+    assert undone.operation == "set_keyframes"
     assert "track.opacity" not in _track(store, track_id)["keyframes"]
 
     redone = store.redo()
-    assert redone["operation"] if isinstance(redone, dict) else redone.operation == "set_keyframes"
+    assert redone.operation == "set_keyframes"
     assert [point["value"] for point in _track(store, track_id)["keyframes"]["track.opacity"]] == [0.2, 0.9]
 
 
