@@ -159,7 +159,7 @@ def publish_project_effect_system(
     """
     spec = load_effect_system(project, system_id)
     compiled = compile_effect_system(spec)
-    item_key = _clean_item_id(item_id or f"effect-system.{spec.id}")
+    item_key = _clean_item_id(f"effect-system.{spec.id}" if item_id is None else item_id)
     normalized_tags = _clean_tags(tags)
 
     document = _read_document(library_root)
