@@ -13,6 +13,7 @@ from .esp_social_provider_adapters import (
     _network_error,
 )
 from .esp_social_publish_media import ResolvedPublishMedia
+from .esp_social_threads_oauth import install_threads_oauth_token_extension
 from .social_management import PlatformVariant, SocialConnection, SocialContent
 
 
@@ -199,8 +200,9 @@ def register_threads_adapter(registry: dict[str, Any] | None = None) -> ThreadsG
     return adapter
 
 
-# esp_social_publish_capabilities imports this module during worker/application startup,
-# after the core provider registry exists and before provider jobs are resolved.
+# The worker imports this module before resolving encrypted social-oauth:// credentials.
+# Install only the Threads-specific refresh extension, then register the bounded provider adapter.
+install_threads_oauth_token_extension()
 register_threads_adapter()
 
 
