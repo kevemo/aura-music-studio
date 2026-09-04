@@ -1,455 +1,204 @@
 {
-  "schema_version": 2,
+  "schema_version": 5,
   "product": "Elevate Souls Productions Content Creation Command Center — Powered by Aura AI",
-  "purpose": "Chat 6 expanded-ecosystem completion and release-truth ledger",
+  "purpose": "Chat 6 expanded-ecosystem completion, coordination and release-truth ledger",
   "expanded_ecosystem_denominator": true,
   "integration_branch": "development/full-site-build",
-  "verified_integration_sha": "2f6f271e00918186f016b4118f3ffcd8a8157601",
-  "verified_at": "2026-09-03T03:39:16+01:00",
-  "confidence": "MEDIUM",
+  "verified_integration_sha": "bb2e05051964f7e222f71beedc2693cace82ddd6",
+  "integration_commit_time_utc": "2026-09-04T03:11:36Z",
+  "confidence": "HIGH_FOR_REPOSITORY_STATE__LOWER_FOR_EXTERNAL_PRODUCTION_STATE",
   "release_decision": "NO_GO",
-  "completion_ladder": {
-    "0": "NOT_STARTED",
-    "1": "SPECIFIED",
-    "2": "SCAFFOLDED",
-    "3": "BACKEND_FUNCTIONAL",
-    "4": "USER_WORKFLOW_FUNCTIONAL",
-    "5": "INTEGRATED",
-    "6": "TESTED",
-    "7": "RELEASE_CANDIDATE",
-    "8": "PRODUCTION_VERIFIED"
-  },
-  "chat_weights_percent": {
-    "chat_1": 20,
-    "chat_2": 18,
-    "chat_3": 18,
-    "chat_4": 18,
-    "chat_5": 26
-  },
-  "chat_progress_ranges_percent": {
-    "chat_1_core_shared": [80, 84],
-    "chat_2_music_audio_voice": [68, 72],
-    "chat_3_video_image_visual_3d": [68, 73],
-    "chat_4_game_live_social": [72, 77],
-    "chat_5_agency_business_native": [53, 59],
-    "chat_6_audit_release_verification": [62, 68]
-  },
+  "release_rule": "No percentage authorizes production while any P0/P1 admission gate or required external production-evidence gate remains unresolved.",
   "headline_ranges_percent": {
-    "architecture_specification": [94, 96],
-    "executable_implementation": [68, 72],
-    "current_command_center_web": [97, 98],
-    "integration_of_implemented_functionality": [91, 94],
-    "tested_expanded_ecosystem": [66, 70],
-    "production_release_readiness": [55, 59],
-    "native_ecosystem": [24, 31],
-    "external_operational_readiness": [24, 32]
+    "architecture_specification": [98, 99],
+    "executable_expanded_implementation": [76, 81],
+    "current_command_center_web_control_plane": [98, 99],
+    "integration_of_implemented_functionality": [97, 99],
+    "tested_expanded_ecosystem": [76, 81],
+    "deep_creative_libraries_plus_aura_effect_system_creator": [39, 49],
+    "production_release_readiness": [61, 66],
+    "native_ecosystem": [32, 40],
+    "external_operational_readiness": [25, 35]
   },
-  "current_test_truth": {
-    "integration_sha": "2f6f271e00918186f016b4118f3ffcd8a8157601",
-    "command_center_ci": "PASS #2290",
-    "security_gates": "PASS #1152",
-    "self_host_smoke": "PASS #272",
-    "production_source_completeness": "PASS",
-    "python_compile": "PASS",
-    "pytest_suite": "PASS; exact numeric count not exposed by current workflow metadata",
-    "deployment_topology_validation": "PASS as code/topology validation, not production-operation proof",
-    "historical_pr386_fixture_failure": "RESOLVED before merge; final PR386 head passed 2,271 tests, 0 failed"
+  "range_notes": [
+    "The 98-99% web/control-plane range is a narrow denominator and must never be presented as expanded-ecosystem completion.",
+    "Video Studio Waves 9-11, Drum Studio workspace, verified subscription lifecycle, creative catalogue/taxonomy, Threads publishing and Shared Sky foundation justify a measured implementation increase.",
+    "Issue #418 remains a deliberately large denominator: catalogue/taxonomy depth and several renderer families do not equal a complete prompt-to-editable-system workflow across all studios.",
+    "Shared Sky is now integrated as a tested foundation, but provider OAuth/app approvals, production ingest, WebRTC/SFU guests, unified chat, cloud recording and scheduled playout remain external or later implementation work.",
+    "External operational readiness cannot be raised by repository tests alone."
+  ],
+  "current_repository_truth": {
+    "live_integration_sha": "bb2e05051964f7e222f71beedc2693cace82ddd6",
+    "latest_merge": "PR #494 — Video Studio mask and crop interoperability",
+    "immediately_prior_merge": "PR #497 — Shared Sky Streaming Studios foundation",
+    "recent_release_train_merge": "PR #492 — verified subscription lifecycle + Drum Studio workspace",
+    "branch_protection": "BLOCKED: development/full-site-build still reports protected=false",
+    "post_merge_gate_inheritance": false,
+    "post_merge_note": "Feature-branch CI/Security/Self-Host evidence is not automatically inherited by later merge SHAs; current-head admission must be rechecked before release claims."
   },
+  "recent_integrated_advances": [
+    "PR #494 — authored Video Studio mask+crop composition with retained fail-closed tracking boundary",
+    "PR #497 — Shared Sky Streaming Studios tested foundation",
+    "PR #492 — verified subscription lifecycle + Drum Studio project workspace/DAW insertion",
+    "PR #486 — public Pro-gated Video Studio track-keyframe authoring",
+    "PR #461 — grouped Video Studio track-opacity keyframe execution",
+    "PR #481 — bounded Threads publishing adapter",
+    "PR #480 — universal studio menu/discovery taxonomy",
+    "PR #473 — executable creative catalogue kernel",
+    "PR #424/#429/#431/#433 — canonical Pro pricing/product presentation and native commercial-access foundations"
+  ],
   "capabilities": [
     {
       "capability_id": "core.auth_sessions_roles",
-      "domain": "core",
       "owner_chat": "CHAT 1",
-      "scope_weight": 5,
       "stage": 6,
-      "specification_state": "complete",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "passing_repository_gates",
+      "state": "integrated_and_repository_tested",
       "production_state": "external_evidence_required",
-      "evidence": ["exact-head CI #2290", "Security Gates #1152"],
       "blockers": []
     },
     {
-      "capability_id": "core.pricing_entitlements",
-      "domain": "commerce-core",
-      "owner_chat": "CHAT 1",
-      "scope_weight": 4,
-      "stage": 5,
-      "specification_state": "current_target_changed",
-      "backend_state": "functional_but_stale_price",
-      "frontend_state": "functional_but_requires_reconciliation",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing_for_old_catalogue",
-      "security_state": "bounded",
-      "production_state": "blocked",
-      "evidence": ["aura_music_studio/plans.py currently prices Unlimited Pro at £14.99/month"],
-      "blockers": ["Reconcile canonical current target: Unlimited Pro £9.99/month and £99/year plus Aura OS/Aura Sec monthly, annual and bundle prices."]
-    },
-    {
-      "capability_id": "core.universal_platform_services",
-      "domain": "platform",
-      "owner_chat": "CHAT 1",
-      "scope_weight": 6,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "partial_expanded_scope",
-      "frontend_state": "partial_expanded_scope",
-      "persistence_state": "functional_foundations",
-      "integration_state": "integrated_foundations",
-      "test_state": "passing_foundations",
-      "security_state": "bounded",
-      "production_state": "external_evidence_required",
-      "evidence": ["PR #386", "Universal Capability Library"],
-      "blockers": ["Accepted planned_original provider/model/orchestration/library capabilities remain."]
-    },
-    {
-      "capability_id": "core.release_supply_chain",
-      "domain": "release",
-      "owner_chat": "CHAT 1",
-      "scope_weight": 5,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional_release_contracts",
-      "frontend_state": "not_applicable",
-      "persistence_state": "evidence_contracts_present",
-      "integration_state": "integrated",
-      "test_state": "passing_repository_gates",
-      "security_state": "partial_until_external_review",
-      "production_state": "blocked",
-      "evidence": ["CI #2290", "Security Gates #1152", "Self-Host Smoke #272"],
-      "blockers": ["Issue #362 GitHub protection/ruleset gate", "Ten production evidence gates", "Full release licence/SBOM/provenance evidence not independently verified in this audit"]
-    },
-    {
-      "capability_id": "music.real_audio_daw_mastering",
-      "domain": "music",
-      "owner_chat": "CHAT 2",
-      "scope_weight": 10,
+      "capability_id": "core.pricing_catalogue_entitlements",
+      "owner_chat": "CHAT 1 + CHAT 5",
       "stage": 6,
-      "specification_state": "complete_foundation",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "bounded",
-      "production_state": "renderer_capacity_external",
-      "evidence": ["PR #383", "real-audio safety smoke PASS"],
-      "blockers": ["Production renderer/model capacity evidence"]
+      "state": "canonical_pro_period_model_catalogue_and_verified_subscription_lifecycle_integrated",
+      "evidence": ["#424", "#429", "#431", "#433", "#492"],
+      "production_state": "provider_e2e_and_remaining_web_native_composition_required",
+      "blockers": [
+        "Issue #397 remains open.",
+        "PR #483 period-aware public/owner web flow remains unintegrated and stale to current head.",
+        "PR #496 member cancellation/refund control API is now behind current integration after #497/#494 and requires exact-current replay/revalidation.",
+        "Real provider settlement/refund/reconciliation evidence remains external."
+      ]
     },
     {
-      "capability_id": "voice.studio",
-      "domain": "voice",
-      "owner_chat": "CHAT 2",
-      "scope_weight": 5,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional_foundations",
-      "frontend_state": "functional_foundations",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing_foundations",
-      "security_state": "consent_bounded",
-      "production_state": "provider_external",
-      "evidence": ["Voice Studio integrated foundations", "Universal Capability Library"],
-      "blockers": ["Advanced accepted voice/dubbing/realtime capabilities and production providers remain partly planned/gated"]
-    },
-    {
-      "capability_id": "music.smart_warp_tempo_follow",
-      "domain": "music",
-      "owner_chat": "CHAT 2",
-      "scope_weight": 3,
+      "capability_id": "cross_studio.aura_effect_system_creator",
+      "owner_chat": "CHATS 1-5 + CHAT 9 coordinated by CHAT 6",
       "stage": 3,
-      "specification_state": "complete",
-      "backend_state": "functional_on_branch",
-      "frontend_state": "functional_on_branch",
-      "persistence_state": "functional_on_branch",
-      "integration_state": "not_integrated",
-      "test_state": "branch_green_before_current_base_replay",
-      "security_state": "bounded",
-      "production_state": "not_production",
-      "evidence": ["PR #392"],
-      "blockers": ["PR #392 is 10 commits behind verified integration and must be replayed/revalidated on exact current head"]
+      "state": "shared_completion_contract_plus_executable_catalogue_foundations__cross_studio_prompt_graph_workflow_partial",
+      "evidence": ["Issue #418", "PR #420", "PR #473", "PR #480"],
+      "production_state": "not_complete",
+      "blockers": [
+        "Prompt -> typed graph -> preview -> editable save must be executable across major studios.",
+        "PR #485 production catalogue API remains unintegrated.",
+        "PR #491 Coin effect unlocks is stacked behind #485 and cannot be admitted first.",
+        "Deep executable libraries remain materially incomplete relative to issue #418."
+      ]
     },
     {
-      "capability_id": "video.nle_vfx",
-      "domain": "video",
-      "owner_chat": "CHAT 3",
-      "scope_weight": 8,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional_expanding",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "bounded",
-      "production_state": "provider_external_where_required",
-      "evidence": ["PR #389", "current universal video compositor"],
-      "blockers": ["Advanced accepted NLE/VFX/generative capability families remain"]
-    },
-    {
-      "capability_id": "image.designer",
-      "domain": "image",
-      "owner_chat": "CHAT 3",
-      "scope_weight": 6,
+      "capability_id": "music.audio_daw_voice",
+      "owner_chat": "CHAT 2",
       "stage": 6,
-      "specification_state": "complete_foundation",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "bounded",
-      "production_state": "provider_external_where_required",
-      "evidence": ["PR #390", "PR #393 merged as integration SHA 2f6f271e..."],
-      "blockers": ["Additional accepted image capability families remain"]
+      "state": "strong_integrated_real_audio_daw_foundation_with_drum_studio_workspace",
+      "evidence": ["Smart Warp", "Groove/Humanisation", "PR #492 Drum Studio"],
+      "production_state": "renderer_model_capacity_external_where_required",
+      "blockers": ["Expanded executable music/audio effect and system libraries remain part of #418."]
     },
     {
-      "capability_id": "visual.3d_aura_avatar",
-      "domain": "3d",
+      "capability_id": "video_image_visual_3d",
       "owner_chat": "CHAT 3",
-      "scope_weight": 4,
-      "stage": 4,
-      "specification_state": "complete",
-      "backend_state": "partial",
-      "frontend_state": "browser_runtime_foundation",
-      "persistence_state": "partial",
-      "integration_state": "integrated_foundation",
-      "test_state": "partial",
-      "security_state": "bounded",
-      "production_state": "not_verified",
-      "evidence": ["Aura avatar runtime/docs"],
-      "blockers": ["Final likeness-grade production asset, device/runtime packaging and production validation"]
-    },
-    {
-      "capability_id": "game.forge",
-      "domain": "game",
-      "owner_chat": "CHAT 4",
-      "scope_weight": 7,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional_foundations",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing_foundations",
-      "security_state": "bounded",
-      "production_state": "external_for_some_targets",
-      "evidence": ["integrated Game Forge runtime/playtest/export foundations"],
-      "blockers": ["Expanded scene/entity/event/node/runtime/export depth remains accepted work"]
-    },
-    {
-      "capability_id": "live.aura_live",
-      "domain": "live",
-      "owner_chat": "CHAT 4",
-      "scope_weight": 7,
       "stage": 6,
-      "specification_state": "complete_foundation",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "bounded",
-      "production_state": "platform_authority_external",
-      "evidence": ["Aura LIVE Overlay Studio/relay/Guardian integrated"],
-      "blockers": ["Real platform permissions/provider authority where required"]
+      "state": "integrated_advanced_video_runtime_through_wave_11",
+      "evidence": ["PR #461 Wave 9", "PR #486 Wave 10", "PR #494 Wave 11"],
+      "production_state": "final_assets_device_matrix_provider_evidence_required",
+      "blockers": [
+        "Automatic subject segmentation, AI rotoscoping, point/planar/motion tracking remain unclaimed where stated.",
+        "Final likeness-grade Aura asset and real browser/device acceptance remain external gates.",
+        "Deep visual/VFX libraries remain part of #418."
+      ]
     },
     {
-      "capability_id": "social.manager",
-      "domain": "social",
+      "capability_id": "game_forge_live_social",
       "owner_chat": "CHAT 4",
-      "scope_weight": 4,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "provider_bounded",
-      "production_state": "provider_external",
-      "evidence": ["PR #374", "PR #381", "PR #382"],
-      "blockers": ["Official provider apps, permissions, credentials and provider-side E2E proof"]
-    },
-    {
-      "capability_id": "agency.creator_agent_owner_os",
-      "domain": "agency",
-      "owner_chat": "CHAT 5",
-      "scope_weight": 7,
       "stage": 6,
-      "specification_state": "complete",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "role_bounded",
-      "production_state": "operational_evidence_external",
-      "evidence": ["Creator/Agent/Owner hubs", "PR #386 service registry/SLA/tech vault/Brand Revenue OS"],
-      "blockers": ["Registry/design status is not proof every real-world service is staffed or live"]
+      "state": "integrated_foundations_with_social_provider_depth_increasing",
+      "evidence": ["Game Forge foundations", "Aura LIVE foundations", "PR #481 Threads publishing"],
+      "production_state": "platform_provider_signing_evidence_required_where_applicable",
+      "blockers": [
+        "PR #495 Threads OAuth is stale to current integration and requires replay/revalidation.",
+        "Expanded Game/3D/LIVE/Social system libraries remain part of #418."
+      ]
     },
     {
-      "capability_id": "agency.business_operations",
-      "domain": "business",
-      "owner_chat": "CHAT 5",
-      "scope_weight": 5,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "partial_expanded_scope",
-      "frontend_state": "partial_expanded_scope",
-      "persistence_state": "functional_foundations",
-      "integration_state": "integrated_foundations",
-      "test_state": "partial",
-      "security_state": "bounded",
-      "production_state": "external_and_operational",
-      "evidence": ["PR #386 agency OS foundations"],
-      "blockers": ["Opportunity/operations/staffing/inventory and several end-to-end business workflows require additional software or real operational evidence"]
+      "capability_id": "streaming.shared_sky",
+      "owner_chat": "STREAMING BUILD LANE coordinated by CHAT 6",
+      "stage": 6,
+      "state": "tested_integrated_foundation",
+      "evidence": ["PR #497"],
+      "production_state": "provider_and_transport_completion_required",
+      "blockers": [
+        "Provider OAuth/app approvals and creator authorization.",
+        "Production ingest and WebRTC/SFU guest workflows.",
+        "Unified provider chat adapters.",
+        "Cloud recording and scheduled playout."
+      ]
     },
     {
-      "capability_id": "commerce.marketplace_payments_finance",
-      "domain": "commerce",
+      "capability_id": "agency_business_operations",
       "owner_chat": "CHAT 5",
-      "scope_weight": 4,
       "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional_fail_closed",
-      "frontend_state": "functional_fail_closed",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing_repository_tests",
-      "security_state": "bounded",
-      "production_state": "external_e2e_missing",
-      "evidence": ["integrated checkout/webhook/ledger/accounting foundations"],
-      "blockers": ["Production payment/webhook/refund/payout and reconciliation evidence"]
+      "state": "substantial_integrated_operating_system_foundations",
+      "production_state": "real_staffing_provider_and_operational_evidence_required",
+      "blockers": ["Registry/design presence does not prove every real-world service, staffing process or partner workflow is operational."]
     },
     {
       "capability_id": "aura.central_assistant",
-      "domain": "aura",
       "owner_chat": "CHAT 5",
-      "scope_weight": 2,
-      "stage": 5,
-      "specification_state": "complete",
-      "backend_state": "functional",
-      "frontend_state": "functional",
-      "persistence_state": "functional",
-      "integration_state": "integrated",
-      "test_state": "passing",
-      "security_state": "tool_bounded",
-      "production_state": "model_provider_external",
-      "evidence": ["Aura orchestration/tools/context integrated"],
-      "blockers": ["Production model/provider capacity and authoritative external-action evidence"]
+      "stage": 6,
+      "state": "integrated_tool_bounded_assistant_runtime",
+      "production_state": "model_provider_capacity_and_external_action_authority_evidence_required",
+      "blockers": []
     },
     {
       "capability_id": "native.aura_os",
-      "domain": "native",
       "owner_chat": "CHAT 5",
-      "scope_weight": 3,
       "stage": 2,
-      "specification_state": "complete",
-      "backend_state": "protocol_scaffold",
-      "frontend_state": "native_clients_not_verified",
-      "persistence_state": "partial",
-      "integration_state": "web_control_plane_only",
-      "test_state": "partial",
-      "security_state": "permission_scoped_design",
+      "state": "protocol_and_web_control_plane_foundations_plus_commercial_access_model",
       "production_state": "not_production",
-      "evidence": ["aura-os/1 contract from PR #386"],
-      "blockers": ["No verified signed Windows/Linux/Android client, installer, updater, uninstall and device matrix"]
+      "blockers": ["Signed Windows/Linux/Android clients", "installer/updater/uninstall", "device matrix", "production attestation/device identity evidence"]
     },
     {
       "capability_id": "native.aura_sec",
-      "domain": "security-native",
       "owner_chat": "CHAT 5",
-      "scope_weight": 3,
       "stage": 2,
-      "specification_state": "complete",
-      "backend_state": "web_control_plane_and_bounded_native_contracts",
-      "frontend_state": "web_functional",
-      "persistence_state": "control_plane_functional",
-      "integration_state": "web_integrated_native_release_separate",
-      "test_state": "repository_security_gates_passing",
-      "security_state": "strong_control_plane_not_commercial_endpoint_evidence",
+      "state": "strong_web_control_plane_and_security_contracts__native_product_boundary_incomplete",
       "production_state": "not_production",
-      "evidence": ["Issue #64", "PR #394 current head c36e2162... all three required workflows PASS"],
-      "blockers": ["Private native engine, signed clients, updater/rollback, real attestation transport, threat operations, independent security benchmarking"]
+      "blockers": ["Issue #64", "private native engine", "signed clients", "secure updater/rollback", "real attestation transport", "threat operations", "independent security benchmarking"]
     },
     {
-      "capability_id": "operations.privacy_legal_accessibility_support",
-      "domain": "operations",
-      "owner_chat": "CHAT 5 / EXTERNAL / PROFESSIONAL REVIEW",
-      "scope_weight": 2,
+      "capability_id": "release.production_admission",
+      "owner_chat": "CHAT 6 + EXTERNAL OPERATIONS",
       "stage": 3,
-      "specification_state": "substantial",
-      "backend_state": "partial",
-      "frontend_state": "partial",
-      "persistence_state": "partial",
-      "integration_state": "partial",
-      "test_state": "insufficient_production_evidence",
-      "security_state": "independent_review_missing",
+      "state": "repository_release_contracts_substantial__external_evidence_incomplete",
       "production_state": "blocked",
-      "evidence": ["production release checklist", "privacy/compliance/IP documentation"],
-      "blockers": ["Independent privacy/security/legal review", "accessibility/browser/device UAT", "real support/on-call/incident evidence"]
+      "blockers": ["Issue #362 GitHub release controls", "Issue #397 commercial convergence", "Issue #418 expanded creative completeness", "Issue #64 native Aura Sec boundary", "ten production evidence gates"]
     }
   ],
-  "blockers": {
+  "active_coordination": [
+    {"pr": 483, "owner": "CHAT 1", "subject": "period-aware public/owner membership web flows", "status": "open; stale ancestry; exact-current replay/revalidation required"},
+    {"pr": 485, "owner": "CHAT 9", "subject": "production-mounted executable creative catalogue API", "status": "open; unintegrated; exact-current admission still required"},
+    {"pr": 491, "owner": "CHAT 9", "subject": "atomic Cosmic Creation Coin effect unlocks", "status": "stacked behind #485; do not merge first"},
+    {"pr": 495, "owner": "CHAT 4", "subject": "encrypted member Threads OAuth", "status": "open; stale to current integration; replay/revalidate"},
+    {"pr": 496, "owner": "CHAT 11", "subject": "subscription status/cancellation/refund controls", "status": "open; based on pre-#497/#494 integration; replay/revalidate"}
+  ],
+  "coordination_cleanup_completed": [
+    "PR #482 closed as superseded by merged #492.",
+    "PR #478 closed as superseded by merged #480."
+  ],
+  "release_blockers": {
     "P0": [
-      {
-        "id": "github-release-controls",
-        "owner": "EXTERNAL_REPOSITORY_ADMIN",
-        "evidence": "Issue #362; no active ruleset; main and integration reported unprotected"
-      }
+      {"id": "github-release-controls", "issue": 362, "owner": "EXTERNAL_REPOSITORY_ADMIN", "state": "BLOCKED", "evidence": "development/full-site-build reports protected=false"}
     ],
     "P1": [
-      {
-        "id": "production-evidence-gates",
-        "owner": "PRODUCTION_OPERATIONS",
-        "evidence": "Ten fail-closed exact-SHA production gates in docs/PRODUCTION_RELEASE_EVIDENCE_CHECKLIST.md"
-      },
-      {
-        "id": "commercial-pricing-drift",
-        "owner": "CHAT 1 + CHAT 5",
-        "evidence": "Integrated Unlimited Pro £14.99/month conflicts with current target £9.99/month and £99/year; native product prices also need canonical reconciliation"
-      },
-      {
-        "id": "native-commercial-release",
-        "owner": "CHAT 5",
-        "evidence": "Issue #64 and missing signed production clients/native release evidence"
-      }
-    ],
-    "P2": [
-      {
-        "id": "smart-warp-branch-drift",
-        "owner": "CHAT 2",
-        "evidence": "PR #392 is 10 commits behind verified integration"
-      },
-      {
-        "id": "expanded-planned-original-scope",
-        "owner": "CHATS 1-5",
-        "evidence": "Universal Capability Library contains accepted planned_original work"
-      },
-      {
-        "id": "verification-coverage-gaps",
-        "owner": "CHAT 6 + OPERATIONS",
-        "evidence": "No independently verified production performance/load, accessibility/device matrix, browser E2E crawl, pentest, restore drill or rollback rehearsal in current evidence set"
-      }
+      {"id": "expanded-creative-completeness", "issue": 418, "owner": "BUILD CHATS + CHAT 6", "state": "OPEN"},
+      {"id": "commercial-production-convergence", "issue": 397, "owner": "CHAT 1 + CHAT 5", "state": "OPEN"},
+      {"id": "native-aura-sec-private-engine", "issue": 64, "owner": "CHAT 5 + SECURITY/RELEASE OPERATIONS", "state": "OPEN"},
+      {"id": "production-evidence-gates", "owner": "PRODUCTION_OPERATIONS", "state": "OPEN", "required": ["domain_tls", "production_secrets", "monitoring_alerting", "backup_restore_drill", "deployment_rollback", "capacity_failure_testing", "privacy_security_review", "incident_support_readiness", "provider_payment_e2e", "production_data_ai_infrastructure"]}
     ]
   },
-  "resolved_actions": [
-    "Historical PR #386 22-test fixture failure resolved before merge; final head passed 2,271 tests, 0 failed.",
-    "PR #393 merged and advanced integration to 2f6f271e00918186f016b4118f3ffcd8a8157601.",
-    "Stale duplicate Aura Sec DLP PR #391 closed unmerged by Chat 6; PR #394 is the authoritative current-base line.",
-    "PR #394 transient committed-secret gate failure was corrected; current head c36e216276c70de32d46ad1f91ffb1f02e4e45e1 passes CI #2292, Security Gates #1154 and Self-Host Smoke #274."
-  ],
   "audit_notes": [
-    "Older MASTER_BUILD_MATRIX code-complete statements apply to the narrower web/control-plane checkpoint, not the expanded six-chat ecosystem denominator.",
-    "Passing production topology validation proves the release contract/configuration shape, not live production operation.",
-    "A registry, schema, route, planned provider or test fixture is not counted as production-complete without evidence at the appropriate completion level.",
-    "No percentage overrides the NO_GO decision while P0/P1 release gates remain materially unresolved."
+    "A passing registry/schema/unit test is not production-operation proof.",
+    "A signed native release, real device trust, real payment settlement and external operational evidence cannot be manufactured by repository code alone.",
+    "Shared Sky foundation is integrated but does not imply its external provider/transport dependencies are live.",
+    "No percentage overrides NO_GO while the listed P0/P1 gates remain materially unresolved."
   ]
 }
