@@ -162,4 +162,57 @@ def universal_runtime_effect_preview_plan(item_id: str, body: RuntimePreviewRequ
     }
 
 
-__all__ = ["RuntimePreviewRequest", "router", "universal_runtime_effects", "universal_runtime_effect_preview_plan", "universal_studio_menus"]
+def _route_signature_exists(app, path: str, method: str) -> bool:
+    expected_method = method.upper()
+    for existing in app.router.routes:
+        if getattr(existing, "path", None) != path:
+            continue
+        methods = getattr(existing, "methods", None) or set()
+        if expected_method in methods:
+            return True
+    return False
+
+
+def install_universal_creative_routes(app) -> None:
+    """Bind Universal Library handlers directly to the shared production app.
+
+    The Command Center composes many late overlay routers. A late ``include_router`` can be
+    ineffective after those compatibility installers have copied/wrapped the original router.
+    Register these handlers on the shared FastAPI instance itself so runtime reachability is
+    deterministic. The handlers retain their own membership validation and the surrounding app
+    middleware remains authoritative. The legacy catch-all is deliberately registered last.
+    """
+    from .universal_creative_library import universal_library, universal_library_item
+
+    prefix = "/command-center/api/universal-library"
+    registrations = (
+        (prefix, universal_library, "GET"),
+        (f"{prefix}/menus", universal_studio_menus, "GET"),
+        (f"{prefix}/runtime-effects", universal_runtime_effects, "GET"),
+        (f"{prefix}/runtime-effects/{{item_id:path}}", universal_runtime_effect_item, "GET"),
+        (f"{prefix}/runtime-effects/{{item_id:path}}/preview-plan", universal_runtime_effect_preview_plan, "POST"),
+        (f"{prefix}/{{item_id:path}}", universal_library_item, "GET"),
+    )
+    for path, endpoint, method in registrations:
+        if _route_signature_exists(app, path, method):
+            continue
+        app.add_api_route(path, endpoint, methods=[method], tags=["Universal Creative Library"])
+
+
+# The root production entrypoint imports ``aura_music_studio.api.app`` before importing this
+# module. Bind to that same shared FastAPI object here so the routes exist before any later
+# compatibility-router copy can make ``include_router`` ineffective. The installer is idempotent.
+from .api import app as _canonical_app
+
+install_universal_creative_routes(_canonical_app)
+
+
+__all__ = [
+    "RuntimePreviewRequest",
+    "install_universal_creative_routes",
+    "router",
+    "universal_runtime_effects",
+    "universal_runtime_effect_item",
+    "universal_runtime_effect_preview_plan",
+    "universal_studio_menus",
+]
