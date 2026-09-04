@@ -5,7 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import __version__
@@ -63,7 +63,7 @@ from .upload_security import (
 )
 from .voice import create_voice_profile
 from .web_api import router as web_api_router
-from .web_portal import router as web_portal_router
+from .web_portal import billing_history_json, billing_history_page, router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
@@ -75,6 +75,19 @@ app = FastAPI(
 app.add_middleware(MembershipAccessMiddleware)
 app.add_middleware(StudioSecurityMiddleware)
 app.include_router(web_portal_router)
+# Keep the customer billing-history endpoints deterministic on the canonical application even
+# when another importer has already snapshotted the shared web router. The handlers retain their
+# own server-session/account scoping; this only guarantees production reachability.
+_mounted_paths = {getattr(route, "path", None) for route in app.routes}
+if "/auth/me/billing-history" not in _mounted_paths:
+    app.add_api_route("/auth/me/billing-history", billing_history_json, methods=["GET"])
+if "/auth/billing-history" not in _mounted_paths:
+    app.add_api_route(
+        "/auth/billing-history",
+        billing_history_page,
+        methods=["GET"],
+        response_class=HTMLResponse,
+    )
 app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
