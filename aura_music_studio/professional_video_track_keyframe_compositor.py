@@ -289,12 +289,22 @@ class TrackOpacityKeyframedGroupedTrackVideoCompositor(GroupedTrackVideoComposit
                         chain += f"scale=iw*{self._ff(sx_default)}:ih*{self._ff(sy_default)},"
 
                     brightness = _finite(colour.get("brightness"), 0.0) + _finite(colour.get("exposure"), 0.0) * 0.1
+                    temperature = max(-1.0, min(1.0, _finite(colour.get("temperature"), 0.0)))
+                    tint = max(-1.0, min(1.0, _finite(colour.get("tint"), 0.0)))
+                    warmth = temperature * 0.24
+                    green = -tint * 0.20
                     chain += (
                         f"eq=brightness={self._ff(max(-1.0,min(1.0,brightness)))}:"
                         f"contrast={self._ff(max(0.0,_finite(colour.get('contrast'),1.0)))}:"
                         f"saturation={self._ff(max(0.0,_finite(colour.get('saturation'),1.0)))}:"
-                        f"gamma={self._ff(max(.05,_finite(colour.get('gamma'),1.0)))},format=rgba,"
+                        f"gamma={self._ff(max(.05,_finite(colour.get('gamma'),1.0)))},"
                     )
+                    if abs(temperature) > 1e-8 or abs(tint) > 1e-8:
+                        chain += (
+                            f"colorbalance=rm={self._ff(warmth)}:gm={self._ff(green)}:bm={self._ff(-warmth)}:"
+                            f"rh={self._ff(warmth)}:gh={self._ff(green)}:bh={self._ff(-warmth)}:pl=1,"
+                        )
+                    chain += "format=rgba,"
 
                     rotation_default = _transform_default(item, "rotation", 0.0)
                     rotation_points = _item_keyframes(item, "transform.rotation")
