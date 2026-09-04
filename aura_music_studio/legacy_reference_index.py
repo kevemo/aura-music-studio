@@ -11,60 +11,18 @@ from pathlib import Path
 from typing import Iterable
 
 TEXT_EXTENSIONS = {
-    ".c",
-    ".cc",
-    ".cjs",
-    ".cpp",
-    ".cs",
-    ".css",
-    ".env",
-    ".h",
-    ".hpp",
-    ".html",
-    ".ini",
-    ".js",
-    ".jsx",
-    ".json",
-    ".md",
-    ".mjs",
-    ".py",
-    ".rs",
-    ".shader",
-    ".sql",
-    ".toml",
-    ".ts",
-    ".tsx",
-    ".txt",
-    ".xml",
-    ".yaml",
-    ".yml",
+    ".c", ".cc", ".cjs", ".cpp", ".cs", ".css", ".env", ".h", ".hpp", ".html", ".ini",
+    ".js", ".jsx", ".json", ".md", ".mjs", ".py", ".rs", ".shader", ".sql", ".toml",
+    ".ts", ".tsx", ".txt", ".xml", ".yaml", ".yml",
 }
 
 LANGUAGE_BY_EXTENSION = {
-    ".c": "C",
-    ".cc": "C++",
-    ".cjs": "JavaScript",
-    ".cpp": "C++",
-    ".cs": "C#",
-    ".css": "CSS",
-    ".h": "C/C++ header",
-    ".hpp": "C++ header",
-    ".html": "HTML",
-    ".js": "JavaScript",
-    ".jsx": "JavaScript/JSX",
-    ".json": "JSON",
-    ".md": "Markdown",
-    ".mjs": "JavaScript",
-    ".py": "Python",
-    ".rs": "Rust",
-    ".shader": "Shader",
-    ".sql": "SQL",
-    ".toml": "TOML",
-    ".ts": "TypeScript",
-    ".tsx": "TypeScript/TSX",
-    ".xml": "XML",
-    ".yaml": "YAML",
-    ".yml": "YAML",
+    ".c": "C", ".cc": "C++", ".cjs": "JavaScript", ".cpp": "C++", ".cs": "C#",
+    ".css": "CSS", ".h": "C/C++ header", ".hpp": "C++ header", ".html": "HTML",
+    ".js": "JavaScript", ".jsx": "JavaScript/JSX", ".json": "JSON", ".md": "Markdown",
+    ".mjs": "JavaScript", ".py": "Python", ".rs": "Rust", ".shader": "Shader", ".sql": "SQL",
+    ".toml": "TOML", ".ts": "TypeScript", ".tsx": "TypeScript/TSX", ".xml": "XML",
+    ".yaml": "YAML", ".yml": "YAML",
 }
 
 SUBSYSTEM_HINTS = {
@@ -82,16 +40,19 @@ SUBSYSTEM_HINTS = {
 }
 
 SENSITIVE_NAME_HINTS = (
-    ".env",
-    "credential",
-    "credentials",
-    "service-key",
-    "service_key",
-    "private-key",
-    "private_key",
-    "secret",
-    "token",
+    ".env", "credential", "credentials", "service-key", "service_key", "private-key", "private_key",
+    "secret", "token",
 )
+
+GENERATED_OR_VENDOR_SEGMENTS = {
+    ".git", "node_modules", "dist", "build", ".next", ".nuxt", "coverage", ".cache", "vendor",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".venv", "venv",
+}
+
+LICENSE_NAMES = {
+    "license", "license.txt", "license.md", "licence", "licence.txt", "licence.md", "notice",
+    "notice.txt", "notice.md", "copying", "copyright",
+}
 
 URL_RE = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 PACKAGE_RE = re.compile(
@@ -113,6 +74,9 @@ class LegacyFileRecord:
     readable_text: bool
     likely_subsystems: tuple[str, ...]
     security_sensitive: bool
+    generated_or_vendor: bool
+    licence_evidence: bool
+    owner_source_candidate: bool
     provenance: str
     urls: tuple[str, ...]
     dependency_hints: tuple[str, ...]
@@ -139,6 +103,10 @@ class LegacyArchiveIndex:
             "archive": self.archive,
             "archive_sha256": self.archive_sha256,
             "file_count": len(self.files),
+            "owner_source_candidate_count": sum(record.owner_source_candidate for record in self.files),
+            "generated_or_vendor_count": sum(record.generated_or_vendor for record in self.files),
+            "licence_evidence_count": sum(record.licence_evidence for record in self.files),
+            "security_sensitive_count": sum(record.security_sensitive for record in self.files),
             "files": [record.public() for record in self.files],
             "nested_archives_scanned": list(self.nested_archives_scanned),
             "warnings": list(self.warnings),
@@ -156,13 +124,7 @@ def _language(path: str) -> str | None:
 def _is_text(path: str) -> bool:
     suffix = Path(path).suffix.casefold()
     name = Path(path).name.casefold()
-    return suffix in TEXT_EXTENSIONS or name in {
-        "dockerfile",
-        "makefile",
-        "notice",
-        "license",
-        "licence",
-    }
+    return suffix in TEXT_EXTENSIONS or name in {"dockerfile", "makefile", *LICENSE_NAMES}
 
 
 def _subsystems(path: str, text: str = "") -> tuple[str, ...]:
@@ -174,6 +136,21 @@ def _subsystems(path: str, text: str = "") -> tuple[str, ...]:
 def _security_sensitive(path: str) -> bool:
     lowered = path.casefold()
     return any(hint in lowered for hint in SENSITIVE_NAME_HINTS)
+
+
+def _generated_or_vendor(path: str) -> bool:
+    parts = {part.casefold() for part in Path(path).parts}
+    return bool(parts & GENERATED_OR_VENDOR_SEGMENTS)
+
+
+def _licence_evidence(path: str) -> bool:
+    return Path(path).name.casefold() in LICENSE_NAMES
+
+
+def _owner_source_candidate(path: str, *, readable_text: bool, security_sensitive: bool) -> bool:
+    if not readable_text or security_sensitive or _generated_or_vendor(path) or _licence_evidence(path):
+        return False
+    return _language(path) is not None or Path(path).name.casefold() in {"dockerfile", "makefile"}
 
 
 def _safe_decode(payload: bytes) -> str:
@@ -230,11 +207,11 @@ def _scan_zip_bytes(
                     text = _safe_decode(content)
             else:
                 warnings.append(
-                    f"Skipped content extraction for oversized member {archive_name}!{path} "
-                    f"({info.file_size} bytes)"
+                    f"Skipped content extraction for oversized member {archive_name}!{path} ({info.file_size} bytes)"
                 )
 
             urls, dependencies = _extract_references(text) if text else ((), ())
+            sensitive = _security_sensitive(path)
             record = LegacyFileRecord(
                 archive=archive_name,
                 path=path,
@@ -245,7 +222,10 @@ def _scan_zip_bytes(
                 sha256=_sha256_bytes(content) if content else "",
                 readable_text=bool(text),
                 likely_subsystems=_subsystems(path, text),
-                security_sensitive=_security_sensitive(path),
+                security_sensitive=sensitive,
+                generated_or_vendor=_generated_or_vendor(path),
+                licence_evidence=_licence_evidence(path),
+                owner_source_candidate=_owner_source_candidate(path, readable_text=bool(text), security_sensitive=sensitive),
                 provenance="UNCLEAR_PROVENANCE",
                 urls=urls,
                 dependency_hints=dependencies,
@@ -297,12 +277,14 @@ def scan_zip(
 def build_legacy_reference_index(paths: Iterable[str | Path]) -> dict:
     archives = [scan_zip(path).public() for path in paths]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "classification_default": "UNCLEAR_PROVENANCE",
         "security_rule": "Sensitive material is indexed by metadata only and must not be copied into the modern repository.",
+        "owner_source_rule": "Generated output, dependency/vendor trees, licence files, and security-sensitive files are excluded from owner-source candidates until reviewed.",
         "archives": archives,
         "archive_count": len(archives),
         "file_count": sum(archive["file_count"] for archive in archives),
+        "owner_source_candidate_count": sum(archive["owner_source_candidate_count"] for archive in archives),
     }
 
 
