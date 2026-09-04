@@ -332,9 +332,6 @@ class SubscriptionLedger:
                     (plan.id, plan.id, user_id),
                 )
 
-        # Read only after the transaction commits so newly scheduled prepaid terms are visible
-        # through a fresh ledger connection. Returning status from inside the transaction would
-        # race the commit and incorrectly report scheduled_transition=None.
         return self.status(user_id)
 
     def cancel_at_period_end(self, user_id: str) -> dict:
@@ -366,6 +363,49 @@ class SubscriptionLedger:
                 )
             con.execute(
                 "UPDATE users SET billing_status='cancel_at_period_end' WHERE id=?",
+                (user_id,),
+            )
+        return self.status(user_id)
+
+    def resume_renewal(self, user_id: str) -> dict:
+        """Reverse a scheduled cancellation while the already-paid term is still active.
+
+        This changes renewal intent only. It does not create a new paid term, extend the current
+        period, change the plan, or bypass provider confirmation handled by the API boundary.
+        """
+        user = self.store.get_user(user_id)
+        state = self.get(user_id)
+        now = _now()
+        end = _parse(state.get("period_end")) if state else None
+        transition = self.scheduled_transition(user_id)
+        cancellation_scheduled = bool(
+            user
+            and state
+            and user.get("plan_id") != "free"
+            and end
+            and end > now
+            and (
+                user.get("billing_status") == "cancel_at_period_end"
+                or state.get("status") == "cancel_at_period_end"
+                or (transition and int(transition.get("cancel_at_period_end") or 0))
+            )
+        )
+        if not cancellation_scheduled:
+            raise ValueError("Membership renewal is not currently scheduled for cancellation")
+
+        with self._connect() as con:
+            con.execute(
+                """UPDATE subscription_state SET status='active', updated_at=?
+                   WHERE user_id=? AND status='cancel_at_period_end'""",
+                (_iso(now), user_id),
+            )
+            con.execute(
+                """UPDATE subscription_transitions SET cancel_at_period_end=0, updated_at=?
+                   WHERE user_id=? AND status='scheduled'""",
+                (_iso(now), user_id),
+            )
+            con.execute(
+                "UPDATE users SET billing_status='active' WHERE id=?",
                 (user_id,),
             )
         return self.status(user_id)
@@ -502,9 +542,6 @@ class SubscriptionLedger:
         transition = self.scheduled_transition(user["id"])
         effective_at = _parse(transition.get("effective_at")) if transition else None
 
-        # A refund may deliberately return the current commercial entitlement to Free while a
-        # separately paid future term remains scheduled. Free status must not erase that future
-        # payment: it stays inactive until its original effective_at, then applies atomically.
         if user.get("plan_id") == "free":
             if not transition or not effective_at or effective_at > now:
                 return user
