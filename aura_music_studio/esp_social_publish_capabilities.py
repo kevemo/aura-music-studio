@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .esp_social_provider_adapters import ADAPTERS
 from .esp_social_secret_refs import social_token_env_name, valid_social_token_ref
+from .esp_social_threads_adapter import ThreadsGraphAdapter
 
 # This map deliberately describes only content surfaces that the current runtime
 # adapters actually implement. Planning capabilities remain broader in
@@ -14,11 +15,13 @@ from .esp_social_secret_refs import social_token_env_name, valid_social_token_re
 _ADAPTER_CONTENT_TYPES: dict[str, frozenset[str]] = {
     "facebook_pages_graph": frozenset({"post"}),
     "instagram_graph": frozenset({"post", "reel"}),
+    "threads_graph": frozenset({"post"}),
     "tiktok_content_posting": frozenset({"video"}),
     "youtube_data_v3": frozenset({"video", "short"}),
 }
 _ADAPTER_PLATFORMS = {
     "facebook_pages_graph": "facebook",
+    ThreadsGraphAdapter.name: ThreadsGraphAdapter.platform,
     **{name: adapter.platform for name, adapter in ADAPTERS.items()},
 }
 
