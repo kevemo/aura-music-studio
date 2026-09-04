@@ -6,12 +6,9 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
-from .api import app as _base_app
 from .commercial_entitlements import can_download_media
 from .creative_project import CreativeProjectStore
 from .tenant_storage import list_project_dirs
-from .universal_creative_catalogue_api import router as _runtime_universal_router
-from .universal_creative_library import router as _legacy_universal_router
 
 router = APIRouter(prefix="/creative", tags=["creative-library"])
 
@@ -21,25 +18,6 @@ _MEDIA_SUFFIXES = {
     ".mp4", ".webm", ".mov", ".m4v", ".mkv", ".avi",
     ".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg",
 }
-
-
-def _mount_universal_creative_routes() -> None:
-    """Mount the universal catalogue on the canonical base app before app.py composes overlays.
-
-    Specific runtime/menu routes must precede the legacy ``/{item_id:path}`` catch-all.
-    Importing this module is already part of the production app composition path, so this keeps
-    the catalogue reachable without creating a second FastAPI application or bypassing the
-    membership/security middleware installed by ``aura_music_studio.api``.
-    """
-    paths = {getattr(route, "path", "") for route in _base_app.router.routes}
-    if "/command-center/api/universal-library/menus" not in paths:
-        _base_app.include_router(_runtime_universal_router)
-        paths = {getattr(route, "path", "") for route in _base_app.router.routes}
-    if "/command-center/api/universal-library" not in paths:
-        _base_app.include_router(_legacy_universal_router)
-
-
-_mount_universal_creative_routes()
 
 
 def _member(request: Request):
