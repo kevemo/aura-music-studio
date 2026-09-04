@@ -148,3 +148,37 @@ def test_status_never_exposes_signing_or_node_secret(tmp_path, monkeypatch):
     assert "super-secret-node-value" not in rendered
     assert payload["signing_configured"] is True
     assert payload["node_auth_configured"] is True
+
+
+def test_ingest_credential_response_is_never_cacheable(monkeypatch):
+    import aura_music_studio.shared_sky_media_plane as module
+
+    member = type("Member", (), {"user_id": "member-1"})()
+    monkeypatch.setattr(module, "_member", lambda _request: (member, None))
+    monkeypatch.setattr(
+        module.media_plane,
+        "create_session",
+        lambda user_id, body: {
+            "id": "session-1",
+            "broadcast_id": body.broadcast_id,
+            "node_id": None,
+            "state": "issued",
+            "expires_at": datetime.now(timezone.utc).isoformat(),
+            "ingest_url": "rtmps://ingest.example.test/live/broadcast-1/credential-secret",
+            "credential": "credential-secret",
+        },
+    )
+
+    app = FastAPI()
+    app.include_router(module.router)
+    client = TestClient(app)
+    response = client.post(
+        "/shared-sky/api/ingest-sessions",
+        json={"broadcast_id": "broadcast-1", "ttl_seconds": 300},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["session"]["credential"] == "credential-secret"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+    assert response.headers["referrer-policy"] == "no-referrer"
