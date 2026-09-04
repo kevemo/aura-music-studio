@@ -27,6 +27,7 @@ from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
+from .shared_sky_streaming_studios import router as shared_sky_router
 from .universal_creative_library import router as universal_creative_library_router
 
 router = APIRouter()
@@ -49,6 +50,7 @@ router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(support_sla_router)
 router.include_router(broadcast_tech_router)
+router.include_router(shared_sky_router)
 router.include_router(creator_tech_vault_router)
 router.include_router(service_registry_router)
 router.include_router(social_media_library_router)
@@ -69,6 +71,7 @@ def level_up_with_creator_plan(request: Request):
 
     progress_link = "<a class='btn' href='/command-center/progress'>Progress</a>"
     links = [
+        "<a class='btn primary' href='/shared-sky'>Shared Sky Streaming Studios</a>",
         "<a class='btn primary' href='/command-center/dashboard'>Creator / Agent Dashboard</a>",
         "<a class='btn primary' href='/command-center/member-hub'>ESP Member Hub</a>",
         "<a class='btn' href='/command-center/library'>Academy &amp; Resources</a>",
