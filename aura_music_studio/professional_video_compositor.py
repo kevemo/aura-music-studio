@@ -162,6 +162,9 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                 for path in (item.get("keyframes") or {}):
                     if path not in _SUPPORTED_VIDEO_KEYFRAMES:
                         raise EditorRenderUnsupported(f"Video keyframe path is not yet render-safe: {path}")
+                colour = item.get("color") or {}
+                if abs(_finite(colour.get("highlights"), 0.0)) > 1e-8 or abs(_finite(colour.get("shadows"), 0.0)) > 1e-8:
+                    raise EditorRenderUnsupported("Video item highlights/shadows are not yet render-safe")
                 if item.get("kind") in {"adjustment", "generator"} and item.get("visible", True):
                     raise EditorRenderUnsupported(f"Video item kind is not yet render-safe: {item.get('kind')}")
 
@@ -284,12 +287,22 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                     chain += f"scale=iw*{self._ff(sx_default)}:ih*{self._ff(sy_default)},"
 
                 brightness = _finite(colour.get("brightness"), 0.0) + _finite(colour.get("exposure"), 0.0) * 0.1
+                temperature = max(-1.0, min(1.0, _finite(colour.get("temperature"), 0.0)))
+                tint = max(-1.0, min(1.0, _finite(colour.get("tint"), 0.0)))
+                warmth = temperature * 0.24
+                green = -tint * 0.20
                 chain += (
                     f"eq=brightness={self._ff(max(-1.0,min(1.0,brightness)))}:"
                     f"contrast={self._ff(max(0.0,_finite(colour.get('contrast'),1.0)))}:"
                     f"saturation={self._ff(max(0.0,_finite(colour.get('saturation'),1.0)))}:"
-                    f"gamma={self._ff(max(.05,_finite(colour.get('gamma'),1.0)))},format=rgba,"
+                    f"gamma={self._ff(max(.05,_finite(colour.get('gamma'),1.0)))},"
                 )
+                if abs(temperature) > 1e-8 or abs(tint) > 1e-8:
+                    chain += (
+                        f"colorbalance=rm={self._ff(warmth)}:gm={self._ff(green)}:bm={self._ff(-warmth)}:"
+                        f"rh={self._ff(warmth)}:gh={self._ff(green)}:bh={self._ff(-warmth)}:pl=1,"
+                    )
+                chain += "format=rgba,"
 
                 rotation_default = _transform_default(item, "rotation", 0.0)
                 rotation_points = _item_keyframes(item, "transform.rotation")
@@ -428,6 +441,10 @@ class AdvancedVideoCompositor(ProfessionalEditorRenderer):
                     "supports_audio_pan": True,
                     "supports_speed_correct_audio": True,
                     "supports_item_blend_modes": sorted(_SUPPORTED_VIDEO_ITEM_BLEND_MODES),
+                    "supports_item_temperature_tint": True,
+                    "item_temperature_tint_range": [-1.0, 1.0],
+                    "item_temperature_tint_preserve_lightness": True,
+                    "item_highlights_shadows_fail_closed": True,
                     "track_blend_modes_require_group_compositing": True,
                     "unsupported_state_fails_closed": True,
                 })

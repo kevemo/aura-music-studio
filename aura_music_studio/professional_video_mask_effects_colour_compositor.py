@@ -12,19 +12,19 @@ from .professional_video_mask_crop_compositor import (
 
 
 # These are the item colour controls actually executed by AdvancedVideoCompositor after the
-# alpha-capable effects/mask derivative is created. Temperature/tint/highlights/shadows remain
-# outside this Wave 12 boundary and therefore continue to fail closed when combined with masks
-# and item effects.
+# alpha-capable effects/mask derivative is created. Wave 13 adds bounded temperature/tint to that
+# mature item-colour stage. Highlights/shadows remain outside the executable boundary and continue
+# to fail closed when combined with masks and item effects.
 _RENDERED_COLOUR_DEFAULTS: dict[str, float] = {
     "exposure": 0.0,
     "brightness": 0.0,
     "contrast": 1.0,
     "saturation": 1.0,
     "gamma": 1.0,
-}
-_UNSUPPORTED_COLOUR_DEFAULTS: dict[str, float] = {
     "temperature": 0.0,
     "tint": 0.0,
+}
+_UNSUPPORTED_COLOUR_DEFAULTS: dict[str, float] = {
     "highlights": 0.0,
     "shadows": 0.0,
 }
@@ -140,7 +140,7 @@ def _count_mask_effects_colour_items(state: dict[str, Any], sequence_id: str) ->
 
 
 # Extend the current Wave 11 validator. The captured validator still performs mask/crop
-# sanitization and every earlier safety check after this Wave 12 validation-only adjustment.
+# sanitization and every earlier safety check after this interoperability-only adjustment.
 _grouped.GroupedUnifiedAdvancedVideoCompositor._validate_effect_state = (
     _validate_grouped_state_with_mask_effects_colour
 )
@@ -164,6 +164,10 @@ class MaskEffectsColourUniversalVisualVideoCompositor(_PreviousProductionComposi
                 "item_effects_applied_before_mask_alpha": True,
                 "mask_alpha_applied_before_item_colour": True,
                 "item_colour_applied_after_mask_derivative": True,
+                "supports_item_temperature_tint": True,
+                "item_temperature_tint_range": [-1.0, 1.0],
+                "item_temperature_tint_preserve_lightness": True,
+                "item_highlights_shadows_fail_closed": True,
                 "mask_effects_colour_source_media_mutated": False,
                 "mask_effects_colour_fail_closed": False,
                 "unsupported_mask_effects_colour_paths_fail_closed": True,
