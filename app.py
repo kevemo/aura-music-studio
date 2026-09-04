@@ -70,6 +70,7 @@ from aura_music_studio.daw_recording_ui import router as daw_recording_ui_router
 from aura_music_studio.daw_routing_api import router as daw_routing_router
 from aura_music_studio.daw_routing_ui import router as daw_routing_ui_router
 from aura_music_studio.discovery import router as discovery_router
+from aura_music_studio.drum_studio_api import router as drum_studio_router
 from aura_music_studio.edit_api import router as edit_router
 from aura_music_studio.engineering_job_api import router as engineering_job_router
 from aura_music_studio.esp_agent_roster_overlay import router as esp_agent_roster_overlay_router
@@ -286,6 +287,7 @@ app.include_router(stripe_billing_hardening_router)
 
 app.include_router(daw_router)
 app.include_router(daw_midi_router)
+app.include_router(drum_studio_router)
 app.include_router(daw_portal_router)
 app.include_router(daw_recording_router)
 app.include_router(daw_recording_ui_router)
