@@ -5,10 +5,15 @@ from fastapi import APIRouter, HTTPException, Request
 from .esp_niche import require_esp_social_member
 from .esp_social_provider_analytics import router as provider_analytics_router
 from .esp_social_publish_queue import SocialPublishQueue
+from .esp_social_threads_oauth import router as threads_oauth_router
 from .esp_social_tiktok_analytics import router as tiktok_analytics_router
 from .esp_social_tiktok_scope_upgrade import router as tiktok_scope_upgrade_router
 
 router = APIRouter(tags=["esp-social-publish-queue"])
+# Specific provider extensions are mounted before the generic OAuth wildcard routes on the
+# canonical Social API. Threads therefore resolves to its bounded two-scope flow rather than the
+# older generic provider service, which intentionally supports only TikTok/Instagram/YouTube.
+router.include_router(threads_oauth_router)
 # The TikTok statistics extension is mounted first so its live capability/sync endpoints
 # replace the earlier truthful "adapter pending" placeholders only when video.list is
 # actually present. The separate scope-upgrade router remains available for explicit
