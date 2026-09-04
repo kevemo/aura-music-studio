@@ -117,7 +117,7 @@ def test_paid_plan_cannot_activate_before_esp_approval(tmp_path):
         ledger.verify_payment(signup.user_id, "pro", "PAYPAL-TEST")
 
 
-def test_verified_payment_creates_and_extends_monthly_period(tmp_path):
+def test_verified_payment_creates_current_term_and_schedules_prepaid_renewal(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     signup = store.signup("renew@example.com", "Renewing Member", "very-secure-password", "pro")
     store.decide_membership(signup.approval_token, "approve", "ESP Test Owner")
@@ -126,8 +126,15 @@ def test_verified_payment_creates_and_extends_monthly_period(tmp_path):
     first = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-ONE")
     first_end = datetime.fromisoformat(first["subscription"]["period_end"])
     second = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")
-    second_end = datetime.fromisoformat(second["subscription"]["period_end"])
-    assert second_end > first_end
+
+    # A second verified payment is a separately paid future term. Do not mutate the current
+    # entitlement early: preserving the boundary makes refunds and cancellation reversible.
+    assert datetime.fromisoformat(second["subscription"]["period_end"]) == first_end
+    transition = second["scheduled_transition"]
+    assert transition["target_plan_id"] == "pro"
+    assert transition["target_billing_period"] == "monthly"
+    assert datetime.fromisoformat(transition["effective_at"]) == first_end
+    assert datetime.fromisoformat(transition["period_end"]) > first_end
 
     with pytest.raises(ValueError):
         ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")
