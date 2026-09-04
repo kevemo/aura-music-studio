@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -43,8 +45,43 @@ def test_owner_runtime_snapshot_exposes_truthful_deployment_state(monkeypatch):
     assert payload["truth_boundary"]["production_ready"] is False
     assert payload["truth_boundary"]["external_provider_approval_required"] is True
     assert "workers" in payload["scheduler"]
+    assert payload["scheduler"]["raw_worker_errors_exposed"] is False
     assert "relay" in payload
     assert "vault" in payload
+
+
+def test_owner_runtime_snapshot_redacts_worker_error_text(monkeypatch):
+    class FakeWorker:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def worker_health(self, **_kwargs):
+            return [
+                {
+                    "worker_id": "worker-redaction-test",
+                    "status": "retry",
+                    "last_seen_at": "2026-09-04T19:00:00+00:00",
+                    "last_claimed_schedule_id": "schedule-1",
+                    "healthy": True,
+                    "last_error": "provider rejected rtmp://secret.example/live/private-key",
+                }
+            ]
+
+    monkeypatch.setattr(owner_ops, "SharedSkyWorker", FakeWorker)
+    monkeypatch.setattr(
+        owner_ops.shared_sky,
+        "owner_status",
+        lambda: {"vault": {}, "counts": {}, "live_broadcasts": []},
+    )
+
+    payload = owner_ops._runtime_snapshot()
+    encoded = json.dumps(payload)
+
+    assert payload["scheduler"]["workers"][0]["error_present"] is True
+    assert payload["scheduler"]["raw_worker_errors_exposed"] is False
+    assert "last_error" not in encoded
+    assert "secret.example" not in encoded
+    assert "private-key" not in encoded
 
 
 def test_owner_runtime_page_is_no_store(monkeypatch):
