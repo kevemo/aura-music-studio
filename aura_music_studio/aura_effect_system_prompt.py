@@ -142,7 +142,7 @@ def compose_effect_system_from_prompt(
                 parameters=_parameters_for(item.id, normalized),
             )
         )
-        if item.entitlement not in required_entitlements:
+        if item.entitlement != "core" and item.entitlement not in required_entitlements:
             required_entitlements.append(item.entitlement)
 
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
