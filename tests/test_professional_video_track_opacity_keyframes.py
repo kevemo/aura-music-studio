@@ -10,6 +10,7 @@ from PIL import Image
 
 from aura_music_studio.professional_editor import ProfessionalEditorStore
 from aura_music_studio.professional_editor_renderer import EditorRenderUnsupported
+from aura_music_studio.professional_track_keyframe_authoring import set_track_keyframes
 from aura_music_studio.professional_video_track_keyframe_universal_compositor import (
     TrackKeyframeUniversalVisualVideoCompositor,
     _track_opacity_keyframes,
@@ -17,11 +18,7 @@ from aura_music_studio.professional_video_track_keyframe_universal_compositor im
 
 
 def _set_track_keyframes(store: ProfessionalEditorStore, track_id: str, path: str, points: list[dict]) -> None:
-    project = store.load()
-    branch = next(value for value in project.branches if value.id == project.active_branch_id)
-    track = next(value for value in branch.tracks if value.id == track_id)
-    track.keyframes[path] = points
-    store.save(project)
+    set_track_keyframes(store, track_id, path, points, actor="Wave 10 Renderer Test")
 
 
 def _project(tmp_path: Path):

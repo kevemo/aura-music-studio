@@ -20,6 +20,7 @@ from .professional_editor_source_security import (
     normalize_project_source_ref,
     normalized_manifest_for_editor,
 )
+from .professional_track_keyframe_authoring import set_track_keyframes as persist_track_keyframes
 from .tenant_storage import project_path
 
 router = APIRouter(prefix="/creative", tags=["Professional Creative Editor"])
@@ -171,6 +172,8 @@ def _state(store: ProfessionalEditorStore) -> dict[str, Any]:
         "undo": bool(branch.get("undo_stack")),
         "redo": bool(branch.get("redo_stack")),
         "timeline_operations": ["split", "ripple_delete", "slip", "roll", "duplicate", "reorder"],
+        "keyframe_targets": ["item", "track"],
+        "video_track_keyframe_paths": ["opacity", "track.opacity"],
     }
     return value
 
@@ -258,6 +261,23 @@ def patch_track(project_name: str, track_id: str, body: PatchRequest, request: R
     member = _member(request)
     store = _store(project_name)
     track = _execute(lambda: store.patch_track(track_id, body.changes, actor=_actor(member)))
+    return {"track": track.model_dump(mode="json"), "editor": _state(store)}
+
+
+@router.post("/projects/{project_name}/editor/tracks/{track_id}/keyframes")
+def set_track_keyframes(project_name: str, track_id: str, body: KeyframesRequest, request: Request):
+    member = _member(request)
+    _require_pro(member)
+    store = _store(project_name)
+    track = _execute(
+        lambda: persist_track_keyframes(
+            store,
+            track_id,
+            body.parameter,
+            body.keyframes,
+            actor=_actor(member),
+        )
+    )
     return {"track": track.model_dump(mode="json"), "editor": _state(store)}
 
 
