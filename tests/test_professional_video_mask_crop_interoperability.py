@@ -208,7 +208,7 @@ def test_mask_crop_does_not_bypass_tracking_or_unsupported_colour_safety_boundar
         item2.id,
         {
             "crop": {"left": 0.2},
-            "color": {"temperature": 0.2},
+            "color": {"highlights": 0.2},
         },
     )
     store2.add_mask(item2.id, EditorMask(shape="rectangle", points=[(0.0, 0.0), (1.0, 1.0)]))
@@ -217,7 +217,7 @@ def test_mask_crop_does_not_bypass_tracking_or_unsupported_colour_safety_boundar
         item2.id,
         EditorEffect(type="contrast", parameters={"factor": 1.1}),
     )
-    with pytest.raises(EditorRenderUnsupported, match="colour adjustments"):
+    with pytest.raises(EditorRenderUnsupported, match="colour adjustments|highlights/shadows"):
         MaskCropUniversalVisualVideoCompositor(project2).render_video_advanced(sequence2.id)
 
 
