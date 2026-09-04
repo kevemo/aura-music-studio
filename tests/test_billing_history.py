@@ -209,6 +209,6 @@ def test_billing_history_page_is_human_readable_and_dashboard_links_to_it(monkey
 def test_billing_history_routes_are_mounted_in_live_fastapi_app():
     from aura_music_studio.api import app
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in app.routes if hasattr(route, "path")}
     assert "/auth/me/billing-history" in paths
     assert "/auth/billing-history" in paths
