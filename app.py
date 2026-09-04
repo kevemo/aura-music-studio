@@ -126,6 +126,12 @@ from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.route_integrity import deduplicate_http_routes
+from aura_music_studio.shared_sky_media_plane import (
+    create_ingest_session as shared_sky_create_ingest_session,
+    media_node_heartbeat as shared_sky_media_node_heartbeat,
+    owner_media_plane_status as shared_sky_owner_media_plane_status,
+    revoke_ingest_session as shared_sky_revoke_ingest_session,
+)
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
@@ -279,6 +285,33 @@ app.add_api_route(
     native_paypal_webhook,
     methods=["POST"],
     include_in_schema=False,
+)
+# Shared Sky media-plane routes are mounted directly on the canonical production app. Like the
+# scheduler controls, these handlers must not depend on late nested-router composition.
+app.add_api_route(
+    "/shared-sky/api/ingest-sessions",
+    shared_sky_create_ingest_session,
+    methods=["POST"],
+    tags=["Shared Sky Media Plane"],
+)
+app.add_api_route(
+    "/shared-sky/api/ingest-sessions/{session_id}/revoke",
+    shared_sky_revoke_ingest_session,
+    methods=["POST"],
+    tags=["Shared Sky Media Plane"],
+)
+app.add_api_route(
+    "/shared-sky/internal/media-nodes/heartbeat",
+    shared_sky_media_node_heartbeat,
+    methods=["POST"],
+    include_in_schema=False,
+    tags=["Shared Sky Media Plane"],
+)
+app.add_api_route(
+    "/owner/shared-sky/api/media-plane",
+    shared_sky_owner_media_plane_status,
+    methods=["GET"],
+    tags=["Shared Sky Media Plane"],
 )
 # Hardened Stripe subscription, Creation Coin and marketplace routes must be mounted once at the
 # production entrypoint so payment effects can only flow through provider-evidence controls.
