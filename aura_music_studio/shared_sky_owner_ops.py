@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from html import escape
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -129,4 +130,44 @@ body{{margin:0;background:#07101d;color:#eef7ff;font-family:Inter,system-ui,sans
     return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
 
-__all__ = ["router"]
+def install_shared_sky_owner_ops(app: Any) -> None:
+    """Bind owner runtime handlers directly to the canonical FastAPI app once.
+
+    The production application uses a compatibility router composition layer whose late
+    ``include_router`` calls are not guaranteed to flatten newly imported routes. Direct handler
+    registration preserves the same owner-authenticated functions while making reachability
+    deterministic. The signature guard keeps repeated imports idempotent.
+    """
+
+    existing = {
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.router.routes
+    }
+    if ("/owner/shared-sky/api/runtime", ("GET",)) not in existing:
+        app.add_api_route(
+            "/owner/shared-sky/api/runtime",
+            owner_shared_sky_runtime,
+            methods=["GET"],
+            tags=["Shared Sky Owner Operations"],
+        )
+    if ("/owner/shared-sky/runtime", ("GET",)) not in existing:
+        app.add_api_route(
+            "/owner/shared-sky/runtime",
+            owner_shared_sky_runtime_page,
+            methods=["GET"],
+            response_class=HTMLResponse,
+            include_in_schema=False,
+            tags=["Shared Sky Owner Operations"],
+        )
+
+
+# ``app.py`` imports the canonical app before importing this module, so the app is fully created
+# here. Register the two owner-only handlers at import time to bypass late compatibility-router
+# snapshotting; both handlers retain their own owner-session gate and no secret-bearing data is
+# added to their responses.
+from .api import app as _canonical_app
+
+install_shared_sky_owner_ops(_canonical_app)
+
+
+__all__ = ["install_shared_sky_owner_ops", "router"]
