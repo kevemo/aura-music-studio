@@ -9,15 +9,15 @@ from aura_music_studio.web_portal import _pricing_cards
 import aura_music_studio.web_portal as web_portal
 
 
-def test_default_member_and_pro_payment_instructions_use_canonical_gbp_monthly_prices():
-    member = payment_instructions("base")
+def test_default_basic_and_pro_payment_instructions_use_canonical_gbp_monthly_prices():
+    basic = payment_instructions("base")
     pro = payment_instructions("pro")
 
-    assert member["billing_period"] == "monthly"
-    assert member["amount"] == "4.99"
-    assert member["amount_minor"] == 499
-    assert member["currency"] == "GBP"
-    assert member["display_amount"] == "£4.99/month"
+    assert basic["billing_period"] == "monthly"
+    assert basic["amount"] == "4.99"
+    assert basic["amount_minor"] == 499
+    assert basic["currency"] == "GBP"
+    assert basic["display_amount"] == "£4.99/month"
 
     assert pro["billing_period"] == "monthly"
     assert pro["amount"] == "9.99"
@@ -48,7 +48,7 @@ def test_annual_pro_never_reuses_monthly_paypal_invoice(monkeypatch):
         payment_option("pro", "annual")
 
 
-def test_member_annual_price_is_not_invented():
+def test_basic_annual_price_is_not_invented():
     with pytest.raises(ValueError, match="Annual billing is not available"):
         payment_instructions("base", "annual")
 
@@ -71,12 +71,17 @@ def test_public_pricing_cards_consume_canonical_catalogue_and_show_pro_annual_pr
     assert "$4.99" not in html
     assert "$9.99" not in html
     assert "Aura OS + Aura Sec included" in html
+    assert "/signup?plan=pro&billing_period=annual" in html
+    assert "/signup?plan=base&billing_period=annual" not in html
 
 
-def test_web_portal_no_longer_formats_deprecated_usd_price_aliases():
+def test_web_portal_uses_current_basic_naming_and_period_aware_copy():
     source = inspect.getsource(web_portal)
 
     assert "monthly_price_usd" not in source
     assert "amount_usd" not in source
     assert "Complete the $" not in source
-    assert "Member gives one confirmed full track" in source
+    assert "Member gives one confirmed full track" not in source
+    assert "Basic is £4.99/month" in source
+    assert "Unlimited Pro is £9.99/month or £99/year" in source
+    assert "billing_period" in source
