@@ -126,6 +126,7 @@ from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.route_integrity import deduplicate_http_routes
+from aura_music_studio.shared_sky_owner_ops import router as shared_sky_owner_ops_router
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
 from aura_music_studio.song_dna_api import router as song_dna_router
@@ -235,6 +236,9 @@ app.include_router(creative_workspace_router)
 app.include_router(esp_level_up_gateway_router)
 app.include_router(esp_niche_portal_router)
 app.include_router(esp_agent_roster_overlay_router)
+# Shared Sky owner runtime is mounted directly because late nested-router composition is not
+# propagated after an already-included parent router has been snapshotted by FastAPI.
+app.include_router(shared_sky_owner_ops_router)
 app.include_router(esp_creator_plan_overlay_router)
 app.include_router(esp_level_up_router)
 app.include_router(esp_progress_portal_router)
