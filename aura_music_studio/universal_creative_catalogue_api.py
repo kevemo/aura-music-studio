@@ -5,6 +5,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .aura_effect_system_api import router as aura_effect_system_router
 from .creative_catalogue import get_catalogue_item, search_catalogue
 from .creative_effect_entitlements import PUBLIC_COIN_UNIT, store as effect_entitlement_store
 from .membership_api import require_admin
@@ -277,15 +278,25 @@ def install_universal_creative_routes(app) -> None:
         app.add_api_route(path, endpoint, methods=[method], tags=["Universal Creative Library"])
 
 
+def install_effect_system_creator_routes(app) -> None:
+    """Mount the authenticated shared Effect/System Creator workflow exactly once."""
+    sentinel = "/command-center/api/effect-systems/capabilities"
+    if any(getattr(existing, "path", None) == sentinel for existing in app.router.routes):
+        return
+    app.include_router(aura_effect_system_router)
+
+
 from .api import app as _canonical_app
 
 install_universal_creative_routes(_canonical_app)
+install_effect_system_creator_routes(_canonical_app)
 
 
 __all__ = [
     "EffectPurchaseRequest",
     "EffectRefundRequest",
     "RuntimePreviewRequest",
+    "install_effect_system_creator_routes",
     "install_universal_creative_routes",
     "router",
     "universal_owned_runtime_effects",
