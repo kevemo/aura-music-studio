@@ -75,6 +75,58 @@ def test_manual_member_cancel_preserves_current_paid_access(tmp_path, monkeypatc
     assert payload["provider_cancellation_confirmed"] is False
 
 
+def test_manual_member_can_resume_cancelled_renewal_without_changing_paid_term(tmp_path, monkeypatch):
+    store, ledger, user_id, token = _paid_user(tmp_path)
+    client = _client(monkeypatch, store, ledger)
+    before = ledger.get(user_id)
+
+    cancelled = client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
+    assert cancelled.status_code == 200
+    resumed = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+
+    assert resumed.status_code == 200
+    payload = resumed.json()
+    assert payload["renewal_resumed"] is True
+    assert payload["cancel_at_period_end"] is False
+    assert payload["subscription"]["status"] == "active"
+    assert payload["renewal_provider"] == "manual_or_non_stripe"
+    assert payload["provider_resume_confirmed"] is False
+    assert payload["access_changed_immediately"] is False
+    after = ledger.get(user_id)
+    assert after["plan_id"] == before["plan_id"]
+    assert after["billing_period"] == before["billing_period"]
+    assert after["period_start"] == before["period_start"]
+    assert after["period_end"] == before["period_end"]
+
+
+def test_resume_clears_cancellation_on_paid_future_transition(tmp_path, monkeypatch):
+    store, ledger, user_id, token = _paid_user(tmp_path)
+    ledger.verify_payment(user_id, "pro", "FUTURE-PAYMENT-9999", billing_period="annual")
+    client = _client(monkeypatch, store, ledger)
+
+    cancelled = client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
+    assert cancelled.status_code == 200
+    assert cancelled.json()["scheduled_transition"]["cancel_at_period_end"] is True
+    assert ledger.get(user_id)["status"] == "active"
+
+    resumed = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+    assert resumed.status_code == 200
+    payload = resumed.json()
+    assert payload["cancel_at_period_end"] is False
+    assert payload["scheduled_transition"]["cancel_at_period_end"] is False
+    assert payload["scheduled_transition"]["target_plan_id"] == "pro"
+    assert payload["scheduled_transition"]["target_billing_period"] == "annual"
+    assert ledger.get(user_id)["status"] == "active"
+
+
+def test_resume_rejects_membership_that_is_not_scheduled_for_cancellation(tmp_path, monkeypatch):
+    store, ledger, _user_id, token = _paid_user(tmp_path)
+    client = _client(monkeypatch, store, ledger)
+    response = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 409
+    assert "not currently scheduled for cancellation" in response.json()["detail"]
+
+
 def test_cookie_member_cancel_requires_session_bound_csrf(tmp_path, monkeypatch):
     store, ledger, _user_id, token = _paid_user(tmp_path)
     client = _client(monkeypatch, store, ledger)
@@ -88,6 +140,22 @@ def test_cookie_member_cancel_requires_session_bound_csrf(tmp_path, monkeypatch)
     assert response.json()["cancel_at_period_end"] is True
 
 
+def test_cookie_member_resume_requires_session_bound_csrf(tmp_path, monkeypatch):
+    store, ledger, _user_id, token = _paid_user(tmp_path)
+    client = _client(monkeypatch, store, ledger)
+    assert client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"}).status_code == 200
+    client.cookies.set("lss_session", token)
+
+    denied = client.post("/membership/subscription/resume")
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["security_gate"] == "session_csrf"
+
+    csrf = SessionCsrfService(store).issue(token)["token"]
+    response = client.post("/membership/subscription/resume", headers={CSRF_HEADER: csrf})
+    assert response.status_code == 200
+    assert response.json()["cancel_at_period_end"] is False
+
+
 def test_stripe_member_cancel_updates_bound_provider_before_local_state(tmp_path, monkeypatch):
     store, ledger, user_id, token = _paid_user(tmp_path)
     stripe_store = StripeEvidenceStore(store.db_path)
@@ -95,15 +163,54 @@ def test_stripe_member_cancel_updates_bound_provider_before_local_state(tmp_path
     client = _client(monkeypatch, store, ledger, stripe_store)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_subscription_cancel")
     calls = []
+
     def fake_post(self, path, data):
         calls.append((path, dict(data)))
         return {"id": "sub_member_123", "customer": "cus_member_123", "cancel_at_period_end": True, "status": "active"}
+
     monkeypatch.setattr(lifecycle_api.StripeClient, "_post", fake_post)
     response = client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert calls == [("/v1/subscriptions/sub_member_123", {"cancel_at_period_end": "true"})]
     assert ledger.get(user_id)["status"] == "cancel_at_period_end"
     assert stripe_store.binding(subscription_id="sub_member_123")["status"] == "cancel_at_period_end"
+
+
+def test_stripe_member_resume_updates_bound_provider_before_local_state(tmp_path, monkeypatch):
+    store, ledger, user_id, token = _paid_user(tmp_path)
+    stripe_store = StripeEvidenceStore(store.db_path)
+    stripe_store.bind_subscription(user_id, "cus_member_123", "sub_member_123", "base", "active")
+    client = _client(monkeypatch, store, ledger, stripe_store)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_subscription_resume")
+    calls = []
+
+    def fake_post(self, path, data):
+        calls.append((path, dict(data)))
+        enabled = data["cancel_at_period_end"] == "true"
+        return {
+            "id": "sub_member_123",
+            "customer": "cus_member_123",
+            "cancel_at_period_end": enabled,
+            "status": "active",
+        }
+
+    monkeypatch.setattr(lifecycle_api.StripeClient, "_post", fake_post)
+    cancelled = client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
+    assert cancelled.status_code == 200
+    resumed = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+
+    assert resumed.status_code == 200
+    assert calls == [
+        ("/v1/subscriptions/sub_member_123", {"cancel_at_period_end": "true"}),
+        ("/v1/subscriptions/sub_member_123", {"cancel_at_period_end": "false"}),
+    ]
+    payload = resumed.json()
+    assert payload["renewal_provider"] == "stripe"
+    assert payload["provider_resume_confirmed"] is True
+    assert payload["cancel_at_period_end"] is False
+    assert ledger.get(user_id)["status"] == "active"
+    assert store.get_user(user_id)["billing_status"] == "active"
+    assert stripe_store.binding(subscription_id="sub_member_123")["status"] == "active"
 
 
 def test_stripe_cancel_configuration_failure_does_not_change_local_state(tmp_path, monkeypatch):
@@ -119,19 +226,57 @@ def test_stripe_cancel_configuration_failure_does_not_change_local_state(tmp_pat
     assert stripe_store.binding(subscription_id="sub_member_123")["status"] == "active"
 
 
+def test_stripe_resume_configuration_failure_does_not_change_local_state(tmp_path, monkeypatch):
+    store, ledger, user_id, token = _paid_user(tmp_path)
+    ledger.cancel_at_period_end(user_id)
+    stripe_store = StripeEvidenceStore(store.db_path)
+    stripe_store.bind_subscription(user_id, "cus_member_123", "sub_member_123", "base", "cancel_at_period_end")
+    client = _client(monkeypatch, store, ledger, stripe_store)
+    monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
+
+    response = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 503
+    assert ledger.get(user_id)["status"] == "cancel_at_period_end"
+    assert store.get_user(user_id)["billing_status"] == "cancel_at_period_end"
+    assert stripe_store.binding(subscription_id="sub_member_123")["status"] == "cancel_at_period_end"
+
+
 def test_stripe_cancel_identity_mismatch_fails_closed_without_local_change(tmp_path, monkeypatch):
     store, ledger, user_id, token = _paid_user(tmp_path)
     stripe_store = StripeEvidenceStore(store.db_path)
     stripe_store.bind_subscription(user_id, "cus_member_123", "sub_member_123", "base", "active")
     client = _client(monkeypatch, store, ledger, stripe_store)
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_subscription_cancel")
+
     def fake_post(self, path, data):
         return {"id": "sub_wrong", "customer": "cus_member_123", "cancel_at_period_end": True}
+
     monkeypatch.setattr(lifecycle_api.StripeClient, "_post", fake_post)
     response = client.post("/membership/subscription/cancel", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 502
     assert ledger.get(user_id)["status"] == "active"
     assert store.get_user(user_id)["billing_status"] == "active"
+
+
+def test_stripe_resume_identity_mismatch_fails_closed_without_local_change(tmp_path, monkeypatch):
+    store, ledger, user_id, token = _paid_user(tmp_path)
+    ledger.cancel_at_period_end(user_id)
+    stripe_store = StripeEvidenceStore(store.db_path)
+    stripe_store.bind_subscription(user_id, "cus_member_123", "sub_member_123", "base", "cancel_at_period_end")
+    client = _client(monkeypatch, store, ledger, stripe_store)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_subscription_resume")
+
+    def fake_post(self, path, data):
+        return {"id": "sub_wrong", "customer": "cus_member_123", "cancel_at_period_end": False}
+
+    monkeypatch.setattr(lifecycle_api.StripeClient, "_post", fake_post)
+    response = client.post("/membership/subscription/resume", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 502
+    assert ledger.get(user_id)["status"] == "cancel_at_period_end"
+    assert store.get_user(user_id)["billing_status"] == "cancel_at_period_end"
+    assert stripe_store.binding(subscription_id="sub_member_123")["status"] == "cancel_at_period_end"
 
 
 def test_verified_refund_requires_admin_and_never_returns_provider_references(tmp_path, monkeypatch):
