@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from .accounts import AccountStore
 from .audit import AuditLedger
+from .csrf_tokens import CSRF_HEADER, SessionCsrfService
 from .membership_api import require_admin
 from .subscriptions import SubscriptionLedger
 
@@ -23,11 +24,16 @@ class VerifiedRefundRequest(BaseModel):
     refund_reference: str = Field(min_length=3, max_length=200)
 
 
-def _session_token(request: Request) -> str | None:
+def _bearer_token(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
     if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return request.cookies.get(_COOKIE_NAME)
+        value = auth[7:].strip()
+        return value or None
+    return None
+
+
+def _session_token(request: Request) -> str | None:
+    return _bearer_token(request) or request.cookies.get(_COOKIE_NAME)
 
 
 def _signed_in_user(request: Request) -> dict[str, Any]:
@@ -35,6 +41,24 @@ def _signed_in_user(request: Request) -> dict[str, Any]:
     if not user:
         raise HTTPException(401, "Sign in required")
     return user
+
+
+def _require_cookie_csrf(request: Request) -> None:
+    """Require session-bound CSRF proof for cookie-authenticated cancellation writes."""
+    if _bearer_token(request):
+        return
+    session_token = request.cookies.get(_COOKIE_NAME) or ""
+    supplied = request.headers.get(CSRF_HEADER) or ""
+    if not SessionCsrfService(store).verify(session_token, supplied):
+        raise HTTPException(
+            403,
+            {
+                "message": "A valid session-bound CSRF token is required to cancel membership",
+                "security_gate": "session_csrf",
+                "csrf_token_endpoint": "/auth/csrf-token",
+                "csrf_header": CSRF_HEADER,
+            },
+        )
 
 
 def _safe_subscription_status(status: dict[str, Any]) -> dict[str, Any]:
@@ -91,6 +115,7 @@ def membership_subscription_status(request: Request):
 @router.post("/membership/subscription/cancel")
 def cancel_membership_subscription(request: Request):
     user = _signed_in_user(request)
+    _require_cookie_csrf(request)
     try:
         status = subscriptions.cancel_at_period_end(str(user["id"]))
     except ValueError as exc:
