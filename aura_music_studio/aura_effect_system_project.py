@@ -15,6 +15,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _prompt_fingerprint(value: str | None) -> str:
+    clean = str(value or "").strip().casefold()
+    if not clean:
+        return ""
+    if len(clean) != 64 or any(ch not in "0123456789abcdef" for ch in clean):
+        raise ValueError("Source prompt fingerprint must be a 64-character SHA-256 hex digest")
+    return clean
+
+
 def _system_root(project: Path) -> Path:
     root = project.resolve() / "work" / "effect_systems"
     root.mkdir(parents=True, exist_ok=True)
@@ -57,8 +66,14 @@ def _system_path(project: Path, system_id: str) -> Path:
     return target
 
 
-def save_effect_system(project: Path, spec: EffectSystemSpec) -> dict[str, Any]:
+def save_effect_system(
+    project: Path,
+    spec: EffectSystemSpec,
+    *,
+    source_prompt_fingerprint: str | None = None,
+) -> dict[str, Any]:
     """Persist one reusable, validated effect-system definition inside the member project."""
+    provenance = _prompt_fingerprint(source_prompt_fingerprint)
     compiled = compile_effect_system(spec)
     path = _system_path(project, spec.id)
     existing: dict[str, Any] | None = None
@@ -79,6 +94,7 @@ def save_effect_system(project: Path, spec: EffectSystemSpec) -> dict[str, Any]:
     payload = {
         "system": spec.public(),
         "fingerprint": compiled.fingerprint,
+        "source_prompt_fingerprint": provenance or None,
         "runtime": "ffmpeg_audio",
         "saved_at": _now(),
         "backend_executable": True,
@@ -97,6 +113,7 @@ def load_effect_system(project: Path, system_id: str) -> EffectSystemSpec:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict) or not isinstance(payload.get("system"), dict):
         raise ValueError("Saved effect system is invalid")
+    _prompt_fingerprint(payload.get("source_prompt_fingerprint"))
     spec = _spec_from_payload(payload["system"])
     compiled = compile_effect_system(spec)
     if str(payload.get("fingerprint") or "") != compiled.fingerprint:
@@ -111,6 +128,7 @@ def list_saved_effect_systems(project: Path) -> list[dict[str, Any]]:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(payload, dict) or not isinstance(payload.get("system"), dict):
                 continue
+            provenance = _prompt_fingerprint(payload.get("source_prompt_fingerprint"))
             spec = _spec_from_payload(payload["system"])
             compiled = compile_effect_system(spec)
             if compiled.fingerprint != str(payload.get("fingerprint") or ""):
@@ -122,6 +140,7 @@ def list_saved_effect_systems(project: Path) -> list[dict[str, Any]]:
                 "version": spec.version,
                 "node_count": len(spec.nodes),
                 "fingerprint": compiled.fingerprint,
+                "source_prompt_fingerprint": provenance or None,
                 "runtime": "ffmpeg_audio",
                 "backend_executable": True,
             })
@@ -151,8 +170,10 @@ def preview_project_effect_system(
     spec: EffectSystemSpec,
     *,
     user_id: str,
+    source_prompt_fingerprint: str | None = None,
     entitlement_store: CreativeEffectEntitlementStore = default_entitlement_store,
 ) -> dict[str, Any]:
+    provenance = _prompt_fingerprint(source_prompt_fingerprint)
     session = load_session(project)
     track = session.find_track(track_id)
     compiled = compile_effect_system(spec)
@@ -164,6 +185,7 @@ def preview_project_effect_system(
         "track_name": track.name,
         "system": spec.public(),
         "fingerprint": compiled.fingerprint,
+        "source_prompt_fingerprint": provenance or None,
         "ffmpeg_filter_chain": compiled.ffmpeg_filter_chain,
         "effects": [effect.model_dump(mode="json") for effect in compiled.effects],
         "entitlements": entitlements,
@@ -184,14 +206,17 @@ def apply_effect_system(
     user_id: str,
     actor: str = "Studio member",
     keep_revisions: int = 40,
+    source_prompt_fingerprint: str | None = None,
     entitlement_store: CreativeEffectEntitlementStore = default_entitlement_store,
 ) -> dict[str, Any]:
     """Apply a compiled system to DAW metadata only after entitlement and revision gates pass."""
+    provenance = _prompt_fingerprint(source_prompt_fingerprint)
     preview = preview_project_effect_system(
         project,
         track_id,
         spec,
         user_id=user_id,
+        source_prompt_fingerprint=provenance,
         entitlement_store=entitlement_store,
     )
     if not preview["can_apply"]:
@@ -213,6 +238,7 @@ def apply_effect_system(
                 "track_id": track.id,
                 "system_id": spec.id,
                 "fingerprint": compiled.fingerprint,
+                "source_prompt_fingerprint": provenance or None,
                 "revision_id": None,
                 "source_media_mutated": False,
             }
@@ -237,6 +263,7 @@ def apply_effect_system(
         "name": spec.name,
         "version": spec.version,
         "fingerprint": compiled.fingerprint,
+        "source_prompt_fingerprint": provenance or None,
         "effect_ids": effect_ids,
         "applied_at": _now(),
         "revision_before_apply": revision["id"],
@@ -250,6 +277,7 @@ def apply_effect_system(
         "track_id": track.id,
         "system_id": spec.id,
         "fingerprint": compiled.fingerprint,
+        "source_prompt_fingerprint": provenance or None,
         "effect_ids": effect_ids,
         "revision_id": revision["id"],
         "source_media_mutated": False,
