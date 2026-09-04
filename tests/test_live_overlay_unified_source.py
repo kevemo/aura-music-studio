@@ -22,7 +22,6 @@ def _client(tmp_path, monkeypatch, *, plan_id="free"):
     monkeypatch.setattr(interactives, "DB_PATH", db)
     studio._init_schema()
     effects._init_schema()
-    pro_source._init_schema()
     interactives._init_schema()
 
     app = FastAPI()
@@ -79,7 +78,7 @@ def test_unified_rotation_invalidates_every_old_overlay_url(tmp_path, monkeypatc
     assert client.get(f"/live-overlay/source/unified/{second_token}/state").status_code == 200
 
 
-def test_unified_state_combines_advanced_scene_and_live_effect_runtime(tmp_path, monkeypatch):
+def test_unified_state_combines_advanced_scene_profile_and_live_effect_runtime(tmp_path, monkeypatch):
     client, _db = _client(tmp_path, monkeypatch, plan_id="base")
     rotated = client.post("/api/live-overlays/unified-source/rotate").json()
     token = urlsplit(rotated["source_url"]).path.rsplit("/", 1)[-1]
@@ -98,6 +97,8 @@ def test_unified_state_combines_advanced_scene_and_live_effect_runtime(tmp_path,
     assert data["event_authority"] == "normalized_live_overlay_events"
     assert data["provider_authority_widened"] is False
     assert "scene" in data["advanced"]
+    assert data["advanced"]["profile"]["tts_gifts_enabled"] is True
+    assert "source_token_hash" not in data["advanced"]["profile"]
     assert data["effects"]["enabled_effects"] == chosen
     assert data["effects"]["intensity"] == 1.35
     assert data["effects"]["max_effects_per_event"] == 5
