@@ -27,7 +27,13 @@ from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
-from .shared_sky_media_plane import router as shared_sky_media_plane_router
+from .shared_sky_media_plane import (
+    create_ingest_session,
+    media_node_heartbeat,
+    owner_media_plane_status,
+    revoke_ingest_session,
+    router as shared_sky_media_plane_router,
+)
 from .shared_sky_streaming_studios import router as shared_sky_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
 from .universal_creative_library import router as universal_creative_library_router
@@ -81,6 +87,35 @@ if not _route_mounted("/owner/shared-sky/api/scheduler/run-due", "POST"):
         scheduler_run_due,
         methods=["POST"],
         tags=["Shared Sky Streaming Studios Scheduler"],
+    )
+if not _route_mounted("/owner/shared-sky/api/media-plane", "GET"):
+    router.add_api_route(
+        "/owner/shared-sky/api/media-plane",
+        owner_media_plane_status,
+        methods=["GET"],
+        tags=["Shared Sky Media Plane"],
+    )
+if not _route_mounted("/shared-sky/api/ingest-sessions", "POST"):
+    router.add_api_route(
+        "/shared-sky/api/ingest-sessions",
+        create_ingest_session,
+        methods=["POST"],
+        tags=["Shared Sky Media Plane"],
+    )
+if not _route_mounted("/shared-sky/api/ingest-sessions/{session_id}/revoke", "POST"):
+    router.add_api_route(
+        "/shared-sky/api/ingest-sessions/{session_id}/revoke",
+        revoke_ingest_session,
+        methods=["POST"],
+        tags=["Shared Sky Media Plane"],
+    )
+if not _route_mounted("/shared-sky/internal/media-nodes/heartbeat", "POST"):
+    router.add_api_route(
+        "/shared-sky/internal/media-nodes/heartbeat",
+        media_node_heartbeat,
+        methods=["POST"],
+        include_in_schema=False,
+        tags=["Shared Sky Media Plane"],
     )
 
 
