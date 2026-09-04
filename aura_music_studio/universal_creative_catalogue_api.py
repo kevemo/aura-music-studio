@@ -28,7 +28,16 @@ def _require_member(request: Request):
     member = getattr(request.state, "member", None)
     if member is None:
         raise HTTPException(401, "Membership context unavailable")
+    plan = getattr(member, "plan", None)
+    plan_id = getattr(plan, "id", None)
+    if not isinstance(plan_id, str) or not plan_id.strip():
+        raise HTTPException(401, "Membership plan context unavailable")
     return member
+
+
+def _member_plan_id(member) -> str:
+    # _require_member validates this shape before any response exposes plan context.
+    return member.plan.id
 
 
 def _validate_studio(studio: str | None) -> str | None:
@@ -77,7 +86,7 @@ def universal_studio_menus(request: Request, domain: str | None = None):
         payload = public_studio_catalogue(domain=domain)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    payload["plan"] = member.plan.id
+    payload["plan"] = _member_plan_id(member)
     payload["catalogue_contract"] = "original_first_party"
     return payload
 
@@ -100,7 +109,7 @@ def universal_runtime_effects(
         "items": rows,
         "count": len(rows),
         "backend_executable_count": sum(1 for row in rows if row["backend_executable"]),
-        "plan": member.plan.id,
+        "plan": _member_plan_id(member),
         "query": q.strip(),
         "studio": selected_studio,
         "entitlement": selected_band,
@@ -118,7 +127,7 @@ def universal_runtime_effect_item(item_id: str, request: Request):
         item = get_catalogue_item(item_id)
     except KeyError as exc:
         raise HTTPException(404, "Creative catalogue item not found") from exc
-    return {"item": _runtime_row(item), "plan": member.plan.id}
+    return {"item": _runtime_row(item), "plan": _member_plan_id(member)}
 
 
 @router.post("/runtime-effects/{item_id:path}/preview-plan")
