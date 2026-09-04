@@ -28,6 +28,7 @@ from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
 from .shared_sky_streaming_studios import router as shared_sky_router
+from .shared_sky_worker_control import scheduler_run_due, scheduler_status
 from .universal_creative_library import router as universal_creative_library_router
 
 router = APIRouter()
@@ -56,6 +57,29 @@ router.include_router(service_registry_router)
 router.include_router(social_media_library_router)
 router.include_router(universal_creative_library_router)
 router.include_router(aura_os_router)
+
+
+def _route_mounted(path: str, method: str) -> bool:
+    return any(
+        getattr(route, "path", None) == path and method in (getattr(route, "methods", None) or set())
+        for route in router.routes
+    )
+
+
+if not _route_mounted("/owner/shared-sky/api/scheduler/status", "GET"):
+    router.add_api_route(
+        "/owner/shared-sky/api/scheduler/status",
+        scheduler_status,
+        methods=["GET"],
+        tags=["Shared Sky Streaming Studios Scheduler"],
+    )
+if not _route_mounted("/owner/shared-sky/api/scheduler/run-due", "POST"):
+    router.add_api_route(
+        "/owner/shared-sky/api/scheduler/run-due",
+        scheduler_run_due,
+        methods=["POST"],
+        tags=["Shared Sky Streaming Studios Scheduler"],
+    )
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
