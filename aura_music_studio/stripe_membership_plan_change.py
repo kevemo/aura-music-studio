@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from .audit import AuditLedger
 from .native_products import BillingPeriod
 from .plans import get_plan
-from .stripe_billing import StripeClient, StripeConfig, _subscription_id, accounts, evidence_store, subscriptions
+from .stripe_billing import StripeClient, StripeConfig, accounts, evidence_store, subscriptions
 from .subscription_lifecycle_api import _require_cookie_csrf, _signed_in_user, _stripe_binding_for_user
 
 router = APIRouter(tags=["Membership Subscription Plan Changes"])
@@ -50,12 +50,11 @@ def _phase_price_id(phase: dict[str, Any]) -> str:
 
 
 class StripeMembershipPlanChangeStore:
-    """Durable provider-plan-change intent without granting entitlement before payment.
+    """Durable provider plan-change intent without granting entitlement before payment.
 
-    A row here means Stripe has confirmed a schedule for a future price change. It is
-    deliberately separate from ``subscription_transitions``: those rows represent an
-    already verified paid future term, while this table represents only a provider-side
-    future billing intent awaiting a signed paid renewal invoice.
+    A scheduled row means Stripe confirmed a future price schedule. It is deliberately
+    separate from ``subscription_transitions``: those rows represent an already verified
+    paid future term, while this table represents only future provider billing intent.
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -86,7 +85,7 @@ class StripeMembershipPlanChangeStore:
                     target_billing_period TEXT NOT NULL,
                     effective_at TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    applied_event_id TEXT,
+                    applied_payment_reference TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -98,25 +97,50 @@ class StripeMembershipPlanChangeStore:
                 """
             )
 
-    def pending_for_user(self, user_id: str) -> dict[str, Any] | None:
+    def _row(self, user_id: str, *, status: str = "scheduled") -> dict[str, Any] | None:
         with self._connect() as con:
             row = con.execute(
                 """SELECT * FROM stripe_membership_plan_changes
-                   WHERE user_id=? AND status='scheduled'
-                   ORDER BY created_at DESC LIMIT 1""",
-                (user_id,),
+                   WHERE user_id=? AND status=? ORDER BY created_at DESC LIMIT 1""",
+                (user_id, status),
             ).fetchone()
         return dict(row) if row else None
 
-    def pending_for_subscription(self, user_id: str, subscription_id: str) -> dict[str, Any] | None:
+    def _reconcile_verified_renewal(self, row: dict[str, Any]) -> dict[str, Any]:
+        """Mark a provider schedule applied only after the authoritative ledger has payment proof."""
+        user_id = str(row.get("user_id") or "")
+        target_plan_id = str(row.get("target_plan_id") or "")
+        transition = subscriptions.scheduled_transition(user_id)
+        payment_reference = ""
+        if transition and str(transition.get("target_plan_id") or "") == target_plan_id:
+            candidate = str(transition.get("payment_reference") or "")
+            if candidate.startswith("stripe:invoice:"):
+                payment_reference = candidate
+        if not payment_reference:
+            state = subscriptions.get(user_id) or {}
+            if str(state.get("plan_id") or "") == target_plan_id:
+                candidate = str(state.get("last_payment_reference") or "")
+                if candidate.startswith("stripe:invoice:"):
+                    payment_reference = candidate
+        if not payment_reference:
+            return row
+
         with self._connect() as con:
-            row = con.execute(
-                """SELECT * FROM stripe_membership_plan_changes
-                   WHERE user_id=? AND stripe_subscription_id=? AND status='scheduled'
-                   ORDER BY created_at DESC LIMIT 1""",
-                (user_id, subscription_id),
-            ).fetchone()
-        return dict(row) if row else None
+            con.execute(
+                """UPDATE stripe_membership_plan_changes
+                   SET status='applied',applied_payment_reference=?,updated_at=?
+                   WHERE id=? AND status='scheduled'""",
+                (payment_reference, _iso(), row["id"]),
+            )
+            updated = con.execute("SELECT * FROM stripe_membership_plan_changes WHERE id=?", (row["id"],)).fetchone()
+        return dict(updated) if updated else row
+
+    def pending_for_user(self, user_id: str) -> dict[str, Any] | None:
+        row = self._row(user_id)
+        if not row:
+            return None
+        reconciled = self._reconcile_verified_renewal(row)
+        return reconciled if reconciled.get("status") == "scheduled" else None
 
     def record_scheduled(
         self,
@@ -142,7 +166,7 @@ class StripeMembershipPlanChangeStore:
                 """INSERT INTO stripe_membership_plan_changes
                    (id,user_id,stripe_customer_id,stripe_subscription_id,stripe_schedule_id,
                     current_plan_id,current_billing_period,target_plan_id,target_billing_period,
-                    effective_at,status,applied_event_id,created_at,updated_at)
+                    effective_at,status,applied_payment_reference,created_at,updated_at)
                    VALUES (?,?,?,?,?,?, 'monthly',?, 'monthly',?,'scheduled',NULL,?,?)""",
                 (
                     row_id,
@@ -159,17 +183,6 @@ class StripeMembershipPlanChangeStore:
             )
             row = con.execute("SELECT * FROM stripe_membership_plan_changes WHERE id=?", (row_id,)).fetchone()
         return dict(row) if row else {}
-
-    def mark_applied(self, user_id: str, subscription_id: str, event_id: str) -> None:
-        with self._connect() as con:
-            changed = con.execute(
-                """UPDATE stripe_membership_plan_changes
-                   SET status='applied',applied_event_id=?,updated_at=?
-                   WHERE user_id=? AND stripe_subscription_id=? AND status='scheduled'""",
-                (event_id, _iso(), user_id, subscription_id),
-            ).rowcount
-            if changed != 1:
-                raise ValueError("Scheduled Stripe membership plan change was not found")
 
     def mark_cancelled(self, user_id: str, schedule_id: str) -> None:
         with self._connect() as con:
@@ -323,8 +336,19 @@ def _schedule_provider_plan_change(
             target_plan_id=target_plan_id,
             effective_at=phase_end,
         )
+        # The Stripe binding describes which canonical plan the provider will bill at the next
+        # subscription-cycle invoice. Local creative entitlement remains on the current plan until
+        # that signed paid invoice reaches SubscriptionLedger.verify_payment().
+        evidence_store.bind_subscription(
+            str(user["id"]), customer_id, subscription_id, target_plan_id, "plan_change_scheduled"
+        )
     except Exception as exc:
         _release_schedule(client, schedule_id)
+        try:
+            plan_changes.mark_cancelled(str(user["id"]), schedule_id)
+        except ValueError:
+            pass
+        evidence_store.bind_subscription(str(user["id"]), customer_id, subscription_id, current_plan_id, "active")
         raise HTTPException(500, "The Stripe plan change could not be recorded safely") from exc
 
     audit.append(
@@ -341,6 +365,22 @@ def _schedule_provider_plan_change(
         },
     )
     return pending
+
+
+@router.get("/membership/subscription/change")
+def membership_plan_change_status(request: Request):
+    user = _signed_in_user(request)
+    pending = plan_changes.pending_for_user(str(user["id"]))
+    return {
+        "scheduled": bool(pending),
+        "current_plan_id": user.get("plan_id"),
+        "target_plan_id": pending.get("target_plan_id") if pending else None,
+        "billing_period": pending.get("target_billing_period") if pending else None,
+        "effective_at": pending.get("effective_at") if pending else None,
+        "entitlement_changed_immediately": False,
+        "activation_source": "verified_paid_stripe_renewal_invoice" if pending else None,
+        "esp_role_effect": "none",
+    }
 
 
 @router.post("/membership/subscription/change")
@@ -386,6 +426,13 @@ def cancel_membership_plan_change(request: Request):
         raise HTTPException(502, "Stripe did not confirm release of the membership plan change schedule")
     try:
         plan_changes.mark_cancelled(user_id, schedule_id)
+        evidence_store.bind_subscription(
+            user_id,
+            str(pending["stripe_customer_id"]),
+            str(pending["stripe_subscription_id"]),
+            str(pending["current_plan_id"]),
+            "active",
+        )
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     audit.append(
@@ -408,41 +455,11 @@ def cancel_membership_plan_change(request: Request):
     }
 
 
-def pending_renewal_binding(invoice: dict[str, Any], binding: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Return the target binding only after a scheduled change renewal is fully validated."""
-    user_id = str(binding.get("user_id") or "")
-    subscription_id = _subscription_id(invoice)
-    if not user_id or not subscription_id:
-        return binding, None
-    pending = plan_changes.pending_for_subscription(user_id, subscription_id)
-    if not pending:
-        return binding, None
-
-    if pending.get("current_billing_period") != BillingPeriod.MONTHLY.value or pending.get("target_billing_period") != BillingPeriod.MONTHLY.value:
-        raise ValueError("Only monthly-to-monthly Stripe membership plan changes are enabled")
-    target = get_plan(str(pending.get("target_plan_id") or ""))
-    if str(invoice.get("status") or "").lower() != "paid":
-        raise ValueError("Stripe plan-change renewal invoice is not paid")
-    if str(invoice.get("currency") or "").upper() != target.currency:
-        raise ValueError("Stripe plan-change renewal currency does not match the target membership")
-    try:
-        amount_paid = int(invoice.get("amount_paid"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("Stripe plan-change renewal has no valid paid amount") from exc
-    if amount_paid != target.price_minor_for(BillingPeriod.MONTHLY):
-        raise ValueError("Stripe plan-change renewal amount does not match the target membership")
-    if str(invoice.get("customer") or "") != str(pending.get("stripe_customer_id") or ""):
-        raise ValueError("Stripe plan-change renewal customer does not match the scheduled change")
-    if subscription_id != str(pending.get("stripe_subscription_id") or ""):
-        raise ValueError("Stripe plan-change renewal subscription does not match the scheduled change")
-    return {**binding, "plan_id": target.id, "billing_period": BillingPeriod.MONTHLY.value}, pending
-
-
 __all__ = [
     "MembershipPlanChangeRequest",
     "StripeMembershipPlanChangeStore",
     "cancel_membership_plan_change",
-    "pending_renewal_binding",
+    "membership_plan_change_status",
     "plan_changes",
     "router",
     "schedule_membership_plan_change",
