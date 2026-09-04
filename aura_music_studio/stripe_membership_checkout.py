@@ -18,6 +18,7 @@ from .stripe_billing import (
     accounts,
     credit_packs,
 )
+from .stripe_membership_plan_change import router as membership_plan_change_router
 from .subscription_lifecycle_api import router as subscription_lifecycle_router
 
 router = APIRouter(tags=["Stripe Membership Checkout"])
@@ -173,9 +174,11 @@ def membership_subscription_checkout(body: MembershipSubscriptionCheckoutRequest
     }
 
 
-# Subscription status/cancel/refund controls share the canonical commercial router so the
-# production application exposes one membership authority rather than a parallel billing stack.
+# Subscription status/cancel/refund and provider-backed plan-change controls share the canonical
+# commercial router so the production application exposes one membership authority rather than
+# parallel billing stacks. A plan change does not change entitlement until a signed paid renewal.
 router.include_router(subscription_lifecycle_router)
+router.include_router(membership_plan_change_router)
 
 
 __all__ = [
