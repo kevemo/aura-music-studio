@@ -1,6 +1,6 @@
 # Chat 3 Shared Sky Studio Integration Contract
 
-Status: Chat 3 production-control-room foundation. This document describes the exact compatibility surface implemented on top of the current `development/full-site-build` Shared Sky control plane. It does not transfer ownership of transport, viewer community, Gifts, Battles, editor capture, or release infrastructure to Chat 3.
+Status: Chat 3 production-control-room implementation on top of the current `development/full-site-build` Shared Sky control plane. This document describes exact interfaces now present in the feature branch. It does not transfer ownership of transport, viewer community, Gifts, Battles, editor capture, or release infrastructure to Chat 3.
 
 ## Runtime modules and routes
 
@@ -9,28 +9,52 @@ Status: Chat 3 production-control-room foundation. This document describes the e
   - `StudioService`: Preview/Programme, scene-copy/reorder, transform/audio autosave and safe snapshot orchestration.
   - `SharedSkyTransportCompatibilityAdapter`: narrow Chat 2 boundary; live programme mutation fails closed until Chat 2 supplies an authoritative commit method.
   - `install_shared_sky_control_room(app)`: idempotent production route mounting helper.
+- `aura_music_studio.shared_sky_control_room_extensions`
+  - original scene-template library and atomic instantiation.
+  - Shared Sky audio presets limited to processing fields that have a real implementation path.
+  - non-destructive media cue/playback settings.
+  - Chat 2 scheduling facade, recording start/stop compatibility adapter and combined studio preflight.
+  - Chat 6 read-only participant/green-room compatibility adapter.
+  - advisory-only Aura production diagnostics derived from current studio/transport state.
+  - `install_shared_sky_control_room_extensions(app)`: idempotent production route mounting helper.
 - Existing Chat 2 source of truth: `aura_music_studio.shared_sky_streaming_studios.shared_sky`.
 - Operator page: `GET /shared-sky/studio?project_id=<id>&profile_key=landscape-1080`.
-- Session API:
-  - `POST /shared-sky/studio/api/sessions`
-  - `GET /shared-sky/studio/api/sessions/{session_id}`
-  - `GET /shared-sky/studio/api/sessions/{session_id}/versions`
-  - `POST /shared-sky/studio/api/sessions/{session_id}/preview`
-  - `POST /shared-sky/studio/api/sessions/{session_id}/cut`
-  - `POST /shared-sky/studio/api/sessions/{session_id}/transition`
-  - `POST /shared-sky/studio/api/sessions/{session_id}/transition/complete`
-- Scene/source production operations:
-  - `POST /shared-sky/studio/api/scenes/{scene_id}/duplicate`
-  - `POST /shared-sky/studio/api/projects/{project_id}/scenes/reorder`
-  - `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/transform`
-  - `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/audio`
-- Brand Kit:
-  - `POST /shared-sky/studio/api/projects/{project_id}/brand-kits`
-  - `PUT /shared-sky/studio/api/projects/{project_id}/brand-kits/{kit_id}`
-  - `GET /shared-sky/studio/api/projects/{project_id}/brand-kits`
-- Capability surfaces:
-  - `GET /shared-sky/studio/api/sessions/{session_id}/recording`
-  - `GET /shared-sky/studio/api/layout/{layout_key}/{count}?profile_key=<profile>`
+
+Session API:
+- `POST /shared-sky/studio/api/sessions`
+- `GET /shared-sky/studio/api/sessions/{session_id}`
+- `GET /shared-sky/studio/api/sessions/{session_id}/versions`
+- `POST /shared-sky/studio/api/sessions/{session_id}/preview`
+- `POST /shared-sky/studio/api/sessions/{session_id}/cut`
+- `POST /shared-sky/studio/api/sessions/{session_id}/transition`
+- `POST /shared-sky/studio/api/sessions/{session_id}/transition/complete`
+- `GET /shared-sky/studio/api/sessions/{session_id}/preflight`
+- `GET /shared-sky/studio/api/sessions/{session_id}/aura/diagnostics`
+
+Scene/source production operations:
+- `POST /shared-sky/studio/api/scenes/{scene_id}/duplicate`
+- `POST /shared-sky/studio/api/projects/{project_id}/scenes/reorder`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/transform`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/audio`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/cue`
+- `GET /shared-sky/studio/api/templates`
+- `POST /shared-sky/studio/api/projects/{project_id}/templates/instantiate`
+- `GET /shared-sky/studio/api/audio/presets`
+- `POST /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/audio/preset`
+
+Brand Kit:
+- `POST /shared-sky/studio/api/projects/{project_id}/brand-kits`
+- `PUT /shared-sky/studio/api/projects/{project_id}/brand-kits/{kit_id}`
+- `GET /shared-sky/studio/api/projects/{project_id}/brand-kits`
+
+Scheduling/recording/participant capability surfaces:
+- `POST /shared-sky/studio/api/sessions/{session_id}/schedules`
+- `DELETE /shared-sky/studio/api/sessions/{session_id}/schedules/{schedule_id}`
+- `GET /shared-sky/studio/api/sessions/{session_id}/recording`
+- `POST /shared-sky/studio/api/sessions/{session_id}/recording/start`
+- `POST /shared-sky/studio/api/sessions/{session_id}/recording/stop`
+- `GET /shared-sky/studio/api/sessions/{session_id}/participants`
+- `GET /shared-sky/studio/api/layout/{layout_key}/{count}?profile_key=<profile>`
 
 All routes retain `require_esp_hub_member` as the request-level membership gate. Owner transport operations remain owned by the existing Owner Shared Sky module.
 
@@ -73,10 +97,21 @@ Programme snapshot schema version 1 contains `schema_version`, `captured_at`, a 
 - `config.transform`: normalized x/y/width/height/rotation/opacity/crop values
 - `config.effects`: brightness/contrast/saturation/hue/blur/rounded bounds
 - `config.audio`: mute/gain/pan/delay/monitor/high-pass/compressor/limiter for relevant audio-bearing types
+- `config.playback`: cue/trim/loop/volume/scene-enter/scene-exit settings for media sources
 - `config.privacy`: must resolve to a Programme-safe state for visible sources
 - browser sources: HTTP(S) only, no embedded credentials, no loopback/private/local host
 
 Any recursively detected provider secret key (`stream_key`, OAuth/access/refresh tokens, credentials, passwords, private keys, client secrets, etc.) rejects persistence or Programme snapshot creation.
+
+## Scene template contract
+
+`SCENE_TEMPLATES` contains original Shared Sky starters: Camera Full Screen, Camera + Chat, Creator + Canvas, Canvas Only, Interview 2-Up, Panel / Grid, Screen Share + Presenter, Tutorial, Music Performance, Gameplay, Premiere, BRB, Starting Soon, Ending and Custom.
+
+Capture/guest/media template slots are created hidden until the operator attaches the real device/media/participant. Atomic instantiation deletes the newly-created scene if any source slot fails, preventing half-created templates.
+
+## Audio preset contract
+
+`AUDIO_PRESETS` exposes Speech, Podcast, Music, Gaming, Interview, Quiet Room and Noisy Room. Presets only set currently backed fields: gain, pan, sync delay, monitor state, high-pass cutoff, compressor and limiter. No unimplemented de-esser/EQ/gate control is represented as functional by these presets.
 
 ## Preview / Programme state machine
 
@@ -86,6 +121,7 @@ Any recursively detected provider secret key (`stream_key`, OAuth/access/refresh
 4. Completion requires the same token and version. Transport rejection aborts the transition and leaves the previous Programme snapshot unchanged.
 5. Reduced-motion mode drives transition duration to zero while preserving explicit state/commit semantics.
 6. A stale tab/operator using an old version receives 409; it cannot overwrite newer studio state.
+7. Media cue edits update Preview/source configuration and explicitly leave the committed Programme snapshot unchanged until the next explicit take.
 
 ## Chat 2 handoff
 
@@ -101,15 +137,17 @@ def set_programme_snapshot(user_id: str, broadcast_id: str, snapshot: dict, *, c
 
 When a broadcast is `live` or `starting` and that method is absent, Chat 3 returns a real 503 and does not claim Programme switched. Draft/offline studio work remains available.
 
-Optional recording compatibility method expected from Chat 2:
+Recording compatibility methods expected from Chat 2:
 
 ```python
 def recording_status(user_id: str, broadcast_id: str) -> dict: ...
+def start_recording(user_id: str, broadcast_id: str) -> dict: ...
+def stop_recording(user_id: str, broadcast_id: str) -> dict: ...
 ```
 
-Until present, Chat 3 reports `supported=false`, `state=unavailable`, `reason="Chat 2 recording contract not merged"`. It never displays a fabricated Recording state.
+Until present, Chat 3 reports recording unsupported and start/stop returns 503. It never displays or returns a fabricated Recording state.
 
-Scheduling execution remains the existing Chat 2 `shared_sky_schedules` path. Chat 3 must consume that service rather than create a second scheduler.
+Scheduling execution remains the existing Chat 2 `shared_sky_schedules` path. Chat 3's schedule endpoint calls `SharedSkyStore.create_schedule`; cancellation calls `SharedSkyStore.delete_schedule`. It does not create a second scheduler. Scheduled times are required to include an explicit timezone.
 
 ## Chat 4 handoff — viewer/community overlays
 
@@ -123,7 +161,15 @@ Safe display-only binding kinds are `gift_goal` and `supporter`. Chat 3 does not
 
 Chat 3 exposes deterministic normalized tile geometry via `participant_layout(layout_key, count, profile_key)` for one through eight supplied participants. Layout keys currently include Solo, Side-by-Side/Interview, Grid, Speaker Focus hook, Host + Guests, Picture-in-Picture hook, Vertical Stack and Battle Teams hook.
 
-Participant identity/order/stage/Battle score/lifecycle remain Chat 6/shared participant authority. Until the participant contract lands, Chat 3 does not claim a connected guest is on-air.
+The read-only `ParticipantCompatibilityAdapter` looks for this future provider method:
+
+```python
+def studio_participants(user_id: str, broadcast_id: str) -> list[dict]: ...
+```
+
+Each row is validated into `ParticipantState` with explicit `participant_id`, `display_name`, `stage`, `connection_state`, camera/microphone state, connection quality and role. A participant may be `connected` while still `green_room`; connection never implies Programme. Until the method lands the API reports `supported=false` rather than producing fake guests.
+
+Participant identity/order/stage/Battle score/lifecycle remain Chat 6/shared participant authority.
 
 ## Chat 7 handoff — Music/Video/Image sources
 
@@ -139,11 +185,15 @@ Chat 9 may read studio project/session history using creator-authorised workflow
 
 ## Chat 10 handoff — observability/security/performance
 
-Chat 10 should instrument `studio_cut` / `studio_transition` Shared Sky events and correlation IDs, transition/transport rejection reason codes, browser Web Audio/device failures, 409 stale-version frequency, canvas/effect pressure metrics when measurable, and source cleanup/leaked-media-track diagnostics. No numeric performance value should be synthesized when no browser metric exists.
+Chat 10 should instrument `studio_cut`, `studio_transition`, `studio_schedule_created`, `studio_schedule_cancelled`, `studio_recording_start` and `studio_recording_stop` Shared Sky events and correlation IDs where provided; transition/transport rejection reason codes; browser Web Audio/device failures; 409 stale-version frequency; canvas/effect pressure metrics when measurable; and source cleanup/leaked-media-track diagnostics. No numeric performance value should be synthesized when no browser metric exists.
 
 ## Chat 11 release handoff
 
-Release acceptance should verify production route reachability, additive database migration, truthful Chat 2 live-commit/recording capability, CI/security/self-host smoke status, no provider credentials in Studio/Brand Kit snapshots, and that Preview editing cannot mutate the last Programme snapshot.
+Release acceptance should verify production route reachability, additive database migration, truthful Chat 2 live-commit/recording capability, CI/security/self-host smoke status, no provider credentials in Studio/Brand Kit snapshots, that Preview editing cannot mutate the last Programme snapshot, template rollback, timezone-aware scheduling and green-room-vs-Programme participant separation.
+
+## Aura production assistance
+
+`GET /shared-sky/studio/api/sessions/{session_id}/aura/diagnostics` is advisory only. It derives recommendations from the current Preview source graph, committed Programme state and transport capability. It may identify an empty scene, no committed Programme scene, missing live-commit capability, absence of an audio-bearing source or unattached template slots. It performs no authoritative action and returns `authoritative_actions_performed=false`.
 
 ## Browser audio/canvas behaviour actually implemented
 
@@ -153,11 +203,15 @@ The audio utility computes RMS/peak/dBFS/clipping from real supplied samples. Br
 
 Hotkeys are ignored while focus is in input/textarea/select/contenteditable controls. Current bindings are Alt+C for CUT and Ctrl+Enter for TRANSITION. Alt+B does not silently take an emergency scene; it reports that a configured BRB scene is required.
 
-## Known compatibility gaps after this slice
+## Known compatibility gaps after current Chat 3 units
 
 - Chat 2 authoritative live Programme registration method has not landed in the current integration branch.
-- Chat 2 recording start/stop/status contract has not landed in the current integration branch.
-- Chat 6 green-room/participant media authority has not landed in the current integration branch.
-- Full drag/resize/rotate pointer compositor, multi-select/snapping and touch gestures are not yet implemented in this slice; normalized transform persistence and numeric accessible controls are.
-- Full source creation/device picker, media playlist cueing, scene template instantiation, scheduling form, guest invite UX and Aura recommendation panel remain follow-up Chat 3 units.
-- Effects not backed by a real browser processor are intentionally not exposed by the new control-room surface.
+- Chat 2 authoritative recording start/stop/status contract has not landed in the current integration branch.
+- Chat 6 green-room/participant media authority has not landed in the current integration branch; the read-only fail-closed adapter is ready.
+- Full drag/resize/rotate pointer compositor, multi-select/snapping, source grouping/alignment and touch gestures are not yet implemented; normalized transform persistence and numeric accessible controls are.
+- Full integrated source/device picker and capture attachment workflow remains to be built into the main control-room page.
+- Media cue configuration is durable and Preview-safe, but a provider/backend playout adapter is still required for authoritative remote pre-recorded execution.
+- Guest invite creation/moderation controls await the shared participant authority; Chat 3 must not duplicate it.
+- Advanced audio processing not already represented by a real Web Audio/config path remains intentionally absent.
+- Full graphics authoring for QR/tickers/data-driven overlays and animation authoring remains follow-up work; typed external widget bindings are already isolated from authoritative community/financial state.
+- The Aura diagnostics endpoint is advisory; no autonomous consequential action path is enabled.
