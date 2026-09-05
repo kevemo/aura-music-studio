@@ -18,6 +18,7 @@ _MAX_PROMPT_NODES = 16
 _SAFE_PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _PERCENT = re.compile(r"(?<!\d)(\d{1,3})(?:\s*%)")
 _NUMBER = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])")
+_PROTECTED_AND = "__AURA_IMAGE_AND__"
 
 # Natural-language text may only select one of the executable local Pillow transforms already
 # enforced by executable_image_effects.py. It cannot introduce code, URLs, plugins or commands.
@@ -47,7 +48,20 @@ def _bounded_prompt(prompt: str) -> str:
 
 
 def _sentences(prompt: str) -> list[str]:
-    return [part.strip() for part in re.split(r"[;,]|\band\s+then\b|\bthen\b", prompt, flags=re.IGNORECASE) if part.strip()]
+    # A plain conjunction is a useful effect separator ("brightness and contrast"), but
+    # "black and white" is itself one allowlisted grayscale alias and must stay intact.
+    protected = re.sub(
+        r"\bblack\s+and\s+white\b",
+        f"black {_PROTECTED_AND} white",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    parts = re.split(
+        r"[;,]|\band\s+then\b|\bthen\b|\band\b",
+        protected,
+        flags=re.IGNORECASE,
+    )
+    return [part.replace(_PROTECTED_AND, "and").strip() for part in parts if part.strip()]
 
 
 def _contains_alias(text: str, alias: str) -> bool:
