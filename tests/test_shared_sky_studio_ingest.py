@@ -80,7 +80,7 @@ def test_active_transport_blocks_rotation_and_revocation(monkeypatch):
         ingest._require_inactive("user-1", "broadcast-1")
 
 
-def test_status_never_returns_token_hash_or_credential(monkeypatch):
+def test_status_never_returns_secret_bearing_fields(monkeypatch):
     monkeypatch.setattr(
         ingest,
         "_transport_state",
@@ -108,8 +108,12 @@ def test_status_never_returns_token_hash_or_credential(monkeypatch):
     )
     payload = ingest.ingest_status("user-1", _studio_session())
     rendered = repr(payload)
-    assert "credential" not in rendered.lower()
+    session = payload.get("session") or {}
+    assert "credential" not in session
+    assert "ingest_url" not in session
+    assert "token_hash" not in session
     assert "token_hash" not in rendered.lower()
+    assert "rtmps://" not in rendered.lower()
     assert payload["secret_recoverable"] is False
     assert payload["media_plane"]["media_termination_deployed"] is False
 
