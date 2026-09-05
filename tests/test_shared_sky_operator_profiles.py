@@ -3,13 +3,14 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import ValidationError
 
 from aura_music_studio.shared_sky_operator_profiles import (
     OperatorMacro,
     OperatorProfileRepository,
     OperatorProfileUpsert,
+    _raise,
     install_shared_sky_operator_profiles,
     normalize_shortcut,
 )
@@ -144,6 +145,26 @@ def test_duplicate_profile_name_is_not_a_silent_second_record(tmp_path, monkeypa
     with pytest.raises(sqlite3.IntegrityError):
         repo.upsert("user-1", "project-1", OperatorProfileUpsert(name="Main"))
     assert len(repo.list("user-1", "project-1")) == 1
+
+
+def test_duplicate_profile_constraint_maps_to_safe_409_without_db_detail():
+    raw = (
+        "UNIQUE constraint failed: shared_sky_operator_profiles.user_id, "
+        "shared_sky_operator_profiles.project_id, shared_sky_operator_profiles.name"
+    )
+    with pytest.raises(HTTPException) as raised:
+        _raise(sqlite3.IntegrityError(raw))
+    assert raised.value.status_code == 409
+    assert raised.value.detail == "An operator profile with that name already exists for this project"
+    assert "constraint failed" not in str(raised.value.detail).lower()
+
+
+def test_other_integrity_conflict_is_safe_and_does_not_leak_sqlite_text():
+    with pytest.raises(HTTPException) as raised:
+        _raise(sqlite3.IntegrityError("FOREIGN KEY constraint failed: secret-db-detail"))
+    assert raised.value.status_code == 409
+    assert raised.value.detail == "Operator profile constraint conflict"
+    assert "secret-db-detail" not in str(raised.value.detail)
 
 
 def test_installer_is_idempotent():
