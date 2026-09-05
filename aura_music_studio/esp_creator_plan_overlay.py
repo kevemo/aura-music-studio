@@ -11,11 +11,13 @@ from .esp_product_workflows import router as product_workflows_router
 from .esp_product_workflows_portal import router as product_workflows_portal_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
+from .esp_support_conversations import router as support_conversations_router
 
 router = APIRouter()
 router.include_router(creator_plan_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
+router.include_router(support_conversations_router)
 router.include_router(broadcast_tech_router)
 router.include_router(social_media_library_router)
 router.include_router(product_workflows_router)
