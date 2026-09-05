@@ -27,13 +27,11 @@ _CREATION_LIVE_REQUIRED = {
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
-    """Return an exact HTTP route signature or None for mounts/websockets/helpers."""
     path = getattr(route, "path", None)
     methods = getattr(route, "methods", None)
     if not isinstance(path, str) or not methods:
         return None
-    normalized = tuple(sorted(str(method).upper() for method in methods))
-    return path, normalized
+    return path, tuple(sorted(str(method).upper() for method in methods))
 
 
 def duplicate_http_signatures(routes: Iterable[Any]) -> dict[tuple[str, tuple[str, ...]], list[Any]]:
@@ -66,10 +64,8 @@ def _operation_suffix(route: Any, *, ordinal: int) -> str:
 
 
 def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
-    """Repair route-level OpenAPI operation-ID collisions without changing dispatch."""
     seen: set[str] = set()
     repaired: list[dict[str, Any]] = []
-
     for ordinal, route in enumerate(routes):
         operation_id = _schema_operation_id(route)
         if operation_id is None:
@@ -77,13 +73,11 @@ def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
         if operation_id not in seen:
             seen.add(operation_id)
             continue
-
         candidate = f"{operation_id}_{_operation_suffix(route, ordinal=ordinal)}"
         bump = 1
         while candidate in seen:
             candidate = f"{operation_id}_{_operation_suffix(route, ordinal=ordinal)}_{bump}"
             bump += 1
-
         route.operation_id = candidate
         route.unique_id = candidate
         endpoint = getattr(route, "endpoint", None)
@@ -100,18 +94,15 @@ def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
             }
         )
         seen.add(candidate)
-
     return repaired
 
 
 def _normalize_schema_operation_ids(schema: dict[str, Any]) -> list[dict[str, str]]:
-    """Guarantee per-operation uniqueness in the emitted OpenAPI document."""
     seen: set[str] = set()
     repaired: list[dict[str, str]] = []
     paths = schema.get("paths")
     if not isinstance(paths, dict):
         return repaired
-
     for path, path_item in paths.items():
         if not isinstance(path_item, dict):
             continue
@@ -127,7 +118,6 @@ def _normalize_schema_operation_ids(schema: dict[str, Any]) -> list[dict[str, st
             if current not in seen:
                 seen.add(current)
                 continue
-
             digest = sha256(f"{path}|{method}".encode("utf-8")).hexdigest()[:12]
             candidate = f"{current}_{digest}"
             bump = 1
@@ -148,16 +138,13 @@ def _normalize_schema_operation_ids(schema: dict[str, Any]) -> list[dict[str, st
 
 
 def _install_openapi_integrity(app: Any) -> None:
-    """Enforce collision-safe schema identity on every uncached canonical schema build."""
     if getattr(app.state, "route_integrity_openapi_installed", False):
         return
-
     original_openapi = app.openapi
 
     def integrity_openapi() -> dict[str, Any]:
         if app.openapi_schema is not None:
             return app.openapi_schema
-
         late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
         with warnings.catch_warnings():
@@ -168,7 +155,6 @@ def _install_openapi_integrity(app: Any) -> None:
                 module=r"fastapi\.openapi\.utils",
             )
             schema = original_openapi()
-
         schema_repairs = _normalize_schema_operation_ids(schema)
         app.openapi_schema = schema
         diagnostics = app.state.route_integrity
@@ -185,26 +171,29 @@ def _install_openapi_integrity(app: Any) -> None:
 
 
 def _ensure_creation_live_routes(app: Any) -> None:
-    """Compose Chat 7 from fresh route objects for every target FastAPI application.
+    """Bind the complete Chat 7 surface directly to each canonical FastAPI app.
 
-    The repository builds more than one FastAPI instance during tests and production bootstrap.
-    Module-level APIRouter route lists are mutable process state and therefore cannot be an
-    authoritative installation source.  Rebuild the namespace from endpoint functions on every
-    composition pass, then fail closed unless the complete Chat 7 surface is present.
+    Late router inclusion is not authoritative in this repository's overlay architecture.  The
+    production entrypoint already uses direct ``app.add_api_route`` registration for routes that
+    must survive overlay composition, so Chat 7 follows the same verified pattern.  This also
+    removes any dependence on mutable module-level APIRouter state.
     """
     from .creation_live_hardening import install_creation_live_hardening
 
     install_creation_live_hardening()
 
     from .creation_live import CreationLiveMiddleware
-    from .creation_live_routes import build_creation_live_router
+    from .creation_live_routes import install_creation_live_api_routes
 
     app.router.routes[:] = [
         route
         for route in app.router.routes
-        if not str(getattr(route, "path", "")).startswith(_CREATION_LIVE_PREFIX)
+        if not (
+            str(getattr(route, "path", "")) == _CREATION_LIVE_PREFIX
+            or str(getattr(route, "path", "")).startswith(f"{_CREATION_LIVE_PREFIX}/")
+        )
     ]
-    app.include_router(build_creation_live_router())
+    install_creation_live_api_routes(app)
 
     mounted = {
         signature
@@ -228,13 +217,10 @@ def _ensure_creation_live_routes(app: Any) -> None:
 
 
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
-    """Remove unreachable exact duplicate HTTP routes and harden schema identity."""
     _ensure_creation_live_routes(app)
-
     seen: set[tuple[str, tuple[str, ...]]] = set()
     kept: list[Any] = []
     removed: list[dict[str, Any]] = []
-
     for route in app.router.routes:
         signature = _http_signature(route)
         if signature is None or signature not in seen:
@@ -242,7 +228,6 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
             if signature is not None:
                 seen.add(signature)
             continue
-
         endpoint = getattr(route, "endpoint", None)
         removed.append(
             {
@@ -253,10 +238,8 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
                 "module": getattr(endpoint, "__module__", None),
             }
         )
-
     if removed:
         app.router.routes[:] = kept
-
     operation_ids_repaired = ensure_unique_operation_ids(app.router.routes)
     app.openapi_schema = None
     app.state.route_integrity = {
