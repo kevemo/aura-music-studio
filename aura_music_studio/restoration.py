@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -9,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 from scipy import signal
+
+from .command_templates import render_command_argv
 
 
 class AudioRestorer:
@@ -24,10 +25,8 @@ class AudioRestorer:
 
     @staticmethod
     def _run_template(template: str, values: dict[str, str]) -> None:
-        rendered = template
-        for key, value in values.items():
-            rendered = rendered.replace("{" + key + "}", shlex.quote(value))
-        subprocess.run(rendered, shell=True, check=True)
+        argv = render_command_argv(template, values)
+        subprocess.run(argv, check=True)
 
     def clean(
         self,
