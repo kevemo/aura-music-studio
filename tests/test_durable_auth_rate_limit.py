@@ -52,6 +52,9 @@ def test_sliding_window_expiry_reopens_admission(tmp_path: Path):
 
 def test_concurrent_admission_cannot_exceed_shared_limit(tmp_path: Path):
     db = tmp_path / "rate.sqlite3"
+    # Initialize the schema once so this test exercises concurrent admission transactions rather
+    # than concurrent first-run DDL creation, which is a separate SQLite startup concern.
+    AuthRateLimitStore(db).allow("setup", "setup", limit=1, window_seconds=1, now=0.0)
 
     def attempt(_index: int) -> bool:
         allowed, _ = AuthRateLimitStore(db).allow(
