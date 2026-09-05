@@ -84,6 +84,12 @@ class SpendingLimitsRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
+class PersonalSpendingLimitsRequest(BaseModel):
+    daily_hard_limit: int | None = Field(default=None, ge=0)
+    weekly_hard_limit: int | None = Field(default=None, ge=0)
+    monthly_hard_limit: int | None = Field(default=None, ge=0)
+
+
 class PublishGiftRequest(BaseModel):
     gift_id: str = Field(min_length=1, max_length=120)
     version: int = Field(gt=0)
@@ -153,6 +159,25 @@ def my_history(request: Request, limit: int = 100, offset: int = 0):
 def my_spending(request: Request):
     try:
         return _economy().spending_state(_member_user_id(request))
+    except EconomyError as exc:
+        _raise(exc)
+
+
+@router.put("/economy/me/personal-spending-limits")
+def my_personal_spending_limits(
+    request: Request,
+    payload: PersonalSpendingLimitsRequest,
+):
+    try:
+        economy = _economy()
+        user_id = _member_user_id(request)
+        limits = economy.set_personal_spending_limits(
+            user_id,
+            daily_hard_limit=payload.daily_hard_limit,
+            weekly_hard_limit=payload.weekly_hard_limit,
+            monthly_hard_limit=payload.monthly_hard_limit,
+        )
+        return {"personal_limits": limits, "spending": economy.spending_state(user_id)}
     except EconomyError as exc:
         _raise(exc)
 
