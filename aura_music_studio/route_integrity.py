@@ -155,14 +155,9 @@ def _install_openapi_integrity(app: Any) -> None:
         if app.openapi_schema is not None:
             return app.openapi_schema
 
-        # Re-run route-level repair at schema time in case a compatibility installer added a
-        # legitimate route after the initial composition pass.
         late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
         with warnings.catch_warnings():
-            # FastAPI emits this warning before callers can inspect/repair its completed schema.
-            # Suppress only this exact generator warning inside the canonical boundary; every
-            # collision is then repaired and audited immediately below. Other warnings remain.
             warnings.filterwarnings(
                 "ignore",
                 message=r"^Duplicate Operation ID .*",
@@ -189,15 +184,13 @@ def _install_openapi_integrity(app: Any) -> None:
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     """Remove unreachable exact duplicate HTTP routes and harden schema identity.
 
-    Starlette/FastAPI dispatches routes in registration order, so when the same exact path and
-    HTTP-method set is registered twice, every later copy is unreachable. Preserve the first
-    authoritative route exactly as runtime dispatch already does and remove only later exact
-    copies. Mounts, websocket routes, and different method sets are untouched.
-
-    After runtime duplicates are removed, repair route-level schema collisions and install a
-    canonical OpenAPI wrapper that also handles per-method collisions. Runtime paths, methods,
-    endpoints, dependencies and dispatch precedence remain unchanged.
+    The canonical composition point also installs the additive Chat 7 creation-live router and
+    middleware before signatures are reconciled. This preserves the repository's one FastAPI app,
+    avoids a second creative/live application, and keeps the installer idempotent.
     """
+    from .creation_live import install_creation_live
+
+    install_creation_live(app)
 
     seen: set[tuple[str, tuple[str, ...]]] = set()
     kept: list[Any] = []
@@ -237,10 +230,3 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     }
     _install_openapi_integrity(app)
     return removed
-
-
-__all__ = [
-    "deduplicate_http_routes",
-    "duplicate_http_signatures",
-    "ensure_unique_operation_ids",
-]
