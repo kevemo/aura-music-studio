@@ -160,13 +160,19 @@ jobs:
           report = json.load(open('/tmp/aura-production-readiness.json', encoding='utf-8'))
           if not report.get('configuration_ready') or report.get('secret_values_exposed'):
               raise SystemExit(f'FAIL: production configuration readiness smoke failed: {report}')
-          if not report['categories']['restore_evidence']['ok']:
-              raise SystemExit(f'FAIL: CI restore evidence was not accepted: {report}')
+          restore = report['categories']['restore_evidence']
+          if restore['ok']:
+              raise SystemExit('FAIL: synthetic CI restore must never satisfy production restore evidence')
+          if not restore['details'].get('mechanism_verified'):
+              raise SystemExit(f'FAIL: CI restore mechanism evidence was not recognized: {restore}')
+          if restore['details'].get('production_backup_used'):
+              raise SystemExit(f'FAIL: synthetic CI evidence falsely claims production-backup use: {restore}')
           if report.get('production_ready'):
               raise SystemExit('FAIL: config-only CI must never claim deployed production readiness')
-          if report.get('release_blocking_categories') != ['runtime_dependencies']:
-              raise SystemExit(f"FAIL: expected runtime deployment verification blocker: {report['release_blocking_categories']}")
-          print('PASS: config is valid, restore mechanism is evidenced, deployed runtime remains explicitly unverified')
+          blockers = set(report.get('release_blocking_categories') or [])
+          if blockers != {'runtime_dependencies', 'restore_evidence'}:
+              raise SystemExit(f"FAIL: expected runtime + production-restore blockers: {report['release_blocking_categories']}")
+          print('PASS: config and restore mechanism are valid; deployed runtime and real production restore remain explicitly unverified')
           PY
 
       - name: ESP compute-node Compose validation
