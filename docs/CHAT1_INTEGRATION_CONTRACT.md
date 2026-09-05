@@ -54,13 +54,23 @@ Use `SharedPersistence.transaction()` plus `enqueue_event(..., connection=connec
 
 Only server-known facts create provider capability state. Clients may display public snapshots but cannot declare credentials, platform approval, user eligibility or provider health. Statuses are centralized in `CapabilityStatus`.
 
+Configuration presence and enablement are distinct: absent provider configuration is `not_configured`, an explicit Owner disable is `disabled`, and configured providers continue through credential, approval, eligibility and health gates.
+
 ## Feature discovery
 
-`ROUTES` registers Shared Sky, Live Now, Battles, Gifts & Cosmic Coins, and Go Live & Create. Entries remain `integration_pending` until their owning workstream provides verified implementation wiring. The fallback is unavailable and never mimics success.
+`ROUTES` registers Shared Sky, Live Now, Battles, Gifts & Cosmic Coins, and Go Live & Create.
 
-## Audit
+- `live_now` is wired to the merged Chat 4 public route `GET /live-now` through `aura_music_studio.shared_sky_live_community:router` and is marked `ready` at the route-wiring layer.
+- A ready route is not a fabricated provider-success claim: Live Now still fails closed for individual sessions unless canonical broadcast and playback-readiness checks pass.
+- Shared Sky root, Battles, Gifts & Cosmic Coins, and Go Live & Create remain `integration_pending` until their owning workstreams provide verified merged wiring.
+
+Pending entries use an unavailable fallback and never mimic success.
+
+## Audit and public error safety
 
 `AuditWriter` wraps the existing SQLite `AuditLedger`; it does not create a competing audit store. Existing hash chaining and AuraSec DLP sanitisation remain the persistence boundary.
+
+`ApiError.public_payload()` and `EventEnvelope.audit_metadata` reuse AuraSec DLP so server credentials, credential-shaped values and internal stack details are not exposed through shared public/audit surfaces. Internal errors return a generic public message plus correlation identity.
 
 ## Cross-workstream rules
 
@@ -71,3 +81,4 @@ Only server-known facts create provider capability state. Clients may display pu
 5. Put domain-specific data in versioned `EventEnvelope.payload`.
 6. Derive external-provider capability from server configuration and approval evidence.
 7. A UI label, feature branch or adapter is never provider-success evidence.
+8. When an owning workstream is merged, update `ROUTES` to its verified route path/state instead of leaving stale provisional discovery metadata.
