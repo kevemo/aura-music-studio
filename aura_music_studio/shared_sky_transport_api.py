@@ -71,6 +71,16 @@ class DestinationPresetRequest(BaseModel):
     destination_ids: list[str] = Field(min_length=1, max_length=50)
 
 
+class HighlightMarkerRequest(BaseModel):
+    offset_ms: int = Field(ge=0, le=172_800_000)
+    label: str = Field(default="", max_length=240)
+    marker_type: Literal["highlight", "chapter", "clip", "replay"] = "highlight"
+
+
+class StaleCleanupRequest(BaseModel):
+    stale_after_seconds: int = Field(default=300, ge=60, le=86_400)
+
+
 def _member_id(request: Request) -> str:
     member, _membership = require_esp_hub_member(request)
     return str(member.user_id)
@@ -276,6 +286,12 @@ def owner_transport_capacity(request: Request):
     return transport.capacity_snapshot()
 
 
+@router.post("/owner/shared-sky/api/transport/cleanup-stale")
+def owner_cleanup_stale_transport(body: StaleCleanupRequest, request: Request):
+    _owner(request)
+    return transport.cleanup_stale_sessions(stale_after_seconds=body.stale_after_seconds)
+
+
 @router.post("/shared-sky/api/broadcasts/{broadcast_id}/recordings/{kind}")
 def request_recording(broadcast_id: str, kind: str, request: Request):
     try:
@@ -307,6 +323,35 @@ def finalize_recording(
         raise HTTPException(404, "Shared Sky recording not found") from exc
 
 
+@router.post("/shared-sky/api/broadcasts/{broadcast_id}/markers")
+def create_highlight_marker(
+    broadcast_id: str,
+    body: HighlightMarkerRequest,
+    request: Request,
+):
+    try:
+        marker = transport.add_highlight_marker(
+            _member_id(request),
+            broadcast_id,
+            offset_ms=body.offset_ms,
+            label=body.label,
+            marker_type=body.marker_type,
+        )
+        return {"marker": marker}
+    except KeyError as exc:
+        raise HTTPException(404, "Shared Sky broadcast not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/shared-sky/api/broadcasts/{broadcast_id}/markers")
+def list_highlight_markers(broadcast_id: str, request: Request):
+    try:
+        return {"markers": transport.highlight_markers(_member_id(request), broadcast_id)}
+    except KeyError as exc:
+        raise HTTPException(404, "Shared Sky broadcast not found") from exc
+
+
 @router.post("/shared-sky/api/destinations/validate")
 def validate_custom_destination(body: DestinationValidateRequest, request: Request):
     user_id = _member_id(request)
@@ -330,8 +375,10 @@ __all__ = [
     "DestinationPresetRequest",
     "DestinationValidateRequest",
     "HealthReportRequest",
+    "HighlightMarkerRequest",
     "RecordingFinalizeRequest",
     "SourceRegisterRequest",
+    "StaleCleanupRequest",
     "TransportConfigureRequest",
     "router",
 ]
