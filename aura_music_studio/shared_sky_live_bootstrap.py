@@ -26,6 +26,7 @@ from .shared_sky_live_moderator_permissions import (
     router as live_moderator_permissions_router,
 )
 from .shared_sky_live_watch_bridge_guard import router as live_watch_bridge_guard_router
+from .shared_sky_live_watch_engagement_wave6 import router as live_watch_engagement_wave6_router
 from .shared_sky_live_watch_ui_v2 import router as live_watch_v2_router
 from .shared_sky_transport_browser_bridge import install_chat2_browser_playback_bridge
 
@@ -36,6 +37,7 @@ PUBLIC_LIVE_PREFIXES = ("/watch/", "/live-events/", "/shared-sky/live/api/")
 # of the Chat 4 APIRoutes before any application consumes/includes the source routers. This makes
 # repeated installation and isolated-app tests deterministic even if a framework/composition step
 # later mutates or replaces a router's live ``routes`` collection.
+_LIVE_WATCH_ENGAGEMENT_WAVE6_ROUTES = tuple(live_watch_engagement_wave6_router.routes)
 _LIVE_WATCH_BRIDGE_GUARD_ROUTES = tuple(live_watch_bridge_guard_router.routes)
 _LIVE_WATCH_V2_ROUTES = tuple(live_watch_v2_router.routes)
 _LIVE_COMMUNITY_ROUTES = tuple(live_community_router.routes)
@@ -67,6 +69,13 @@ def install_shared_sky_live_community(app: Any) -> None:
     Chat 4's Wave 4 Watch guard only corrects viewer capability handling for the token-free HLS
     bootstrap; it does not create a second media authority.
 
+    Wave 6 makes the viewer page operational against already-merged neighbouring authorities. The
+    Watch page renders and submits LIVE Gifts only through Chat 5's canonical
+    ``/economy/me/gifts/send`` transaction route with a client-generated idempotency key. It polls
+    Chat 6's read-only Battle viewer projection for current scoreboard/timer state and never mutates
+    Battle lifecycle or scoring. The Wave 6 route delegates to the Wave 4 playback guard first, so
+    the secure cookie-bootstrap playback contract remains the only Watch playback path.
+
     LIVE moderation is an independent permission dimension. Owner and the LIVE creator retain their
     own authority; any other moderator must have both a current Owner-enabled global Moderator grant
     and an explicit assignment to that LIVE. Agent status by itself grants no moderation action.
@@ -77,9 +86,8 @@ def install_shared_sky_live_community(app: Any) -> None:
     review. Persistent creator blocks, room-wide chat configuration, poll creation and Q&A show
     selection remain Creator/Owner controls.
 
-    Neighbour integrations remain typed and fail closed: Chat 6 Battle display does not activate
-    until Chat 6 publishes its explicit viewer LIVE lookup, and Chat 5 remains the financial Gift
-    authority.
+    Neighbour integrations remain typed and fail closed: Chat 6 Battle display activates only from
+    its explicit viewer LIVE lookup, while Chat 5 remains the financial Gift authority.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -100,6 +108,7 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     existing = {_route_signature(route) for route in app.router.routes}
     for route in (
+        *_LIVE_WATCH_ENGAGEMENT_WAVE6_ROUTES,
         *_LIVE_WATCH_BRIDGE_GUARD_ROUTES,
         *_LIVE_WATCH_V2_ROUTES,
         *_LIVE_COMMUNITY_ROUTES,

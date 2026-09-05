@@ -176,7 +176,7 @@ def test_watch_page_escapes_content_disables_member_writes_and_never_queries_pre
     assert "an external post is not assumed" in html
 
 
-def test_bootstrap_keeps_wave4_guard_as_single_canonical_watch_route(monkeypatch):
+def test_bootstrap_keeps_wave6_engagement_as_single_canonical_watch_route(monkeypatch):
     monkeypatch.setattr(bootstrap, "configure_neighbor_live_integrations", lambda: {})
     monkeypatch.setattr(bootstrap, "harden_browser_playback_integration", lambda: {})
     monkeypatch.setattr(bootstrap, "install_chat2_browser_playback_bridge", lambda: {})
@@ -200,6 +200,6 @@ def test_bootstrap_keeps_wave4_guard_as_single_canonical_watch_route(monkeypatch
     ]
 
     assert len(watch_routes) == 1
-    assert watch_routes[0].endpoint.__name__ == "watch_page_bridge_guard"
+    assert watch_routes[0].endpoint.__name__ == "watch_page_engagement_wave6"
     assert len(interactive_routes) == 1
     assert interactive_routes[0].endpoint.__name__ == "watch_interactive_state"
