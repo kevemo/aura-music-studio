@@ -168,6 +168,7 @@ def install_shared_sky_owner_ops(app: Any) -> None:
 # retains its own membership/owner gate; this module does not widen public or operator authority.
 from .api import app as _canonical_app
 from .shared_sky_chat2_studio_integration import install_chat2_studio_integration
+from .shared_sky_chat2_studio_operator import install_chat2_studio_operator
 from .shared_sky_control_room import install_shared_sky_control_room
 from .shared_sky_control_room_extensions import install_shared_sky_control_room_extensions
 from .shared_sky_professional_canvas import install_shared_sky_professional_canvas
@@ -181,6 +182,7 @@ install_shared_sky_control_room_extensions(_canonical_app)
 install_shared_sky_professional_canvas(_canonical_app)
 install_shared_sky_studio_history_graphics(_canonical_app)
 install_chat2_studio_integration(_canonical_app)
+install_chat2_studio_operator(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 
 
