@@ -38,7 +38,7 @@ def test_owner_runtime_snapshot_exposes_truthful_deployment_state(monkeypatch):
     response = client.get("/owner/shared-sky/api/runtime")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["product"] == "Shared Sky Streaming Studios"
+    assert payload["product"] == "Shared Skies Streaming Studios"
     assert payload["scheduler"]["enabled"] is False
     assert payload["deployment"]["ingest_configured"] is False
     assert payload["deployment"]["provider_oauth_configured"] is False
@@ -93,4 +93,4 @@ def test_owner_runtime_page_is_no_store(monkeypatch):
     response = client.get("/owner/shared-sky/runtime")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
-    assert "Shared Sky Runtime &amp; Operations" in response.text or "Shared Sky Runtime & Operations" in response.text
+    assert "Shared Skies Runtime &amp; Operations" in response.text or "Shared Skies Runtime & Operations" in response.text
