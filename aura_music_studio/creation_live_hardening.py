@@ -331,8 +331,8 @@ def hardened_api_error(exc: Exception):
 
 
 def _harden_ui(script: str) -> str:
-    old = "try{state.previewStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});const v=document.createElement('video');"
-    new = (
+    capture_old = "try{state.previewStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});const v=document.createElement('video');"
+    capture_new = (
         "try{if(state.previewStream){state.previewStream.getTracks().forEach(t=>t.stop());state.previewStream=null;}"
         "state.previewStream=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});"
         "const previewStream=state.previewStream;previewStream.getTracks().forEach(t=>{t.onended=()=>{"
@@ -340,7 +340,30 @@ def _harden_ui(script: str) -> str:
         "msg('Workspace preview ended. It is no longer available for attachment.',true);}}});"
         "const v=document.createElement('video');"
     )
-    return script.replace(old, new)
+    script = script.replace(capture_old, capture_new)
+
+    # Registration, transport readiness and Programme truth are separate. Surface Chat 2 blockers
+    # in the creator drawer but never let a ready transport preflight imply this source is ON AIR.
+    attach_old = (
+        "state.selected=data.source;state.status=data;renderStatus();"
+        "msg(data.transport?.available?'Source registered with Shared Sky transport.':"
+        "'Source safely prepared; Chat 2 transport registry is pending merge. No LIVE success is being claimed.')"
+    )
+    attach_new = (
+        "state.selected=data.source;state.status=data;renderStatus();"
+        "const pf=data.transport_preflight||{};const blockers=Array.isArray(pf.blocking_errors)?pf.blocking_errors:[];"
+        "if(pf.state==='broadcast_not_selected'){msg('Source registered with Shared Sky transport. Select a broadcast to run transport preflight. Programme remains NOT CONFIRMED ON AIR.')}"
+        "else if(pf.available&&pf.ready===true){msg('Source registered. Transport preflight is ready. Programme remains NOT CONFIRMED ON AIR until Shared Sky control-room authority confirms this exact source.')}"
+        "else if(pf.available&&pf.ready===false){const reasons=blockers.slice(0,5).map(x=>String(x.code||x.message||'transport_blocked')).join(', ');msg('Source registered, but transport is not ready'+(reasons?': '+reasons:'')+'. Programme is NOT CONFIRMED ON AIR.',true)}"
+        "else{msg('Source is safely registered/prepared, but transport readiness is unavailable. No LIVE or ON-AIR success is being claimed.',true)}"
+    )
+    script = script.replace(attach_old, attach_new)
+
+    # The merged Chat 4 community projection is part of the production creative drawer, not only
+    # a test helper. It is display-only and uses text nodes for viewer-controlled content.
+    from .creation_live_ui_community import harden_community_ui
+
+    return harden_community_ui(script)
 
 
 def install_creation_live_hardening() -> None:
@@ -365,6 +388,7 @@ def install_creation_live_hardening() -> None:
     cl._api_error = hardened_api_error
     cl.LIVE_UI_SCRIPT = _harden_ui(cl.LIVE_UI_SCRIPT)
     cl.creation_live_hardening_installed = True
+    cl.creation_live_community_ui_installed = "Shared Sky community" in cl.LIVE_UI_SCRIPT
     _PATCHED = True
 
 
