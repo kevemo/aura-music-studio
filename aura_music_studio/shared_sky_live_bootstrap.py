@@ -8,6 +8,7 @@ from .shared_sky_live_community import router as live_community_router
 from .shared_sky_live_controls import router as live_controls_router
 from .shared_sky_live_events import router as live_events_router
 from .shared_sky_live_events_ui import router as live_events_ui_router
+from .shared_sky_live_hardening import install_live_community_hardening
 from .shared_sky_live_integrations import (
     configure_neighbor_live_integrations,
     router as live_integrations_router,
@@ -59,6 +60,11 @@ def install_shared_sky_live_community(app: Any) -> None:
     custom Bearer header is not advertised as native-video playable until a browser-safe credential
     mode or a deliberately packaged header-capable HLS runtime exists.
 
+    Chat 4 Wave 3 installs additive durability hardening before requests are served. LIVE follower
+    notifications become retry-safe rather than permanently suppressed after one delivery failure,
+    and poll votes gain one serialized receipt per poll/viewer so competing requests cannot create
+    multiple final choices. Historical emission/vote rows are migrated without inventing new events.
+
     Upcoming-event routes expose only creator-published schedule sidecars. The underlying private
     `shared_sky_schedules` table is never made public by membership-middleware configuration alone;
     publication/access checks remain server authoritative inside the event handlers. The public
@@ -76,6 +82,7 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     configure_neighbor_live_integrations()
     harden_browser_playback_integration()
+    install_live_community_hardening()
 
     existing = {_route_signature(route) for route in app.router.routes}
     for route in (
