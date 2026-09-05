@@ -12,6 +12,7 @@ from .access_control import MembershipAccessMiddleware
 from .admin_portal import router as admin_portal_router
 from .assets import AssetLibrary
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
+from .cosmic_economy_api import router as cosmic_economy_router
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
@@ -56,6 +57,7 @@ app.include_router(engineering_router)
 app.include_router(speech_api_router)
 app.include_router(web_api_router)
 app.include_router(job_api_router)
+app.include_router(cosmic_economy_router)
 
 
 class ProducerRequest(BaseModel):
