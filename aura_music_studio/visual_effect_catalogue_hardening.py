@@ -48,7 +48,6 @@ _VIDEO_COLOUR_IDS = frozenset({
 
 def install_visual_effect_catalogue_hardening() -> None:
     """Harden media-specific compilation and advertised automation truth in-place."""
-    base._KEYWORDS = _MEDIA_KEYWORDS
     for effect_id in _VIDEO_COLOUR_IDS:
         spec = base.EFFECTS[effect_id]
         if spec.supports_keyframes:
