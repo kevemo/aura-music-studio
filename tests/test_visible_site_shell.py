@@ -14,6 +14,13 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     <span>Workspace architecture staged</span>
     <span>Aura routes connected</span>
     <span>Unified project layer in build</span>
+    <span>Aura Intelligence</span>
+    <span>Aura Today</span>
+    <span>Talk to Aura</span>
+    <span>Aura Sec Security Center</span>
+    <span>Aura Sec available · same account</span>
+    <span>Open Aura Sec</span>
+    <span>Manage Aura OS &amp; Aura Sec</span>
     <h3>Base</h3><a href='/signup?plan=base'>Choose Base</a>
     <p>The target project model keeps music sections, stems, scenes, visual layers, voice assets and generation settings addressable</p>
     <p>The platform is being built around continuity:</p>
@@ -23,8 +30,15 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     current = rebrand_text(source)
     assert "href='/creative-house'>Creative House" in current
     assert "Creative DNA + renderer bridge connected" in current
-    assert "Aura Core 0.20 connected" in current
+    assert "Rhian Core 0.20 connected" in current
     assert "Creative DNA project layer connected" in current
+    assert "Rhiannon Intelligence Systems" in current
+    assert "Rhian Today" in current
+    assert "Talk to Rhian" in current
+    assert "SLS Security Center" in current
+    assert "SLS available · same account" in current
+    assert "Open SLS" in current
+    assert "Manage OS Overlay &amp; SLS" in current
     assert "<h3>Basic</h3>" in current
     assert "href='/signup?plan=base'>Choose Basic" in current
     assert "Creative DNA project model keeps" in current
@@ -35,6 +49,12 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     assert "External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states" in current
     assert "Workspace architecture staged" not in current
     assert "Unified project layer in build" not in current
+    assert "Aura Core 0.20 connected" not in current
+    assert "Aura Intelligence" not in current
+    assert "Aura Today" not in current
+    assert "Talk to Aura" not in current
+    assert "Aura Sec Security Center" not in current
+    assert "Open Aura Sec" not in current
 
     again = rebrand_text(current)
     assert again.count("data-pfh-aura-core='0.20'") == 1
