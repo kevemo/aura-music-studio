@@ -454,9 +454,19 @@ def go_live_and_create(surface: str):
 
 
 def install_shared_skies_live_network(app) -> None:
-    existing_paths = {getattr(route, "path", "") for route in app.router.routes}
-    if "/api/live-now" not in existing_paths:
-        app.include_router(router)
+    existing = {
+        (getattr(route, "path", ""), frozenset(getattr(route, "methods", set()) or set()))
+        for route in app.router.routes
+    }
+    for route in router.routes:
+        signature = (
+            getattr(route, "path", ""),
+            frozenset(getattr(route, "methods", set()) or set()),
+        )
+        if signature in existing:
+            continue
+        app.router.routes.append(route)
+        existing.add(signature)
 
 
 __all__ = ["PRODUCT_NAME", "MAX_COHOSTS", "CREATIVE_SURFACES", "install_shared_skies_live_network", "router"]
