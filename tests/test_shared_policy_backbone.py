@@ -80,7 +80,7 @@ def test_moderator_is_separate_additive_permission_and_requires_agent():
             "esp_additional_roles": "moderator",
         }
     )
-    assert creator_moderator == frozenset({OrgRole.CREATOR, OrgRole.MODERATOR})
+    assert creator_moderator == frozenset({OrgRole.CREATOR})
 
     agent_context = AuthorizationContext(user_id="agent", org_roles=agent_only)
     dual_context = AuthorizationContext(user_id="dual", org_roles=agent_moderator)
