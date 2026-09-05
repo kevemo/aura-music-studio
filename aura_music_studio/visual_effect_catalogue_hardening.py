@@ -44,6 +44,7 @@ _VIDEO_COLOUR_IDS = frozenset({
     "video.color.temperature",
     "video.color.tint",
 })
+_ITEM_KIND_BY_MEDIA = {"image": "image_layer", "video": "video_clip"}
 
 
 def install_visual_effect_catalogue_hardening() -> None:
@@ -52,6 +53,30 @@ def install_visual_effect_catalogue_hardening() -> None:
         spec = base.EFFECTS[effect_id]
         if spec.supports_keyframes:
             base.EFFECTS[effect_id] = replace(spec, supports_keyframes=False)
+
+
+def _validate_target_media(state: dict, target_type: str, target_id: str, spec: base.EffectSpec) -> dict:
+    """Require the selected editor resource to match the catalogue effect's media domain."""
+    branch = state.get("branch") or {}
+    if len(spec.media) != 1:
+        raise ValueError("Visual effect media contract is ambiguous")
+    media_kind = spec.media[0]
+    if target_type == "item":
+        target = next((row for row in branch.get("items", []) if row.get("id") == target_id), None)
+        if target is None:
+            raise KeyError(target_id)
+        expected_kind = _ITEM_KIND_BY_MEDIA[media_kind]
+        if target.get("kind") != expected_kind:
+            raise ValueError(f"{spec.name} requires a {expected_kind} editor item")
+        return target
+    if target_type == "track":
+        target = next((row for row in branch.get("tracks", []) if row.get("id") == target_id), None)
+        if target is None:
+            raise KeyError(target_id)
+        if target.get("kind") != media_kind:
+            raise ValueError(f"{spec.name} requires a {media_kind} editor track")
+        return target
+    raise ValueError("Unsupported visual effect target type")
 
 
 def compile_effect_graph_hardened(
@@ -141,6 +166,8 @@ def apply_visual_effect_hardened(
         parameters = base.normalize_effect_parameters(spec.effect_id, body.parameters)
         keyframes = base.normalize_keyframes(spec, body.keyframes)
         store = base._store(project_name)
+        state = store.public_state()
+        target = _validate_target_media(state, target_type, target_id, spec)
         if spec.runtime == "item_color":
             if abs(float(body.mix) - 1.0) > 1e-9:
                 raise ValueError("Video colour controls execute directly and do not support effect mix")
@@ -148,14 +175,7 @@ def apply_visual_effect_hardened(
                 raise ValueError("Video colour controls do not advertise unexecuted keyframes")
             if target_type != "item":
                 raise ValueError("Video colour controls execute at item scope")
-            state = store.public_state()
-            item = next(
-                (row for row in state["branch"].get("items", []) if row.get("id") == target_id),
-                None,
-            )
-            if item is None:
-                raise KeyError(target_id)
-            color = dict(item.get("color") or {})
+            color = dict(target.get("color") or {})
             color[spec.runtime_type] = parameters["value"]
             updated = store.patch_item(target_id, {"color": color}, actor=base._actor(member))
             result = {"item": updated.model_dump(mode="json")}
