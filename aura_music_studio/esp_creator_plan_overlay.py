@@ -8,6 +8,7 @@ from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_product_workflows import router as product_workflows_router
+from .esp_product_workflows_portal import router as product_workflows_portal_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 
@@ -18,6 +19,7 @@ router.include_router(support_center_router)
 router.include_router(broadcast_tech_router)
 router.include_router(social_media_library_router)
 router.include_router(product_workflows_router)
+router.include_router(product_workflows_portal_router)
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
@@ -32,14 +34,18 @@ def level_up_with_creator_plan(request: Request):
         return response
 
     progress_link = "<a class='btn' href='/command-center/progress'>Progress</a>"
+    onboarding_link = "<a class='btn primary' href='/command-center/onboarding'>Creator Onboarding</a>"
     my_plan_link = "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>"
     reviews_link = "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>"
     support_link = "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>"
     broadcast_link = "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>"
     media_link = "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>"
+    agent_leads_link = "<a class='btn' href='/command-center/agent/leads'>Agent Lead CRM</a>"
     if progress_link in html and "/command-center/my-plan" not in html:
-        html = html.replace(progress_link, my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
+        html = html.replace(progress_link, onboarding_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + agent_leads_link + progress_link, 1)
     else:
+        if progress_link in html and "/command-center/onboarding" not in html:
+            html = html.replace(progress_link, onboarding_link + progress_link, 1)
         if progress_link in html and "/command-center/my-plan/reviews" not in html:
             html = html.replace(progress_link, reviews_link + progress_link, 1)
         if progress_link in html and "/command-center/support" not in html:
@@ -48,6 +54,8 @@ def level_up_with_creator_plan(request: Request):
             html = html.replace(progress_link, broadcast_link + progress_link, 1)
         if progress_link in html and "/command-center/social/media-library" not in html:
             html = html.replace(progress_link, media_link + progress_link, 1)
+        if progress_link in html and "/command-center/agent/leads" not in html:
+            html = html.replace(progress_link, agent_leads_link + progress_link, 1)
 
     designed = (
         "<div class='topline'><span>Creator OS</span><b class='planned'>Designed</b></div>"
