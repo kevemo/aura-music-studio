@@ -371,10 +371,18 @@ def delete_operator_profile(project_id: str, profile_id: str, request: Request):
 
 
 def install_shared_sky_operator_profiles(app: Any) -> None:
-    existing = {getattr(route, "path", "") for route in app.router.routes}
-    marker = "/shared-sky/studio/api/projects/{project_id}/operator-profiles"
-    if marker not in existing:
-        app.include_router(router)
+    existing = {
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.router.routes
+    }
+    for route in router.routes:
+        signature = (
+            getattr(route, "path", ""),
+            tuple(sorted(getattr(route, "methods", set()) or set())),
+        )
+        if signature not in existing:
+            app.router.routes.append(route)
+            existing.add(signature)
 
 
 __all__ = [
