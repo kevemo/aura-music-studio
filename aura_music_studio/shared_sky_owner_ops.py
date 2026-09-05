@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
+from .shared_sky_battle_bootstrap import install_shared_sky_battle_routes
 from .shared_sky_live_bootstrap import install_shared_sky_live_community
 from .shared_sky_media_plane import router as shared_sky_media_plane_router
 from .shared_sky_relay import relay
@@ -177,11 +178,13 @@ def install_shared_sky_media_plane(app: Any) -> None:
 
 
 # ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Register owner runtime, first-party viewer/community, and the signed media-plane routes at
-# import time to bypass late compatibility-router snapshotting. Their handlers retain their own
-# membership/owner/node-secret checks and fail closed when deployment credentials are absent.
+# here. Register authoritative Battle/multi-host control, owner runtime, first-party
+# viewer/community, and the signed media-plane routes at import time to bypass late compatibility-
+# router snapshotting. Their handlers retain their own membership/owner/node-secret checks and
+# fail closed when deployment credentials are absent.
 from .api import app as _canonical_app
 
+install_shared_sky_battle_routes(_canonical_app)
 install_shared_sky_live_community(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 install_shared_sky_media_plane(_canonical_app)
