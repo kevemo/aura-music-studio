@@ -18,9 +18,8 @@ router = APIRouter(tags=["Shared Sky Limited LIVE Moderator Actions"])
 _DELEGATED_MODERATION_ACTIONS = {"delete_message", "timeout_user", "remove_user"}
 _DELEGATED_QA_ACTIONS = {"approve", "reject", "remove"}
 
-# Capture the canonical domain implementations before the Wave 5 wrappers are installed. The
-# wrappers only gate authority/capabilities; they delegate the actual moderation mutation to the
-# existing Chat 4 domain so there is no second moderation-state authority.
+# Capture the canonical Chat 4 mutations before the Wave 5 guards are installed. The wrappers
+# enforce capability scope only; they do not create a second chat/Q&A moderation authority.
 _BASE_MODERATE = live.LiveCommunityStore.moderate
 _BASE_CREATE_POLL = live.LiveCommunityStore.create_poll
 _BASE_MODERATE_QA = live.LiveCommunityStore.moderate_qa
@@ -64,8 +63,7 @@ def _limited_moderate(self: Any, broadcast_id: str, actor_user_id: str | None, o
 
 
 def _creator_only_create_poll(self: Any, broadcast_id: str, actor_user_id: str, body: Any) -> dict:
-    kind = _authority_kind(self, broadcast_id, actor_user_id, False)
-    if kind != "creator":
+    if _authority_kind(self, broadcast_id, actor_user_id, False) != "creator":
         raise PermissionError("Only the LIVE creator can create viewer polls")
     return _BASE_CREATE_POLL(self, broadcast_id, actor_user_id, body)
 
@@ -76,7 +74,8 @@ def _limited_moderate_qa(self: Any, broadcast_id: str, question_id: str, actor_u
         raise PermissionError("Creator or assigned Moderator permission required")
     if kind == "moderator" and str(body.action) not in _DELEGATED_QA_ACTIONS:
         raise PermissionError(
-            "Limited Moderators may approve, reject or remove Q&A submissions; selecting/marking answered remains a Creator control"
+            "Limited Moderators may approve, reject or remove Q&A submissions; "
+            "selecting/marking answered remains a Creator control"
         )
     return _BASE_MODERATE_QA(self, broadcast_id, question_id, actor_user_id, body)
 
@@ -147,18 +146,19 @@ def _ensure_schema() -> None:
 
 
 def _request_actor(request: Request) -> tuple[str, bool, str]:
-    owner = owner_session_authorized(request)
-    if owner:
+    if owner_session_authorized(request):
         member = getattr(request.state, "member", None)
-        user_id = str(getattr(member, "user_id", "") or "") or "owner"
-        return user_id, True, "owner"
+        return str(getattr(member, "user_id", "") or "") or "owner", True, "owner"
     member = live.require_member(request)
     return str(member.user_id), False, "member"
 
 
 def _require_queue_authority(broadcast_id: str, request: Request) -> tuple[str, str]:
-    user_id, owner, actor_kind = _request_actor(request)
-    kind = _authority_kind(live.community, broadcast_id, user_id, owner)
+    user_id, owner, _ = _request_actor(request)
+    try:
+        kind = _authority_kind(live.community, broadcast_id, user_id, owner)
+    except KeyError as exc:
+        raise HTTPException(404, "Shared Sky LIVE not found") from exc
     if kind == "none":
         raise HTTPException(403, "Creator, Owner or assigned Moderator permission required")
     return user_id, "owner" if owner else kind
@@ -218,7 +218,7 @@ def escalate_report(broadcast_id: str, report_id: str, body: EscalateReportReque
         con.isolation_level = None
         con.execute("BEGIN IMMEDIATE")
         report = con.execute(
-            "SELECT id,state FROM shared_sky_reports WHERE id=? AND broadcast_id=?",
+            "SELECT id FROM shared_sky_reports WHERE id=? AND broadcast_id=?",
             (report_id, broadcast_id),
         ).fetchone()
         if not report:
@@ -231,7 +231,12 @@ def escalate_report(broadcast_id: str, report_id: str, body: EscalateReportReque
         ).fetchone()
         if existing:
             con.execute("COMMIT")
-            return {"report_id": report_id, "state": "escalated", "escalation_id": existing["id"], "created_at": existing["created_at"]}
+            return {
+                "report_id": report_id,
+                "state": "escalated",
+                "escalation_id": existing["id"],
+                "created_at": existing["created_at"],
+            }
         escalation_id = uuid4().hex
         con.execute("UPDATE shared_sky_reports SET state='escalated' WHERE id=?", (report_id,))
         con.execute(
