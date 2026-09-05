@@ -61,6 +61,10 @@ class VoiceProfile(BaseModel):
         if self.consent_confirmed and not self.consent_recorded_at:
             # Backwards-compatible migration for profiles created before explicit consent timestamps.
             object.__setattr__(self, "consent_recorded_at", self.created_at)
+        if self.subject_relationship == "legacy_unspecified" and self.metadata.get("challenge_id"):
+            # The current Voice House challenge explicitly instructs the submitting subject to
+            # record themselves. Older challenge-created rows predate this typed field.
+            object.__setattr__(self, "subject_relationship", "self")
         if self.revoked_at:
             object.__setattr__(self, "verification_state", "revoked")
             object.__setattr__(self, "consent_confirmed", False)
@@ -129,6 +133,14 @@ class RightsLedger:
         return record
 
     def save_voice(self, profile: VoiceProfile) -> VoiceProfile:
+        user_id = current_user_id()
+        if user_id:
+            if profile.tenant_user_id and profile.tenant_user_id != user_id:
+                raise PermissionError("Voice Profile belongs to another tenant and cannot be modified.")
+            if not profile.tenant_user_id:
+                profile.tenant_user_id = user_id
+            if not profile.created_by_user_id:
+                profile.created_by_user_id = user_id
         profile.updated_at = _now()
         data = self._read_list(self.voices_path)
         data = [x for x in data if x.get("id") != profile.id]
@@ -176,6 +188,7 @@ class RightsLedger:
         complete erasure. This method intentionally does not accept arbitrary filesystem paths.
         """
         profile = self.get_voice(profile_id)
+        profile.assert_tenant(current_user_id())
         data = [x for x in self._read_list(self.voices_path) if x.get("id") != profile_id]
         self._write_list(self.voices_path, data)
         return profile
