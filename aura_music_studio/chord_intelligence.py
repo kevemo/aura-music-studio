@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from .project import ProjectWorkspace
 from .revisions import create_revision, revision_root
@@ -31,42 +31,28 @@ ReharmonizeStyle = Literal["pop", "jazz", "gospel", "cinematic"]
 ChordSource = Literal["manual", "generated", "detected", "imported"]
 
 _NOTE_TO_PC = {
-    "C": 0,
-    "B#": 0,
-    "C#": 1,
-    "Db": 1,
-    "D": 2,
-    "D#": 3,
-    "Eb": 3,
-    "E": 4,
-    "Fb": 4,
-    "E#": 5,
-    "F": 5,
-    "F#": 6,
-    "Gb": 6,
-    "G": 7,
-    "G#": 8,
-    "Ab": 8,
-    "A": 9,
-    "A#": 10,
-    "Bb": 10,
-    "B": 11,
-    "Cb": 11,
+    "C": 0, "B#": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
+    "E": 4, "Fb": 4, "E#": 5, "F": 5, "F#": 6, "Gb": 6, "G": 7,
+    "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11, "Cb": 11,
 }
-
 _KEY_RE = re.compile(r"^\s*([A-Ga-g])([#b]?)(?:\s*(major|maj|minor|min|m))?\s*$")
 _CHORD_RE = re.compile(
     r"^\s*([A-Ga-g])([#b]?)(maj9|min9|m9|maj7|min7|m7|dim7|dim|aug|sus2|sus4|add9|m6|6|9|7|min|m)?(?:/([A-Ga-g])([#b]?))?\s*$"
 )
-
-_MAJOR_SCALE = (0, 2, 4, 5, 7, 9, 11)
-_MINOR_SCALE = (0, 2, 3, 5, 7, 8, 10)
 _ROMAN = ("I", "II", "III", "IV", "V", "VI", "VII")
+_MAJOR_DEGREES = (
+    (1, ""), (1, "#"), (2, ""), (3, "b"), (3, ""), (4, ""),
+    (4, "#"), (5, ""), (6, "b"), (6, ""), (7, "b"), (7, ""),
+)
+_MINOR_DEGREES = (
+    (1, ""), (2, "b"), (2, ""), (3, ""), (3, "#"), (4, ""),
+    (4, "#"), (5, ""), (6, ""), (6, "#"), (7, ""), (7, "#"),
+)
+_MAJOR_SCALE = {0, 2, 4, 5, 7, 9, 11}
+_MINOR_SCALE = {0, 2, 3, 5, 7, 8, 10}
 
 
 class ChordEvent(BaseModel):
-    model_config = ConfigDict(validate_assignment=True)
-
     id: str = Field(default_factory=lambda: f"chord_{uuid4().hex}", min_length=1, max_length=96)
     symbol: str = Field(min_length=1, max_length=MAX_SYMBOL_CHARS)
     start_seconds: float = Field(ge=0.0, le=MAX_CHORD_SECONDS)
@@ -76,10 +62,10 @@ class ChordEvent(BaseModel):
     metadata: dict = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_time_range(self):
+    def validate_event(self):
         if self.end_seconds <= self.start_seconds:
             raise ValueError("Chord end_seconds must be greater than start_seconds")
-        self.symbol = normalize_chord_symbol(self.symbol)
+        object.__setattr__(self, "symbol", normalize_chord_symbol(self.symbol))
         return self
 
 
@@ -135,8 +121,7 @@ def _canonical_note(letter: str, accidental: str = "") -> str:
 
 def _normalize_quality(raw: str | None) -> str:
     value = (raw or "").lower()
-    aliases = {"min": "m", "min7": "m7", "min9": "m9"}
-    return aliases.get(value, value)
+    return {"min": "m", "min7": "m7", "min9": "m9"}.get(value, value)
 
 
 def parse_chord_symbol(symbol: str) -> tuple[str, str, str | None]:
@@ -162,57 +147,35 @@ def normalize_chord_symbol(symbol: str) -> str:
 
 
 def parse_key(key: str) -> tuple[str, Literal["major", "minor"]]:
-    raw = (key or "").strip()
-    match = _KEY_RE.fullmatch(raw)
+    match = _KEY_RE.fullmatch((key or "").strip())
     if not match:
         raise ValueError("Key must be a tonic such as C, F# minor, Bb major or Cm")
     tonic = _canonical_note(match.group(1), match.group(2) or "")
     if tonic not in _NOTE_TO_PC:
         raise ValueError("Unsupported key tonic")
-    mode_token = (match.group(3) or "major").lower()
-    mode: Literal["major", "minor"] = "minor" if mode_token in {"minor", "min", "m"} else "major"
+    token = (match.group(3) or "major").lower()
+    mode: Literal["major", "minor"] = "minor" if token in {"minor", "min", "m"} else "major"
     return tonic, mode
-
-
-def _degree_for_interval(interval: int, mode: Literal["major", "minor"]) -> tuple[int, str, bool]:
-    scale = _MAJOR_SCALE if mode == "major" else _MINOR_SCALE
-    if interval in scale:
-        return scale.index(interval) + 1, "", True
-    candidates: list[tuple[int, int, str]] = []
-    for index, semitone in enumerate(scale):
-        up = (interval - semitone) % 12
-        down = (semitone - interval) % 12
-        if up <= 2:
-            candidates.append((up, index + 1, "#" * up))
-        if down <= 2:
-            candidates.append((down, index + 1, "b" * down))
-    if not candidates:
-        return 1, "", False
-    _distance, degree, accidental = min(candidates, key=lambda item: (item[0], len(item[2]), item[1]))
-    return degree, accidental, False
 
 
 def describe_chord(symbol: str, key: str | None = None) -> ChordDescriptor:
     root, quality, bass = parse_chord_symbol(symbol)
     descriptor = ChordDescriptor(
-        symbol=normalize_chord_symbol(symbol),
-        root=root,
-        quality=quality,
-        bass=bass,
-        pitch_class=_NOTE_TO_PC[root],
+        symbol=normalize_chord_symbol(symbol), root=root, quality=quality, bass=bass, pitch_class=_NOTE_TO_PC[root]
     )
     if not key:
         return descriptor
     tonic, mode = parse_key(key)
     interval = (_NOTE_TO_PC[root] - _NOTE_TO_PC[tonic]) % 12
-    degree, accidental, in_key = _degree_for_interval(interval, mode)
+    degree, accidental = (_MAJOR_DEGREES if mode == "major" else _MINOR_DEGREES)[interval]
+    in_key = interval in (_MAJOR_SCALE if mode == "major" else _MINOR_SCALE)
     roman = _ROMAN[degree - 1]
     if quality.startswith("m") and not quality.startswith("maj"):
         roman = roman.lower()
     if quality.startswith("dim"):
         roman = roman.lower() + "°"
     elif quality == "aug":
-        roman = roman + "+"
+        roman += "+"
     descriptor.key = f"{tonic} {mode}"
     descriptor.mode = mode
     descriptor.in_key = in_key
@@ -239,28 +202,12 @@ def _sophisticated_quality(quality: str, style: ReharmonizeStyle) -> str:
     if diminished:
         return "dim7"
     if style == "jazz":
-        if minor:
-            return "m9"
-        if dominant:
-            return "9"
-        return "maj9"
+        return "m9" if minor else "9" if dominant else "maj9"
     if style == "gospel":
-        if minor:
-            return "m7"
-        if dominant:
-            return "9"
-        return "add9"
+        return "m7" if minor else "9" if dominant else "add9"
     if style == "cinematic":
-        if minor:
-            return "m7"
-        if dominant:
-            return "7"
-        return "add9"
-    if minor:
-        return "m7"
-    if dominant:
-        return "7"
-    return "add9"
+        return "m7" if minor else "7" if dominant else "add9"
+    return "m7" if minor else "7" if dominant else "add9"
 
 
 def reharmonize_symbol(symbol: str, *, mode: ReharmonizeMode, style: ReharmonizeStyle = "pop") -> str:
@@ -272,7 +219,10 @@ def reharmonize_symbol(symbol: str, *, mode: ReharmonizeMode, style: Reharmonize
 def validate_progression(events: list[ChordEvent]) -> list[ChordEvent]:
     if len(events) > MAX_CHORD_EVENTS:
         raise ValueError(f"Chord progression is limited to {MAX_CHORD_EVENTS} events")
-    ordered = sorted((ChordEvent.model_validate(event) for event in events), key=lambda item: (item.start_seconds, item.end_seconds, item.id))
+    ordered = sorted(
+        (ChordEvent.model_validate(event) for event in events),
+        key=lambda item: (item.start_seconds, item.end_seconds, item.id),
+    )
     seen: set[str] = set()
     for event in ordered:
         if event.id in seen:
@@ -319,8 +269,7 @@ def _store(name: str) -> SongDNAStore:
 
 
 def _load_progression(store: SongDNAStore) -> list[ChordEvent]:
-    dna = store.load()
-    raw = dna.metadata.get("chord_progression") or []
+    raw = store.load().metadata.get("chord_progression") or []
     if not isinstance(raw, list):
         raise ValueError("Song DNA chord progression is invalid")
     return validate_progression([ChordEvent.model_validate(item) for item in raw])
@@ -335,7 +284,7 @@ def _hash_file(path: Path) -> str:
 
 
 def _checkpoint_song_dna(project: Path, *, label: str) -> dict:
-    """Create a shared revision and explicitly add Song DNA until it is globally tracked."""
+    """Add Song DNA to the shared checkpoint so this edit is fully restorable."""
     manifest = create_revision(project, label=label, reason="song_dna_chord_edit", actor="Rhiannon")
     source = project / "song_dna.json"
     if not source.is_file():
@@ -344,9 +293,7 @@ def _checkpoint_song_dna(project: Path, *, label: str) -> dict:
     target = folder / "song_dna.json"
     shutil.copy2(source, target)
     row = {"path": "song_dna.json", "sha256": _hash_file(source), "bytes": source.stat().st_size}
-    files = [item for item in manifest.get("files", []) if item.get("path") != "song_dna.json"]
-    files.append(row)
-    manifest["files"] = files
+    manifest["files"] = [item for item in manifest.get("files", []) if item.get("path") != "song_dna.json"] + [row]
     domains = dict(manifest.get("domains") or {})
     domains["music_song_dna"] = {"files": 1, "bytes": row["bytes"], "paths": ["song_dna.json"]}
     manifest["domains"] = domains
@@ -363,8 +310,7 @@ def _persist_progression(store: SongDNAStore, events: list[ChordEvent], *, key: 
         tonic, mode = parse_key(effective_key)
         effective_key = f"{tonic} {mode}"
     validated = validate_progression(events)
-    project = store.project
-    revision = _checkpoint_song_dna(project, label=f"Before chord {operation}")
+    revision = _checkpoint_song_dna(store.project, label=f"Before chord {operation}")
     dna.metadata["chord_progression"] = [event.model_dump(mode="json") for event in validated]
     dna.metadata["chord_intelligence"] = {
         "schema_version": 1,
@@ -479,9 +425,10 @@ def delete_project_chord(project_name: str, chord_id: str):
 def reharmonize_project_chords(project_name: str, request: ReharmonizeRequest):
     try:
         store = _store(project_name)
-        events = _load_progression(store)
-        changed = reharmonize_progression(events, mode=request.mode, style=request.style)
-        result = _persist_progression(store, changed, key=request.key, operation=f"reharmonize_{request.mode}_{request.style}")
+        changed = reharmonize_progression(_load_progression(store), mode=request.mode, style=request.style)
+        result = _persist_progression(
+            store, changed, key=request.key, operation=f"reharmonize_{request.mode}_{request.style}"
+        )
         result["deterministic_reharmonization"] = True
         result["provider_invoked"] = False
         return result
@@ -489,12 +436,12 @@ def reharmonize_project_chords(project_name: str, request: ReharmonizeRequest):
         raise HTTPException(400, str(exc)) from exc
 
 
-def _chord_rows(project_name: str, store: SongDNAStore) -> str:
+def _chord_rows(store: SongDNAStore) -> str:
     payload = _current_payload(store)
-    analysis_by_symbol = {item["symbol"]: item for item in payload["analysis"]}
+    labels = {item["symbol"]: item for item in payload["analysis"]}
     rows: list[str] = []
     for event in payload["events"]:
-        analysis = analysis_by_symbol.get(event["symbol"], {})
+        analysis = labels.get(event["symbol"], {})
         chord_id = html.escape(str(event["id"]), quote=True)
         symbol = html.escape(str(event["symbol"]), quote=True)
         rows.append(
@@ -516,7 +463,7 @@ def chord_editor_portal(project_name: str, request: Request):
     store = _store(project_name)
     payload = _current_payload(store)
     encoded = quote(project_name, safe="")
-    rows = _chord_rows(project_name, store)
+    rows = _chord_rows(store)
     key_label = html.escape(str(payload.get("key") or "Not set"))
     return HTMLResponse(
         f"""<!doctype html>
@@ -533,7 +480,7 @@ body{{font-family:system-ui,sans-serif;margin:0;background:#11131a;color:#f5f5f7
 <div class='card'><h2>Deterministic reharmonisation</h2><form id='reharmonize' class='grid'><label>Operation<select name='mode'><option value='simplify'>Simplify</option><option value='sophisticate'>Sophisticate</option></select></label><label>Style<select name='style'><option value='pop'>Pop</option><option value='jazz'>Jazz</option><option value='gospel'>Gospel</option><option value='cinematic'>Cinematic</option></select></label><div><button type='submit'>Apply to chord map</button></div></form></div>
 <script>
 const base='/projects/{encoded}/song-dna/chords'; const status=document.getElementById('status');
-async function send(url, method, body){{status.textContent='Applying…'; const r=await fetch(url,{{method,headers:body?{{'Content-Type':'application/json'}}:undefined,body:body?JSON.stringify(body):undefined}}); const data=await r.json().catch(()=>({{}})); if(!r.ok)throw new Error(data.detail||'Request failed'); status.textContent=`Saved Song DNA version ${{data.song_dna_version||''}}. Audio rendered: ${{data.audio_rendered===true?'yes':'no'}}.`; location.reload();}}
+async function send(url, method, body){{status.textContent='Applying…';const r=await fetch(url,{{method,headers:body?{{'Content-Type':'application/json'}}:undefined,body:body?JSON.stringify(body):undefined}});const data=await r.json().catch(()=>({{}}));if(!r.ok)throw new Error(data.detail||'Request failed');status.textContent=`Saved Song DNA version ${{data.song_dna_version||''}}. Audio rendered: ${{data.audio_rendered===true?'yes':'no'}}.`;location.reload();}}
 document.getElementById('addChord').addEventListener('submit',e=>{{e.preventDefault();const f=new FormData(e.currentTarget);send(base,'POST',{{symbol:f.get('symbol'),start_seconds:Number(f.get('start_seconds')),end_seconds:Number(f.get('end_seconds'))}}).catch(err=>status.textContent=err.message)}});
 document.querySelectorAll('.replaceChord').forEach(form=>form.addEventListener('submit',e=>{{e.preventDefault();const f=new FormData(form);send(base+'/'+encodeURIComponent(form.dataset.id),'PATCH',{{symbol:f.get('symbol')}}).catch(err=>status.textContent=err.message)}}));
 document.querySelectorAll('.deleteChord').forEach(btn=>btn.addEventListener('click',()=>send(base+'/'+encodeURIComponent(btn.dataset.id),'DELETE').catch(err=>status.textContent=err.message)));
@@ -543,15 +490,7 @@ document.getElementById('reharmonize').addEventListener('submit',e=>{{e.preventD
 
 
 __all__ = [
-    "ChordDescriptor",
-    "ChordEvent",
-    "MAX_CHORD_EVENTS",
-    "describe_chord",
-    "normalize_chord_symbol",
-    "parse_chord_symbol",
-    "parse_key",
-    "reharmonize_progression",
-    "reharmonize_symbol",
-    "router",
+    "ChordDescriptor", "ChordEvent", "MAX_CHORD_EVENTS", "describe_chord", "normalize_chord_symbol",
+    "parse_chord_symbol", "parse_key", "reharmonize_progression", "reharmonize_symbol", "router",
     "validate_progression",
 ]
