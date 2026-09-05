@@ -183,12 +183,11 @@ def _install_openapi_integrity(app: Any) -> None:
 
 
 def _ensure_creation_live_routes(app: Any) -> None:
-    """Install Chat 7 routes/middleware and recover from stale installer markers.
+    """Install Chat 7 routes/middleware and recover from stale installer markers."""
+    from .creation_live_hardening import install_creation_live_hardening
 
-    Route presence is the durable source of truth. This avoids skipping the router when an app
-    state marker was copied/set before the routes themselves were mounted, while still preventing
-    duplicate route or middleware registration on repeated reconciliation calls.
-    """
+    install_creation_live_hardening()
+
     from .creation_live import CreationLiveMiddleware, install_creation_live, router as creation_live_router
 
     install_creation_live(app)
