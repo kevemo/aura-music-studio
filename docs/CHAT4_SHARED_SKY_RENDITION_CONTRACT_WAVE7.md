@@ -54,6 +54,8 @@ The actual first-party HLS bootstrap, browser authorization exchange, media orig
 
 ## Integration rule
 
-Wave 7 is intentionally developed on top of Chat 4 Wave 6 but must not be merged ahead of it. After Wave 6 reaches `development/full-site-build`, Wave 7 must be rebased/reconciled onto the then-current integration head and must pass the exact-head Command Center CI, Security Gates and Self-Host Smoke admission matrix before merge.
+Wave 6 is merged into `development/full-site-build` as `c792f1ae0bfd8823100d3587ac10ea3e91a4d448`. Wave 7 is now retargeted directly to that integration branch. This documentation-only reconciliation commit exists to trigger fresh pull-request validation against the post-Wave-6 combined tree; no prior stacked workflow result is accepted for admission.
+
+Wave 7 must pass the exact-head Command Center CI, Security Gates and Self-Host Smoke admission matrix before merge. If the integration base moves again, reconcile and rerun the matrix.
 
 Final deployment remains Chat 11-owned.
