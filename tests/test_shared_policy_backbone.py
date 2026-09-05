@@ -150,9 +150,13 @@ def test_public_errors_and_event_audit_metadata_scrub_secrets():
         )
 
 
-def test_routes_are_discovery_only_until_domain_owners_wire_them():
+def test_routes_reflect_verified_merged_owners_without_fabricating_pending_domains():
     required = {"shared_sky", "live_now", "battles", "gifts_cosmic_coins", "go_live_create"}
     assert required.issubset({route.key for route in ROUTES.all()})
-    assert all(route.implementation_state is RouteImplementationState.INTEGRATION_PENDING for route in ROUTES.all())
+    live_now = ROUTES.get("live_now")
+    assert live_now.path == "/live-now"
+    assert live_now.implementation_state is RouteImplementationState.READY
+    for key in required - {"live_now"}:
+        assert ROUTES.get(key).implementation_state is RouteImplementationState.INTEGRATION_PENDING
     with pytest.raises(ValueError):
         RouteRegistry([ROUTES.get("shared_sky"), ROUTES.get("shared_sky")])
