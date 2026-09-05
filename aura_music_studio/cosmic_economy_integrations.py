@@ -7,6 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .cosmic_economy import (
     BaselineGiftRiskEvaluator,
@@ -18,6 +19,7 @@ from .cosmic_economy import (
     UnavailableEconomyEligibilityDirectory,
     UnavailableLiveSessionDirectory,
     VerifiedPaymentEvent,
+    _iso,
 )
 
 
@@ -64,6 +66,28 @@ class IntegratedCosmicEconomy(CosmicEconomy):
                 );
                 CREATE INDEX IF NOT EXISTS idx_economy_rate_events_scope
                     ON economy_rate_events(user_id, action, occurred_at_epoch);
+
+                CREATE TABLE IF NOT EXISTS economy_rate_idempotency (
+                    user_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    occurred_at_epoch INTEGER NOT NULL,
+                    PRIMARY KEY(user_id, action, idempotency_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_economy_rate_idempotency_time
+                    ON economy_rate_idempotency(occurred_at_epoch);
+
+                CREATE TABLE IF NOT EXISTS economy_operational_events (
+                    id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    user_id TEXT,
+                    details_json TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_economy_operational_events_time
+                    ON economy_operational_events(occurred_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_economy_operational_events_user
+                    ON economy_operational_events(user_id, occurred_at DESC);
                 """
             )
 
@@ -88,13 +112,71 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             )
         return value
 
-    def _consume_rate_limit(self, *, user_id: str, action: str, limit_env: str, default_limit: int) -> None:
+    def _record_operational_event(
+        self,
+        *,
+        event_type: str,
+        user_id: str | None,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Persist non-financial evidence about rejected/blocked economy actions."""
+        with self._connect() as con:
+            con.execute(
+                """INSERT INTO economy_operational_events
+                   (id,event_type,user_id,details_json,occurred_at) VALUES (?,?,?,?,?)""",
+                (
+                    uuid4().hex,
+                    event_type[:160],
+                    user_id,
+                    json.dumps(details or {}, sort_keys=True, separators=(",", ":")),
+                    _iso(),
+                ),
+            )
+
+    def operational_events(
+        self,
+        *,
+        event_type: str | None = None,
+        user_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 500))
+        clauses: list[str] = []
+        params: list[Any] = []
+        if event_type:
+            clauses.append("event_type=?")
+            params.append(event_type)
+        if user_id:
+            clauses.append("user_id=?")
+            params.append(user_id)
+        sql = "SELECT * FROM economy_operational_events"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY occurred_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as con:
+            rows = con.execute(sql, params).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["details"] = json.loads(item.pop("details_json"))
+            result.append(item)
+        return result
+
+    def _consume_rate_limit(
+        self,
+        *,
+        user_id: str,
+        action: str,
+        idempotency_key: str,
+        limit_env: str,
+        default_limit: int,
+    ) -> None:
         """Atomically admit one new financial command for this account/action.
 
-        Idempotent replays are checked before this method and therefore do not consume additional
-        admission capacity. The limiter protects the financial service itself, not only one HTTP
-        route. Chat 10 may add an edge/distributed abuse-control layer without changing this
-        financial invariant.
+        The durable idempotency reservation is created in the same transaction as the rate event.
+        Concurrent retries carrying the same key therefore share one admission slot even before
+        the financial transaction itself has committed.
         """
         limit = self._configured_positive_int(limit_env, default_limit)
         window = self._configured_positive_int("LSS_ECONOMY_RATE_WINDOW_SECONDS", 60)
@@ -106,6 +188,18 @@ class IntegratedCosmicEconomy(CosmicEconomy):
                 "DELETE FROM economy_rate_events WHERE occurred_at_epoch<=?",
                 (cutoff,),
             )
+            con.execute(
+                "DELETE FROM economy_rate_idempotency WHERE occurred_at_epoch<=?",
+                (cutoff,),
+            )
+            seen = con.execute(
+                """SELECT 1 FROM economy_rate_idempotency
+                   WHERE user_id=? AND action=? AND idempotency_key=?""",
+                (user_id, action, idempotency_key),
+            ).fetchone()
+            if seen:
+                con.commit()
+                return
             rows = con.execute(
                 """SELECT occurred_at_epoch FROM economy_rate_events
                    WHERE user_id=? AND action=? AND occurred_at_epoch>?
@@ -114,7 +208,27 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             ).fetchall()
             if len(rows) >= limit:
                 retry_after = max(1, int(rows[0]["occurred_at_epoch"]) + window - now + 1)
-                con.rollback()
+                con.execute(
+                    """INSERT INTO economy_operational_events
+                       (id,event_type,user_id,details_json,occurred_at) VALUES (?,?,?,?,?)""",
+                    (
+                        uuid4().hex,
+                        "economy.rate_limit_blocked",
+                        user_id,
+                        json.dumps(
+                            {
+                                "action": action,
+                                "retry_after_seconds": retry_after,
+                                "limit": limit,
+                                "window_seconds": window,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        _iso(),
+                    ),
+                )
+                con.commit()
                 raise EconomyError(
                     "RATE_LIMITED",
                     "Too many financial requests. Try again after the retry period.",
@@ -124,6 +238,11 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             con.execute(
                 "INSERT INTO economy_rate_events(user_id,action,occurred_at_epoch) VALUES (?,?,?)",
                 (user_id, action, now),
+            )
+            con.execute(
+                """INSERT INTO economy_rate_idempotency
+                   (user_id,action,idempotency_key,occurred_at_epoch) VALUES (?,?,?,?)""",
+                (user_id, action, idempotency_key, now),
             )
             con.commit()
 
@@ -142,6 +261,7 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             self._consume_rate_limit(
                 user_id=user_id,
                 action="coin_purchase",
+                idempotency_key=idempotency_key,
                 limit_env="LSS_COIN_PURCHASE_RATE_LIMIT",
                 default_limit=8,
             )
@@ -175,6 +295,7 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             self._consume_rate_limit(
                 user_id=sender_user_id,
                 action="gift_send",
+                idempotency_key=idempotency_key,
                 limit_env="LSS_GIFT_SEND_RATE_LIMIT",
                 default_limit=120,
             )
@@ -182,6 +303,23 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             return super().send_gift(
                 sender_user_id=sender_user_id, idempotency_key=idempotency_key, **kwargs
             )
+        except EconomyError as exc:
+            event_types = {
+                "SPENDING_LIMIT_EXCEEDED": "economy.spending_limit_blocked",
+                "PERSONAL_SPENDING_LIMIT_EXCEEDED": "economy.personal_spending_limit_blocked",
+                "INSUFFICIENT_COIN_BALANCE": "economy.insufficient_balance",
+                "RISK_REVIEW_REQUIRED": "economy.risk_hold",
+                "GIFT_BLOCKED": "economy.risk_block",
+                "COIN_ACCOUNT_RESTRICTED": "economy.account_restriction_block",
+            }
+            event_type = event_types.get(exc.code)
+            if event_type:
+                self._record_operational_event(
+                    event_type=event_type,
+                    user_id=sender_user_id,
+                    details={"code": exc.code, **(exc.details or {})},
+                )
+            raise
         except sqlite3.IntegrityError as exc:
             with self._connect() as con:
                 winner = con.execute(
