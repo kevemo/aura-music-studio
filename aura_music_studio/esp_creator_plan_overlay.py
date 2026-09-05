@@ -28,10 +28,6 @@ from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
 from .shared_sky_battle_api import router as shared_sky_battle_router
-# Importing this canonical mount binds the same Battle router/store directly to api.app before the
-# legacy Creator overlay is snapshotted. The overlay copy remains for compatibility and is later
-# deduplicated by route integrity; no second Battle authority is created.
-from .shared_sky_battle_mount import install_shared_sky_battle_routes as _install_shared_sky_battle_routes
 from .shared_sky_streaming_studios import router as shared_sky_router
 from .shared_sky_transport_api import router as shared_sky_transport_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
