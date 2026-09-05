@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import aura_music_studio.restoration as restoration
+import aura_music_studio.spatial as spatial
 import aura_music_studio.speech as speech
 import aura_music_studio.tone as tone
 from aura_music_studio.command_templates import render_command_argv
@@ -131,5 +132,34 @@ def test_tone_adapter_invokes_subprocess_with_argv_not_shell(monkeypatch):
         "/tmp/model.nam",
         "--output",
         "/tmp/out.wav",
+    ]
+    assert captured["kwargs"] == {"check": True}
+
+
+def test_spatial_adapter_invokes_subprocess_with_argv_not_shell(tmp_path, monkeypatch):
+    captured = {}
+    output = tmp_path / "out.wav"
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        output.write_bytes(b"0" * 2048)
+        return SimpleNamespace(returncode=0)
+
+    renderer = spatial.SpatialRenderer()
+    renderer.command = "spatial-render --input {input} --output {output} --mode {mode}"
+    monkeypatch.setattr(spatial.subprocess, "run", fake_run)
+    rendered, report = renderer.immersive(tmp_path / "input.wav", output, mode="binaural")
+
+    assert rendered == output.resolve()
+    assert report["engine"] == "configured_local_spatial_renderer"
+    assert captured["argv"] == [
+        "spatial-render",
+        "--input",
+        str((tmp_path / "input.wav").resolve()),
+        "--output",
+        str(output.resolve()),
+        "--mode",
+        "binaural",
     ]
     assert captured["kwargs"] == {"check": True}
