@@ -177,10 +177,18 @@ def add_countdown(session_id: str, body: CountdownCreateRequest, request: Reques
 
 
 def install_shared_sky_motion_graphics(app: Any) -> None:
-    existing = {getattr(route, "path", "") for route in app.router.routes}
-    marker = "/shared-sky/studio/api/sessions/{session_id}/graphics/ticker"
-    if marker not in existing:
-        app.include_router(router)
+    existing = {
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.router.routes
+    }
+    for route in router.routes:
+        signature = (
+            getattr(route, "path", ""),
+            tuple(sorted(getattr(route, "methods", set()) or set())),
+        )
+        if signature not in existing:
+            app.router.routes.append(route)
+            existing.add(signature)
 
 
 __all__ = [
