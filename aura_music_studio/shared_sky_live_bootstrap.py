@@ -76,6 +76,11 @@ def install_shared_sky_live_community(app: Any) -> None:
     Chat 5 also mounts a purpose-built emergency Programme source-hide command. It operates only on
     the already-committed Studio Programme snapshot, commits through the canonical transport
     adapter, never mutates a wallet/Battle score, and fails closed if transport rejects the change.
+
+    Rhiannon LIVE Guardian is mounted as a read-only/advisory readiness surface that consumes the
+    existing moderation authority and never obtains independent moderation or provider-write power.
+    Auto Cue is a creator-private browser-local prompter: script text is never posted to or persisted
+    by Shared Skies.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -117,8 +122,10 @@ def install_shared_sky_live_community(app: Any) -> None:
     # Import lazily after the canonical application/control-room composition is available to avoid
     # creating a second Studio authority or an import cycle during module construction.
     from .shared_skies_emergency_programme import install_shared_skies_emergency_programme
+    from .shared_skies_live_assist import install_shared_skies_live_assist
 
     install_shared_skies_emergency_programme(app)
+    install_shared_skies_live_assist(app)
 
 
 __all__ = ["install_shared_sky_live_community", "PUBLIC_LIVE_PREFIXES"]
