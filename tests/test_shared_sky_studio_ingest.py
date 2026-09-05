@@ -145,11 +145,19 @@ def test_issue_route_is_no_store(monkeypatch):
     assert response.headers["referrer-policy"] == "no-referrer"
 
 
-def test_installer_is_idempotent():
-    app = FastAPI()
-    ingest.install_shared_sky_studio_ingest(app)
+def test_installer_is_idempotent_on_canonical_app():
+    from aura_music_studio.api import app
+
+    expected = {
+        "/shared-sky/studio/api/sessions/{session_id}/ingest",
+        "/shared-sky/studio/api/sessions/{session_id}/ingest/revoke",
+    }
     before = [r.path for r in app.routes if "/ingest" in getattr(r, "path", "")]
     ingest.install_shared_sky_studio_ingest(app)
-    after = [r.path for r in app.routes if "/ingest" in getattr(r, "path", "")]
-    assert before == after
-    assert len(after) == 3
+    after_once = [r.path for r in app.routes if "/ingest" in getattr(r, "path", "")]
+    ingest.install_shared_sky_studio_ingest(app)
+    after_twice = [r.path for r in app.routes if "/ingest" in getattr(r, "path", "")]
+    assert after_twice == after_once
+    assert len(after_twice) == 3
+    assert expected.issubset(set(after_twice))
+    assert set(before).issubset(set(after_twice))
