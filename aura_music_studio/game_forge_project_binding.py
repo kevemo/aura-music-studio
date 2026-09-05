@@ -165,6 +165,7 @@ def games_in_creative_project(project_name: str, request: Request):
         "project_bound_view": True,
         "can_create": can_create,
         "unlimited_active_projects": unlimited,
+        # The create entitlement is global to Game Forge, so this remains deliberately unscoped.
         "active_editable_count": len(active_editable_games()),
         "basic_active_limit": None if unlimited else (1 if can_create else 0),
     }
