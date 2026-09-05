@@ -62,6 +62,13 @@ def test_personal_limit_can_only_be_lower_than_platform_limit(tmp_path):
     assert state["effective_hard_limits"]["daily"] == 50
     assert state["remaining_hard_limit"]["daily"] == 50
 
+    history = e.personal_spending_limit_history("viewer-1")
+    assert len(history) == 1
+    assert history[0]["previous"] == {}
+    assert history[0]["new"]["daily_hard_limit"] == 50
+    events = e.pending_outbox(limit=20)
+    assert any(row["event_type"] == "economy.personal_spending_limits_changed" for row in events)
+
 
 def test_personal_limit_blocks_gift_atomically_without_consuming_coins(tmp_path):
     e = economy(tmp_path)
@@ -86,6 +93,13 @@ def test_personal_limit_blocks_gift_atomically_without_consuming_coins(tmp_path)
     state = e.spending_state("viewer-1")
     assert state["spent"]["daily"] == 20
     assert state["remaining_hard_limit"]["daily"] == 0
+    blocked = e.operational_events(
+        event_type="economy.personal_spending_limit_blocked",
+        user_id="viewer-1",
+    )
+    assert len(blocked) == 1
+    assert blocked[0]["details"]["spent_coins"] == 20
+    assert blocked[0]["details"]["attempted_coins"] == 10
 
 
 def test_platform_limit_remains_when_personal_limit_is_cleared(tmp_path):
@@ -106,6 +120,10 @@ def test_platform_limit_remains_when_personal_limit_is_cleared(tmp_path):
     assert cleared["daily_hard_limit"] is None
     state = e.spending_state("viewer-1")
     assert state["effective_hard_limits"]["daily"] == 30
+    history = e.personal_spending_limit_history("viewer-1")
+    assert len(history) == 2
+    assert history[0]["previous"]["daily_hard_limit"] == 20
+    assert history[0]["new"]["daily_hard_limit"] is None
 
 
 def test_personal_spending_limit_route_is_member_scoped_surface():
