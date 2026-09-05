@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from .aura_chat_store import AuraChatStore
 from .speech import AuraSpeechService
 
-router = APIRouter(tags=["Aura Multimodal"])
+router = APIRouter(tags=["Rhian Multimodal"])
 store = AuraChatStore()
 
 
@@ -24,10 +24,10 @@ class AttachmentAnalysisRequest(BaseModel):
 
 
 class AuraVisionService:
-    """Local-first vision adapter for Aura chat attachments.
+    """Local-first vision adapter for Rhian chat attachments.
 
     Vision data stays on the configured local model host. The default adapter uses Ollama's
-    chat API with message images. If no vision model is configured, Aura fails truthfully
+    chat API with message images. If no vision model is configured, Rhian fails truthfully
     instead of pretending it can see the attachment.
     """
 
@@ -43,7 +43,7 @@ class AuraVisionService:
 
     def analyze_images(self, images: list[Path], instruction: str) -> str:
         if not self.configured:
-            raise RuntimeError("Aura vision is not configured. Set AURA_VISION_MODEL on the local Ollama host.")
+            raise RuntimeError("Rhian vision is not configured. Set AURA_VISION_MODEL on the local Ollama host.")
         encoded: list[str] = []
         for path in images[:8]:
             if not path.is_file():
@@ -52,7 +52,7 @@ class AuraVisionService:
                 raise ValueError(f"Vision image {path.name} exceeds the configured maximum size")
             encoded.append(base64.b64encode(path.read_bytes()).decode("ascii"))
         if not encoded:
-            raise ValueError("No readable image frames were supplied to Aura vision")
+            raise ValueError("No readable image frames were supplied to Rhian vision")
         response = requests.post(
             f"{self.base_url}/api/chat",
             json={
@@ -62,7 +62,7 @@ class AuraVisionService:
                     {
                         "role": "system",
                         "content": (
-                            "You are Aura's visual perception module. Describe only what is supportable from the supplied image(s). "
+                            "You are Rhian's visual perception module. Describe only what is supportable from the supplied image(s). "
                             "Be precise about text, layout, objects, visual defects, composition and creative-edit opportunities when relevant. "
                             "Do not infer a real person's identity from appearance."
                         ),
@@ -76,7 +76,7 @@ class AuraVisionService:
         response.raise_for_status()
         text = str((response.json().get("message") or {}).get("content") or "").strip()
         if not text:
-            raise RuntimeError("Aura vision model returned an empty analysis")
+            raise RuntimeError("Rhian vision model returned an empty analysis")
         return text[:80000]
 
     def diagnostics(self) -> dict:
@@ -91,14 +91,14 @@ class AuraVisionService:
 def _safe_attachment(member_id: str, thread_id: str, attachment_id: str) -> tuple[dict, Path]:
     item = store.attachment(member_id, thread_id, attachment_id)
     if not item:
-        raise HTTPException(404, "Aura attachment not found")
+        raise HTTPException(404, "Rhian attachment not found")
     path = Path(str(item.get("stored_path") or "")).resolve()
     root = Path(os.getenv("AURA_CHAT_ATTACHMENT_DIR", "data/aura/attachments")).resolve()
     expected = (root / member_id / thread_id).resolve()
     if root not in expected.parents or (path != expected and expected not in path.parents):
-        raise HTTPException(400, "Invalid Aura attachment path")
+        raise HTTPException(400, "Invalid Rhian attachment path")
     if not path.is_file():
-        raise HTTPException(404, "Aura attachment file is missing")
+        raise HTTPException(404, "Rhian attachment file is missing")
     return item, path
 
 
@@ -126,7 +126,7 @@ def _sample_video(path: Path, work: Path) -> list[Path]:
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
-        raise RuntimeError("ffmpeg/ffprobe are required for Aura video perception")
+        raise RuntimeError("ffmpeg/ffprobe are required for Rhian video perception")
     probe = subprocess.run(
         [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
         capture_output=True,
@@ -184,7 +184,7 @@ def analyze_attachment(thread_id: str, attachment_id: str, body: AttachmentAnaly
     if member is None:
         raise HTTPException(401, "Sign in required")
     if not store.thread(member.user_id, thread_id):
-        raise HTTPException(404, "Aura conversation not found")
+        raise HTTPException(404, "Rhian conversation not found")
     item, path = _safe_attachment(member.user_id, thread_id, attachment_id)
     kind = str(item.get("kind") or "")
     instruction = (body.instruction or "Describe and analyse this attachment.").strip()
@@ -193,7 +193,7 @@ def analyze_attachment(thread_id: str, attachment_id: str, body: AttachmentAnaly
             text = AuraVisionService().analyze_images([path], instruction)
             updated = _update_analysis(
                 member.user_id, thread_id, attachment_id,
-                text="Aura visual analysis:\n" + text,
+                text="Rhian visual analysis:\n" + text,
                 metadata={"vision_analyzed": True, "vision_model": AuraVisionService().model},
             )
             return {"attachment": {k: v for k, v in updated.items() if k != "stored_path"}, "analysis": text, "mode": "vision"}
@@ -202,7 +202,7 @@ def analyze_attachment(thread_id: str, attachment_id: str, body: AttachmentAnaly
             transcript = _audio_transcript(path)
             updated = _update_analysis(
                 member.user_id, thread_id, attachment_id,
-                text="Aura audio transcript:\n" + transcript,
+                text="Rhian audio transcript:\n" + transcript,
                 metadata={"audio_transcribed": True},
             )
             return {"attachment": {k: v for k, v in updated.items() if k != "stored_path"}, "analysis": transcript, "mode": "transcript"}
@@ -215,7 +215,7 @@ def analyze_attachment(thread_id: str, attachment_id: str, body: AttachmentAnaly
                     instruction
                     + "\nThese are chronological sampled frames from one video. Describe the visual sequence, continuity, composition, text and edit opportunities. State that this is sampled-frame analysis, not frame-perfect review.",
                 )
-            text = "Aura sampled-frame video analysis:\n" + description
+            text = "Rhian sampled-frame video analysis:\n" + description
             updated = _update_analysis(
                 member.user_id, thread_id, attachment_id,
                 text=text,
