@@ -37,7 +37,8 @@ def test_source_create_delete_and_history_are_server_backed():
     js = canvas.PRO_JS
     assert "/sources/tracked" in js
     assert "/sources/batch-delete" in js
-    assert "/undo" in js and "/redo" in js
+    assert "historyAction('undo')" in js
+    assert "historyAction('redo')" in js
     assert "/history" in js
     assert "state.streams.delete(id)" in js
     assert "getTracks().forEach(t=>t.stop())" in js
@@ -49,7 +50,7 @@ def test_typed_graphics_have_actual_dom_renderer_path():
     assert "src.config?.graphic" in js
     assert "background_opacity" in js
     assert "secondary_text" in js
-    assert "graphic-lower_third" not in js  # class is generated from the typed kind at runtime
+    assert "graphic-${esc(kind)}" in js
 
 
 def test_hotkeys_remain_focus_safe():
