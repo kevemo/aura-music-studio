@@ -1,23 +1,15 @@
-import json
-
-from aura_music_studio.audit import AuditLogger
-from aura_music_studio.shared_audit import AuditWriter, redact_sensitive
+from aura_music_studio.audit import AuditLedger
+from aura_music_studio.shared_audit import AuditWriter
 
 
-def test_sensitive_values_are_redacted():
-    value = redact_sensitive({"api_key": "abc", "nested": {"password": "p", "safe": 1}})
-    assert value == {"api_key": "[REDACTED]", "nested": {"password": "[REDACTED]", "safe": 1}}
-
-
-def test_audit_writer_preserves_hash_chain_and_redacts(tmp_path):
-    logger = AuditLogger(tmp_path)
-    writer = AuditWriter(logger)
-    writer.write(
-        actor_id="owner", role="owner", action="config.change",
-        target_type="provider", target_id="youtube", correlation_id="corr1",
-        metadata={"api_token": "secret", "status": "enabled"},
-    )
-    assert logger.verify() is True
-    event = json.loads(logger.audit_path.read_text().splitlines()[0])
-    assert event["details"]["metadata"]["api_token"] == "[REDACTED]"
-    assert event["details"]["metadata"]["status"] == "enabled"
+def test_audit_writer_reuses_existing_ledger_contract(monkeypatch):
+    rows = []
+    ledger = object.__new__(AuditLedger)
+    monkeypatch.setattr(ledger, "append", lambda **kwargs: rows.append(kwargs) or kwargs)
+    writer = AuditWriter(ledger)
+    result = writer.write(actor_id="owner", role="owner", action="config.change",
+                          target_type="provider", target_id="youtube", correlation_id="corr1",
+                          metadata={"status": "enabled"})
+    assert result["actor"] == "owner"
+    assert result["details"]["correlation_id"] == "corr1"
+    assert rows[0]["action"] == "config.change"

@@ -2,38 +2,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .audit import AuditLogger
+from .audit import AuditLedger
 from .shared_contracts import OwnerOverrideEvidence
 
 
-_SENSITIVE_MARKERS = (
-    "password", "secret", "token", "authorization", "api_key", "apikey",
-    "private_key", "credential",
-)
-
-
-def redact_sensitive(value: Any) -> Any:
-    if isinstance(value, dict):
-        result: dict[str, Any] = {}
-        for key, nested in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if any(marker in normalized for marker in _SENSITIVE_MARKERS):
-                result[str(key)] = "[REDACTED]"
-            else:
-                result[str(key)] = redact_sensitive(nested)
-        return result
-    if isinstance(value, list):
-        return [redact_sensitive(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(redact_sensitive(item) for item in value)
-    return value
-
-
 class AuditWriter:
-    """Canonical consequential-action writer backed by the existing hash chain."""
+    """Cross-domain writer that reuses the existing hash-chained, DLP-sanitised ledger."""
 
-    def __init__(self, logger: AuditLogger) -> None:
-        self.logger = logger
+    def __init__(self, ledger: AuditLedger) -> None:
+        self.ledger = ledger
 
     def write(
         self,
@@ -49,28 +26,23 @@ class AuditWriter:
         new_state: Any | None = None,
         metadata: dict[str, Any] | None = None,
         override: OwnerOverrideEvidence | None = None,
-    ) -> dict[str, Any]:
-        details = {
+    ) -> dict:
+        details: dict[str, Any] = {
+            "role": role,
+            "target_type": target_type,
+            "target_id": target_id,
             "correlation_id": correlation_id,
             "reason": reason or "",
-            "previous_state": redact_sensitive(previous_state),
-            "new_state": redact_sensitive(new_state),
-            "metadata": redact_sensitive(metadata or {}),
+            "previous_state": previous_state,
+            "new_state": new_state,
+            "metadata": metadata or {},
         }
         if override is not None:
-            details["override"] = {
-                "override_id": override.override_id,
-                "owner_user_id": override.owner_user_id,
-                "reason": override.reason,
-                "approved_at": override.approved_at.isoformat(),
-                "correlation_id": override.correlation_id,
-            }
-        return self.logger.append(
-            actor_id=actor_id,
-            role=role,
+            details["override"] = override.model_dump(mode="json")
+        return self.ledger.append(
+            actor=actor_id,
             action=action,
-            target_type=target_type,
-            target_id=target_id,
+            subject_user_id=target_id if target_type == "user" else None,
             details=details,
         )
 

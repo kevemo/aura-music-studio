@@ -5,8 +5,7 @@ from typing import Iterable
 
 from pydantic import Field
 
-from .access_control import ESPAction
-from .membership import MembershipTier
+from .org_authority import OrgAction
 from .shared_contracts import ContractModel, NonEmptyId
 
 
@@ -21,8 +20,8 @@ class FeatureRoute(ContractModel):
     path: str = Field(pattern=r"^/")
     title: str = Field(min_length=1, max_length=120)
     capability_key: NonEmptyId | None = None
-    minimum_tier: MembershipTier | None = None
-    org_action: ESPAction | None = None
+    required_feature: NonEmptyId | None = None
+    org_action: OrgAction | None = None
     lazy_target: str = Field(min_length=1, max_length=255)
     implementation_state: RouteImplementationState = RouteImplementationState.INTEGRATION_PENDING
     unavailable_message: str = Field(
@@ -33,8 +32,6 @@ class FeatureRoute(ContractModel):
 
 
 class RouteRegistry:
-    """Shared discovery metadata; actual framework routes must still enforce server guards."""
-
     def __init__(self, routes: Iterable[FeatureRoute] = ()) -> None:
         self._routes: dict[str, FeatureRoute] = {}
         self._paths: dict[str, str] = {}
@@ -60,41 +57,16 @@ class RouteRegistry:
 
 
 SHARED_DISCOVERY_ROUTES = (
-    FeatureRoute(
-        key="shared_sky",
-        path="/shared-sky",
-        title="Shared Sky",
-        capability_key="shared_sky",
-        lazy_target="shared_sky",
-    ),
-    FeatureRoute(
-        key="live_now",
-        path="/shared-sky/live-now",
-        title="Live Now",
-        capability_key="shared_sky.live_now",
-        lazy_target="shared_sky.live_now",
-    ),
-    FeatureRoute(
-        key="battles",
-        path="/shared-sky/battles",
-        title="Battles",
-        capability_key="shared_sky.battles",
-        lazy_target="shared_sky.battles",
-    ),
-    FeatureRoute(
-        key="gifts_cosmic_coins",
-        path="/cosmic-coins",
-        title="Gifts & Cosmic Coins",
-        capability_key="economy.cosmic_coins",
-        lazy_target="economy.cosmic_coins",
-    ),
-    FeatureRoute(
-        key="go_live_create",
-        path="/go-live-create",
-        title="Go Live & Create",
-        capability_key="shared_sky.go_live_create",
-        lazy_target="shared_sky.go_live_create",
-    ),
+    FeatureRoute(key="shared_sky", path="/shared-sky", title="Shared Sky",
+                 capability_key="shared_sky", lazy_target="shared_sky"),
+    FeatureRoute(key="live_now", path="/shared-sky/live-now", title="Live Now",
+                 capability_key="shared_sky.live_now", lazy_target="shared_sky.live_now"),
+    FeatureRoute(key="battles", path="/shared-sky/battles", title="Battles",
+                 capability_key="shared_sky.battles", lazy_target="shared_sky.battles"),
+    FeatureRoute(key="gifts_cosmic_coins", path="/cosmic-coins", title="Gifts & Cosmic Coins",
+                 capability_key="economy.cosmic_coins", lazy_target="economy.cosmic_coins"),
+    FeatureRoute(key="go_live_create", path="/go-live-create", title="Go Live & Create",
+                 capability_key="shared_sky.go_live_create", lazy_target="shared_sky.go_live_create"),
 )
 
 ROUTES = RouteRegistry(SHARED_DISCOVERY_ROUTES)

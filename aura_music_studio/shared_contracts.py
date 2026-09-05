@@ -2,24 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from .access_control import ESPAction, ESPRole
-from .membership import MembershipStatus, MembershipTier
+from .org_authority import OrgAction, OrgRole
 
 NonEmptyId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1024)]
 
 
 class ContractModel(BaseModel):
-    """Base for cross-domain contracts accepted at trust boundaries."""
-
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
 
-def _require_aware(value: datetime | None) -> datetime | None:
+def _aware(value: datetime | None) -> datetime | None:
     if value is not None and value.tzinfo is None:
         raise ValueError("datetime must include timezone information")
     return value
@@ -66,23 +63,21 @@ class UserIdentity(ContractModel):
 class OrgRoleGrant(ContractModel):
     grant_id: NonEmptyId
     user_id: NonEmptyId
-    role: ESPRole
+    role: OrgRole
     granted_by: NonEmptyId
     granted_at: datetime
     revoked_at: datetime | None = None
-
-    _validate_granted = field_validator("granted_at", "revoked_at")(_require_aware)
+    _dates = field_validator("granted_at", "revoked_at")(_aware)
 
 
 class ProductEntitlement(ContractModel):
     user_id: NonEmptyId
-    tier: MembershipTier
-    status: MembershipStatus
-    entitlement_key: NonEmptyId | None = None
+    plan_id: NonEmptyId
+    active: bool
+    feature_key: NonEmptyId | None = None
     source: NonEmptyText
     valid_until: datetime | None = None
-
-    _validate_until = field_validator("valid_until")(_require_aware)
+    _until = field_validator("valid_until")(_aware)
 
 
 class FeatureEntitlement(ContractModel):
@@ -91,8 +86,7 @@ class FeatureEntitlement(ContractModel):
     enabled: bool
     source: NonEmptyText
     valid_until: datetime | None = None
-
-    _validate_until = field_validator("valid_until")(_require_aware)
+    _until = field_validator("valid_until")(_aware)
 
 
 class OwnerOverrideEvidence(ContractModel):
@@ -101,8 +95,7 @@ class OwnerOverrideEvidence(ContractModel):
     reason: NonEmptyText
     correlation_id: NonEmptyId
     approved_at: datetime
-
-    _validate_approved = field_validator("approved_at")(_require_aware)
+    _approved = field_validator("approved_at")(_aware)
 
 
 class CreatorIdentityReference(ContractModel):
@@ -238,11 +231,10 @@ __all__ = [
     "BattleScoreEventReference", "BattleSessionReference", "BroadcastReference",
     "ContractModel", "CorrelationIdentity", "CosmicCoinLedgerTransactionReference",
     "CreatorIdentityReference", "CreatorReceiptReference", "EngagementEventReference",
-    "ESPAction", "ESPRole", "FeatureEntitlement", "GiftCatalogueItemReference",
-    "LiveGiftReference", "LiveSessionReference", "LiveSessionStatus",
-    "MembershipStatus", "MembershipTier", "ModerationReference", "NonEmptyId",
-    "OrgRoleGrant", "OwnerOverrideEvidence", "ParticipantReference", "ParticipantRole",
-    "ProductEntitlement", "ProjectIdentity", "ProviderConfigurationReference",
-    "ReceiptStatus", "RequestIdentity", "StreamingDestinationReference",
-    "UserIdentity", "WorkspaceIdentity",
+    "FeatureEntitlement", "GiftCatalogueItemReference", "LiveGiftReference",
+    "LiveSessionReference", "LiveSessionStatus", "ModerationReference", "NonEmptyId",
+    "OrgAction", "OrgRole", "OrgRoleGrant", "OwnerOverrideEvidence", "ParticipantReference",
+    "ParticipantRole", "ProductEntitlement", "ProjectIdentity", "ProviderConfigurationReference",
+    "ReceiptStatus", "RequestIdentity", "StreamingDestinationReference", "UserIdentity",
+    "WorkspaceIdentity",
 ]
