@@ -5,6 +5,7 @@ services:
     environment:
       AURA_DEPLOYMENT_ENV: production
       LSS_DEPLOYMENT_MODE: ${LSS_DEPLOYMENT_MODE:?LSS_DEPLOYMENT_MODE=selfhost is required}
+      LSS_TRUSTED_PROXY_TOKEN: ${LSS_TRUSTED_PROXY_TOKEN:?LSS_TRUSTED_PROXY_TOKEN is required in production}
       AURA_GPU_REQUIRED: "true"
       AURA_REQUIRE_LIVE_RENDERER: "true"
       AURA_MONITORING_ENABLED: "true"
@@ -90,6 +91,7 @@ services:
   caddy:
     environment:
       LSS_PUBLIC_SITE_ADDRESS: ${LSS_PUBLIC_SITE_ADDRESS:?real production HTTPS site address is required}
+      LSS_TRUSTED_PROXY_TOKEN: ${LSS_TRUSTED_PROXY_TOKEN:?LSS_TRUSTED_PROXY_TOKEN is required in production}
     security_opt:
       - no-new-privileges:true
     logging:
