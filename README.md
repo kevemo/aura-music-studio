@@ -1,6 +1,6 @@
 # Elevate Souls Productions Content Creation Command Center
 
-**Powered by Aura AI**  
+**Powered by Rhiannon Intelligence Systems**  
 **Elevate Your Soul Through Purposeful Media**
 
 The **Elevate Souls Productions Content Creation Command Center** is the unified creator, production, LIVE, social, business and AI ecosystem developed by **Elevate Souls Productions LCN LLC & LTD**.
@@ -9,19 +9,21 @@ The connected creator journey is:
 
 > **IDEA → PLAN → CREATE → EDIT → PUBLISH → GO LIVE → PROMOTE → ANALYSE → IMPROVE → EARN**
 
-Aura AI is the intelligence and orchestration layer across the Command Center. Aura is designed to understand the authorised page, project, files, tools, user role and workflow context so she can guide, create, analyse and perform approved actions without crossing authentication, privacy, consent, commercial or external-provider boundaries.
+**Rhiannon Intelligence Systems — Rhian for short —** is the intelligence and orchestration layer across the Command Center. Rhian is designed to understand the authorised page, project, files, tools, user role and workflow context so she can guide, create, analyse and perform approved actions without crossing authentication, privacy, consent, commercial or external-provider boundaries.
 
-> Legacy repository, package, database, cookie and environment-variable identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `LSS_*`, or earlier public product names. These are retained only where compatibility requires them and are **not** the current public brand.
+> Legacy repository, package, database, cookie and environment-variable identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `AURA_*`, `LSS_*`, or earlier public product/assistant names. These are retained only where compatibility requires them and are **not** the current public brand or assistant identity.
 
 ## Authoritative public identity
 
 - **Product:** Elevate Souls Productions Content Creation Command Center
-- **Endorsement:** Powered by Aura AI
+- **Intelligence system:** Rhiannon Intelligence Systems
+- **Everyday assistant name:** Rhian
+- **Endorsement:** Powered by Rhiannon Intelligence Systems
 - **Company:** Elevate Souls Productions LCN LLC & LTD
 - **Tagline:** Elevate Your Soul Through Purposeful Media
 - **Security system:** Elevate Souls Productions Secure Lattice System (**SLS**)
 
-Older names such as **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current product identity.
+Older names such as **Aura**, **Aura AI**, **Aura AI Systems**, **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current public product/assistant identity. Compatibility-critical internal identifiers may remain until a tested migration exists.
 
 ## Engineering truth model
 
@@ -36,13 +38,13 @@ Repository documentation and release reporting distinguish between:
 
 Code existence by itself is not production-readiness evidence. The canonical CI also runs a fail-closed production-source completeness audit that rejects concrete `pass`/ellipsis-only implementations, concrete `NotImplementedError` paths, and unresolved TODO/FIXME/XXX comments in executable production Python while permitting genuine abstract/Protocol contracts.
 
-## Aura AI
+## Rhiannon Intelligence Systems (Rhian)
 
-Aura is designed to remain present throughout the Command Center rather than functioning only as a standalone chatbot.
+Rhian is designed to remain present throughout the Command Center rather than functioning only as a standalone chatbot.
 
 Core architecture includes page-, project- and role-aware assistance, text and voice interaction, multimodal file/media workflows, creative direction, research assistance, project memory with user controls, creator-growth guidance, LIVE preparation, training/support guidance, bounded tools, audited automation and model/provider routing.
 
-Aura must remain truthful about knowledge, permissions and external actions. She must not grant herself credentials, bypass role or consent boundaries, fabricate provider success, or convert untrusted content into unrestricted system execution.
+Rhian must remain truthful about knowledge, permissions and external actions. She must not grant herself credentials, bypass role or consent boundaries, fabricate provider success, or convert untrusted content into unrestricted system execution.
 
 ## Creative Studios
 
@@ -74,13 +76,13 @@ Game Forge provides interactive project creation, editing/playtest foundations a
 
 ## Social Media Centre
 
-The Social Media Centre is the campaign, scheduling, repurposing and analytics workspace. Its architecture includes campaign planning, calendar/composer workflows, platform variants, approval state, provider-aware publishing, manual reminder paths where direct APIs are unavailable, assets/provenance, analytics/freshness, discovery research and Aura recommendations.
+The Social Media Centre is the campaign, scheduling, repurposing and analytics workspace. Its architecture includes campaign planning, calendar/composer workflows, platform variants, approval state, provider-aware publishing, manual reminder paths where direct APIs are unavailable, assets/provenance, analytics/freshness, discovery research and Rhian recommendations.
 
 The platform must never claim an external social action succeeded unless the relevant provider confirms it.
 
-## Aura LIVE ecosystem
+## Rhian LIVE ecosystem
 
-### Aura LIVE Overlay Studio
+### Rhian LIVE Overlay Studio
 
 The LIVE production environment supports browser-source-compatible workflows for systems such as TikTok LIVE Studio, OBS and similar broadcast software. Foundations include scenes, alerts, goals, supporter activity, leaderboards, timers, wheels, polls, CTA widgets, lower thirds/captions, reactive effects, approved media and bounded Trigger → Condition → Approved Action automation.
 
@@ -90,11 +92,11 @@ Arbitrary JavaScript, shell execution and unrestricted remote commands are outsi
 
 The Auto Cue Prompter is designed as a creator-private browser-local script surface with auto-scroll, speed controls, text sizing, countdown, mirror/fullscreen, keyboard control and private second-screen/popup use. Script content must remain separate from the public LIVE overlay and LIVE event state.
 
-### Aura LIVE Guardian
+### Rhian LIVE Guardian
 
-Aura LIVE Guardian provides creator-authorised moderation assistance around the dedicated TikTok moderation identity **@aura.chat.mod**. Creating or assigning that account as a moderator does **not** grant hidden TikTok API authority.
+Rhian LIVE Guardian provides creator-authorised moderation assistance. The current dedicated TikTok moderation identity **@aura.chat.mod** is a legacy provider-side handle and must not be interpreted as the current Rhian public brand; any provider-side rename remains a separate authorised external-account action.
 
-Any real provider moderation write must use an officially supported/authorised provider capability. Where such a capability is unavailable, Guardian remains advisory or assisted and reports the provider dependency truthfully.
+Creating or assigning that account as a moderator does **not** grant hidden TikTok API authority. Any real provider moderation write must use an officially supported/authorised provider capability. Where such a capability is unavailable, Guardian remains advisory or assisted and reports the provider dependency truthfully.
 
 The normalized LIVE relay is **implemented and verified on the integration branch**, including route, scoping, identity and regression coverage. A real TikTok or other LIVE provider connection remains an external dependency unless that provider is officially authorised, configured and independently verified; the relay does not pretend to create undocumented TikTok authority.
 
@@ -114,9 +116,9 @@ The protected Owner Command Center contains administration foundations for users
 
 Marketplace/revenue administration uses the first-party order, provider-evidence, settlement, reversal and account-reporting layers described below. Live financial reconciliation still requires real provider and banking evidence.
 
-## Aura Help & Support Centre
+## Rhian Help & Support Centre
 
-Aura provides first-line feature/product guidance and support-ticket workflows. Billing disputes, account access, privacy, safeguarding, copyright/legal and security matters remain subject to appropriate human escalation rather than autonomous final decisions.
+Rhian provides first-line feature/product guidance and support-ticket workflows. Billing disputes, account access, privacy, safeguarding, copyright/legal and security matters remain subject to appropriate human escalation rather than autonomous final decisions.
 
 ## Membership model
 
@@ -233,5 +235,6 @@ The main Command Center and the SLS full native commercial product may reach dif
 ## Final product identity
 
 **Elevate Souls Productions Content Creation Command Center**  
-**Powered by Aura AI**  
+**Powered by Rhiannon Intelligence Systems**  
+**Rhian — your everyday companion and creative intelligence**  
 **Elevate Your Soul Through Purposeful Media**

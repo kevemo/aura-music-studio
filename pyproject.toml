@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # product brand is Elevate Souls Productions Content Creation Command Center.
 name = "aura-music-studio"
 version = "0.20.0"
-description = "Elevate Souls Productions Content Creation Command Center — professional music, video, image, voice and creator intelligence — Powered by Aura AI"
+description = "Elevate Souls Productions Content Creation Command Center — professional music, video, image, voice and creator intelligence — Powered by Rhiannon Intelligence Systems"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",

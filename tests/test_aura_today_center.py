@@ -118,7 +118,8 @@ def test_today_ui_is_mounted_and_keeps_read_only_disclosure():
     paths = {getattr(route, "path", None) for route in today_router.routes}
     assert "/aura-intelligence/api/today" in paths
     assert "/aura-intelligence/today-ui.js" in paths
-    assert "Aura Today" in TODAY_SCRIPT
+    assert "Rhian Today" in TODAY_SCRIPT
+    assert "Aura Today" not in TODAY_SCRIPT
     assert "does not open email bodies automatically" in TODAY_SCRIPT
     assert "bulk-scan Drive" in TODAY_SCRIPT
     assert "Do not send or modify anything" in TODAY_SCRIPT

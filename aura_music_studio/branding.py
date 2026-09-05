@@ -9,10 +9,10 @@ PRODUCT_NAME = "Elevate Souls Productions Content Creation Command Center"
 PRODUCT_FULL_NAME = "Elevate Souls Productions Content Creation Command Center"
 PRODUCT_SHORT_NAME = "Content Creation Command Center"
 TAGLINE = "Elevate Your Soul Through Purposeful Media"
-ENDORSEMENT = "Powered by Aura AI"
+ENDORSEMENT = "Powered by Rhiannon Intelligence Systems"
 PLATFORM_DESCRIPTOR = "Music, Video, Image, Voice, Creator Intelligence, Commerce & Security"
-AI_PRODUCER_NAME = "Aura"
-AI_SYSTEM_NAME = "Aura AI"
+AI_PRODUCER_NAME = "Rhian"
+AI_SYSTEM_NAME = "Rhiannon Intelligence Systems"
 COMPANY_NAME = "Elevate Souls Productions"
 BRAND_LOGO_PATH = "/static/elevate-souls-command-center-logo.svg"
 BRAND_MARK_ROUTE = "/brand/command-center-mark.svg"
@@ -30,6 +30,15 @@ LEGACY_PRODUCT_NAMES = (
     "Cosmic Creation Studios",
     "The Live Sound Studio",
     "Live Sound Studio",
+)
+
+# The assistant identity changed publicly on 5 September 2026. Internal module, route,
+# database, cookie, environment-variable and provider identifiers may retain Aura-based
+# names until a tested compatibility migration is available.
+LEGACY_AI_NAMES = (
+    "Aura",
+    "Aura AI",
+    "Aura AI Systems",
 )
 
 
