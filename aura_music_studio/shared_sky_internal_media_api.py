@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 
 from .owner_identity import owner_session_authorized
 from .shared_sky_internal_media import SharedSkyInternalMediaError, internal_media
+from .shared_sky_live_community import community, optional_member
 from .shared_sky_transport_domain import transport
 
 
 router = APIRouter(tags=["Shared Sky Internal Media"])
 _PLAYBACK_COOKIE = "shared_sky_playback"
+_ACTIVE_PLAYBACK_STATES = {"live", "degraded", "reconnecting"}
 
 
 def _allow_insecure_playback() -> bool:
@@ -48,6 +51,31 @@ def _owner(request: Request) -> None:
         raise HTTPException(401, "Owner authentication required")
 
 
+def _expiry_seconds(expires_at: str) -> int:
+    try:
+        expiry = datetime.fromisoformat(str(expires_at or "").replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(401, "Shared Sky playback authorization is invalid") from exc
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    seconds = int((expiry - datetime.now(timezone.utc)).total_seconds())
+    if seconds <= 0:
+        raise HTTPException(401, "Shared Sky playback authorization has expired")
+    return max(1, min(600, seconds))
+
+
+def _set_playback_cookie(response: Response, broadcast_id: str, token: str, expires_at: str) -> None:
+    response.set_cookie(
+        key=_PLAYBACK_COOKIE,
+        value=token,
+        max_age=_expiry_seconds(expires_at),
+        path=f"/shared-sky/media/{broadcast_id}/",
+        secure=not _allow_insecure_playback(),
+        httponly=True,
+        samesite="strict",
+    )
+
+
 def shared_sky_media_asset(
     broadcast_id: str,
     asset_path: str,
@@ -81,6 +109,72 @@ def shared_sky_media_asset(
     return FileResponse(target, media_type=media_type, headers=headers)
 
 
+@router.get(
+    "/shared-sky/media/{broadcast_id}/bootstrap",
+    include_in_schema=False,
+)
+def bootstrap_shared_sky_media(broadcast_id: str, request: Request):
+    """Authorize native-video playback without placing a credential in the media URL.
+
+    The request is evaluated against Chat 4's canonical viewer-access decision first. Only then is
+    a fresh Chat 2 playback token minted. The token is stored in a broadcast-scoped HttpOnly cookie
+    and the browser is redirected to the built-in manifest path with no secret in the redirect URL.
+    """
+    member = optional_member(request)
+    viewer_user_id = member.user_id if member else None
+    try:
+        decision = community.access(
+            broadcast_id,
+            viewer_user_id,
+            direct=True,
+            owner=owner_session_authorized(request),
+        )
+        if not decision.allowed:
+            raise PermissionError(decision.reason)
+        broadcast = community._broadcast(broadcast_id)
+        owner_user_id = str(broadcast["user_id"])
+        community.rate_limit(
+            community.actor_key(request, viewer_user_id),
+            "playback_bootstrap",
+            limit=120,
+            window_seconds=60,
+        )
+        descriptor = transport.playback(owner_user_id, broadcast_id, ttl=120)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)[:120] or "Shared Sky playback is not permitted") from exc
+    except KeyError as exc:
+        raise HTTPException(404, "Shared Sky broadcast was not found") from exc
+    except Exception as exc:
+        raise HTTPException(503, "Shared Sky playback is temporarily unavailable") from exc
+
+    capability = str(getattr(descriptor.get("capability_state"), "value", descriptor.get("capability_state")) or "").lower()
+    state = str(descriptor.get("state") or "").lower()
+    authorization = descriptor.get("authorization") if isinstance(descriptor.get("authorization"), dict) else {}
+    token = str(authorization.get("token") or "")
+    expires_at = str(authorization.get("expires_at") or "")
+    manifest_url = str(descriptor.get("manifest_url") or "").strip()
+    parsed = urlparse(manifest_url)
+    manifest_path = parsed.path if parsed.scheme or parsed.netloc else manifest_url.split("?", 1)[0]
+    expected_prefix = f"/shared-sky/media/{broadcast_id}/"
+    if (
+        capability != "ready"
+        or state not in _ACTIVE_PLAYBACK_STATES
+        or not token
+        or not expires_at
+        or not manifest_path.startswith(expected_prefix)
+        or manifest_path.endswith("/bootstrap")
+    ):
+        raise HTTPException(503, "Shared Sky first-party browser playback is not ready")
+
+    response = RedirectResponse(
+        url=manifest_path,
+        status_code=307,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+    _set_playback_cookie(response, broadcast_id, token, expires_at)
+    return response
+
+
 @router.post(
     "/shared-sky/media/{broadcast_id}/authorize",
     include_in_schema=False,
@@ -94,25 +188,13 @@ def authorize_shared_sky_media(
     token = _bearer(authorization)
     try:
         verified = transport.verify_playback_token(token, expected_broadcast_id=broadcast_id)
-        expiry = datetime.fromisoformat(str(verified["expires_at"]).replace("Z", "+00:00"))
     except (ValueError, RuntimeError, KeyError) as exc:
         raise HTTPException(401, "Shared Sky playback authorization is invalid") from exc
-    if expiry.tzinfo is None:
-        expiry = expiry.replace(tzinfo=timezone.utc)
-    seconds = max(1, min(600, int((expiry - datetime.now(timezone.utc)).total_seconds())))
     response = Response(
         status_code=204,
         headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
     )
-    response.set_cookie(
-        key=_PLAYBACK_COOKIE,
-        value=token,
-        max_age=seconds,
-        path=f"/shared-sky/media/{broadcast_id}/",
-        secure=not _allow_insecure_playback(),
-        httponly=True,
-        samesite="strict",
-    )
+    _set_playback_cookie(response, broadcast_id, token, str(verified.get("expires_at") or ""))
     return response
 
 
@@ -171,6 +253,7 @@ def owner_internal_media_status(request: Request):
 __all__ = [
     "router",
     "shared_sky_media_asset",
+    "bootstrap_shared_sky_media",
     "authorize_shared_sky_media",
     "clear_shared_sky_media_authorization",
 ]
