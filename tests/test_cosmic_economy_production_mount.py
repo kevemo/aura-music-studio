@@ -3,12 +3,15 @@ from __future__ import annotations
 import importlib
 
 from aura_music_studio.api import app as package_app
+from aura_music_studio.cosmic_economy_integrations import runtime_integrations
+from aura_music_studio.cosmic_economy_shared_sky import chat5_shared_sky_status
 
 
 EXPECTED_ROUTES = {
     ("/economy/coin-packs", "GET"),
     ("/economy/coins", "GET"),
     ("/economy/payment-providers", "GET"),
+    ("/economy/integration-status", "GET"),
     ("/economy/me/balance", "GET"),
     ("/economy/me/history", "GET"),
     ("/economy/me/spending", "GET"),
@@ -72,3 +75,10 @@ def test_chat5_routes_survive_final_production_app_composition():
     production_module = importlib.import_module("app")
     _assert_routes_once(production_module.app)
     _assert_legacy_creation_coin_paths_use_chat5_bridge(production_module.app)
+
+
+def test_merged_shared_sky_live_authority_is_bound_to_chat5():
+    status = chat5_shared_sky_status()
+    assert status["state"] == "registered", status
+    assert status["adapter"] == "SharedSkyGiftLiveSessionDirectory", status
+    assert type(runtime_integrations.live_sessions).__name__ == "SharedSkyGiftLiveSessionDirectory"
