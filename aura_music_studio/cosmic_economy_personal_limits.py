@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from .cosmic_economy import EconomyError, _iso
+from .cosmic_economy import EconomyError, VerifiedPaymentEvent, _fingerprint, _iso
 from .cosmic_purchase_checkout import CheckoutBoundCosmicEconomy
 
 
@@ -300,6 +300,49 @@ class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
             "updated_at": None,
             "updated_by": None,
         }
+
+    def apply_verified_payment_event(self, event: VerifiedPaymentEvent) -> dict:
+        """Reject provider event-ID reuse when the verified financial payload has changed."""
+        if not event.verified:
+            return super().apply_verified_payment_event(event)
+        payload_hash = _fingerprint(
+            {
+                "provider": event.provider,
+                "provider_event_id": event.provider_event_id,
+                "provider_payment_id": event.provider_payment_id,
+                "purchase_id": event.purchase_id,
+                "event_type": event.event_type,
+                "occurred_at": event.occurred_at,
+            }
+        )
+        with self._connect() as con:
+            seen = con.execute(
+                """SELECT purchase_id,payload_hash FROM payment_webhook_events
+                   WHERE provider=? AND provider_event_id=?""",
+                (event.provider, event.provider_event_id),
+            ).fetchone()
+        if seen and seen["payload_hash"] != payload_hash:
+            self._record_operational_event(
+                event_type="economy.payment_event_id_conflict",
+                user_id=None,
+                details={
+                    "provider": event.provider,
+                    "provider_event_id": event.provider_event_id,
+                    "stored_purchase_id": seen["purchase_id"],
+                    "presented_purchase_id": event.purchase_id,
+                    "presented_event_type": event.event_type,
+                },
+            )
+            raise EconomyError(
+                "PAYMENT_EVENT_ID_REUSED",
+                "Payment provider event ID was reused with different financial data.",
+                status_code=409,
+                details={
+                    "provider": event.provider,
+                    "provider_event_id": event.provider_event_id,
+                },
+            )
+        return super().apply_verified_payment_event(event)
 
     def send_gift(self, *, sender_user_id: str, idempotency_key: str, **kwargs: Any) -> dict:
         try:
