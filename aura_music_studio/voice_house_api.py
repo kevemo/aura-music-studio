@@ -12,6 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from .request_context import current_user_id
 from .rights import RightsLedger, RightsRecord, VoiceProfile
 from .speech import AuraSpeechService
 from .tenant_storage import project_path
@@ -217,7 +218,6 @@ async def create_voice_house_profile(
                     raise RuntimeError("Voice reference upload was not saved")
                 saved = candidates[0]
             saved = saved.resolve()
-            # Decode and quality-gate before writing a rights record or enabling a profile.
             analysis[str(saved)] = analyze_voice_sample(saved)
             saved_refs.append(saved)
             pending_reference_rights.append((original_name, saved))
@@ -247,8 +247,6 @@ async def create_voice_house_profile(
                 verification_state = "failed"
                 verification_method = "local_stt_phrase_mismatch"
         except RuntimeError:
-            # No STT engine configured: retain the recording and typed consent as evidence,
-            # but never mislabel it as biometric/high-confidence verification.
             verification_state = "attested"
 
         requested_similarity = max(0.0, min(1.0, float(similarity_limit)))
@@ -278,7 +276,6 @@ async def create_voice_house_profile(
             },
         )
 
-        # Rights records are written only after every reference has decoded and passed quality gates.
         for original_name, saved in pending_reference_rights:
             ledger.add_rights_record(
                 RightsRecord(
@@ -342,7 +339,7 @@ def revoke_voice_house_profile(project_name: str, profile_id: str, request: Revo
     ledger = RightsLedger(project / ".aura_rights")
     try:
         profile = ledger.get_voice(profile_id)
-        profile.assert_tenant(None)
+        profile.assert_tenant(current_user_id())
         profile = ledger.revoke_voice(profile_id, request.reason)
     except KeyError as exc:
         raise HTTPException(404, "Voice Profile not found") from exc
@@ -362,8 +359,14 @@ def revoke_voice_house_profile(project_name: str, profile_id: str, request: Revo
 def voice_house_profiles(project_name: str):
     project = _project(project_name)
     ledger = RightsLedger(project / ".aura_rights")
-    return {
-        "profiles": [
+    user_id = current_user_id()
+    profiles: list[dict] = []
+    for profile in ledger.list_voices():
+        try:
+            profile.assert_tenant(user_id)
+        except PermissionError:
+            continue
+        profiles.append(
             {
                 "id": profile.id,
                 "name": profile.name,
@@ -382,8 +385,9 @@ def voice_house_profiles(project_name: str):
                 "last_used_at": profile.last_used_at,
                 "revoked_at": profile.revoked_at,
             }
-            for profile in ledger.list_voices()
-        ],
+        )
+    return {
+        "profiles": profiles,
         "private_library": True,
         "raw_reference_paths_exposed": False,
     }
