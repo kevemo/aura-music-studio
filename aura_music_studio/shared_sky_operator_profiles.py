@@ -309,6 +309,11 @@ def _member(request: Request):
 def _raise(exc: Exception) -> None:
     if isinstance(exc, KeyError):
         raise HTTPException(404, "Shared Sky operator profile not found") from exc
+    if isinstance(exc, sqlite3.IntegrityError):
+        message = str(exc).lower()
+        if "unique" in message and "shared_sky_operator_profiles" in message:
+            raise HTTPException(409, "An operator profile with that name already exists for this project") from exc
+        raise HTTPException(409, "Operator profile constraint conflict") from exc
     if isinstance(exc, ValueError):
         status = 409 if "version" in str(exc).lower() or "concurrently" in str(exc).lower() else 400
         raise HTTPException(status, str(exc)) from exc
