@@ -220,6 +220,12 @@ def _revive_rediscovered_sources(
     studio_type: str,
     descriptors: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """Reconcile the durable registry with the current allow-list and rights state.
+
+    Sources that disappear or become rights/privacy blocked are revoked fail-closed. A previously
+    revoked source is only reissued after a fresh discovery proves it exists and is no longer
+    blocked; stale Shared Sky/editor linkage is removed during reissue.
+    """
     by_id = {str(item.get("source_adapter_id")): item for item in descriptors}
     active_ids = set(by_id)
     stamp = _now()
@@ -267,6 +273,28 @@ def _revive_rediscovered_sources(
 
             current = by_id[source_id]
             rights_state = str((current.get("rights") or {}).get("state") or "unknown")
+            if rights_state == "blocked" and status not in {"detached", "revoked"}:
+                descriptor = dict(current)
+                descriptor.update(
+                    {
+                        "version": int(item["version"]) + 1,
+                        "updated_at": stamp,
+                        "live_source_registration_state": "revoked",
+                        "health": "revoked",
+                        "revoked_at": stamp,
+                    }
+                )
+                con.execute(
+                    """
+                    UPDATE creation_live_sources
+                       SET descriptor_json=?,source_status='revoked',active_editor_instance_id=NULL,
+                           version=version+1,updated_at=?,revoked_at=?
+                     WHERE source_adapter_id=? AND user_id=?
+                    """,
+                    (json.dumps(descriptor, separators=(",", ":")), stamp, stamp, source_id, user_id),
+                )
+                continue
+
             if status == "revoked" and rights_state != "blocked":
                 descriptor = dict(current)
                 descriptor.update(
