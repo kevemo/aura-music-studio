@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
+from .shared_sky_battle_bootstrap import install_shared_sky_battle_routes
 from .shared_sky_live_bootstrap import install_shared_sky_live_community
 from .shared_sky_media_plane import router as shared_sky_media_plane_router
 from .shared_sky_relay import relay
@@ -186,6 +187,7 @@ from .shared_sky_studio_ingest import install_shared_sky_studio_ingest
 from .shared_sky_studio_recovery_hardening import install_history_recovery_versioning
 
 install_history_recovery_versioning()
+install_shared_sky_battle_routes(_canonical_app)
 install_shared_sky_live_community(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 install_shared_sky_media_plane(_canonical_app)
