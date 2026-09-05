@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
+from .shared_sky_live_bootstrap import install_shared_sky_live_community
 from .shared_sky_relay import relay
 from .shared_sky_streaming_studios import shared_sky
 from .shared_sky_worker import SharedSkyWorker, WorkerSettings
@@ -162,11 +163,12 @@ def install_shared_sky_owner_ops(app: Any) -> None:
 
 
 # ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Register the two owner-only handlers at import time to bypass late compatibility-router
-# snapshotting; both handlers retain their own owner-session gate and no secret-bearing data is
-# added to their responses.
+# here. Register the owner runtime and the first-party viewer/community router at import time to
+# bypass late compatibility-router snapshotting. Viewer/community handlers retain their own
+# optional/required canonical membership checks, while public discovery/watch remains possible.
 from .api import app as _canonical_app
 
+install_shared_sky_live_community(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 
 
