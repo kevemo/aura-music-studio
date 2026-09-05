@@ -67,7 +67,11 @@ class Chat6BattleDisplayAdapter:
 
 
 def install_chat6_battle_viewer_bridge() -> dict[str, Any]:
-    """Register Chat 6 viewer projection only when its explicit LIVE lookup exists."""
+    """Register Chat 6 viewer projection only when its explicit LIVE lookup exists.
+
+    A future Chat 6 module may exist while its deployment/capacity configuration is still invalid.
+    Discovery must fail closed without preventing the rest of Shared Sky Watch from starting.
+    """
 
     try:
         battle_api = importlib.import_module(f"{__package__}.shared_sky_battle_api")
@@ -76,6 +80,11 @@ def install_chat6_battle_viewer_bridge() -> dict[str, Any]:
         return {
             "state": "pending",
             "reason": "chat6_viewer_live_battle_lookup_unavailable",
+        }
+    except Exception:
+        return {
+            "state": "degraded",
+            "reason": "chat6_battle_module_unavailable",
         }
     try:
         live.register_battle_display_adapter(Chat6BattleDisplayAdapter(viewer_live_battle))
