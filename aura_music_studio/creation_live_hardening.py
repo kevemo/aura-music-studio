@@ -380,6 +380,14 @@ def _harden_ui(script: str) -> str:
     )
     script = script.replace(capture_old, capture_new)
 
+    preview_old = "async function preview(){const s=state.selected;if(!s)return msg('Select a source first.',true);const box=$('clPreview');box.replaceChildren();"
+    preview_new = preview_old + "if(state.previewStream){state.previewStream.getTracks().forEach(t=>t.stop());state.previewStream=null;}"
+    script = script.replace(preview_old, preview_new)
+
+    source_change_old = "state.selected=state.sources.find(s=>s.source_adapter_id===x.value);$('clWorkspaceRow').style.display="
+    source_change_new = "state.selected=state.sources.find(s=>s.source_adapter_id===x.value);if(state.previewStream){state.previewStream.getTracks().forEach(t=>t.stop());state.previewStream=null;const p=$('clPreview');if(p)p.replaceChildren();}$('clWorkspaceRow').style.display="
+    script = script.replace(source_change_old, source_change_new)
+
     attach_old = (
         "state.selected=data.source;state.status=data;renderStatus();"
         "msg(data.transport?.available?'Source registered with Shared Sky transport.':"
