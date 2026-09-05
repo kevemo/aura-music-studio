@@ -22,6 +22,16 @@ def _tone(path, *, seconds: float = 1.25, sample_rate: int = 24000, amplitude: f
     return path
 
 
+def _authorised_profile(name: str = "Private Voice") -> VoiceProfile:
+    return VoiceProfile(
+        name=name,
+        owner_label="Owner",
+        consent_confirmed=True,
+        consent_statement="I authorise this voice profile for my own private music project.",
+        subject_relationship="self",
+    )
+
+
 def test_challenge_created_profile_migrates_to_explicit_self_relationship_and_timestamp():
     profile = VoiceProfile(
         name="Challenge Voice",
@@ -56,15 +66,7 @@ def test_authenticated_save_binds_profile_to_tenant_and_rejects_cross_tenant_wri
     ledger = RightsLedger(tmp_path / "rights")
     token = set_current_user_id("member-a")
     try:
-        profile = ledger.save_voice(
-            VoiceProfile(
-                name="Private Voice",
-                owner_label="Owner",
-                consent_confirmed=True,
-                consent_statement="I authorise this voice profile for my own private music project.",
-                subject_relationship="self",
-            )
-        )
+        profile = ledger.save_voice(_authorised_profile())
     finally:
         reset_current_user_id(token)
 
@@ -79,6 +81,54 @@ def test_authenticated_save_binds_profile_to_tenant_and_rejects_cross_tenant_wri
             authorize_voice_profile(ledger.root, profile.id, "singing")
     finally:
         reset_current_user_id(token)
+
+
+def test_revoke_route_hides_and_rejects_cross_tenant_profile(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_house_api, "_project", lambda _name: tmp_path)
+    ledger = RightsLedger(tmp_path / ".aura_rights")
+    token = set_current_user_id("member-a")
+    try:
+        profile = ledger.save_voice(_authorised_profile("Member A Voice"))
+    finally:
+        reset_current_user_id(token)
+
+    token = set_current_user_id("member-b")
+    try:
+        with pytest.raises(Exception) as exc:
+            voice_house_api.revoke_voice_house_profile(
+                "demo",
+                profile.id,
+                voice_house_api.RevokeVoiceRequest(reason="malicious cross-tenant revoke"),
+            )
+        assert getattr(exc.value, "status_code", None) == 404
+    finally:
+        reset_current_user_id(token)
+
+    assert ledger.get_voice(profile.id).active is True
+
+
+def test_private_library_filters_explicit_cross_tenant_records(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_house_api, "_project", lambda _name: tmp_path)
+    ledger = RightsLedger(tmp_path / ".aura_rights")
+
+    token = set_current_user_id("member-a")
+    try:
+        member_a = ledger.save_voice(_authorised_profile("Member A Voice"))
+    finally:
+        reset_current_user_id(token)
+
+    token = set_current_user_id("member-b")
+    try:
+        member_b = ledger.save_voice(_authorised_profile("Member B Voice"))
+        listing = voice_house_api.voice_house_profiles("demo")
+    finally:
+        reset_current_user_id(token)
+
+    ids = {profile["id"] for profile in listing["profiles"]}
+    assert member_b.id in ids
+    assert member_a.id not in ids
+    assert listing["private_library"] is True
+    assert listing["raw_reference_paths_exposed"] is False
 
 
 def test_legacy_upload_path_creates_locked_candidate_not_reusable_identity_profile(tmp_path):
