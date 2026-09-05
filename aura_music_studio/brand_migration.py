@@ -6,23 +6,31 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .branding import BRAND_ART_ROUTE, BRAND_LOGO_PATH, ENDORSEMENT, PRODUCT_FULL_NAME, TAGLINE
+from .branding import (
+    AI_PRODUCER_NAME,
+    AI_SYSTEM_NAME,
+    BRAND_ART_ROUTE,
+    BRAND_LOGO_PATH,
+    ENDORSEMENT,
+    PRODUCT_FULL_NAME,
+    TAGLINE,
+)
 from .command_center_visual_shell import apply_visual_shell
 
 
 # Compatibility bridge: historical public product copy still exists inside legacy modules and
 # persisted templates. Public responses are migrated without renaming storage keys, cookies,
 # package imports, project IDs or deployment configuration.
-# The historical data-pfh marker remains compatibility metadata only.
+# The historical data-pfh marker and aura_* data/event markers remain compatibility metadata only.
 _LEGACY_LOGO_PATHS = {
     "/brand/pulsar-frequency-house-logo.svg",
     "/static/pulsar-frequency-house-logo.svg",
 }
-_AURA_CORE_HOME_SECTION = f"""<section class='wrap section' data-pfh-aura-core='0.20' data-esp-command-center-aura-core='0.20'><div class='eyebrow'>Aura Core 0.20</div><h2>Your Content Creation Command Center has an operating intelligence layer.</h2><p class='sectionintro'>Aura is more than a prompt box: the connected software layer provides private realtime conversations, project-aware tools, hands-free voice workflows, versioned Artifacts, durable Tasks, Notifications, Aura Today, verified multi-step tool chains and encrypted read-only workspace connectors when a member authorizes them.</p><div class='grid'><article class='card' style='--accent:#a66bff'><div class='icon'>🧠</div><h3>Aura Intelligence</h3><p>Persistent private conversations with Fast, Auto, Deep and Creative modes, custom Aura Profiles, project context, research and verified tool workflows.</p><span class='status'>Aura Core 0.20 connected</span><div class='featurelist'><span>Realtime</span><span>Profiles</span><span>Research</span><span>Project-aware</span></div></article><article class='card' style='--accent:#5de7ff'><div class='icon'>🎙️</div><h3>Voice & Embodied Host</h3><p>Single-turn speech, optional hands-free Voice Conversation and an embodied Aura state/runtime. The browser 3D renderer is implemented; the final production rig remains a deployment asset.</p><span class='status'>Host runtime connected · final rig pending</span><div class='featurelist'><span>Listening</span><span>Thinking</span><span>Speaking</span><span>3D-ready runtime</span></div></article><article class='card' style='--accent:#77e0a6'><div class='icon'>☀️</div><h3>Aura Today & Tasks</h3><p>At-a-glance Calendar/Gmail metadata, pinned-project context, durable reminders, scheduled read-only briefings and private notifications across sessions.</p><span class='status'>Workspace intelligence connected</span><div class='featurelist'><span>Today</span><span>Tasks</span><span>Briefings</span><span>Notifications</span></div></article><article class='card' style='--accent:#f4c873'><div class='icon'>▤</div><h3>Artifacts & Safe Tools</h3><p>Versioned documents, lyrics, prompts, data and code with restore history. Code execution remains disabled on the web host and requires a separately configured isolated sandbox.</p><span class='status'>Artifacts connected · sandbox optional</span><div class='featurelist'><span>Versions</span><span>Restore</span><span>Data tools</span><span>Isolation</span></div></article></div><div class='heroactions'><a class='btn primary' href='/aura-intelligence'>Open Aura Intelligence</a><a class='btn' href='/creative-house'>Open Creative House</a></div><p class='tiny'>External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states. {PRODUCT_FULL_NAME} reports those states instead of presenting an unconfigured backend as complete.</p></section>"""
+_AURA_CORE_HOME_SECTION = f"""<section class='wrap section' data-pfh-aura-core='0.20' data-esp-command-center-aura-core='0.20'><div class='eyebrow'>{AI_PRODUCER_NAME} Core 0.20</div><h2>Your Content Creation Command Center has an operating intelligence layer.</h2><p class='sectionintro'>{AI_PRODUCER_NAME} is more than a prompt box: the connected software layer provides private realtime conversations, project-aware tools, hands-free voice workflows, versioned Artifacts, durable Tasks, Notifications, {AI_PRODUCER_NAME} Today, verified multi-step tool chains and encrypted read-only workspace connectors when a member authorizes them.</p><div class='grid'><article class='card' style='--accent:#a66bff'><div class='icon'>🧠</div><h3>{AI_SYSTEM_NAME}</h3><p>Persistent private conversations with Fast, Auto, Deep and Creative modes, custom {AI_PRODUCER_NAME} Profiles, project context, research and verified tool workflows.</p><span class='status'>{AI_PRODUCER_NAME} Core 0.20 connected</span><div class='featurelist'><span>Realtime</span><span>Profiles</span><span>Research</span><span>Project-aware</span></div></article><article class='card' style='--accent:#5de7ff'><div class='icon'>🎙️</div><h3>Voice & Embodied Host</h3><p>Single-turn speech, optional hands-free Voice Conversation and an embodied {AI_PRODUCER_NAME} state/runtime. The browser 3D renderer is implemented; the final production rig remains a deployment asset.</p><span class='status'>Host runtime connected · final rig pending</span><div class='featurelist'><span>Listening</span><span>Thinking</span><span>Speaking</span><span>3D-ready runtime</span></div></article><article class='card' style='--accent:#77e0a6'><div class='icon'>☀️</div><h3>{AI_PRODUCER_NAME} Today & Tasks</h3><p>At-a-glance Calendar/Gmail metadata, pinned-project context, durable reminders, scheduled read-only briefings and private notifications across sessions.</p><span class='status'>Workspace intelligence connected</span><div class='featurelist'><span>Today</span><span>Tasks</span><span>Briefings</span><span>Notifications</span></div></article><article class='card' style='--accent:#f4c873'><div class='icon'>▤</div><h3>Artifacts & Safe Tools</h3><p>Versioned documents, lyrics, prompts, data and code with restore history. Code execution remains disabled on the web host and requires a separately configured isolated sandbox.</p><span class='status'>Artifacts connected · sandbox optional</span><div class='featurelist'><span>Versions</span><span>Restore</span><span>Data tools</span><span>Isolation</span></div></article></div><div class='heroactions'><a class='btn primary' href='/aura-intelligence'>Open {AI_PRODUCER_NAME}</a><a class='btn' href='/creative-house'>Open Creative House</a></div><p class='tiny'>External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states. {PRODUCT_FULL_NAME} reports those states instead of presenting an unconfigured backend as complete.</p></section>"""
 _LANDING_MEMBERSHIP_MARKER = "<section class='wrap section'><div class='eyebrow'>Memberships</div>"
 
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    # Specific phrases precede their generic substrings to avoid mixed old/new names.
+    # Specific phrases precede generic display phrases to avoid mixed old/new names.
     ("Elevate Souls Productions Presents: The Live Sound Studio", PRODUCT_FULL_NAME),
     ("Elevate Souls Productions Presents: Live Sound Studio", PRODUCT_FULL_NAME),
     ("Powered by Elevate Souls Productions and Aura AI Systems", ENDORSEMENT),
@@ -31,6 +39,8 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("powered by Elevate Souls Productions & Aura AI Systems", ENDORSEMENT),
     ("Powered by Aura AI Systems", ENDORSEMENT),
     ("powered by Aura AI Systems", ENDORSEMENT),
+    ("Powered by Aura AI", ENDORSEMENT),
+    ("powered by Aura AI", ENDORSEMENT),
     ("Pulsar-Frequency House", PRODUCT_FULL_NAME),
     ("Pulsar-Frequency", "Content Creation Command Center"),
     ("4Infinity Creative Studios", PRODUCT_FULL_NAME),
@@ -43,10 +53,32 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ("Music Making for Professionals", TAGLINE),
     ("/brand/pulsar-frequency-house-logo.svg", BRAND_LOGO_PATH),
     ("/static/pulsar-frequency-house-logo.svg", BRAND_LOGO_PATH),
+    # Current assistant/security presentation migration. These are deliberately specific;
+    # internal Aura* class names, aura_* keys, AURA_* environment variables and /aura-* routes
+    # are not globally rewritten by this middleware.
+    ("Open Aura Intelligence", f"Open {AI_PRODUCER_NAME}"),
+    ("Aura Creative Director", f"{AI_PRODUCER_NAME} Creative Director"),
+    ("Talk to Aura", f"Talk to {AI_PRODUCER_NAME}"),
+    ("Ask Aura", f"Ask {AI_PRODUCER_NAME}"),
+    ("Aura Intelligence", AI_SYSTEM_NAME),
+    ("Aura Core", f"{AI_PRODUCER_NAME} Core"),
+    ("Aura Today", f"{AI_PRODUCER_NAME} Today"),
+    ("Aura Profiles", f"{AI_PRODUCER_NAME} Profiles"),
+    ("Aura Tasks", f"{AI_PRODUCER_NAME} Tasks"),
+    ("Aura Task", f"{AI_PRODUCER_NAME} Task"),
+    ("Aura follow-up", f"{AI_PRODUCER_NAME} follow-up"),
+    ("Aura Sec Security Center", "SLS Security Center"),
+    ("Aura Sec commercial access active", "SLS commercial access active"),
+    ("Aura Sec commercial access is active", "SLS commercial access is active"),
+    ("Aura Sec available", "SLS available"),
+    ("Open Aura Sec", "Open SLS"),
+    ("Manage Aura OS &amp; Aura Sec", "Manage OS Overlay &amp; SLS"),
+    ("Aura OS &amp; Aura Sec", "OS Overlay &amp; SLS"),
+    ("Aura OS and Aura Sec", "OS Overlay System and SLS"),
     # Current landing-page compatibility/presentation upgrades.
     ("href='#suite'>Creative House", "href='/creative-house'>Creative House"),
     ("Workspace architecture staged", "Creative DNA + renderer bridge connected"),
-    ("Aura routes connected", "Aura Core 0.20 connected"),
+    ("Aura routes connected", f"{AI_PRODUCER_NAME} Core 0.20 connected"),
     ("Unified project layer in build", "Creative DNA project layer connected"),
     ("<h3>Base</h3>", "<h3>Basic</h3>"),
     ("href='/signup?plan=base'>Choose Base", "href='/signup?plan=base'>Choose Basic"),
@@ -62,7 +94,7 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     ),
     (
         "The current real-audio music engine, owner controls and ESP permission systems remain underneath the new master brand while the unified video, image and multimodal editing layers are expanded.",
-        "The real-audio music engine, Creative DNA layer, Aura Core, owner controls and ESP permission systems are connected under the master brand. Image/video renderer bridges are present while their external generation backends remain deployment-configurable.",
+        f"The real-audio music engine, Creative DNA layer, {AI_PRODUCER_NAME} Core, owner controls and ESP permission systems are connected under the master brand. Image/video renderer bridges are present while their external generation backends remain deployment-configurable.",
     ),
 )
 
@@ -109,7 +141,7 @@ def inject_song_dna_lock_entry(value: str, path: str) -> str:
 
 
 class BrandMigrationMiddleware(BaseHTTPMiddleware):
-    """Rewrite legacy copy and apply the shared Command Center HTML visual shell."""
+    """Rewrite legacy public copy and apply the shared Command Center HTML visual shell."""
 
     async def dispatch(self, request: Request, call_next):
         if request.method.upper() in {"GET", "HEAD"} and request.url.path in _LEGACY_LOGO_PATHS:
