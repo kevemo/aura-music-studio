@@ -1,6 +1,6 @@
 # Elevate Souls Productions Content Creation Command Center
 
-**Powered by Aura AI**  
+**Powered by Rhiannon Intelligence Systems**  
 **Elevate Your Soul Through Purposeful Media**
 
 The **Elevate Souls Productions Content Creation Command Center** is the unified creator, production, LIVE, social, business and AI ecosystem developed by **Elevate Souls Productions LCN LLC & LTD**.
@@ -9,19 +9,21 @@ The connected creator journey is:
 
 > **IDEA → PLAN → CREATE → EDIT → PUBLISH → GO LIVE → PROMOTE → ANALYSE → IMPROVE → EARN**
 
-Aura AI is the intelligence and orchestration layer across the Command Center. Aura is designed to understand the authorised page, project, files, tools, user role and workflow context so she can guide, create, analyse and perform approved actions without crossing authentication, privacy, consent, commercial or external-provider boundaries.
+**Rhiannon Intelligence Systems**, known day to day as **Rhian**, is the intelligence and orchestration layer across the Command Center. Rhian is designed to understand the authorised page, project, files, tools, user role and workflow context so she can guide, create, analyse and perform approved actions without crossing authentication, privacy, consent, commercial or external-provider boundaries.
 
-> Legacy repository, package, database, cookie and environment-variable identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `LSS_*`, or earlier public product names. These are retained only where compatibility requires them and are **not** the current public brand.
+> Legacy repository, package, database, cookie, route, event, environment-variable and provider-handle identifiers may still use names such as `aura-music-studio`, `aura_music_studio`, `aura_*`, `AURA_*`, `/aura-*`, `LSS_*`, or earlier public product names. These are retained only where compatibility requires them and are **not** the current public brand. They must not be blindly renamed without a tested migration.
 
 ## Authoritative public identity
 
 - **Product:** Elevate Souls Productions Content Creation Command Center
-- **Endorsement:** Powered by Aura AI
+- **Intelligence system:** Rhiannon Intelligence Systems
+- **Everyday assistant name:** Rhian
+- **Endorsement:** Powered by Rhiannon Intelligence Systems
 - **Company:** Elevate Souls Productions LCN LLC & LTD
 - **Tagline:** Elevate Your Soul Through Purposeful Media
 - **Security system:** Elevate Souls Productions Secure Lattice System (**SLS**)
 
-Older names such as **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current product identity.
+Older names such as **Aura / Aura AI / Aura AI Systems**, **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current product identity. Compatibility-critical internal identifiers may remain until explicitly migrated.
 
 ## Engineering truth model
 
@@ -36,13 +38,13 @@ Repository documentation and release reporting distinguish between:
 
 Code existence by itself is not production-readiness evidence. The canonical CI also runs a fail-closed production-source completeness audit that rejects concrete `pass`/ellipsis-only implementations, concrete `NotImplementedError` paths, and unresolved TODO/FIXME/XXX comments in executable production Python while permitting genuine abstract/Protocol contracts.
 
-## Aura AI
+## Rhiannon Intelligence Systems / Rhian
 
-Aura is designed to remain present throughout the Command Center rather than functioning only as a standalone chatbot.
+Rhian is designed to remain present throughout the Command Center rather than functioning only as a standalone chatbot.
 
 Core architecture includes page-, project- and role-aware assistance, text and voice interaction, multimodal file/media workflows, creative direction, research assistance, project memory with user controls, creator-growth guidance, LIVE preparation, training/support guidance, bounded tools, audited automation and model/provider routing.
 
-Aura must remain truthful about knowledge, permissions and external actions. She must not grant herself credentials, bypass role or consent boundaries, fabricate provider success, or convert untrusted content into unrestricted system execution.
+Rhian must remain truthful about knowledge, permissions and external actions. She must not grant herself credentials, bypass role or consent boundaries, fabricate provider success, or convert untrusted content into unrestricted system execution.
 
 ## Creative Studios
 
@@ -74,13 +76,13 @@ Game Forge provides interactive project creation, editing/playtest foundations a
 
 ## Social Media Centre
 
-The Social Media Centre is the campaign, scheduling, repurposing and analytics workspace. Its architecture includes campaign planning, calendar/composer workflows, platform variants, approval state, provider-aware publishing, manual reminder paths where direct APIs are unavailable, assets/provenance, analytics/freshness, discovery research and Aura recommendations.
+The Social Media Centre is the campaign, scheduling, repurposing and analytics workspace. Its architecture includes campaign planning, calendar/composer workflows, platform variants, approval state, provider-aware publishing, manual reminder paths where direct APIs are unavailable, assets/provenance, analytics/freshness, discovery research and Rhian recommendations.
 
 The platform must never claim an external social action succeeded unless the relevant provider confirms it.
 
-## Aura LIVE ecosystem
+## Rhian LIVE ecosystem
 
-### Aura LIVE Overlay Studio
+### Rhian LIVE Overlay Studio
 
 The LIVE production environment supports browser-source-compatible workflows for systems such as TikTok LIVE Studio, OBS and similar broadcast software. Foundations include scenes, alerts, goals, supporter activity, leaderboards, timers, wheels, polls, CTA widgets, lower thirds/captions, reactive effects, approved media and bounded Trigger → Condition → Approved Action automation.
 
@@ -90,13 +92,13 @@ Arbitrary JavaScript, shell execution and unrestricted remote commands are outsi
 
 The Auto Cue Prompter is designed as a creator-private browser-local script surface with auto-scroll, speed controls, text sizing, countdown, mirror/fullscreen, keyboard control and private second-screen/popup use. Script content must remain separate from the public LIVE overlay and LIVE event state.
 
-### Aura LIVE Guardian
+### Rhian LIVE Guardian
 
-Aura LIVE Guardian provides creator-authorised moderation assistance around the dedicated TikTok moderation identity **@aura.chat.mod**. Creating or assigning that account as a moderator does **not** grant hidden TikTok API authority.
+Rhian LIVE Guardian provides creator-authorised moderation assistance. A legacy or operational provider handle such as **@aura.chat.mod** may remain unchanged where external-platform continuity requires it; the handle is a compatibility identifier and is not the current assistant brand. Creating or assigning that account as a moderator does **not** grant hidden TikTok API authority.
 
 Any real provider moderation write must use an officially supported/authorised provider capability. Where such a capability is unavailable, Guardian remains advisory or assisted and reports the provider dependency truthfully.
 
-The normalized LIVE relay is **implemented and verified on the integration branch**, including route, scoping, identity and regression coverage. A real TikTok or other LIVE provider connection remains an external dependency unless that provider is officially authorised, configured and independently verified; the relay does not pretend to create undocumented TikTok authority.
+The normalised LIVE relay is **implemented and verified on the integration branch**, including route, scoping, identity and regression coverage. A real TikTok or other LIVE provider connection remains an external dependency unless that provider is officially authorised, configured and independently verified; the relay does not pretend to create undocumented TikTok authority.
 
 ## ESP Creator Hub
 
@@ -114,9 +116,9 @@ The protected Owner Command Center contains administration foundations for users
 
 Marketplace/revenue administration uses the first-party order, provider-evidence, settlement, reversal and account-reporting layers described below. Live financial reconciliation still requires real provider and banking evidence.
 
-## Aura Help & Support Centre
+## Rhian Help & Support Centre
 
-Aura provides first-line feature/product guidance and support-ticket workflows. Billing disputes, account access, privacy, safeguarding, copyright/legal and security matters remain subject to appropriate human escalation rather than autonomous final decisions.
+Rhian provides first-line feature/product guidance and support-ticket workflows. Billing disputes, account access, privacy, safeguarding, copyright/legal and security matters remain subject to appropriate human escalation rather than autonomous final decisions.
 
 ## Membership model
 
@@ -129,15 +131,15 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 ### Basic — £4.99/month
 
 - increased creative access;
-- up to **5 eligible creations/edits per day** across the configured shared Music, Video and Game admission boundary;
-- Cosmic Creation Coins for eligible usage beyond the included allowance where configured.
+- the included eligible creation/edit allowance is controlled by the authoritative versioned entitlement/catalogue configuration;
+- Cosmic Creation Coins may be used for eligible usage beyond the included allowance where configured.
 
-The cross-studio five-per-day admission counter is **server-authoritative, implemented and regression-tested**, including shared daily usage across eligible studio operations. Clients cannot override the server meter. Production launch still requires the authoritative plan/catalogue configuration and operational monitoring to match the approved commercial policy.
+Cross-studio admission counters are **server-authoritative** and clients cannot override them. Production launch configuration must match the current approved commercial policy; historical hard-coded daily allowances are not product authority.
 
 ### Unlimited Pro — £9.99/month
 
 - highest normal enabled creative access;
-- Elevate Souls Productions Secure Lattice System (SLS) entitlement included with the subscription;
+- Elevate Souls Productions Secure Lattice System (SLS) entitlement included with the subscription where the current entitlement catalogue enables it;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
 
@@ -145,13 +147,9 @@ Safety, privacy, consent and transparency protections are never paywalled.
 
 ## Cosmic Creation Coins
 
-The locked baseline is **1,000 Cosmic Creation Coins = £5**, therefore **£0.005 per Coin**. Any discounted bulk or promotional pack must be explicitly configured and clearly displayed as such rather than silently changing the baseline rate.
+The locked baseline is **1,000 Cosmic Creation Coins = £5**, therefore **£0.005 per Coin**.
 
-Current configured public packs documented by the repository are:
-
-- **1,000 Cosmic Creation Coins — £5** — baseline pack;
-- **2,500 Cosmic Creation Coins — £10** — discounted bulk pack;
-- **6,000 Cosmic Creation Coins — £20** — discounted bulk pack.
+Any larger, discounted bulk or promotional pack must be explicitly configured, versioned and clearly displayed by the authoritative server catalogue. Older example bundles must not be treated as current pricing merely because they remain in historical code or documentation.
 
 Coin pricing, balances, debits, fulfilment, refunds and reversals remain server-authoritative and ledger-backed. Live launch additionally requires verified provider configuration and operational reconciliation; client-side success can never mint value by itself.
 
@@ -159,16 +157,25 @@ Coin pricing, balances, debits, fulfilment, refunds and reversals remain server-
 
 Eligible Unlimited Pro users can use the shared publication/marketplace architecture for eligible songs and games under the configured rights and safety rules.
 
-The creator-publication revenue allocation is:
+The creator-publication marketplace revenue allocation is:
 
 - **50% Creator**
 - **50% Elevate Souls Productions**
 
-Eligible content explicitly created/published by Mary or Kev under Owner/Admin identity as ESP-owned catalogue content allocates **100% of eligible ESP-owned creation revenue to the ESP Admin Revenue Pool**.
+Eligible content explicitly created/published by Mary or Kev under Owner/Admin identity as ESP-owned catalogue content allocates **100% of eligible ESP-owned creation revenue to the ESP Admin Revenue Pool** where that treatment remains enabled by the authoritative economy configuration.
 
-The integration branch contains server-authoritative marketplace orders, provider-bound checkout validation, provider fee evidence, 50/50 creator-versus-ESP and explicit owner-catalogue settlement policy, refunds/reversals, payout reconciliation foundations, buyer purchase history, seller earnings/reversal/net reporting and account-scoped read surfaces. These transaction/accounting paths are code-complete and regression-tested within the repository boundary. **Production financial readiness is still evidence-gated** by real live payment credentials/webhook delivery, end-to-end real-money payment/refund/payout certification, tax/accounting review and independent bank/Open-Banking reconciliation evidence. Provider payout status alone is not represented as bank-statement proof.
+The integration branch contains server-authoritative marketplace orders, provider-bound checkout validation, provider fee evidence, creator-versus-ESP settlement policy, refunds/reversals, payout reconciliation foundations, buyer purchase history, seller earnings/reversal/net reporting and account-scoped read surfaces. These transaction/accounting paths are code-complete and regression-tested within the repository boundary. **Production financial readiness is still evidence-gated** by real live payment credentials/webhook delivery, end-to-end real-money payment/refund/payout certification, tax/accounting review and independent bank/Open-Banking reconciliation evidence. Provider payout status alone is not represented as bank-statement proof.
 
-The marketplace revenue split is a marketplace rule only. It does **not** define or imply a LIVE Gift creator payout percentage.
+The marketplace 50/50 revenue split is a marketplace rule only. It does **not** apply to first-party creator Gifts.
+
+### Creator Gift economy
+
+The current Owner-approved first-party Gift economic split is:
+
+- **70% Creator**
+- **30% Elevate Souls Productions**
+
+The applicable Gift split-policy version must be snapshotted on each committed Gift. Future Owner-approved changes apply prospectively through the canonical server-authoritative economy service; historical Gifts retain the policy version active when committed. Viewer Coin debit, creator receipt/liability, cleared/payable state, actual payout, ESP share/revenue, reversals and chargebacks remain distinct accounting states.
 
 ## Privacy, safeguarding, consent and governance
 
@@ -233,5 +240,6 @@ The main Command Center and the SLS full native commercial product may reach dif
 ## Final product identity
 
 **Elevate Souls Productions Content Creation Command Center**  
-**Powered by Aura AI**  
+**Powered by Rhiannon Intelligence Systems**  
+**Rhiannon Intelligence Systems · Rhian**  
 **Elevate Your Soul Through Purposeful Media**
