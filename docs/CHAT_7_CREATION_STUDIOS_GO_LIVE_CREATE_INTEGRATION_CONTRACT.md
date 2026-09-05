@@ -1,8 +1,23 @@
 # Chat 7 Creation Studios Go Live & Create Integration Contract
 
-Status: additive Chat 7 implementation for `development/full-site-build`. This contract owns only the safe Music / Video-Cinema / Image-Visual project-source bridge into Shared Sky. Chat 2 remains transport authority, Chat 3 remains Preview/Programme and composition authority, Chat 4 remains viewer/community authority, Chat 5 remains Coin/Gift financial authority, and Chat 6 remains participant/Battle authority.
+Status: active Chat 7 implementation for `development/full-site-build`.
 
-## Canonical imports
+This workstream owns the privacy-safe Music / Video-Cinema / Image-Visual project-source bridge into Shared Sky. It does not own transport, the professional control-room compositor, viewer/community truth, Coin/Gift finance or Battle scoring.
+
+## Current integrated baseline
+
+Chat 7 was refreshed onto `development/full-site-build` commit `1a6976a32a0deb832aca2ef983b899811ee1f92b` with two-parent merge commit `bc3905411bf278aaeab644eb34273567be55bd00`.
+
+At that integration checkpoint:
+
+- Chat 2 transport PR #570 is merged and is canonical transport authority.
+- Chat 4 first-party LIVE/community PR #571 is merged and is canonical viewer/community authority.
+- Chat 3 PR #572 remains open; Chat 7 therefore still fails closed for exact project-source Programme/ON-AIR confirmation and BRB/cut authority.
+- Chat 5 PR #573 remains open and is not part of the integration branch. Chat 7 never imports its financial implementation directly.
+- Chat 6 has an authoritative Battle branch, but no verified Chat 6 Battle contract is merged into the integration branch at this checkpoint. Chat 7 therefore consumes only Chat 4's registered Battle display adapter state.
+- Chat 11 retains repository-wide release acceptance and final deployment ownership.
+
+## Canonical Chat 7 modules
 
 ```python
 from aura_music_studio.creation_live import (
@@ -12,116 +27,318 @@ from aura_music_studio.creation_live import (
     SourceCapabilities,
     creation_live_store,
     discover_sources,
-    install_creation_live,
-    router as creation_live_router,
 )
 ```
 
-The production installer is invoked at the repository's canonical route-composition/reconciliation point in `aura_music_studio.route_integrity.deduplicate_http_routes`. `install_creation_live(app)` is idempotent and mounts the API plus `CreationLiveMiddleware` into the one FastAPI application. It does not create a second creative/live app.
+Additional production layers:
 
-## Studio routes and embedded entry points
+- `aura_music_studio.creation_live_hardening`
+  - source expiry/session-end revocation;
+  - pre-side-effect idempotency reservation;
+  - stale/revoked handle rejection;
+  - discovery reconciliation;
+  - browser capture cleanup.
+- `aura_music_studio.creation_live_authority`
+  - current-source rights/privacy revalidation before attach;
+  - Chat 2 transport preflight projection;
+  - authoritative LIVE-marker/session checks;
+  - Chat 2 recording-state reconciliation for post-LIVE returns.
+- `aura_music_studio.creation_live_community`
+  - read-only Chat 4 creator-side community projection derived from the server-owned project/source association.
+- `aura_music_studio.creation_live_ui_community`
+  - read-only community section embedded in the Go Live & Create drawer.
+- `aura_music_studio.route_integrity`
+  - idempotent canonical route composition and duplicate-route/OpenAPI-ID reconciliation.
 
-Chat 7 injects the same project-aware Go Live & Create client into:
+No second FastAPI application, transport service, chat service, wallet, Gift ledger or Battle engine is introduced.
+
+## Embedded studio entry points
+
+The same Go Live & Create system is embedded into:
 
 - Music Studio: `/studio`
 - Video/Cinema Studio: `/video-studio`
 - Image/Poster/Visual Studio: `/image-designer`
 
-Client script: `GET /creation-live/ui.js`.
+Client script:
 
-The control is keyboard-operable, uses a dialog landmark, moves focus to a labelled close control, supports Escape close, uses `aria-live=polite` for bounded status announcements, and never uses colour as the sole LIVE truth. The UI explicitly displays `NOT CONFIRMED ON AIR` unless the authoritative programme adapter can prove the exact source is Programme.
+- `GET /creation-live/ui.js`
 
-## Shared source descriptor schema
+The editor project remains open. Opening the drawer does not start LIVE, start browser capture or attach a project source.
 
-`CreationLiveSourceDescriptor` schema version 1 contains:
+## Shared source descriptor
 
-- stable `source_adapter_id` and adapter version;
+`CreationLiveSourceDescriptor` schema version 1 carries only safe cross-system data:
+
+- `source_adapter_id`;
+- adapter/schema version;
 - `studio_type`: `music | video_cinema | image_visual`;
 - canonical project/workspace/creator IDs;
-- studio-specific safe `source_type`;
-- safe display label;
-- media kind and optional aspect/fps/sample/channel metadata;
-- capability flags;
+- studio-specific source type;
+- safe display name;
+- media kind;
+- aspect/fps/sample/channel capability metadata when known;
+- source capability flags;
 - privacy classification;
-- inclusion manifest and `creation-live-default-v1` exclusion-policy reference;
+- allow-listed inclusion manifest;
+- exclusion-policy reference;
 - rights/preflight result;
-- Shared Sky project/broadcast/source references only after server-authorised attachment;
-- explicit presentation mode;
+- Shared Sky project/broadcast/source references after authorised attachment;
+- presentation mode;
 - health/version/timestamps/revocation/correlation references;
 - optional Creative element/version IDs;
 - preview kind.
 
-The public descriptor never contains the server-only `server_ref`, raw local/server paths, destination credentials, provider tokens, OAuth material, private storage URLs or whole project documents. Recursive private-key detection blocks secret-bearing metadata from being accepted into a source preflight.
+It never serialises the whole creative-project document, raw server/local paths, destination credentials, provider tokens, OAuth material or private storage URLs.
 
-## Source registry and persistence
+## Durable state
 
-Chat 7 adds additive idempotent SQLite tables to the canonical Shared Sky database path:
+Chat 7 adds additive SQLite tables in the canonical Shared Sky database:
 
 - `creation_live_sources`
 - `creation_live_idempotency`
 - `creation_live_returns`
 - `creation_live_markers`
 
-`creation_live_sources.version` provides optimistic concurrency. `active_editor_instance_id` prevents a stale duplicate tab from taking over an attached source. Attach/detach operations use durable request-hash-bound idempotency keys.
+`creation_live_sources.version` is the optimistic-concurrency token. `active_editor_instance_id` prevents stale duplicate editor tabs from controlling a newer attached source.
 
-Transient MediaStream/browser capture grants are never persisted.
+Transient browser `MediaStream` objects and browser permission grants are never persisted.
 
-## Discovery and safe output policy
+## Safe discovery policy
 
-Source identity is a deterministic SHA-256-derived ID over creator, project, studio and server-only source key. Discovery is tenant-confined by the existing `tenant_storage.project_path` context.
-
-Default source discovery is allow-list based:
+Source identity is stable per creator/project/studio/server-owned source key.
 
 ### Music
 
-- active ready Creative `music` / `audio` outputs;
-- allow-listed audio files under the current project's `output/` tree;
-- files under obvious `private`, `reference`, `training` or `models` paths are not surfaced;
-- stem-like paths become explicit `selected_stem` sources and require deliberate rights confirmation;
-- whole workspace exists only as an advanced source.
+Normal safe sources currently include:
+
+- ready active Creative music/audio outputs;
+- allow-listed files under the project's `output/` tree;
+- explicitly selected stems with an additional confirmation boundary;
+- advanced whole-workspace capture only after explicit opt-in.
+
+Obvious `private`, `reference`, `training` and `models` paths are not surfaced as normal Music sources.
 
 ### Video/Cinema
 
-- current active ready Creative `video` element output only;
-- server resolves the element's project-relative file and verifies confinement to the current project;
-- clean video output is the normal source;
-- whole workspace is advanced/high-risk.
+Normal safe source:
+
+- current active ready Creative video output, resolved and confined to the current tenant project.
+
+Advanced whole-workspace capture is separate and higher risk.
 
 ### Image/Visual
 
-- current active ready Creative `image` element output only;
-- server resolves a project-relative safe media file;
-- clean artwork is the normal source;
-- whole workspace is advanced/high-risk.
+Normal safe source:
 
-Image/video/music preview media is returned through an authenticated opaque source-adapter route with `private, no-store` and `nosniff`; the descriptor does not expose its backing path.
+- current active ready Creative image/artwork output, resolved and confined to the current tenant project.
 
-## Rights, consent and provenance preflight
+Advanced whole-workspace capture is separate and higher risk.
 
-`RightsPreflight` returns `ready`, `warning`, `blocked` or `unknown`-compatible state semantics.
+## Source lifecycle hardening
 
-Chat 7 blocks:
+The durable source lifecycle now covers:
 
-- hidden/private/restricted/collaborator-only/internal-only sources;
+- discovery;
+- preview;
+- attach/register;
+- ready/registered state;
+- presentation-mode transition;
+- detach;
+- revoke;
+- expiry;
+- rediscovery/reissue after a new current safe source is deliberately selected.
+
+Additional rules:
+
+- expired handles revoke fail closed;
+- a missing or terminal linked Shared Sky session revokes the handle;
+- a revoked handle cannot silently reactivate;
+- a project output no longer present in the current allow list is revoked;
+- safe rediscovery clears obsolete broadcast/transport/editor ownership references;
+- attach/detach idempotency keys are reserved with `BEGIN IMMEDIATE` before side effects, preventing concurrent duplicate transport work;
+- failed side effects release the in-progress reservation so a legitimate retry can proceed.
+
+## Rights / consent / provenance
+
+Preflight blocks or warns on the current authoritative metadata, including:
+
+- hidden/private/restricted/collaborator-only/internal-only material;
 - `broadcast_allowed=false`;
-- detected secret/provider/security metadata;
+- secret/provider/security metadata;
 - real-person likeness without LIVE permission;
 - missing/revoked/ineligible Voice Profiles;
-- music cover/remix/backing projects whose authoritative manifest does not confirm rights.
+- music cover/remix/backing projects lacking required rights confirmation.
 
-A Voice Profile that is valid for singing or voice conversion is **not** automatically valid for public LIVE output. Chat 7 calls the existing `VoiceProfile.assert_usable("live_streaming")`; live use must therefore be explicitly included in `allowed_uses` and consent must remain active.
+Voice generation permission does not imply LIVE permission. Existing Voice Profiles must explicitly permit `live_streaming` and consent must remain active.
 
-Missing complete rights metadata yields a warning requiring creator confirmation; it never fabricates a `cleared for broadcast` result.
+Missing rights metadata is never rewritten into a false `cleared for broadcast` result.
 
-## Advanced full-workspace capture
+Immediately before an attach, `creation_live_authority` rediscovers the chosen project source and re-runs current rights/privacy eligibility. A stale source descriptor is not sufficient authority.
 
-`full_workspace` is always `advanced_workspace`, never the default. Attachment requires both rights-warning confirmation and `full_workspace_confirmed=true`.
+## Whole-workspace mode
 
-The browser preview uses `navigator.mediaDevices.getDisplayMedia` only after the creator selects Preview. The browser's native permission UI remains authoritative. Chat 7 explicitly states that application masking cannot guarantee unrelated windows/notifications are hidden. Preview tracks are stopped when the live drawer closes.
+`full_workspace` is always advanced/high-risk and never the default.
 
-No whole-screen/window capture is silently started by opening Go Live & Create.
+It requires:
 
-## API routes
+- explicit rights/privacy warning confirmation;
+- `full_workspace_confirmed=true`;
+- browser `getDisplayMedia` permission.
+
+The UI states that browser/window capture cannot guarantee application-level masking of unrelated notifications or windows.
+
+Repeated preview requests stop the previous browser capture first. `MediaStreamTrack.onended` clears the preview and reports that the source is no longer available.
+
+## Chat 2 transport integration — merged
+
+Canonical import:
+
+```python
+from aura_music_studio.shared_sky_transport_domain import transport
+```
+
+Chat 7 uses the merged Chat 2 APIs rather than a local transport backend:
+
+- `transport.register_source(...)`
+- `transport.source(...)`
+- `transport.preflight(user_id, broadcast_id)`
+- `transport.status(user_id, broadcast_id)`
+
+Source registration uses an opaque `creation-live://<source_adapter_id>` reference plus safe media/privacy capabilities. A persisted transport source ID is reused when valid.
+
+Attach now reports Chat 2 preflight separately. Source registration or a passing transport preflight still does **not** prove the exact project source is on Programme.
+
+Post-LIVE return reconciles recording state and authoritative `asset_id` from `transport.status(...)` when available. It projects only safe recording metadata; storage URIs/provider internals are not returned through Chat 7.
+
+Chat 7 does not own destination OAuth, provider credentials, ingest/relay/transcoding or external-destination delivery truth.
+
+## Chat 3 control-room handoff — pending merge
+
+Chat 7 supplies:
+
+- source adapter ID;
+- safe display label;
+- privacy classification;
+- capabilities;
+- correlation ID;
+- Shared Sky source/session references.
+
+Chat 3 owns:
+
+- scene/source placement;
+- transforms/crop;
+- Preview/Programme;
+- transitions/cuts;
+- mixer/audio composition;
+- overlays/widgets;
+- programme output.
+
+Until the merged Chat 3 contract exposes an authoritative exact-source Programme query, Chat 7 intentionally keeps `on_air=false` and `programme_state=unknown` rather than inferring ON AIR from broadcast state.
+
+Emergency hide currently records `brb` presentation intent but does not claim a real Programme cut occurred without Chat 3 authority.
+
+## Chat 4 community integration — merged
+
+`GET /creation-live/projects/{project_name}/community` now consumes the merged `shared_sky_live_community.community` store.
+
+The project-side endpoint derives the active LIVE session from Chat 7's server-owned project/source association. It does not accept a client-selected broadcast ID.
+
+Safe creator-side projection includes:
+
+- authoritative LIVE state;
+- current Shared Sky viewer count and its count definition;
+- chat settings;
+- recent internal chat history;
+- reaction aggregates;
+- Chat 4 registered Gift display state;
+- Chat 4 registered Battle display state;
+- canonical Chat 4 chat/events/poll/Q&A action paths.
+
+The embedded drawer displays current viewer/chat/reaction state using DOM text nodes. Incoming chat/reactions never become creative-editor commands automatically.
+
+The endpoint reports:
+
+- `project_mutated=false`;
+- `financial_mutation=false`;
+- `battle_score_mutation=false`.
+
+Chat 7 does not duplicate Chat 4 presence, chat, polls, Q&A, moderation or realtime event backends.
+
+## Chat 5 and Chat 6 boundaries
+
+Until their verified canonical contracts are merged into the integration branch:
+
+- Gift state is consumed only through Chat 4's registered display adapter;
+- Chat 7 never debits Coins or calculates balances/liabilities/payouts;
+- Battle state is consumed only through Chat 4's registered display adapter;
+- Chat 7 never creates a Battle, ticks a Battle timer or calculates a score.
+
+## Create → showcase state model
+
+One project-source association changes presentation intent without creating another hidden LIVE session.
+
+Music modes:
+
+- creating
+- tutorial
+- rehearsal
+- performance
+- premiere
+- showcase
+- listening_party
+- brb
+- detached
+
+Video modes:
+
+- creating
+- tutorial
+- review
+- premiere
+- showcase
+- brb
+- detached
+
+Image modes:
+
+- creating
+- tutorial
+- review
+- showcase
+- gallery
+- brb
+- detached
+
+## Markers and post-LIVE return
+
+Markers now require:
+
+- source state `registered` or `ready`;
+- marker session ID equal to the source's server-owned broadcast linkage;
+- Shared Sky session in an active marker-eligible state.
+
+Markers never mutate project creative content.
+
+Returned recording/highlight provenance is deduplicated by `(user_id, project_name, return_import_id)` and retains project/studio/session/recording/source/time/category/correlation references.
+
+When Chat 2 recording authority is available, client-declared `ready` cannot override the transport recording state. `ready` requires an authoritative recording asset ID.
+
+A tenant-safe media resolver is still required before returned recording bytes can be materialised into a creative media library; Chat 7 does not invent a local file.
+
+## Aura boundary
+
+Aura assistance may recommend a safe current source/preset and explain warnings.
+
+It explicitly cannot autonomously:
+
+- start/stop LIVE;
+- reveal hidden material;
+- switch a private version onto Programme;
+- enable whole-workspace capture;
+- bypass rights/voice/likeness restrictions.
+
+## Main API surface
 
 - `GET /creation-live/capabilities`
 - `GET /creation-live/projects/{project_name}/sources?studio_type=...`
@@ -136,132 +353,46 @@ No whole-screen/window capture is silently started by opening Go Live & Create.
 - `POST /creation-live/projects/{project_name}/returns`
 - `GET /creation-live/projects/{project_name}/community`
 - `GET /creation-live/projects/{project_name}/aura-assistance?studio_type=...`
+- `GET /creation-live/ui.js`
 
-All project operations require the existing membership context. Creative project paths remain server-derived from the current tenant; a client cannot supply a filesystem path.
+## Error/state additions
 
-## Chat 2 transport handoff
+Important Chat 7 errors include:
 
-Chat 7 dynamically consumes the pending canonical module:
+- `stale_source_version`
+- `source_controlled_by_another_editor`
+- `source_revoked`
+- `operation_in_progress`
+- `idempotency_key_reused_with_different_request`
+- `project_rights_blocked`
+- `source_not_ready`
+- `live_session_ended`
+- `marker_session_mismatch`
+- `return_session_mismatch`
+- `return_asset_mismatch`
+- `recording_not_found`
+- `recording_asset_processing`
 
-```python
-from aura_music_studio.shared_sky_transport_domain import transport
-```
+## Deterministic test suites
 
-When present, attachment calls `transport.register_source(...)` using only:
+Chat 7 currently adds:
 
-- authenticated creator ID;
-- server-authorised Shared Sky project ID;
-- `music_project` or `video_project` contribution type per Chat 2's current contract;
-- opaque `creation-live://<source_adapter_id>` source reference;
-- safe media/privacy capabilities.
+- `tests/test_creation_live.py`
+- `tests/test_creation_live_hardening.py`
+- `tests/test_creation_live_authority.py`
+- `tests/test_creation_live_community.py`
 
-A persisted `transport_source_id` is reused after reconnect rather than registering duplicates.
+Coverage includes descriptor secrecy, rights/voice boundaries, tenant/stable identity, optimistic concurrency, duplicate-editor rejection, pre-side-effect idempotency, expiry/revocation, rediscovery, browser capture cleanup, route idempotency, authoritative recording mapping, Chat 4 contract consumption and read-only community UI safety.
 
-When Chat 2 is not merged, attachment becomes truthfully `registered`/`compatibility_pending`; the UI explicitly states that the source is safely prepared but no transport/LIVE success is claimed.
+Repository CI/security/self-host checks remain the acceptance authority.
 
-Chat 7 never creates destination OAuth, provider credentials, relay/transcode jobs or a second broadcast transport backend.
+## Remaining genuine blockers / technical debt
 
-## Chat 3 control-room handoff
-
-Attachment returns `control_room_handoff` containing only:
-
-- `source_adapter_id`;
-- safe display label;
-- privacy classification;
-- capabilities;
-- correlation ID.
-
-Chat 3 owns source placement, crop/transform, scene state, Preview/Programme, mixer, transitions, overlays and programme commit.
-
-A broadcast being in Shared Sky `live` state is **not** considered proof that a Chat 7 project source is on Programme. `_programme_truth` defaults `on_air=false` and `programme_state=unknown`. It only changes if Chat 3 exposes an authoritative source-programme query. This prevents fake ON AIR state.
-
-## Chat 4 / Chat 5 / Chat 6 boundary
-
-`GET /creation-live/projects/{project_name}/community` is deliberately non-authoritative compatibility state until the owning contracts are merged:
-
-- Chat 4: display contract only, no project mutation;
-- Chat 5: display only, no Coin debit/balance/payout mutation;
-- Chat 6: read only, no local Battle score/timer engine.
-
-Chat 7 does not fabricate chat messages, viewer counts, Gifts or Battle score state.
-
-## Create -> showcase state model
-
-The single source association uses presentation modes rather than creating additional hidden live sessions:
-
-- Music: creating, tutorial, rehearsal, performance, premiere, showcase, listening_party, brb, detached.
-- Video: creating, tutorial, review, premiere, showcase, brb, detached.
-- Image: creating, tutorial, review, showcase, gallery, brb, detached.
-
-`POST .../transition` preserves the existing Shared Sky project/broadcast association and increments source version. It returns `same_live_session=true`; Chat 3 remains responsible for the actual scene/programme switch.
-
-## Emergency hide / BRB
-
-`POST .../emergency-hide` changes the Chat 7 presentation intent to `brb` using optimistic concurrency. It never deletes editor/project data. Until Chat 3 exposes an authoritative BRB/cut method, the response explicitly says `brb_intent_requested` and does **not** claim Programme changed.
-
-## Markers and post-live return
-
-Markers persist project/live time, source, kind, label and correlation ID. They report `project_mutated=false`.
-
-Post-live return uses one `ReturnAssetRequest` for all three studios and deduplicates by `(user_id, project_name, return_import_id)`. It retains project, studio, live session, recording/highlight, source adapter, processing state, time range, visibility and correlation provenance.
-
-Chat 2's current recording contract returns an asset ID/metadata rather than a local editor blob. Chat 7 therefore persists the provenance link and does **not** invent a local file. A future canonical media-library resolver can materialise the asset once it can prove tenant ownership/readiness. Processing/failed/incomplete/recovered states remain explicit.
-
-## Aura boundary
-
-Aura assistance may recommend the safest currently discoverable source and an original studio preset. The endpoint explicitly reports:
-
-- `consequential_actions_require_creator_confirmation=true`;
-- `can_start_or_stop_live=false`;
-- `can_reveal_hidden_content=false`;
-- `can_enable_full_workspace_capture=false`.
-
-Aura recommendations therefore cannot silently expose private work or start LIVE.
-
-## Browser/device/resource handling
-
-Current browser handling is capability based:
-
-- safe media previews use native audio/video/image playback;
-- advanced workspace checks `getDisplayMedia` before presenting it as usable;
-- browser denial is reported as denial rather than fake preview success;
-- active browser-capture tracks are stopped when the drawer closes;
-- no CPU/GPU/bitrate/frame-drop number is fabricated.
-
-The first slice does not yet own a live Web Audio graph tap, WebRTC/SFU, canvas encoder or transport worker. Those remain the existing Music/Video editor runtime plus Chat 2/3/10 integration boundaries.
-
-## Exact privacy exclusions
-
-The descriptor/preflight rejects or excludes secret-bearing keys including API/OAuth/access/refresh/stream keys, passwords, client/private secrets, credentials, storage/server/filesystem paths, provider payloads, training data/file references, collaborator email and billing fields. Safe source discovery does not serialize the whole Creative Manifest.
-
-The default clean Image/Video live contribution is pixel/media presentation; project EXIF/private metadata is not included in the public descriptor. The preview route itself remains private and is not a public Shared Sky asset URL.
-
-## Deterministic tests
-
-`tests/test_creation_live.py` covers:
-
-- descriptor secrecy and studio/source validation;
-- stable tenant-scoped source IDs;
-- optimistic stale-tab rejection;
-- second-editor control rejection;
-- durable idempotency replay and conflicting-key rejection;
-- private/hidden/secret metadata blocking;
-- real-person likeness checks;
-- Voice Profile generation-vs-LIVE permission separation;
-- cover rights blocking;
-- advanced-workspace confirmation semantics;
-- browser permission and track cleanup strings;
-- non-fabricated ON AIR wording;
-- absence of Chat 7 wallet/Battle score implementation;
-- complete source lifecycle/privacy/return API route surface;
-- idempotent production route installation.
-
-## Known integration gaps / handoff
-
-1. PR #570 (Chat 2) is still open at this branch base. Once merged, Chat 7's dynamic transport adapter activates without a parallel implementation. Re-run contract tests and rebase before merge.
-2. PR #572 (Chat 3) is still open at this branch base. Its current contract does not yet expose `source_programme_state`, so Chat 7 correctly reports Programme state unknown/ON AIR false. Chat 3 can add that query without changing Chat 7 source identity.
-3. Chat 4/5/6 owning contracts should replace the current display-only compatibility payloads; Chat 7 must never keep a permanent duplicate community/Gift/Battle backend.
-4. A true low-latency Music master-bus Web Audio MediaStream tap is not introduced in this slice because the current `/studio` page does not expose one canonical browser audio-graph handle. Chat 7 currently sources ready project audio output without fabricating a live graph. The DAW/audio-runtime owner should expose one safe project programme-bus handle, then Chat 7 can attach it under the same descriptor.
-5. Video/Image current main studio pages expose ready project media elements rather than a canonical application render-canvas handle. Chat 7 uses those real clean outputs and does not pretend canvas capture exists. A future explicit render-surface handle can be added without changing the source schema.
-6. Returned Chat 2 recording/highlight binaries are not materialised until a canonical tenant-safe asset resolver exists. Provenance/deduplication is implemented now.
-7. Final deployment, provider approvals, media-plane capacity and repository-wide release acceptance remain Chat 10/11 concerns.
+1. Chat 3 exact project-source Programme/BRB authority is not merged yet.
+2. Chat 5 Coin/Gift authority is not merged into this integration branch; Chat 7 remains display-only through Chat 4.
+3. Chat 6 authoritative Battle/participant contract is not merged into this integration branch; Chat 7 remains display-only through Chat 4.
+4. Music `/studio` still needs a canonical low-latency browser master/programme-bus `MediaStream` from the DAW runtime for true live graph contribution. Current Chat 7 Music source uses real ready project audio output rather than faking such a bus.
+5. Video/Image editors still need canonical application-owned render-canvas/capture handles for low-latency clean canvas contribution. Current Chat 7 uses real ready clean project output rather than pretending `canvas.captureStream()` is already wired.
+6. Returned Chat 2 recording binaries need a canonical tenant-safe media-asset resolver before physical project-library import.
+7. Browser/device matrix, longer soak/leak tests and media-plane capacity/resource telemetry remain Chat 10/11 handoff items.
+8. Final production enablement/deployment remains outside Chat 7.
