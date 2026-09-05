@@ -8,9 +8,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .cosmic_economy import EconomyError
 from .cosmic_economy_integrations import economy_service
+from .cosmic_economy_shared_sky import chat5_shared_sky_status, configure_chat5_shared_sky
 from .cosmic_payments import coin_payment_providers
 
 router = APIRouter(tags=["Cosmic Creation Coin Compatibility"])
+_SHARED_SKY_BOOTSTRAP = configure_chat5_shared_sky()
 
 
 def _member_user_id(request: Request) -> str:
@@ -53,6 +55,15 @@ def _catalog_payload(user_id: str) -> dict:
 def payment_providers(request: Request):
     _member_user_id(request)
     return {"providers": coin_payment_providers.configured()}
+
+
+@router.get("/economy/integration-status")
+def economy_integration_status(request: Request):
+    _member_user_id(request)
+    return {
+        "shared_sky": chat5_shared_sky_status(),
+        "payment_providers": coin_payment_providers.configured(),
+    }
 
 
 @router.get("/economy/coins", response_class=HTMLResponse)
