@@ -4,9 +4,13 @@ Status: Chat 2 transport control-plane implementation for `development/full-site
 
 ## Scope boundary
 
-This contract owns durable broadcast transport state, programme-source handoff, preflight, independent destination runs, idempotent start/stop/retry, internal playback descriptors, normalized transport health events, recording handoff metadata, and destination adapter capability truth.
+This contract owns durable broadcast transport state, programme-source handoff, preflight,
+independent destination runs, idempotent start/stop/retry, internal playback descriptors,
+normalized transport health events, recording/replay handoff metadata, destination presets,
+transport capacity evidence, stale-session recovery, and destination adapter capability truth.
 
-It does not own studio composition/mixer UI, Live Now discovery/player UI, Gifts, Battles/scoring, editor UX, global infrastructure hardening, or final release acceptance.
+It does not own studio composition/mixer UI, Live Now discovery/player UI, Gifts,
+Battles/scoring, editor UX, global infrastructure hardening, or final release acceptance.
 
 ## Canonical imports
 
@@ -21,17 +25,18 @@ from aura_music_studio.shared_sky_destination_adapters import CapabilityState
 from aura_music_studio.shared_sky_transport_api import router as shared_sky_transport_router
 ```
 
-The existing Shared Sky studio domain remains in:
+The existing Shared Sky studio domain remains:
 
 ```python
 from aura_music_studio.shared_sky_streaming_studios import shared_sky
 ```
 
-Chat 2 composes that existing store rather than creating a competing user/auth/project/destination system.
+Chat 2 composes that store rather than creating a competing user/auth/project/destination
+system.
 
 ## Durable state
 
-Chat 2 adds these SQLite tables to the repository's canonical `LSS_DB_PATH` database:
+Chat 2 adds these SQLite tables to the canonical `LSS_DB_PATH` database:
 
 - `shared_sky_programme_sources`
 - `shared_sky_transport_sessions`
@@ -40,36 +45,42 @@ Chat 2 adds these SQLite tables to the repository's canonical `LSS_DB_PATH` data
 - `shared_sky_transport_events`
 - `shared_sky_transport_rate_limits`
 - `shared_sky_recordings`
+- `shared_sky_destination_presets`
+- `shared_sky_highlight_markers`
 
-`shared_sky_transport_sessions.version` is an optimistic-concurrency version. The session also persists contribution ingest identity, programme/rendition references, correlation/trace IDs, start/end timestamps, validation evidence and terminal/recovery reason codes. Consequential transitions update using the observed version and fail on concurrent mutation.
+`shared_sky_transport_sessions.version` is an optimistic-concurrency version. Sessions
+persist contribution-ingest identity, programme/rendition references, correlation/trace IDs,
+start/end timestamps, validation evidence, health state and terminal/recovery reason codes.
+Consequential transitions update using the observed version and fail on concurrent mutation.
 
 ## Broadcast lifecycle
 
-Canonical Chat 2 states:
+Canonical states:
 
 `draft -> configuring -> validating -> ready -> starting -> live`
 
-Recovery/degradation states:
+Recovery/degradation:
 
 - `degraded`
 - `reconnecting`
 - `stopping`
 
-Terminal states:
+Terminal:
 
 - `ended`
 - `failed`
 - `cancelled`
 
-An external destination has its own lifecycle. A failed destination does not make healthy destinations fail automatically. The aggregate session becomes `degraded` or `reconnecting` while a usable delivery path remains.
+Each external destination has its own lifecycle. A failed/unavailable destination does not
+terminate another healthy destination or healthy internal Shared Sky playback. When at least
+one delivery path is usable, destination-local failures are non-fatal preflight warnings and
+the aggregate session can start `degraded`.
 
 ## Programme-source contract — Chats 3, 6, 7 and 8
 
 Register an upstream programme source:
 
 `POST /shared-sky/api/programme-sources`
-
-Body:
 
 ```json
 {
@@ -95,9 +106,9 @@ Allowed source types:
 - `game_project` — Chat 8
 - `battle_program` — Chat 6 participant/composite transport hook
 
-The response source ID is the stable handoff ID. The source is tenant/project scoped.
+The source ID is the stable tenant/project-scoped handoff ID.
 
-Configure a broadcast to use the source:
+Configure transport:
 
 `PUT /shared-sky/api/broadcasts/{broadcast_id}/transport`
 
@@ -118,30 +129,33 @@ Configure a broadcast to use the source:
 
 `GET /shared-sky/api/broadcasts/{broadcast_id}/transport/preflight`
 
-Response shape:
+Blocking errors are server-authoritative. Source ownership/readiness, conflicting active
+session, recording storage requirements and all-delivery-path-unavailable conditions remain
+fatal. Destination-local inability is demoted to a warning only when another independent
+internal/external delivery path is actually ready.
+
+Representative response:
 
 ```json
 {
-  "ready": false,
-  "blocking_errors": [
+  "ready": true,
+  "blocking_errors": [],
+  "warnings": [
     {
-      "code": "internal_playback_unconfigured",
-      "scope": "internal_playback",
-      "message": "Internal playback origin/signing is not configured"
+      "code": "youtube_live_scope_missing",
+      "scope": "destination",
+      "destination_id": "dest_...",
+      "non_fatal_delivery_path_failure": true
     }
   ],
-  "warnings": [],
-  "destinations": [],
   "internal_playback": {
-    "capability_state": "credentials_missing",
-    "reason_code": "internal_playback_unconfigured"
+    "capability_state": "ready",
+    "reason_code": "ready"
   },
   "correlation_id": "corr_...",
   "trace_id": "trace_..."
 }
 ```
-
-Blocking errors are server-authoritative. The client cannot override them.
 
 ## Idempotent go-live operations — Chat 3
 
@@ -157,30 +171,65 @@ Both require:
 
 `Idempotency-Key: <unique-operation-key>`
 
-The key is reserved in the database before execution. Sensitive operations are also tenant-scoped through a durable SQLite fixed-window limiter (start 10/minute, stop/retry 20/minute, destination validation 30/minute, health events 240/minute). A concurrent duplicate sees HTTP 409 rather than initiating a second provider publish/relay. Reusing a completed key returns the stored response. Reusing the same key with a different request is rejected.
+The key is reserved durably before execution. A concurrent duplicate gets HTTP 409; a
+completed duplicate gets the stored response. Reusing a key with a different request is
+rejected.
+
+Stop order is deterministic by destination ID: media relay is stopped first, then the provider
+resource is closed. A provider-close failure is recorded as a warning and does not prevent
+other destination cleanup or authoritative terminal state.
 
 Retry one destination:
 
 `POST /shared-sky/api/broadcasts/{broadcast_id}/destinations/{destination_id}/retry`
 
-This also requires `Idempotency-Key`. Retry is bounded by `SHARED_SKY_DESTINATION_MAX_RETRIES` (default 5) with exponential backoff capped at 300 seconds.
+Retry is bounded by `SHARED_SKY_DESTINATION_MAX_RETRIES` (default 5), with exponential
+backoff capped at 300 seconds.
+
+## Destination provider resource recovery
+
+Provider external broadcast/stream IDs are persisted before FFmpeg relay startup. If the
+provider publish succeeds but local relay startup fails, a retry receives the existing provider
+IDs. The YouTube adapter re-queries the existing `liveStream` ingest information and reuses
+that resource rather than creating duplicate remote broadcasts/streams.
+
+## Destination presets — Chat 3
+
+Create/upsert a tenant-scoped preset:
+
+`POST /shared-sky/api/destination-presets`
+
+```json
+{
+  "name": "Main Launch",
+  "destination_ids": ["dest_a", "dest_b"]
+}
+```
+
+List:
+
+`GET /shared-sky/api/destination-presets`
+
+Apply to a non-active broadcast:
+
+`POST /shared-sky/api/broadcasts/{broadcast_id}/destination-presets/{preset_id}/apply`
+
+Applying a preset to an active `starting/live/degraded/reconnecting/stopping` transport is
+rejected.
 
 ## Transport status and diagnostics — Chats 3 and 10
 
 `GET /shared-sky/api/broadcasts/{broadcast_id}/transport`
 
-The response contains:
+The response contains durable aggregate state/version, correlation/trace IDs, independent
+destination runs, normalized health data, recording handoffs, recent events, playback
+capability/descriptor and relay runtime health.
 
-- durable aggregate session state/version
-- correlation ID and trace ID
-- independent destination runs
-- normalized health payloads
-- recording handoffs
-- recent transport events
-- internal playback capability/descriptor
-- relay runtime health
+Health-event write endpoint:
 
-Normalized measurable metric keys accepted by the event contract include:
+`POST /shared-sky/api/broadcasts/{broadcast_id}/transport/health`
+
+Normalized measurable keys include:
 
 - `input_bitrate_kbps`
 - `output_bitrate_kbps`
@@ -198,40 +247,49 @@ Normalized measurable metric keys accepted by the event contract include:
 - `region`
 - `relay_id`
 
-Unknown metrics are not persisted into the normalized metric payload. The contract does not invent CPU, GPU, packet-loss, jitter, bitrate, or latency values.
+Unknown metrics are not persisted. The contract does not invent CPU/GPU/network/media values.
 
-Health-event write endpoint:
+### Capacity evidence
 
-`POST /shared-sky/api/broadcasts/{broadcast_id}/transport/health`
+Member-scoped:
 
-## Internal playback — Chat 4
+`GET /shared-sky/api/transport/capacity`
+
+Owner/global:
+
+`GET /owner/shared-sky/api/transport/capacity`
+
+Snapshot fields include active broadcasts, live/reconnecting/failed destination runs, maximum
+active fan-out, active recordings, recent destination-failure event count, measured queue/buffer
+peaks, FFmpeg active outputs/runtime mode, and Chat 10 declared media-node capacity when its
+canonical table exists. `cpu_gpu_values_fabricated` is always false; absence of measurement is
+reported as absence rather than synthetic telemetry.
+
+## Internal playback — Chat 4 / origin service
 
 `GET /shared-sky/api/broadcasts/{broadcast_id}/playback`
 
-When the deployment has both `SHARED_SKY_PLAYBACK_BASE_URL` and `SHARED_SKY_PLAYBACK_SIGNING_SECRET`, the response contains:
+When `SHARED_SKY_PLAYBACK_BASE_URL` and `SHARED_SKY_PLAYBACK_SIGNING_SECRET` exist, the
+response contains a short-lived LL-HLS-style manifest descriptor and separate Bearer token.
+The token is never embedded into the manifest query string.
 
-```json
-{
-  "capability_state": "ready",
-  "mode": "ll-hls",
-  "manifest_url": "https://origin/.../{broadcast_id}/master.m3u8",
-  "authorization": {
-    "scheme": "Bearer",
-    "token": "short-lived-signed-token",
-    "expires_at": "..."
-  },
-  "broadcast_id": "...",
-  "state": "live"
-}
+Origin/CDN authorization can reuse the exact verifier:
+
+```python
+from aura_music_studio.shared_sky_transport_domain import transport
+
+claims = transport.verify_playback_token(
+    token,
+    expected_broadcast_id=broadcast_id,
+    expected_user_id=user_id,
+)
 ```
 
-The signed token is not embedded in the manifest query string. If the origin/signing deployment is absent, the API returns a truthful `credentials_missing`/runtime capability state instead of a fake URL.
-
-Chat 4 should use `session.state` plus transport events for stream-start/end state. Replay/post-production should use recording asset IDs, not opaque blob copies.
+The verifier uses HMAC constant-time comparison, validates expiry and binds the token to the
+expected broadcast/member. This is the authorization contract; a deployed LL-HLS origin/CDN
+remains an infrastructure prerequisite rather than being claimed by Chat 2.
 
 ## Destination adapter contract
-
-Adapter boundary:
 
 ```python
 class DestinationAdapter(Protocol):
@@ -241,72 +299,57 @@ class DestinationAdapter(Protocol):
     def stop(...): ...
 ```
 
-Implemented adapter modes:
-
 ### Custom RTMP/RTMPS/SRT/RIST
 
-Creator-supplied lawful endpoints use the existing encrypted Shared Sky vault. Before first relay use Chat 2 validates:
+Creator-supplied lawful endpoints use the existing encrypted Shared Sky vault. Validation
+requires approved schemes, hostname, no embedded user/password and no localhost/private/
+link-local/reserved IP. DNS resolution is checked before relay use. Credentials are appended
+only server-side and never returned by the API.
 
-- approved schemes only
-- hostname presence
-- no user/password embedded in the URL
-- no localhost/private/link-local/reserved destination IP
-- DNS resolution does not resolve to unsafe internal addresses
-
-Credentials are appended only server-side after vault decryption and are never returned by the API.
+`POST /shared-sky/api/destinations/validate` performs the same server validation boundary.
 
 ### YouTube Live Streaming API
 
-The adapter uses the repository's encrypted `SocialOAuthVault`; it does not create a second OAuth/token store. It requires an OAuth credential linked in destination metadata under `oauth_credential_id`, and one of the official YouTube Live scopes:
+The adapter uses the repository's encrypted `SocialOAuthVault`; it does not create a second
+OAuth store. It requires destination metadata `oauth_credential_id`, one of:
 
 - `https://www.googleapis.com/auth/youtube`
 - `https://www.googleapis.com/auth/youtube.force-ssl`
 
-Provider publish is additionally gated by `SHARED_SKY_YOUTUBE_LIVE_ENABLED=1`, which should only be enabled after app verification/account eligibility are validated.
+and deployment gate `SHARED_SKY_YOUTUBE_LIVE_ENABLED=1` after app verification/account
+eligibility have been validated.
 
-When ready, the adapter uses official YouTube Live Streaming API operations to create a `liveBroadcast`, create a `liveStream`, bind them, obtain provider ingest information, and relay the Shared Sky programme to that ingest. Provider IDs are persisted in the destination run.
-
-Current repository-wide YouTube social OAuth asks for upload/read scopes rather than a Live Streaming write scope, so existing accounts can truthfully report `scope_insufficient` until reauthorized through the canonical OAuth layer. The adapter follows the official create-broadcast → create-stream → bind flow and leaves account eligibility/provider approval as an evidence gate.
+When ready it uses official YouTube `liveBroadcast`, `liveStream`, bind and stream-query
+operations. Current repository-wide social OAuth requests upload/read scopes, so existing
+accounts truthfully report `scope_insufficient` until reauthorized through the canonical OAuth
+layer.
 
 ### Other providers
 
-Other provider entries remain capability-only adapters until their official API/ingest access and app/account eligibility are implemented and verified. They return explicit states such as `approval_pending`, `credentials_missing`, `account_ineligible`, or `unsupported`; they do not simulate live connection success.
+Other providers remain capability-only until their official APIs/ingest access and app/account
+eligibility are implemented and verified. They return explicit `approval_pending`,
+`credentials_missing`, `account_ineligible`, `scope_insufficient` or `unsupported` states and
+never simulate LIVE success.
 
-A creator-supplied permitted RTMP/RTMPS/SRT endpoint may still be transported through the custom endpoint adapter when the creator legitimately has that endpoint/key.
-
-Capability matrix endpoint:
+Capability matrix:
 
 `GET /shared-sky/api/destination-capabilities`
 
 ## Ingest compatibility — Chat 10
 
-Chat 2 deliberately does not duplicate Chat 10's open signed-ingest media-plane PR. For `browser` or `external_encoder` sources, it dynamically detects the canonical `shared_sky_media_plane` compatibility module when present. Until that PR lands, preflight emits `signed_ingest_contract_pending_merge`. Browser/external-encoder sources are fail-closed unless a canonical signed ingest session can be verified from `shared_sky_ingest_sessions`; an arbitrary client-supplied ingest ID is not accepted as proof.
+Chat 2 deliberately does not duplicate Chat 10's signed-ingest media-plane PR. Browser or
+external-encoder sources are fail-closed unless a canonical `shared_sky_ingest_sessions` row is
+present, tenant/broadcast bound, issued, unrevoked and unexpired. An arbitrary client-supplied
+ID is not accepted as proof.
 
-External relay still requires `SHARED_SKY_INGEST_BASE_URL` when external destinations are selected.
+Until Chat 10's canonical module lands, preflight emits the explicit compatibility blocker/
+warning instead of inventing media termination.
 
-Chat 10 media-node/ingest credentials remain the canonical ingest-security boundary after merge.
+External relay still requires `SHARED_SKY_INGEST_BASE_URL` when external destinations are used.
 
-## Destination failure isolation
+## Recording and replay handoff — Chats 3, 4, 7 and 8
 
-`shared_sky_destination_runs` has one row per broadcast/destination. Important fields:
-
-- `state`
-- `capability_state`
-- `provider_external_id`
-- `provider_stream_id`
-- `output_id`
-- `retry_count`
-- `next_retry_at`
-- `last_error_code`
-- redacted/safe `last_error_safe`
-- profile and health JSON
-- start/end timestamps
-
-A failure is normalized to a reason code and, when retryable, becomes `reconnecting` with bounded backoff. Healthy output processes remain untouched.
-
-## Recording handoff — Chats 3, 4, 7 and 8
-
-Request a recording transport asset:
+Request recording metadata:
 
 `POST /shared-sky/api/broadcasts/{broadcast_id}/recordings/{kind}`
 
@@ -317,46 +360,75 @@ Kinds:
 - `isolated_source`
 - `audio_tracks`
 
-Requires `SHARED_SKY_RECORDING_STORAGE_URI`.
-
-Finalize/handoff metadata:
+Finalize:
 
 `PUT /shared-sky/api/broadcasts/{broadcast_id}/recordings/{kind}`
 
+Stores asset ID, checksum, size, duration and status references; editors receive references
+rather than copied opaque blobs. Client-facing storage paths are masked.
+
+Create replay/highlight/chapter/clip markers:
+
+`POST /shared-sky/api/broadcasts/{broadcast_id}/markers`
+
 ```json
 {
-  "state": "complete",
-  "asset_id": "asset_...",
-  "checksum_sha256": "<64 hex chars>",
-  "size_bytes": 123456789,
-  "duration_ms": 3600000
+  "offset_ms": 15000,
+  "label": "Big moment",
+  "marker_type": "highlight"
 }
 ```
 
-Chat 2 stores provenance/status/checksum/size/duration references. It does not copy the media blob into editors. Storage paths are masked in client-facing status.
+List ordered markers:
+
+`GET /shared-sky/api/broadcasts/{broadcast_id}/markers`
+
+Supported marker types: `highlight`, `chapter`, `clip`, `replay`. These timestamp references
+are the handoff for recording/replay/highlight processors; Chat 2 does not implement editing.
+
+## Stale-session recovery — Owner / Chat 10
+
+Owner-only recovery action:
+
+`POST /owner/shared-sky/api/transport/cleanup-stale`
+
+```json
+{"stale_after_seconds": 300}
+```
+
+Only stale transitional `starting` and `stopping` sessions are touched. Persisted relay output
+IDs are torn down; stale starts become `failed` with `stale_start_cleanup`, stale stops become
+`ended` with `stale_stop_cleanup`. Healthy live/degraded/reconnecting sessions are never swept
+by this action.
+
+This is a domain recovery hook. Chat 10 may call/schedule it from hardened infrastructure.
 
 ## Existing scheduled LIVE contract — Chat 3 / Chat 10
 
-Chat 2 reuses the existing `SharedSkyWorker` durable scheduler with leases, retry count, and a fail-closed pre-recorded mode. Chat 2 does not add a competing scheduler.
+Chat 2 reuses `SharedSkyWorker` with database leases/retry counts. It does not add a second
+scheduler.
 
-Current routes already owned by the worker control layer:
+Existing owner routes:
 
 - `GET /owner/shared-sky/api/scheduler/status`
 - `POST /owner/shared-sky/api/scheduler/run-due`
 
-Pre-recorded playout remains a truthful runtime blocker until a dedicated playout worker exists.
+Pre-recorded playout remains fail-closed until a dedicated playout worker exists.
 
 ## Chat 5 handoff
 
-Gift transactions should reference the authoritative Shared Sky LIVE/broadcast identity plus creator recipient identity only. Chat 2 provides lifecycle/start/end state; no Gift ledger or Coin arithmetic is implemented here.
+Gift transactions reference the authoritative Shared Sky broadcast/live identity and creator
+recipient identity only. Chat 2 exposes lifecycle/start/end state; no Coin arithmetic is here.
 
 ## Chat 6 handoff
 
-Battles use the stable broadcast ID plus `battle_program` source registration. Chat 2 transports the programme/media state only; scoring, teams and battle logic remain Chat 6.
+Battles use the stable broadcast ID and `battle_program` source registration. Chat 2 owns only
+media transport state.
 
 ## Chat 9 handoff
 
-Use destination capability/status and broadcast history references. Do not duplicate OAuth/user-role systems. The YouTube transport adapter resolves credentials through the canonical encrypted Social OAuth vault.
+Use destination capability/status and broadcast history references. Do not duplicate OAuth or
+role systems.
 
 ## Chat 10 handoff
 
@@ -364,26 +436,33 @@ Consume:
 
 - `shared_sky_transport_events`
 - `shared_sky_destination_runs`
+- `shared_sky_transport_sessions`
+- `GET /owner/shared-sky/api/transport/capacity`
+- `POST /owner/shared-sky/api/transport/cleanup-stale`
 - relay health from `shared_sky_relay`
-- correlation/trace IDs from `shared_sky_transport_sessions`
-- `signed_ingest_contract_pending_merge` compatibility warning until the media-plane PR lands
+- correlation/trace IDs
 
-Chat 10 should replace the current web-process FFmpeg supervisor with hardened worker/service orchestration without changing these Chat 2 domain contracts.
+Chat 10 may replace process-local FFmpeg supervision with a hardened worker/service without
+changing these domain contracts.
 
 ## Chat 11 acceptance handoff
 
 Release acceptance should verify:
 
-1. exact integration-branch ancestry;
-2. migrations initialize on an existing database;
-3. start/stop/retry idempotency under concurrent requests;
-4. SSRF cases for IPv4/IPv6/private/link-local/reserved/DNS resolution; DNS rebinding remains a deployment-layer hardening item for Chat 10;
-5. provider credentials never appear in API/log fixtures;
-6. YouTube official API tests remain mocked in ordinary CI and never contact creator accounts;
-7. internal playback is capability-blocked until a real origin is configured;
-8. scheduled worker remains fail-closed for pre-recorded playout;
-9. Chat 10 signed-ingest PR is reconciled without duplicate schemas/routes;
-10. production media-plane/origin/relay capacity evidence is supplied before claiming production scale.
+1. exact integration ancestry;
+2. schema initialization on existing databases;
+3. concurrent start/stop/retry idempotency;
+4. partial-LIVE behavior when one delivery path is unavailable;
+5. provider-resource reuse after relay startup failure;
+6. deterministic media-before-provider shutdown;
+7. stale transition cleanup never sweeps healthy LIVE sessions;
+8. IPv4/IPv6/private/link-local/reserved/DNS SSRF cases;
+9. credentials never appear in API/log fixtures;
+10. playback Bearer token signature/expiry/broadcast/member binding;
+11. internal playback remains capability-blocked without a real origin;
+12. scheduled worker remains fail-closed for pre-recorded playout;
+13. Chat 10 signed-ingest PR reconciles without duplicate schemas/routes;
+14. production media-plane/origin/relay capacity evidence exists before production-scale claims.
 
 ## Environment/configuration points
 
@@ -395,17 +474,19 @@ Release acceptance should verify:
 - `SHARED_SKY_DESTINATION_MAX_RETRIES`
 - `SHARED_SKY_PLAYBACK_BASE_URL`
 - `SHARED_SKY_PLAYBACK_SIGNING_SECRET`
-- `SHARED_SKY_ALLOW_INSECURE_PLAYBACK` (development only)
+- `SHARED_SKY_ALLOW_INSECURE_PLAYBACK` — development only
 - `SHARED_SKY_RECORDING_STORAGE_URI`
 - `SHARED_SKY_YOUTUBE_LIVE_ENABLED`
-- canonical social OAuth variables already owned by `esp_social_oauth.py`
+- canonical social OAuth variables owned by `esp_social_oauth.py`
 
-No secret values belong in source control, browser logs, analytics, fixtures, or API error bodies.
+No secret belongs in source control, browser logs, analytics, fixtures or API error bodies.
 
 ## Truth boundary
 
-This Chat 2 implementation is a production-facing control plane and adapter layer. It does not claim the repository currently has a deployed SFU, RTMP/SRT termination cluster, LL-HLS origin/CDN, dedicated transcoder fleet, recording writer, or provider approvals merely because contracts/configuration exist. Those remain runtime/deployment/provider gates and are surfaced as capability blockers rather than fake success.
-
+This implementation is a production-facing transport control plane and adapter layer. It does
+not claim a deployed SFU, RTMP/SRT termination cluster, LL-HLS origin/CDN, dedicated transcoder
+fleet, recording writer, or external provider approval merely because contracts exist. Those
+remain deployment/provider capability gates and are surfaced truthfully.
 
 ## Official provider references verified for this implementation
 
