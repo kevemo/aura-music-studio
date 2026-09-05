@@ -126,7 +126,6 @@ from aura_music_studio.recording_portal import router as recording_portal_router
 from aura_music_studio.revision_api import router as revision_router
 from aura_music_studio.revision_portal import router as revision_portal_router
 from aura_music_studio.route_integrity import deduplicate_http_routes
-from aura_music_studio.shared_sky_battle_api import router as shared_sky_battle_router
 from aura_music_studio.shared_sky_owner_ops import router as shared_sky_owner_ops_router
 from aura_music_studio.social_management_api import router as social_management_router
 from aura_music_studio.social_management_portal import router as social_management_portal_router
@@ -237,10 +236,6 @@ app.include_router(creative_workspace_router)
 app.include_router(esp_level_up_gateway_router)
 app.include_router(esp_niche_portal_router)
 app.include_router(esp_agent_roster_overlay_router)
-# Battle and multi-host authority is mounted directly for the same FastAPI snapshotting reason as
-# the owner runtime. The Creator overlay also exposes it for compatibility; final route integrity
-# deduplicates the later copy while preserving this canonical production dispatch boundary.
-app.include_router(shared_sky_battle_router)
 # Shared Sky owner runtime is mounted directly because late nested-router composition is not
 # propagated after an already-included parent router has been snapshotted by FastAPI.
 app.include_router(shared_sky_owner_ops_router)
