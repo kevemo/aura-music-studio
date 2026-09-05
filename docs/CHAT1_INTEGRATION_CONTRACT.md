@@ -1,84 +1,162 @@
-# Chat 1 Integration Contract
+from datetime import datetime, timezone
 
-Developer handoff for the shared integration backbone. This is not a second product/master specification.
+import pytest
+from pydantic import ValidationError
 
-## Security boundary
-
-Commercial/product entitlement and ESP organisational authority are independent.
-
-- Existing product access remains driven by `plans.py` / `Plan.has(...)` and active membership state.
-- Existing membership middleware remains in `access_control.py` unchanged.
-- ESP organisational role/action policy lives in `org_authority.py`.
-- A paid plan never grants Owner/Admin/Agent/Creator authority.
-- An ESP role never grants a paid plan feature.
-- Owner commercial overrides require explicit `OwnerOverrideEvidence` and an audit callback.
-
-## Canonical imports
-
-```python
-from aura_music_studio.shared_contracts import (
-    AssetReference, BattleRoundReference, BattleSessionReference, BroadcastReference,
-    CorrelationIdentity, CosmicCoinLedgerTransactionReference, CreatorIdentityReference,
-    CreatorReceiptReference, EngagementEventReference, FeatureEntitlement,
-    GiftCatalogueItemReference, LiveGiftReference, LiveSessionReference,
-    ModerationReference, OrgRoleGrant, OwnerOverrideEvidence, ParticipantReference,
-    ProductEntitlement, ProjectIdentity, RequestIdentity, StreamingDestinationReference,
-    UserIdentity, WorkspaceIdentity,
-)
-from aura_music_studio.org_authority import OrgAction, OrgAuthority, OrgRole, roles_from_account
-from aura_music_studio.authorization import (
-    AuthorizationContext, require_authorized_feature,
-    require_org_authority, require_product_entitlement,
-)
-from aura_music_studio.capabilities import (
-    CapabilityRecord, CapabilityRegistry, CapabilityStatus,
-    ProviderCapabilityState, derive_provider_capability,
-)
-from aura_music_studio.events import EventEnvelope, OutboxPublisher
-from aura_music_studio.shared_persistence import SharedPersistence, canonical_request_hash
-from aura_music_studio.shared_audit import AuditWriter
-from aura_music_studio.runtime_config import ProviderRuntimeConfig, provider_config_from_env
-from aura_music_studio.feature_routes import FeatureRoute, RouteRegistry, ROUTES
 from aura_music_studio.api_errors import ApiError, ApiErrorCode
-```
+from aura_music_studio.authorization import (
+    AuthorizationContext, EntitlementDeniedError, InvalidOverrideError,
+    require_authorized_feature, require_product_entitlement,
+)
+from aura_music_studio.capabilities import CapabilityRegistry, CapabilityStatus, derive_provider_capability
+from aura_music_studio.events import EventEnvelope
+from aura_music_studio.feature_routes import ROUTES, RouteImplementationState, RouteRegistry
+from aura_music_studio.org_authority import OrgAction, OrgAuthorityDeniedError, OrgRole, roles_from_account
+from aura_music_studio.plans import MULTITRACK_DAW
+from aura_music_studio.runtime_config import provider_config_from_env
+from aura_music_studio.shared_contracts import OwnerOverrideEvidence, OrgRoleGrant, UserIdentity
 
-Shared test objects are imported from `aura_music_studio.testing`. Fixtures identify themselves as test data and are never production provider evidence.
+NOW = datetime.now(timezone.utc)
 
-## Persistence
 
-`SharedPersistence.initialize()` applies additive schema version 1. It creates `shared_schema_migrations`, `shared_idempotency`, and `shared_event_outbox` without replacing existing domain tables.
+def test_contracts_forbid_extra_and_naive_datetimes():
+    with pytest.raises(ValidationError):
+        UserIdentity(user_id="u1", unexpected=True)
+    with pytest.raises(ValidationError):
+        OrgRoleGrant(grant_id="g1", user_id="u1", role=OrgRole.AGENT,
+                     granted_by="owner", granted_at=datetime.now())
 
-Use `SharedPersistence.transaction()` plus `enqueue_event(..., connection=connection)` when a domain mutation and consequential event must commit atomically. Reusing an idempotency key with a different canonical request hash is a conflict, never a replay.
 
-## Capability truth
+def test_account_role_mapping_preserves_creator_agent_both():
+    assert roles_from_account({"esp_status": "owner"}) == frozenset({OrgRole.OWNER})
+    assert roles_from_account({"esp_status": "active", "esp_roles": "both"}) == frozenset({OrgRole.CREATOR, OrgRole.AGENT})
+    assert roles_from_account({"esp_status": "none"}) == frozenset({OrgRole.USER})
 
-Only server-known facts create provider capability state. Clients may display public snapshots but cannot declare credentials, platform approval, user eligibility or provider health. Statuses are centralized in `CapabilityStatus`.
 
-Configuration presence and enablement are distinct: absent provider configuration is `not_configured`, an explicit Owner disable is `disabled`, and configured providers continue through credential, approval, eligibility and health gates.
+def test_paid_plan_never_grants_org_authority():
+    context = AuthorizationContext(user_id="u1", org_roles=frozenset({OrgRole.USER}),
+                                   plan_id="pro", membership_active=True)
+    with pytest.raises(OrgAuthorityDeniedError):
+        require_authorized_feature(context, org_action=OrgAction.MANAGE_FINANCES,
+                                   feature_key=MULTITRACK_DAW)
 
-## Feature discovery
 
-`ROUTES` registers Shared Sky, Live Now, Battles, Gifts & Cosmic Coins, and Go Live & Create.
+def test_owner_role_never_silently_grants_paid_entitlement():
+    context = AuthorizationContext(user_id="owner", org_roles=frozenset({OrgRole.OWNER}),
+                                   plan_id="free", membership_active=True)
+    with pytest.raises(EntitlementDeniedError):
+        require_product_entitlement(context, feature_key=MULTITRACK_DAW)
 
-- `live_now` is wired to the merged Chat 4 public route `GET /live-now` through `aura_music_studio.shared_sky_live_community:router` and is marked `ready` at the route-wiring layer.
-- A ready route is not a fabricated provider-success claim: Live Now still fails closed for individual sessions unless canonical broadcast and playback-readiness checks pass.
-- Shared Sky root, Battles, Gifts & Cosmic Coins, and Go Live & Create remain `integration_pending` until their owning workstreams provide verified merged wiring.
 
-Pending entries use an unavailable fallback and never mimic success.
+def test_owner_override_requires_matching_evidence_and_audit():
+    context = AuthorizationContext(user_id="owner", org_roles=frozenset({OrgRole.OWNER}),
+                                   plan_id="free", membership_active=True)
+    evidence = OwnerOverrideEvidence(override_id="ovr1", owner_user_id="owner",
+                                     reason="Incident recovery", correlation_id="corr1",
+                                     approved_at=NOW)
+    with pytest.raises(InvalidOverrideError):
+        require_product_entitlement(context, feature_key=MULTITRACK_DAW, override=evidence)
+    seen = []
+    require_product_entitlement(context, feature_key=MULTITRACK_DAW, override=evidence,
+                                audit_writer=lambda item, purpose: seen.append((item.override_id, purpose)))
+    assert seen == [("ovr1", f"feature:{MULTITRACK_DAW}")]
 
-## Audit and public error safety
 
-`AuditWriter` wraps the existing SQLite `AuditLedger`; it does not create a competing audit store. Existing hash chaining and AuraSec DLP sanitisation remain the persistence boundary.
+def test_capability_registry_is_server_derived():
+    state = derive_provider_capability(key="stream.youtube", provider="youtube", implemented=True,
+                                       owner_enabled=True, feature_flag_enabled=True,
+                                       credentials_present=False, approval_granted=False)
+    assert state.status is CapabilityStatus.CREDENTIALS_MISSING
+    assert not state.available
+    registry = CapabilityRegistry([state])
+    with pytest.raises(Exception):
+        registry.require_available("stream.youtube")
 
-`ApiError.public_payload()` and `EventEnvelope.audit_metadata` reuse AuraSec DLP so server credentials, credential-shaped values and internal stack details are not exposed through shared public/audit surfaces. Internal errors return a generic public message plus correlation identity.
 
-## Cross-workstream rules
+def test_provider_state_distinguishes_unconfigured_disabled_and_missing_credentials():
+    unconfigured = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True, environ={},
+    ).capability_state()
+    assert unconfigured.status is CapabilityStatus.NOT_CONFIGURED
 
-1. Reuse existing durable string IDs; do not force a UUID migration.
-2. Validate untrusted cross-domain payloads with the Pydantic contracts.
-3. Keep roles, product entitlements, balances and provider capability server-authoritative.
-4. Reuse canonical shared status values instead of inventing duplicate strings.
-5. Put domain-specific data in versioned `EventEnvelope.payload`.
-6. Derive external-provider capability from server configuration and approval evidence.
-7. A UI label, feature branch or adapter is never provider-success evidence.
-8. When an owning workstream is merged, update `ROUTES` to its verified route path/state instead of leaving stale provisional discovery metadata.
+    disabled = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True, environ={"YOUTUBE_ENABLED": "false"},
+    ).capability_state()
+    assert disabled.status is CapabilityStatus.DISABLED
+
+    missing_credentials = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True,
+        environ={"YOUTUBE_ENABLED": "true", "YOUTUBE_FEATURE_FLAG": "true", "YOUTUBE_APPROVED": "true"},
+    ).capability_state()
+    assert missing_credentials.status is CapabilityStatus.CREDENTIALS_MISSING
+
+
+def test_runtime_config_never_exposes_secret():
+    config = provider_config_from_env(provider="youtube", capability_key="stream.youtube",
+                                      credential_env="YOUTUBE_SECRET", prefix="YOUTUBE", implemented=True,
+                                      environ={"YOUTUBE_SECRET":"super-secret","YOUTUBE_ENABLED":"true",
+                                               "YOUTUBE_FEATURE_FLAG":"true","YOUTUBE_APPROVED":"true"})
+    assert "super-secret" not in repr(config.public_payload())
+    assert config.public_payload()["available"] is True
+
+
+def test_public_errors_and_event_audit_metadata_scrub_secrets():
+    bearer = "Bearer very-sensitive-token-value"
+    placeholder_secret = "test-provider-secret-placeholder"
+    error = ApiError(
+        code=ApiErrorCode.VALIDATION_FAILED,
+        message=f"Provider rejected {bearer}",
+        correlation_id="corr-public-error",
+        details={"api_key": placeholder_secret, "note": bearer},
+    )
+    public = error.public_payload()
+    serialized = repr(public)
+    assert "very-sensitive-token-value" not in serialized
+    assert placeholder_secret not in serialized
+
+    internal = ApiError(
+        code=ApiErrorCode.INTERNAL_ERROR,
+        message="Traceback: /srv/app/secret.py line 9",
+        correlation_id="corr-internal",
+        details={"stack": "Traceback: sensitive implementation detail"},
+    ).public_payload()
+    assert internal["message"] == "Internal error"
+    assert internal["details"] == {}
+
+    event = EventEnvelope(
+        event_id="evt-1",
+        type="test.event",
+        subject_type="test",
+        subject_id="subject-1",
+        occurred_at=NOW,
+        correlation_id="corr-event",
+        source="tests",
+        audit_metadata={"note": bearer},
+    )
+    assert "very-sensitive-token-value" not in repr(event.audit_metadata)
+    with pytest.raises(ValidationError):
+        EventEnvelope(
+            event_id="evt-2",
+            type="test.event",
+            subject_type="test",
+            subject_id="subject-2",
+            occurred_at=NOW,
+            correlation_id="corr-event-2",
+            source="tests",
+            audit_metadata={"access_token": "must-never-be-accepted"},
+        )
+
+
+def test_routes_reflect_verified_merged_owners_without_fabricating_pending_domains():
+    required = {"shared_sky", "live_now", "battles", "gifts_cosmic_coins", "go_live_create"}
+    assert required.issubset({route.key for route in ROUTES.all()})
+    live_now = ROUTES.get("live_now")
+    assert live_now.path == "/live-now"
+    assert live_now.implementation_state is RouteImplementationState.READY
+    for key in required - {"live_now"}:
+        assert ROUTES.get(key).implementation_state is RouteImplementationState.INTEGRATION_PENDING
+    with pytest.raises(ValueError):
+        RouteRegistry([ROUTES.get("shared_sky"), ROUTES.get("shared_sky")])
