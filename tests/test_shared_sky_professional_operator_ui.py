@@ -72,6 +72,34 @@ def test_operator_commands_use_existing_versioned_studio_and_marker_routes():
     assert "expected_studio_version" not in OPERATOR_JS
 
 
+def test_operator_profile_editor_updates_with_server_version_and_allowlisted_commands():
+    assert "id='addOperatorHotkey'" in OPERATOR_HTML
+    assert "id='addOperatorMacro'" in OPERATOR_HTML
+    assert "id='deleteOperatorProfile'" in OPERATOR_HTML
+    assert "const OPERATOR_COMMANDS=['cut','transition','undo','redo','scene_next','scene_previous','marker_highlight']" in OPERATOR_JS
+    assert "expected_version:profile.version" in OPERATOR_JS
+    assert "OPERATOR_COMMANDS.includes(command)" in OPERATOR_JS
+    assert "commands.some(c=>!OPERATOR_COMMANDS.includes(c))" in OPERATOR_JS
+    assert "confirm_programme:programme" in OPERATOR_JS
+
+
+def test_profile_selection_is_distinct_from_active_profile_for_safe_delete():
+    assert "function selectedOperatorProfile()" in OPERATOR_JS
+    assert "const profile=selectedOperatorProfile();if(!profile)return;if(profile.is_active)" in OPERATOR_JS
+    assert "Activate another profile before deleting this active profile." in OPERATOR_JS
+    assert "Delete inactive operator profile" in OPERATOR_JS
+    assert "del.disabled=!selected||Boolean(selected.is_active)" in OPERATOR_JS
+    assert "activate.disabled=!selected||Boolean(selected.is_active)" in OPERATOR_JS
+    assert "$('#operatorProfile').onchange=updateOperatorButtons" in OPERATOR_JS
+
+
+def test_hotkeys_and_macros_edit_active_profile_not_merely_selected_profile():
+    assert "async function saveActiveOperatorProfile(fields){const profile=activeOperatorProfile()" in OPERATOR_JS
+    assert "async function addOperatorHotkeyUI(){const profile=activeOperatorProfile()" in OPERATOR_JS
+    assert "async function addOperatorMacroUI(){const profile=activeOperatorProfile()" in OPERATOR_JS
+    assert "Hotkeys and macros edit the active profile" in OPERATOR_HTML
+
+
 def test_composed_installer_wraps_professional_renderer_once(monkeypatch):
     monkeypatch.setattr(canvas, "professional_html", _base)
     app = FastAPI()
