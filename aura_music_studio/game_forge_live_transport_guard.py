@@ -71,6 +71,7 @@ def guarded_transition_game_live_source(
         game_id=game_id,
         source_adapter_id=source_adapter_id,
         reason_code=("game_forge_brb" if body.presentation_mode == "brb" else "game_forge_presentation_ready"),
+        force_not_ready=False,
     )
     return _with_transport(payload, programme)
 
@@ -90,6 +91,7 @@ def guarded_promote_game_live_version(
         game_id=game_id,
         source_adapter_id=source_adapter_id,
         reason_code="game_forge_version_promoted",
+        force_not_ready=False,
     )
     return _with_transport(payload, programme)
 
