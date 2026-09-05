@@ -15,6 +15,12 @@ class GameModelError(ValueError):
 
 _MAX_VERTICES = max(3, int(os.getenv("AURA_GAME_MODEL_MAX_VERTICES", "100000")))
 _MAX_PRIMITIVES = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_PRIMITIVES", "128")))
+_MAX_ACCESSOR_ELEMENTS = max(3, int(os.getenv("AURA_GAME_MODEL_MAX_ACCESSOR_ELEMENTS", "250000")))
+_MAX_NODES = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_NODES", "4096")))
+_MAX_MESHES = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_MESHES", "2048")))
+_MAX_ACCESSORS = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_ACCESSORS", "4096")))
+_MAX_BUFFER_VIEWS = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_BUFFER_VIEWS", "4096")))
+_MAX_BUFFERS = max(1, int(os.getenv("AURA_GAME_MODEL_MAX_BUFFERS", "64")))
 _COMPONENT_TYPES = {
     5120: ("b", 1),
     5121: ("B", 1),
@@ -35,6 +41,35 @@ def _decode_data_uri(uri: str) -> bytes:
         return base64.b64decode(encoded, validate=True)
     except Exception as exc:
         raise GameModelError("glTF contains an invalid embedded base64 buffer") from exc
+
+
+def _validate_document_shape(document: dict[str, Any]) -> None:
+    limits = {
+        "nodes": _MAX_NODES,
+        "meshes": _MAX_MESHES,
+        "accessors": _MAX_ACCESSORS,
+        "bufferViews": _MAX_BUFFER_VIEWS,
+        "buffers": _MAX_BUFFERS,
+    }
+    for key, limit in limits.items():
+        rows = document.get(key, []) or []
+        if not isinstance(rows, list):
+            raise GameModelError(f"glTF {key} must be an array")
+        if len(rows) > limit:
+            raise GameModelError(f"glTF exceeds the {limit} {key} safety limit")
+    for row in document.get("accessors", []) or []:
+        if not isinstance(row, dict):
+            raise GameModelError("glTF accessor entries must be objects")
+        try:
+            count = int(row.get("count") or 0)
+        except (TypeError, ValueError) as exc:
+            raise GameModelError("glTF accessor count is invalid") from exc
+        if count < 0:
+            raise GameModelError("glTF accessor count is invalid")
+        if count > _MAX_ACCESSOR_ELEMENTS:
+            raise GameModelError(
+                f"glTF accessor exceeds the {_MAX_ACCESSOR_ELEMENTS} element safety limit"
+            )
 
 
 def _read_glb(path: Path) -> tuple[dict[str, Any], list[bytes]]:
@@ -65,12 +100,17 @@ def _read_glb(path: Path) -> tuple[dict[str, Any], list[bytes]]:
         document = json.loads(json_chunk.rstrip(b"\x00 \t\r\n").decode("utf-8"))
     except Exception as exc:
         raise GameModelError("GLB JSON chunk is invalid") from exc
+    if not isinstance(document, dict):
+        raise GameModelError("GLB JSON root must be an object")
     if str(document.get("asset", {}).get("version", "")) != "2.0":
         raise GameModelError("Only glTF 2.0 models are supported")
+    _validate_document_shape(document)
 
     buffers: list[bytes] = []
     binary_index = 0
     for row in document.get("buffers", []) or []:
+        if not isinstance(row, dict):
+            raise GameModelError("glTF buffer entries must be objects")
         uri = row.get("uri")
         if uri:
             data = _decode_data_uri(str(uri))
@@ -91,10 +131,15 @@ def _read_gltf(path: Path) -> tuple[dict[str, Any], list[bytes]]:
         document = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise GameModelError("glTF JSON is invalid") from exc
+    if not isinstance(document, dict):
+        raise GameModelError("glTF JSON root must be an object")
     if str(document.get("asset", {}).get("version", "")) != "2.0":
         raise GameModelError("Only glTF 2.0 models are supported")
+    _validate_document_shape(document)
     buffers: list[bytes] = []
     for row in document.get("buffers", []) or []:
+        if not isinstance(row, dict):
+            raise GameModelError("glTF buffer entries must be objects")
         uri = str(row.get("uri") or "")
         if not uri:
             raise GameModelError("JSON glTF buffers must be embedded as base64 data URIs")
@@ -131,18 +176,28 @@ def _normalized(value: float, component_type: int) -> float:
     return float(value)
 
 
+def _finite_values(values: tuple[float, ...]) -> tuple[float, ...]:
+    if any(not math.isfinite(value) for value in values):
+        raise GameModelError("glTF geometry contains non-finite numeric values")
+    return values
+
+
 def _accessor(document: dict[str, Any], buffers: list[bytes], index: int) -> list[tuple[float, ...]]:
     accessors = document.get("accessors", []) or []
     views = document.get("bufferViews", []) or []
     if not isinstance(index, int) or index < 0 or index >= len(accessors):
         raise GameModelError("glTF primitive references an invalid accessor")
     row = accessors[index]
+    if not isinstance(row, dict):
+        raise GameModelError("glTF accessor entries must be objects")
     if row.get("sparse"):
         raise GameModelError("Sparse glTF accessors are not supported by the closed runtime yet")
     view_index = row.get("bufferView")
     if not isinstance(view_index, int) or view_index < 0 or view_index >= len(views):
         raise GameModelError("glTF accessor is missing a valid bufferView")
     view = views[view_index]
+    if not isinstance(view, dict):
+        raise GameModelError("glTF bufferView entries must be objects")
     buffer_index = view.get("buffer")
     if not isinstance(buffer_index, int) or buffer_index < 0 or buffer_index >= len(buffers):
         raise GameModelError("glTF bufferView references a missing buffer")
@@ -156,6 +211,8 @@ def _accessor(document: dict[str, Any], buffers: list[bytes], index: int) -> lis
     count = int(row.get("count") or 0)
     if count < 0:
         raise GameModelError("glTF accessor count is invalid")
+    if count > _MAX_ACCESSOR_ELEMENTS:
+        raise GameModelError(f"glTF accessor exceeds the {_MAX_ACCESSOR_ELEMENTS} element safety limit")
     fmt_char, component_size = _COMPONENT_TYPES[component_type]
     element_size = component_size * component_count
     stride = int(view.get("byteStride") or element_size)
@@ -172,9 +229,10 @@ def _accessor(document: dict[str, Any], buffers: list[bytes], index: int) -> lis
             raise GameModelError("glTF accessor reads beyond its embedded buffer")
         raw = struct.unpack_from(fmt, data, offset)
         if normalized and component_type != 5126:
-            values.append(tuple(_normalized(float(value), component_type) for value in raw))
+            converted = tuple(_normalized(float(value), component_type) for value in raw)
         else:
-            values.append(tuple(float(value) for value in raw))
+            converted = tuple(float(value) for value in raw)
+        values.append(_finite_values(converted))
     return values
 
 
@@ -183,24 +241,30 @@ def _identity() -> list[list[float]]:
 
 
 def _matmul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
-    return [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
+    result = [[sum(a[r][k] * b[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
+    for row in result:
+        _finite_values(tuple(float(value) for value in row))
+    return result
 
 
 def _node_matrix(node: dict[str, Any]) -> list[list[float]]:
     raw = node.get("matrix")
     if isinstance(raw, list) and len(raw) == 16:
+        values = _finite_values(tuple(float(value) for value in raw))
         # glTF stores matrices column-major; convert to ordinary row-major math here.
-        return [[float(raw[c * 4 + r]) for c in range(4)] for r in range(4)]
+        return [[values[c * 4 + r] for c in range(4)] for r in range(4)]
     translation = node.get("translation") if isinstance(node.get("translation"), list) else [0.0, 0.0, 0.0]
     scale = node.get("scale") if isinstance(node.get("scale"), list) else [1.0, 1.0, 1.0]
     rotation = node.get("rotation") if isinstance(node.get("rotation"), list) else [0.0, 0.0, 0.0, 1.0]
     if len(translation) != 3 or len(scale) != 3 or len(rotation) != 4:
         raise GameModelError("glTF node has malformed TRS data")
-    x, y, z, w = (float(v) for v in rotation)
+    x, y, z, w = _finite_values(tuple(float(v) for v in rotation))
+    sx, sy, sz = _finite_values(tuple(float(v) for v in scale))
+    tx, ty, tz = _finite_values(tuple(float(v) for v in translation))
     length = math.sqrt(x * x + y * y + z * z + w * w) or 1.0
+    if not math.isfinite(length):
+        raise GameModelError("glTF node rotation is non-finite")
     x, y, z, w = x / length, y / length, z / length, w / length
-    sx, sy, sz = (float(v) for v in scale)
-    tx, ty, tz = (float(v) for v in translation)
     rotation_matrix = [
         [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), 0.0],
         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), 0.0],
@@ -215,10 +279,12 @@ def _node_matrix(node: dict[str, Any]) -> list[list[float]]:
 
 def _transform_point(matrix: list[list[float]], value: tuple[float, ...]) -> tuple[float, float, float]:
     x, y, z = value[:3]
-    return (
-        matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z + matrix[0][3],
-        matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z + matrix[1][3],
-        matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z + matrix[2][3],
+    return _finite_values(
+        (
+            matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z + matrix[0][3],
+            matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z + matrix[1][3],
+            matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z + matrix[2][3],
+        )
     )
 
 
@@ -227,15 +293,20 @@ def _transform_normal(matrix: list[list[float]], value: tuple[float, ...]) -> tu
     nx = matrix[0][0] * x + matrix[0][1] * y + matrix[0][2] * z
     ny = matrix[1][0] * x + matrix[1][1] * y + matrix[1][2] * z
     nz = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2] * z
+    nx, ny, nz = _finite_values((nx, ny, nz))
     length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+    if not math.isfinite(length):
+        raise GameModelError("glTF transformed normal is non-finite")
     return nx / length, ny / length, nz / length
 
 
 def _face_normal(a: tuple[float, float, float], b: tuple[float, float, float], c: tuple[float, float, float]) -> tuple[float, float, float]:
     ux, uy, uz = b[0] - a[0], b[1] - a[1], b[2] - a[2]
     vx, vy, vz = c[0] - a[0], c[1] - a[1], c[2] - a[2]
-    nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx
+    nx, ny, nz = _finite_values((uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx))
     length = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+    if not math.isfinite(length):
+        raise GameModelError("glTF face normal is non-finite")
     return nx / length, ny / length, nz / length
 
 
@@ -255,10 +326,21 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
 
     scene_index = document.get("scene", 0)
     scenes = document.get("scenes", []) or []
+    if not isinstance(scenes, list):
+        raise GameModelError("glTF scenes must be an array")
     if scenes and isinstance(scene_index, int) and 0 <= scene_index < len(scenes):
-        roots = list(scenes[scene_index].get("nodes", []) or [])
+        scene = scenes[scene_index]
+        if not isinstance(scene, dict):
+            raise GameModelError("glTF scene entries must be objects")
+        roots = list(scene.get("nodes", []) or [])
     elif nodes:
-        child_ids = {int(child) for node in nodes for child in (node.get("children", []) or []) if isinstance(child, int)}
+        child_ids = {
+            int(child)
+            for node in nodes
+            if isinstance(node, dict)
+            for child in (node.get("children", []) or [])
+            if isinstance(child, int)
+        }
         roots = [index for index in range(len(nodes)) if index not in child_ids]
     else:
         roots = []
@@ -270,13 +352,18 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
         if depth > 64 or not isinstance(node_index, int) or node_index < 0 or node_index >= len(nodes):
             raise GameModelError("glTF node graph is invalid or too deep")
         node = nodes[node_index]
+        if not isinstance(node, dict):
+            raise GameModelError("glTF node entries must be objects")
         world_matrix = _matmul(parent, _node_matrix(node))
         mesh_index = node.get("mesh")
         if isinstance(mesh_index, int):
             if mesh_index < 0 or mesh_index >= len(meshes):
                 raise GameModelError("glTF node references an invalid mesh")
             instances.append((mesh_index, world_matrix))
-        for child in node.get("children", []) or []:
+        children = node.get("children", []) or []
+        if not isinstance(children, list):
+            raise GameModelError("glTF node children must be an array")
+        for child in children:
             marker = (node_index, int(child)) if isinstance(child, int) else (-1, -1)
             if marker in visited_path:
                 raise GameModelError("glTF node graph contains a cycle")
@@ -296,13 +383,23 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
     maximum = [-math.inf, -math.inf, -math.inf]
 
     for mesh_index, matrix in instances:
-        for primitive in meshes[mesh_index].get("primitives", []) or []:
+        mesh = meshes[mesh_index]
+        if not isinstance(mesh, dict):
+            raise GameModelError("glTF mesh entries must be objects")
+        primitives = mesh.get("primitives", []) or []
+        if not isinstance(primitives, list):
+            raise GameModelError("glTF mesh primitives must be an array")
+        for primitive in primitives:
+            if not isinstance(primitive, dict):
+                raise GameModelError("glTF primitive entries must be objects")
             primitive_count += 1
             if primitive_count > _MAX_PRIMITIVES:
                 raise GameModelError(f"Model exceeds the {_MAX_PRIMITIVES} primitive safety limit")
             if int(primitive.get("mode", 4)) != 4:
                 raise GameModelError("Aura3D static model import currently supports TRIANGLES primitives only")
             attributes = primitive.get("attributes") or {}
+            if not isinstance(attributes, dict):
+                raise GameModelError("glTF primitive attributes must be an object")
             position_index = attributes.get("POSITION")
             if not isinstance(position_index, int):
                 raise GameModelError("glTF mesh primitive is missing POSITION data")
@@ -320,6 +417,8 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
             indices_index = primitive.get("indices")
             if isinstance(indices_index, int):
                 index_values = _accessor(document, buffers, indices_index)
+                if any(len(value) != 1 for value in index_values):
+                    raise GameModelError("glTF index accessor must contain SCALAR values")
                 indices = [int(value[0]) for value in index_values]
             else:
                 indices = list(range(len(positions)))
@@ -338,7 +437,8 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
                     point = transformed[local]
                     normal = _transform_normal(matrix, normals[source_index]) if normals else face
                     uv = uvs[source_index] if uvs else (0.0, 0.0)
-                    vertices.extend((point[0], point[1], point[2], normal[0], normal[1], normal[2], float(uv[0]), float(uv[1])))
+                    uv = _finite_values((float(uv[0]), float(uv[1])))
+                    vertices.extend((point[0], point[1], point[2], normal[0], normal[1], normal[2], uv[0], uv[1]))
                     for axis in range(3):
                         minimum[axis] = min(minimum[axis], point[axis])
                         maximum[axis] = max(maximum[axis], point[axis])
@@ -357,6 +457,9 @@ def extract_static_mesh(path: Path) -> dict[str, Any]:
         "bounds": {"min": minimum, "max": maximum},
         "animations_present": bool(document.get("animations")),
         "skins_present": bool(document.get("skins")),
+        "static_projection_only": True,
+        "animation_clips_executed": False,
+        "skinning_executed": False,
         "embedded_materials_ignored": True,
         "external_resources_allowed": False,
         "generated_code_executed": False,
