@@ -7,15 +7,16 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .audit import AuditLedger
-from .cosmic_economy import CosmicEconomy, EconomyError
+from .cosmic_economy import EconomyError
+from .cosmic_economy_integrations import economy_service
 from .cosmic_payments import coin_payment_providers
 from .owner_auth import owner_authorized
 
 router = APIRouter(tags=["Cosmic Creation Coins & Shared Sky LIVE Gifts"])
 
 
-def _economy() -> CosmicEconomy:
-    return CosmicEconomy()
+def _economy():
+    return economy_service()
 
 
 def _member_user_id(request: Request) -> str:
@@ -194,7 +195,7 @@ def create_coin_purchase(
         _raise(exc)
 
 
-@router.post("/economy/payment-webhooks/{provider_name}", include_in_schema=False)
+@router.post("/auth/economy/payment-webhooks/{provider_name}", include_in_schema=False)
 async def coin_payment_webhook(provider_name: str, request: Request):
     """Signature verification is delegated to the registered official provider adapter."""
     try:
