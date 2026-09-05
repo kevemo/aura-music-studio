@@ -12,6 +12,7 @@ from .esp_product_workflows_portal import router as product_workflows_portal_rou
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 from .esp_support_conversations import router as support_conversations_router
+from .esp_training_academy import router as training_academy_router
 
 router = APIRouter()
 router.include_router(creator_plan_router)
@@ -22,11 +23,12 @@ router.include_router(broadcast_tech_router)
 router.include_router(social_media_library_router)
 router.include_router(product_workflows_router)
 router.include_router(product_workflows_portal_router)
+router.include_router(training_academy_router)
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
 def level_up_with_creator_plan(request: Request):
-    """Expose Creator OS, private support, broadcast tech and Social Media Library from the ESP Level Up Hub."""
+    """Expose Creator OS, private support, training, broadcast tech and Social Media Library from the ESP Level Up Hub."""
     response = base_level_up_portal(request)
     if not isinstance(response, Response) or not getattr(response, "body", None):
         return response
@@ -37,16 +39,19 @@ def level_up_with_creator_plan(request: Request):
 
     progress_link = "<a class='btn' href='/command-center/progress'>Progress</a>"
     onboarding_link = "<a class='btn primary' href='/command-center/onboarding'>Creator Onboarding</a>"
+    training_link = "<a class='btn primary' href='/command-center/training'>Training Academy</a>"
     my_plan_link = "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>"
     reviews_link = "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>"
     support_link = "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>"
     broadcast_link = "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>"
     media_link = "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>"
     if progress_link in html and "/command-center/my-plan" not in html:
-        html = html.replace(progress_link, onboarding_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
+        html = html.replace(progress_link, onboarding_link + training_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
     else:
         if progress_link in html and "/command-center/onboarding" not in html:
             html = html.replace(progress_link, onboarding_link + progress_link, 1)
+        if progress_link in html and "/command-center/training" not in html:
+            html = html.replace(progress_link, training_link + progress_link, 1)
         if progress_link in html and "/command-center/my-plan/reviews" not in html:
             html = html.replace(progress_link, reviews_link + progress_link, 1)
         if progress_link in html and "/command-center/support" not in html:
