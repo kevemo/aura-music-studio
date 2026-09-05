@@ -1,6 +1,8 @@
-# Aura isolated code sandbox
+# Rhian isolated code sandbox
 
-Aura Artifacts can store and version code without executing it. Code execution is a separate capability and must never run arbitrary member code inside the Pulsar-Frequency House FastAPI process or host shell.
+> **Compatibility note:** this document retains the legacy path `docs/AURA_SANDBOX.md` and the existing `AURA_SANDBOX_*` configuration identifiers so deployed integrations do not break. The current assistant-facing identity is **Rhiannon Intelligence Systems / Rhian**.
+
+Rhian Artifacts can store and version code without executing it. Code execution is a separate capability and must never run arbitrary member code inside the Elevate Souls Productions Content Creation Command Center FastAPI process or host shell.
 
 ## Deployment contract
 
@@ -14,11 +16,11 @@ AURA_SANDBOX_MAX_CODE_CHARS=100000
 AURA_SANDBOX_MAX_OUTPUT_CHARS=100000
 ```
 
-When `AURA_SANDBOX_URL` is blank, Aura reports that code execution is not configured. There is no local fallback.
+When `AURA_SANDBOX_URL` is blank, Rhian reports that code execution is not configured. There is no local fallback.
 
 ## Request
 
-Aura sends a bounded JSON request to:
+Rhian sends a bounded JSON request to:
 
 `POST {AURA_SANDBOX_URL}/v1/execute`
 
@@ -50,7 +52,7 @@ The adapter consumes only bounded execution metadata/text:
 }
 ```
 
-Stdout/stderr are truncated to the configured output limits before Aura receives them.
+Stdout/stderr are truncated to the configured output limits before Rhian receives them.
 
 ## Security requirements for the sandbox service
 
@@ -69,10 +71,12 @@ The external sandbox implementation should provide at minimum:
 - automatic cleanup after every execution;
 - no secrets inherited from the main application environment.
 
-Pulsar-Frequency House sends `network=false` and `filesystem=ephemeral`; the sandbox must enforce those constraints independently rather than trusting the request as its only security boundary.
+The Command Center sends `network=false` and `filesystem=ephemeral`; the sandbox must enforce those constraints independently rather than trusting the request as its only security boundary.
 
-## Aura tool behavior
+## Rhian tool behaviour
 
-`run_code_artifact` can execute only a private Aura Artifact whose kind is `code`. The member's latest message must explicitly ask to run/execute/test the code. Reading or explaining code does not authorize execution.
+`run_code_artifact` can execute only a private Rhian Artifact whose kind is `code`. The member's latest message must explicitly ask to run/execute/test the code. Reading or explaining code does not authorise execution.
 
-The result always identifies `host_execution=false` and is eligible for the same verified multi-step workflow history as other Aura tools.
+The result always identifies `host_execution=false` and is eligible for the same verified multi-step workflow history as other Rhian tools.
+
+The `AURA_SANDBOX_*` names above are compatibility configuration identifiers, not current public branding. Rename them only through a tested migration with backwards-compatible aliases where required.
