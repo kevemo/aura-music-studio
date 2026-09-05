@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Prepare test configuration
         run: cp .env.example .env
@@ -82,6 +82,7 @@ jobs:
               '/health/live': {'get'},
               '/health/ready': {'get'},
               '/billing/stripe/checkout/marketplace': {'post'},
+              # Legacy URL retained strictly as the compatibility route for the public SLS surface.
               '/aura-sec/overview': {'get'},
           }
           paths = schema.get('paths', {})
@@ -94,7 +95,7 @@ jobs:
           if missing:
               raise SystemExit('Unified production route surface missing: ' + ', '.join(missing))
 
-          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes including Aura Sec")
+          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes including the SLS compatibility route")
           PY
 
       - name: Capture self-host logs on failure
