@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from aura_music_studio.cosmic_economy import (
@@ -67,8 +69,43 @@ def test_purchase_rate_limit_is_account_scoped_and_retry_safe(tmp_path, monkeypa
     assert exc.value.details["action"] == "coin_purchase"
     assert exc.value.details["retry_after_seconds"] >= 1
 
+    blocked = economy.operational_events(
+        event_type="economy.rate_limit_blocked",
+        user_id="viewer-1",
+    )
+    assert len(blocked) == 1
+    assert blocked[0]["details"]["action"] == "coin_purchase"
+
     other = purchase(economy, user_id="viewer-2", key="purchase-other")
     assert other["user_id"] == "viewer-2"
+
+
+def test_concurrent_same_purchase_idempotency_key_uses_one_rate_slot(tmp_path, monkeypatch):
+    monkeypatch.setenv("LSS_COIN_PURCHASE_RATE_LIMIT", "1")
+    monkeypatch.setenv("LSS_ECONOMY_RATE_WINDOW_SECONDS", "60")
+    economy = make_economy(tmp_path)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda _: purchase(economy, user_id="viewer-1", key="purchase-concurrent"),
+                range(2),
+            )
+        )
+
+    assert results[0]["id"] == results[1]["id"]
+    with economy._connect() as con:
+        rate_count = con.execute(
+            """SELECT COUNT(*) AS n FROM economy_rate_events
+               WHERE user_id='viewer-1' AND action='coin_purchase'"""
+        ).fetchone()["n"]
+        reservation_count = con.execute(
+            """SELECT COUNT(*) AS n FROM economy_rate_idempotency
+               WHERE user_id='viewer-1' AND action='coin_purchase'
+                 AND idempotency_key='purchase-concurrent'"""
+        ).fetchone()["n"]
+    assert rate_count == 1
+    assert reservation_count == 1
 
 
 def test_gift_rate_limit_blocks_new_debit_but_allows_idempotent_retry(tmp_path, monkeypatch):
@@ -91,6 +128,24 @@ def test_gift_rate_limit_blocks_new_debit_but_allows_idempotent_retry(tmp_path, 
         gift(economy, key="gift-2")
     assert exc.value.code == "RATE_LIMITED"
     assert economy.get_balance("viewer-1")["available_coins"] == 90
+
+
+def test_insufficient_balance_creates_operational_evidence_without_ledger_debit(tmp_path):
+    economy = make_economy(tmp_path)
+    with pytest.raises(EconomyError) as exc:
+        gift(economy, key="gift-no-balance")
+    assert exc.value.code == "INSUFFICIENT_COIN_BALANCE"
+    assert economy.get_balance("viewer-1")["available_coins"] == 0
+    events = economy.operational_events(
+        event_type="economy.insufficient_balance",
+        user_id="viewer-1",
+    )
+    assert len(events) == 1
+    with economy._connect() as con:
+        debits = con.execute(
+            "SELECT COUNT(*) AS n FROM coin_ledger_entries WHERE entry_type='GIFT_DEBIT'"
+        ).fetchone()["n"]
+    assert debits == 0
 
 
 def test_invalid_finance_rate_limit_configuration_fails_closed(tmp_path, monkeypatch):
