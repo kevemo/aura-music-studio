@@ -15,6 +15,7 @@ from .song_dna_portal import song_editor_project as base_song_editor_project
 from .voice_house_api import router as voice_house_api_router
 from .voice_house_assets_api import router as voice_house_assets_router
 from .voice_house_portal import router as voice_house_portal_router
+from .voice_profile_lifecycle import router as voice_profile_lifecycle_router
 
 install_audio_fx_expansion()
 
@@ -26,6 +27,7 @@ router.include_router(performance_generation_router)
 router.include_router(focus_locks_router)
 router.include_router(voice_house_api_router)
 router.include_router(voice_house_assets_router)
+router.include_router(voice_profile_lifecycle_router)
 router.include_router(voice_house_portal_router)
 
 
