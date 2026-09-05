@@ -131,7 +131,7 @@ def explicit_proxy_get(
     session = requests.Session()
     session.trust_env = False
     try:
-        return session.get(
+        response = session.get(
             url,
             headers=dict(headers),
             timeout=timeout,
@@ -142,6 +142,22 @@ def explicit_proxy_get(
     except Exception:
         session.close()
         raise
+
+    original_close = response.close
+    closed = False
+
+    def close_with_session() -> None:
+        nonlocal closed
+        if closed:
+            return
+        closed = True
+        try:
+            original_close()
+        finally:
+            session.close()
+
+    response.close = close_with_session
+    return response
 
 
 def no_env_session() -> requests.Session:
