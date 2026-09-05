@@ -39,6 +39,23 @@ class ReceiptHoldRequest(BaseModel):
     reference: str = Field(min_length=2, max_length=240)
 
 
+class PromotionalGrantRequest(BaseModel):
+    user_id: str = Field(min_length=1, max_length=180)
+    coin_quantity: int = Field(gt=0)
+    campaign_ref: str = Field(min_length=2, max_length=240)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class AvailabilityRequest(BaseModel):
+    active: bool
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class DiscrepancyResolutionRequest(BaseModel):
+    resolution_note: str = Field(min_length=3, max_length=2000)
+
+
 @router.get("/risk-cases")
 def risk_cases(request: Request, status: str | None = "open", limit: int = 100):
     _owner(request)
@@ -75,10 +92,83 @@ def creator_receipt_hold(receipt_id: str, payload: ReceiptHoldRequest, request: 
         _raise(exc)
 
 
+@router.post("/promotional-credits")
+def grant_promotional_coins(payload: PromotionalGrantRequest, request: Request):
+    _owner(request)
+    try:
+        return _ops().grant_promotional_coins(
+            user_id=payload.user_id,
+            coin_quantity=payload.coin_quantity,
+            campaign_ref=payload.campaign_ref,
+            idempotency_key=payload.idempotency_key,
+            actor="owner_session",
+            reason=payload.reason,
+        )
+    except EconomyError as exc:
+        _raise(exc)
+
+
+@router.post("/coin-packs/{pack_id}/versions/{version}/availability")
+def coin_pack_availability(
+    pack_id: str,
+    version: int,
+    payload: AvailabilityRequest,
+    request: Request,
+):
+    _owner(request)
+    try:
+        return _ops().set_coin_pack_active(
+            pack_id,
+            version,
+            active=payload.active,
+            actor="owner_session",
+            reason=payload.reason,
+        )
+    except EconomyError as exc:
+        _raise(exc)
+
+
+@router.post("/gift-catalogue/{gift_id}/versions/{version}/availability")
+def gift_availability(
+    gift_id: str,
+    version: int,
+    payload: AvailabilityRequest,
+    request: Request,
+):
+    _owner(request)
+    try:
+        return _ops().set_gift_active(
+            gift_id,
+            version,
+            active=payload.active,
+            actor="owner_session",
+            reason=payload.reason,
+        )
+    except EconomyError as exc:
+        _raise(exc)
+
+
 @router.get("/discrepancies")
 def reconciliation_discrepancies(request: Request, status: str = "open", limit: int = 100):
     _owner(request)
     return {"discrepancies": _ops().list_reconciliation_discrepancies(status=status, limit=limit)}
+
+
+@router.post("/discrepancies/{discrepancy_id}/resolve")
+def resolve_reconciliation_discrepancy(
+    discrepancy_id: str,
+    payload: DiscrepancyResolutionRequest,
+    request: Request,
+):
+    _owner(request)
+    try:
+        return _ops().resolve_reconciliation_discrepancy(
+            discrepancy_id,
+            actor="owner_session",
+            resolution_note=payload.resolution_note,
+        )
+    except EconomyError as exc:
+        _raise(exc)
 
 
 @router.get("/finance-snapshot")
