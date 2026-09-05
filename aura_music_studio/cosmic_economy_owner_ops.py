@@ -19,6 +19,14 @@ class EconomyOwnerOperations:
     def __init__(self, economy: CosmicEconomy):
         self.economy = economy
 
+    def _audit(self, *, actor: str, action: str, details: dict, subject_user_id: str | None = None) -> None:
+        AuditLedger(AccountStore(self.economy.db_path)).append(
+            actor=actor,
+            action=action,
+            subject_user_id=subject_user_id,
+            details=details,
+        )
+
     def list_risk_cases(self, *, status: str | None = "open", limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), 500))
         sql = "SELECT * FROM economy_risk_cases"
@@ -79,7 +87,7 @@ class EconomyOwnerOperations:
             )
             result = con.execute("SELECT * FROM economy_risk_cases WHERE id=?", (case_id,)).fetchone()
             con.commit()
-        AuditLedger(AccountStore(self.economy.db_path)).append(
+        self._audit(
             actor=reviewer,
             action="cosmic_economy.risk_case_reviewed",
             subject_user_id=result["subject_user_id"] if result else None,
@@ -124,10 +132,145 @@ class EconomyOwnerOperations:
             )
             result = con.execute("SELECT * FROM creator_gift_receipts WHERE id=?", (receipt_id,)).fetchone()
             con.commit()
-        AuditLedger(AccountStore(self.economy.db_path)).append(
+        self._audit(
             actor=actor,
             action="cosmic_economy.creator_receipt_hold_changed",
             details={"receipt_id": receipt_id, "held": held, "reason": reason, "reference": reference, "correlation_id": correlation_id},
+        )
+        return dict(result)
+
+    def grant_promotional_coins(
+        self,
+        *,
+        user_id: str,
+        coin_quantity: int,
+        campaign_ref: str,
+        idempotency_key: str,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if len((campaign_ref or "").strip()) < 2 or len((reason or "").strip()) < 3:
+            raise EconomyError(
+                "INVALID_PROMOTIONAL_GRANT",
+                "Promotional Coin grant requires a campaign reference and reason.",
+            )
+        entry = self.economy.promotional_credit(
+            user_id=user_id,
+            coin_quantity=coin_quantity,
+            campaign_ref=campaign_ref.strip(),
+            idempotency_key=idempotency_key,
+            actor=actor,
+        )
+        self._audit(
+            actor=actor,
+            action="cosmic_economy.promotional_coins_granted",
+            subject_user_id=user_id,
+            details={
+                "ledger_entry_id": entry["id"],
+                "coin_quantity": coin_quantity,
+                "campaign_ref": campaign_ref,
+                "reason": reason,
+            },
+        )
+        return entry
+
+    def set_coin_pack_active(
+        self,
+        pack_id: str,
+        version: int,
+        *,
+        active: bool,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if len((reason or "").strip()) < 3:
+            raise EconomyError("INVALID_CATALOGUE_ACTION", "Coin pack availability change requires a reason.")
+        correlation_id = uuid4().hex
+        with self.economy._connect() as con:
+            self.economy._begin(con)
+            row = con.execute(
+                "SELECT * FROM coin_packs WHERE pack_id=? AND version=?",
+                (pack_id, version),
+            ).fetchone()
+            if not row:
+                raise EconomyError("COIN_PACK_UNAVAILABLE", "Coin pack version not found.", status_code=404)
+            con.execute(
+                "UPDATE coin_packs SET active=? WHERE pack_id=? AND version=?",
+                (int(active), pack_id, version),
+            )
+            self.economy._enqueue_locked(
+                con,
+                "economy.coin_pack_availability_changed",
+                "coin_pack",
+                f"{pack_id}:{version}",
+                {"pack_id": pack_id, "version": version, "active": active, "reason": reason},
+                correlation_id=correlation_id,
+            )
+            result = con.execute(
+                "SELECT * FROM coin_packs WHERE pack_id=? AND version=?",
+                (pack_id, version),
+            ).fetchone()
+            con.commit()
+        self._audit(
+            actor=actor,
+            action="cosmic_economy.coin_pack_availability_changed",
+            details={
+                "pack_id": pack_id,
+                "version": version,
+                "active": active,
+                "reason": reason,
+                "correlation_id": correlation_id,
+            },
+        )
+        return dict(result)
+
+    def set_gift_active(
+        self,
+        gift_id: str,
+        version: int,
+        *,
+        active: bool,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        if len((reason or "").strip()) < 3:
+            raise EconomyError("INVALID_CATALOGUE_ACTION", "Gift availability change requires a reason.")
+        correlation_id = uuid4().hex
+        with self.economy._connect() as con:
+            self.economy._begin(con)
+            row = con.execute(
+                "SELECT * FROM gift_definitions WHERE gift_id=? AND version=?",
+                (gift_id, version),
+            ).fetchone()
+            if not row:
+                raise EconomyError("GIFT_UNAVAILABLE", "Gift version not found.", status_code=404)
+            con.execute(
+                "UPDATE gift_definitions SET active=? WHERE gift_id=? AND version=?",
+                (int(active), gift_id, version),
+            )
+            self.economy._enqueue_locked(
+                con,
+                "economy.gift_availability_changed",
+                "gift_definition",
+                f"{gift_id}:{version}",
+                {"gift_id": gift_id, "version": version, "active": active, "reason": reason},
+                correlation_id=correlation_id,
+            )
+            result = con.execute(
+                "SELECT * FROM gift_definitions WHERE gift_id=? AND version=?",
+                (gift_id, version),
+            ).fetchone()
+            con.commit()
+        self._audit(
+            actor=actor,
+            action="cosmic_economy.gift_availability_changed",
+            details={
+                "gift_id": gift_id,
+                "version": version,
+                "active": active,
+                "reason": reason,
+                "correlation_id": correlation_id,
+            },
         )
         return dict(result)
 
@@ -146,6 +289,67 @@ class EconomyOwnerOperations:
             item["actual"] = json.loads(item.pop("actual_json"))
             result.append(item)
         return result
+
+    def resolve_reconciliation_discrepancy(
+        self,
+        discrepancy_id: str,
+        *,
+        actor: str,
+        resolution_note: str,
+    ) -> dict[str, Any]:
+        if len((resolution_note or "").strip()) < 3:
+            raise EconomyError("INVALID_RECONCILIATION_ACTION", "Resolution requires a review note.")
+        now = _iso()
+        correlation_id = uuid4().hex
+        with self.economy._connect() as con:
+            self.economy._begin(con)
+            row = con.execute(
+                "SELECT * FROM economy_reconciliation_discrepancies WHERE id=?",
+                (discrepancy_id,),
+            ).fetchone()
+            if not row:
+                raise EconomyError(
+                    "RECONCILIATION_DISCREPANCY_NOT_FOUND",
+                    "Reconciliation discrepancy not found.",
+                    status_code=404,
+                )
+            if row["status"] == "resolved":
+                con.commit()
+                return dict(row)
+            con.execute(
+                """UPDATE economy_reconciliation_discrepancies
+                   SET status='resolved',resolved_at=?,resolution_note=? WHERE id=?""",
+                (now, resolution_note.strip()[:2000], discrepancy_id),
+            )
+            self.economy._enqueue_locked(
+                con,
+                "economy.reconciliation_discrepancy_resolved",
+                "reconciliation_discrepancy",
+                discrepancy_id,
+                {
+                    "discrepancy_type": row["discrepancy_type"],
+                    "subject_id": row["subject_id"],
+                    "resolution_note": resolution_note,
+                },
+                correlation_id=correlation_id,
+            )
+            result = con.execute(
+                "SELECT * FROM economy_reconciliation_discrepancies WHERE id=?",
+                (discrepancy_id,),
+            ).fetchone()
+            con.commit()
+        self._audit(
+            actor=actor,
+            action="cosmic_economy.reconciliation_discrepancy_resolved",
+            details={
+                "discrepancy_id": discrepancy_id,
+                "discrepancy_type": result["discrepancy_type"],
+                "subject_id": result["subject_id"],
+                "resolution_note": resolution_note,
+                "correlation_id": correlation_id,
+            },
+        )
+        return dict(result)
 
     def finance_snapshot(self) -> dict[str, Any]:
         with self.economy._connect() as con:
