@@ -5,6 +5,7 @@ from typing import Any
 
 from pydantic import Field
 
+from .aura_sec_dlp import redact_text, sanitize_audit_details
 from .shared_contracts import ContractModel, NonEmptyId
 
 
@@ -49,4 +50,18 @@ class ApiError(ContractModel):
         return HTTP_STATUS_BY_CODE[self.code]
 
     def public_payload(self) -> dict[str, Any]:
-        return self.model_dump(mode="json")
+        """Return a bounded client-safe error body without secrets or stack details."""
+
+        payload = self.model_dump(mode="json")
+        if self.code is ApiErrorCode.INTERNAL_ERROR:
+            payload["message"] = "Internal error"
+            payload["details"] = {}
+            return payload
+        payload["message"] = redact_text(self.message, max_length=1000)
+        payload["details"] = sanitize_audit_details(
+            self.details,
+            max_depth=5,
+            max_items=50,
+            max_string_length=1000,
+        )
+        return payload
