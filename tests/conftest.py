@@ -11,6 +11,7 @@ from aura_music_studio.shared_sky_internal_media import internal_media
 # FFmpeg capability, and contribution ingest are available. These pre-Wave-2 transport tests
 # exercise state/idempotency/token behaviour rather than FFmpeg itself, so they receive a
 # deterministic in-process media adapter instead of weakening the production readiness gate.
+# Exact test-name scoping prevents the adapter from masking Wave 2 fail-closed/runtime tests.
 _LEGACY_TRANSPORT_TESTS_REQUIRING_MEDIA_RUNTIME = {
     "test_broadcast_state_machine_and_idempotent_internal_start_stop",
     "test_internal_playback_can_start_when_external_destination_is_unavailable",
