@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
 from .shared_sky_live_bootstrap import install_shared_sky_live_community
+from .shared_sky_media_plane import router as shared_sky_media_plane_router
 from .shared_sky_relay import relay
 from .shared_sky_streaming_studios import shared_sky
 from .shared_sky_worker import SharedSkyWorker, WorkerSettings
@@ -162,14 +163,28 @@ def install_shared_sky_owner_ops(app: Any) -> None:
         )
 
 
+def install_shared_sky_media_plane(app: Any) -> None:
+    """Mount Chat 10's fail-closed ingest/media-node control plane on the canonical app."""
+    existing = {
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.router.routes
+    }
+    for route in shared_sky_media_plane_router.routes:
+        signature = (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        if signature not in existing:
+            app.router.routes.append(route)
+            existing.add(signature)
+
+
 # ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Register the owner runtime and the first-party viewer/community router at import time to
-# bypass late compatibility-router snapshotting. Viewer/community handlers retain their own
-# optional/required canonical membership checks, while public discovery/watch remains possible.
+# here. Register owner runtime, first-party viewer/community, and the signed media-plane routes at
+# import time to bypass late compatibility-router snapshotting. Their handlers retain their own
+# membership/owner/node-secret checks and fail closed when deployment credentials are absent.
 from .api import app as _canonical_app
 
 install_shared_sky_live_community(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
+install_shared_sky_media_plane(_canonical_app)
 
 
-__all__ = ["install_shared_sky_owner_ops", "router"]
+__all__ = ["install_shared_sky_media_plane", "install_shared_sky_owner_ops", "router"]
