@@ -5,6 +5,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
+from .audio_fx_expansion import install_audio_fx_expansion
 from .chord_intelligence import router as chord_intelligence_router
 from .chord_midi import router as chord_midi_router
 from .daw_fx_lab import router as daw_fx_lab_router
@@ -14,6 +15,8 @@ from .song_dna_portal import song_editor_project as base_song_editor_project
 from .voice_house_api import router as voice_house_api_router
 from .voice_house_assets_api import router as voice_house_assets_router
 from .voice_house_portal import router as voice_house_portal_router
+
+install_audio_fx_expansion()
 
 router = APIRouter()
 router.include_router(chord_intelligence_router)
