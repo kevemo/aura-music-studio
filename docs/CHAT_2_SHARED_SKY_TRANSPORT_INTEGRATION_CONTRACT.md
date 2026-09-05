@@ -464,6 +464,11 @@ Release acceptance should verify:
 13. Chat 10 signed-ingest PR reconciles without duplicate schemas/routes;
 14. production media-plane/origin/relay capacity evidence exists before production-scale claims.
 
+Acceptance must distinguish coding completeness from external capability. A green Chat 2
+control plane does not turn an unapproved provider, undeployed CDN/origin, absent SFU, or
+unconfigured media termination service into an available production feature. Those remain
+explicit capability blockers for Chat 10/11 and deployment operations.
+
 ## Environment/configuration points
 
 - `LSS_DB_PATH`
