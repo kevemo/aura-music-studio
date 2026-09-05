@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from .game_forge_api import _creator
@@ -14,7 +15,6 @@ from .game_forge_live_integration import (
     _load_state,
     _member_identity,
     _now,
-    _opaque,
     _owned_source,
     _save_state,
 )
@@ -180,7 +180,7 @@ def _set_programme_source_state(
             "WHERE id=? AND user_id=? AND source_type='game_project' AND source_ref=?",
             (
                 state,
-                __import__("json").dumps(capabilities, separators=(",", ":"), sort_keys=True),
+                json.dumps(capabilities, separators=(",", ":"), sort_keys=True),
                 _now(),
                 programme["id"],
                 user_id,
