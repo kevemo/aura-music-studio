@@ -70,6 +70,8 @@ def _token(request: Request) -> str | None:
 def _required_feature(path: str, method: str) -> str | None:
     if path == "/songs" and method == "POST":
         return BASIC_CREATE
+    if path.startswith("/image-effects/") or ("/image-effects/" in path and path.startswith("/projects/")):
+        return BASIC_CREATE
     if path.startswith("/speech/"):
         return AURA_SPEECH
     if path.startswith("/web/"):
