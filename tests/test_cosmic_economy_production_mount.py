@@ -7,15 +7,26 @@ from aura_music_studio.api import app as package_app
 
 EXPECTED_ROUTES = {
     ("/economy/coin-packs", "GET"),
+    ("/economy/coins", "GET"),
+    ("/economy/payment-providers", "GET"),
     ("/economy/me/balance", "GET"),
     ("/economy/me/history", "GET"),
     ("/economy/me/spending", "GET"),
     ("/economy/me/personal-spending-limits", "PUT"),
     ("/economy/me/coin-purchases", "POST"),
     ("/economy/me/gifts/send", "POST"),
+    ("/billing/creation-coins/catalog", "GET"),
+    ("/billing/creation-coins", "GET"),
+    ("/billing/stripe/checkout/credits", "POST"),
     ("/owner/economy/finance-snapshot", "GET"),
     ("/owner/economy/risk-cases", "GET"),
     ("/owner/economy/operational-events", "GET"),
+}
+
+LEGACY_BRIDGE_SIGNATURES = {
+    ("/billing/creation-coins/catalog", "GET"),
+    ("/billing/creation-coins", "GET"),
+    ("/billing/stripe/checkout/credits", "POST"),
 }
 
 
@@ -28,16 +39,36 @@ def _signatures(app):
     return signatures
 
 
+def _route_modules(app):
+    modules: dict[tuple[str, str], list[str]] = {}
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        module = str(getattr(getattr(route, "endpoint", None), "__module__", ""))
+        for method in getattr(route, "methods", set()) or set():
+            modules.setdefault((path, method), []).append(module)
+    return modules
+
+
 def _assert_routes_once(app):
     signatures = _signatures(app)
     for expected in EXPECTED_ROUTES:
         assert signatures.count(expected) == 1, expected
 
 
+def _assert_legacy_creation_coin_paths_use_chat5_bridge(app):
+    modules = _route_modules(app)
+    for signature in LEGACY_BRIDGE_SIGNATURES:
+        assert modules.get(signature) == [
+            "aura_music_studio.cosmic_economy_legacy_bridge"
+        ], (signature, modules.get(signature))
+
+
 def test_chat5_routes_are_mounted_once_on_package_application():
     _assert_routes_once(package_app)
+    _assert_legacy_creation_coin_paths_use_chat5_bridge(package_app)
 
 
 def test_chat5_routes_survive_final_production_app_composition():
     production_module = importlib.import_module("app")
     _assert_routes_once(production_module.app)
+    _assert_legacy_creation_coin_paths_use_chat5_bridge(production_module.app)
