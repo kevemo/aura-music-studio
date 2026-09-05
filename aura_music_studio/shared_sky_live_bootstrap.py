@@ -14,6 +14,7 @@ from .shared_sky_live_integrations import (
     router as live_integrations_router,
 )
 from .shared_sky_live_watch_ui_v2 import router as live_watch_v2_router
+from .shared_sky_transport_browser_bridge import install_chat2_browser_playback_bridge
 
 
 PUBLIC_LIVE_PREFIXES = ("/watch/", "/live-events/", "/shared-sky/live/api/")
@@ -56,9 +57,10 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     Neighbour contracts are registered at application composition time. If Chat 2/5 modules are not
     merged yet, registration remains fail-closed and the original unavailable adapters stay active.
-    Chat 2 playback is then hardened for the actual browser runtime: a descriptor that requires a
-    custom Bearer header is not advertised as native-video playable until a browser-safe credential
-    mode or a deliberately packaged header-capable HLS runtime exists.
+    Chat 2 playback is first hardened for a generic native-video runtime, then the Chat 2-owned
+    browser bridge is installed when its signed cookie-bootstrap contract is available. The Watch
+    player receives a token-free bootstrap URL; Chat 2 performs viewer access, token minting and the
+    HttpOnly cookie exchange server-side before redirecting native media to the HLS manifest.
 
     Chat 4 Wave 3 installs additive durability hardening before requests are served. LIVE follower
     notifications become retry-safe rather than permanently suppressed after one delivery failure,
@@ -82,6 +84,7 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     configure_neighbor_live_integrations()
     harden_browser_playback_integration()
+    install_chat2_browser_playback_bridge()
     install_live_community_hardening()
 
     existing = {_route_signature(route) for route in app.router.routes}

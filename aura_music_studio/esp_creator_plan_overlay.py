@@ -31,6 +31,7 @@ from .esp_support_casework_portal import router as support_casework_portal_route
 from .esp_support_center import router as support_center_router
 from .esp_support_privacy_guard import install_support_activity_privacy_guard
 from .esp_support_sla import router as support_sla_router
+from .shared_sky_internal_media_api import router as shared_sky_internal_media_router
 from .shared_sky_streaming_studios import router as shared_sky_router
 from .shared_sky_transport_api import router as shared_sky_transport_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
@@ -63,6 +64,7 @@ router.include_router(support_casework_portal_router)
 router.include_router(broadcast_tech_router)
 router.include_router(shared_sky_router)
 router.include_router(shared_sky_transport_router)
+router.include_router(shared_sky_internal_media_router)
 router.include_router(creator_tech_vault_router)
 router.include_router(service_registry_router)
 router.include_router(social_media_library_router)
