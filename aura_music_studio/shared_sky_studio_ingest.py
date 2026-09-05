@@ -225,10 +225,19 @@ def revoke_studio_ingest(session_id: str, body: StudioIngestRevokeRequest, reque
 
 
 def install_shared_sky_studio_ingest(app: Any) -> None:
-    existing = {getattr(route, "path", "") for route in app.router.routes}
-    marker = "/shared-sky/studio/api/sessions/{session_id}/ingest"
-    if marker not in existing:
-        app.include_router(router)
+    existing = {
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.router.routes
+    }
+    for route in router.routes:
+        signature = (
+            getattr(route, "path", ""),
+            tuple(sorted(getattr(route, "methods", set()) or set())),
+        )
+        if signature not in existing:
+            app.router.routes.append(route)
+            existing.add(signature)
+    app.openapi_schema = None
 
 
 __all__ = [
