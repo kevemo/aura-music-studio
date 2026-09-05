@@ -6,6 +6,8 @@ from fastapi.responses import HTMLResponse, Response
 from .esp_broadcast_tech import router as broadcast_tech_router
 from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
+from .esp_evidence_import_portal import router as evidence_import_portal_router
+from .esp_evidence_imports import router as evidence_import_router
 from .esp_level_up import level_up_portal as base_level_up_portal
 from .esp_product_workflows import router as product_workflows_router
 from .esp_product_workflows_portal import router as product_workflows_portal_router
@@ -23,12 +25,14 @@ router.include_router(broadcast_tech_router)
 router.include_router(social_media_library_router)
 router.include_router(product_workflows_router)
 router.include_router(product_workflows_portal_router)
+router.include_router(evidence_import_router)
+router.include_router(evidence_import_portal_router)
 router.include_router(training_academy_router)
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
 def level_up_with_creator_plan(request: Request):
-    """Expose Creator OS, private support, training, broadcast tech and Social Media Library from the ESP Level Up Hub."""
+    """Expose Creator OS, private support, training, evidence import, broadcast tech and Social Media Library from the ESP Level Up Hub."""
     response = base_level_up_portal(request)
     if not isinstance(response, Response) or not getattr(response, "body", None):
         return response
@@ -43,10 +47,15 @@ def level_up_with_creator_plan(request: Request):
     my_plan_link = "<a class='btn primary' href='/command-center/my-plan'>My Plan</a>"
     reviews_link = "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>"
     support_link = "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>"
+    evidence_import_link = "<a class='btn' href='/command-center/evidence-import'>Analytics Import</a>"
     broadcast_link = "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>"
     media_link = "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>"
     if progress_link in html and "/command-center/my-plan" not in html:
-        html = html.replace(progress_link, onboarding_link + training_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
+        html = html.replace(
+            progress_link,
+            onboarding_link + training_link + my_plan_link + reviews_link + support_link + evidence_import_link + broadcast_link + media_link + progress_link,
+            1,
+        )
     else:
         if progress_link in html and "/command-center/onboarding" not in html:
             html = html.replace(progress_link, onboarding_link + progress_link, 1)
@@ -56,6 +65,8 @@ def level_up_with_creator_plan(request: Request):
             html = html.replace(progress_link, reviews_link + progress_link, 1)
         if progress_link in html and "/command-center/support" not in html:
             html = html.replace(progress_link, support_link + progress_link, 1)
+        if progress_link in html and "/command-center/evidence-import" not in html:
+            html = html.replace(progress_link, evidence_import_link + progress_link, 1)
         if progress_link in html and "/command-center/broadcast-tech" not in html:
             html = html.replace(progress_link, broadcast_link + progress_link, 1)
         if progress_link in html and "/command-center/social/media-library" not in html:
