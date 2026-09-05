@@ -17,6 +17,10 @@ from .shared_sky_live_integrations import (
     configure_neighbor_live_integrations,
     router as live_integrations_router,
 )
+from .shared_sky_live_moderator_actions import (
+    install_limited_moderator_actions,
+    router as live_moderator_actions_router,
+)
 from .shared_sky_live_moderator_permissions import (
     install_shared_sky_moderator_permissions,
     router as live_moderator_permissions_router,
@@ -41,6 +45,7 @@ _LIVE_EVENT_UI_ROUTES = tuple(live_events_ui_router.routes)
 _LIVE_INTEGRATION_ROUTES = tuple(live_integrations_router.routes)
 _LIVE_BATTLE_BRIDGE_ROUTES = tuple(live_battle_bridge_router.routes)
 _LIVE_MODERATOR_PERMISSION_ROUTES = tuple(live_moderator_permissions_router.routes)
+_LIVE_MODERATOR_ACTION_ROUTES = tuple(live_moderator_actions_router.routes)
 
 
 def _route_signature(route: Any) -> tuple[str, tuple[str, ...]]:
@@ -58,33 +63,23 @@ def install_shared_sky_live_community(app: Any) -> None:
     community handler still performs its own canonical optional/required member resolution.
     StudioSecurityMiddleware and CrossSiteRequestGuardMiddleware remain in force globally.
 
-    Routes are appended from import-time immutable APIRoute snapshots rather than relying on a
-    late ``include_router`` flattening pass. The repository already uses direct canonical-app route
-    binding for late Shared Sky modules; this keeps Chat 4 registration idempotent and deterministic
-    for both the production application and isolated FastAPI test applications.
-
     Chat 2 owns the signed first-party HLS bootstrap, bearer minting, HttpOnly cookie and redirect.
-    Chat 4's Wave 4 Watch guard is mounted before the Wave 2 page and delegates all viewer UI back to
-    Wave 2. It intervenes only when the canonical descriptor declares
-    ``cookie_bootstrap_redirect``: the bootstrap URL is not eagerly assigned to native video, and
-    it is treated as HLS for browser-capability gating so unsupported browsers do not falsely claim
-    playback readiness. No second playback/token authority is created.
-
-    Neighbour contracts are registered at application composition time. Chat 2 playback is first
-    hardened for a generic native-video runtime, then the Chat 2-owned browser bridge is installed
-    when its signed cookie-bootstrap contract is available. Chat 6 viewer Battle state remains
-    fail-closed until Chat 6 publishes an explicit ``viewer_live_battle(live_session_id)`` lookup;
-    Chat 4 never discovers Battles by reading Chat 6 private tables.
+    Chat 4's Wave 4 Watch guard only corrects viewer capability handling for the token-free HLS
+    bootstrap; it does not create a second media authority.
 
     LIVE moderation is an independent permission dimension. Owner and the LIVE creator retain their
     own authority; any other moderator must have both a current Owner-enabled global Moderator grant
     and an explicit assignment to that LIVE. Agent status by itself grants no moderation action.
 
-    Chat 4 Wave 3 installs additive durability hardening before requests are served. LIVE follower
-    notifications are retry-safe and poll votes have one serialized receipt per poll/viewer.
+    The delegated Moderator action layer is intentionally narrower than Creator/Owner authority.
+    Delegated Moderators may remove comments, temporarily timeout/mute users, remove viewers,
+    approve/reject/remove Q&A, view the moderation queue, escalate reports and flag a stream for
+    review. Persistent creator blocks, room-wide chat configuration, poll creation and Q&A show
+    selection remain Creator/Owner controls.
 
-    Upcoming-event routes expose only creator-published schedule sidecars. The underlying private
-    `shared_sky_schedules` table is never made public by membership-middleware configuration alone.
+    Neighbour integrations remain typed and fail closed: Chat 6 Battle display does not activate
+    until Chat 6 publishes its explicit viewer LIVE lookup, and Chat 5 remains the financial Gift
+    authority.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -100,6 +95,7 @@ def install_shared_sky_live_community(app: Any) -> None:
     install_chat2_browser_playback_bridge()
     install_chat6_battle_viewer_bridge()
     install_shared_sky_moderator_permissions()
+    install_limited_moderator_actions()
     install_live_community_hardening()
 
     existing = {_route_signature(route) for route in app.router.routes}
@@ -113,6 +109,7 @@ def install_shared_sky_live_community(app: Any) -> None:
         *_LIVE_INTEGRATION_ROUTES,
         *_LIVE_BATTLE_BRIDGE_ROUTES,
         *_LIVE_MODERATOR_PERMISSION_ROUTES,
+        *_LIVE_MODERATOR_ACTION_ROUTES,
     ):
         signature = _route_signature(route)
         if signature in existing:
