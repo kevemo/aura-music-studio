@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from .shared_sky_destination_adapters import CapabilityState
+from .shared_sky_transport_browser_playback import TransportBrowserPlaybackMixin
 from .shared_sky_transport_extensions import TransportExtensionsMixin
+from .shared_sky_transport_local_recording import TransportLocalRecordingMixin
+from .shared_sky_transport_media import TransportMediaMixin
+from .shared_sky_transport_media_lifecycle import TransportMediaLifecycleMixin
+from .shared_sky_transport_media_privacy import TransportMediaPrivacyMixin
+from .shared_sky_transport_media_readiness import TransportMediaStartupReadinessMixin
 from .shared_sky_transport_models import (
     BroadcastState,
     DestinationState,
@@ -16,17 +22,26 @@ from .shared_sky_transport_support import TransportSupport
 
 
 class SharedSkyTransportStore(
+    TransportMediaPrivacyMixin,
+    TransportBrowserPlaybackMixin,
+    TransportMediaStartupReadinessMixin,
+    TransportMediaLifecycleMixin,
+    TransportLocalRecordingMixin,
+    TransportMediaMixin,
     TransportRecoveryMixin,
     TransportExtensionsMixin,
     TransportOperations,
     TransportSupport,
     TransportPersistence,
 ):
-    """Canonical Shared Sky transport control-plane service.
+    """Canonical Shared Sky transport control-plane and first-party media service.
 
-    Recovery and compatibility mixins sit ahead of the core operations layer so narrowly
-    scoped hardening can override stop/preflight/provider-start behaviour while continuing
-    to delegate durable base initialization through cooperative ``super()``.
+    The privacy boundary is intentionally first in the cooperative MRO so member-facing
+    status responses cannot expose local filesystem roots added by lower media-runtime
+    layers. Browser playback decorates the signed descriptor with the secure cookie exchange,
+    and startup readiness requires actual viewer-playable HLS evidence before the internal
+    path can count toward LIVE. Lower lifecycle/recovery/provider layers retain ownership of
+    durable session and destination state.
     """
 
 
