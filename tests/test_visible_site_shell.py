@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import aura_music_studio.member_dashboard as dashboard
-from aura_music_studio.brand_migration import rebrand_text
+from aura_music_studio.brand_migration import BrandMigrationMiddleware, rebrand_text
 from aura_music_studio.native_access import EffectiveNativeAccess
 
 
@@ -23,7 +23,7 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     current = rebrand_text(source)
     assert "href='/creative-house'>Creative House" in current
     assert "Creative DNA + renderer bridge connected" in current
-    assert "Aura Core 0.20 connected" in current
+    assert "Rhian Core 0.20 connected" in current
     assert "Creative DNA project layer connected" in current
     assert "<h3>Basic</h3>" in current
     assert "href='/signup?plan=base'>Choose Basic" in current
@@ -31,13 +31,67 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     assert "built around Creative DNA continuity" in current
     assert "external generation backends remain deployment-configurable" in current
     assert "data-pfh-aura-core='0.20'" in current
+    assert "Rhiannon Intelligence Systems" in current
+    assert "Rhian Intelligence" in current
+    assert "Rhian Today & Tasks" in current
     assert "Host runtime connected · final rig pending" in current
     assert "External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states" in current
     assert "Workspace architecture staged" not in current
     assert "Unified project layer in build" not in current
+    assert "Aura Core" not in current
 
     again = rebrand_text(current)
     assert again.count("data-pfh-aura-core='0.20'") == 1
+
+
+def test_rhiannon_identity_replaces_legacy_public_copy_but_preserves_internal_routes_and_ids():
+    source = (
+        "Powered by Aura AI | Aura Core | Aura Today | Aura Sec Security Center | "
+        "/aura-intelligence | /aura-sec | aura_task_id | AURA_INTELLIGENCE_PROVIDER"
+    )
+    current = rebrand_text(source)
+    assert "Powered by Rhiannon Intelligence Systems" in current
+    assert "Rhian Core" in current
+    assert "Rhian Today" in current
+    assert "SLS Security Center" in current
+    assert "Aura AI" not in current
+    assert "Aura Core" not in current
+    assert "/aura-intelligence" in current
+    assert "/aura-sec" in current
+    assert "aura_task_id" in current
+    assert "AURA_INTELLIGENCE_PROVIDER" in current
+
+
+def test_rhiannon_migration_covers_legacy_assistant_facing_site_labels():
+    source = (
+        "Aura AI Producer | Aura Producer | Aura production queue | Aura Internet | Spoken Aura | "
+        "Aura Tune | Aura Artifacts | Aura artifacts | Aura Profile | Aura · Default profile | "
+        "Aura attachment not found | Aura lyrics | Aura creates original lyrics | let Aura draft | "
+        "let Aura build | Prepare with Aura | Open an Aura conversation first. | "
+        "Aura chat is not ready. | Aura, give me my daily briefing | Ask Aura | Talk to Aura"
+    )
+    current = rebrand_text(source)
+    assert "Rhian AI Producer" in current
+    assert "Rhian Producer" in current
+    assert "Rhian production queue" in current
+    assert "Rhian Internet" in current
+    assert "Spoken Rhian" in current
+    assert "Rhian Tune" in current
+    assert "Rhian Artifacts" in current
+    assert "Rhian artifacts" in current
+    assert "Rhian Profile" in current
+    assert "Rhian · Default profile" in current
+    assert "Rhian attachment not found" in current
+    assert "Rhian lyrics" in current
+    assert "Rhian creates original lyrics" in current
+    assert "let Rhian draft" in current
+    assert "let Rhian build" in current
+    assert "Prepare with Rhian" in current
+    assert "Open a Rhian conversation first." in current
+    assert "Rhian chat is not ready." in current
+    assert "Rhian, give me my daily briefing" in current
+    assert "Ask Rhian" in current
+    assert "Talk to Rhian" in current
 
 
 def _client(monkeypatch, membership):
@@ -62,22 +116,23 @@ def _client(monkeypatch, membership):
     )
     app = FastAPI()
     app.include_router(dashboard.router)
+    app.add_middleware(BrandMigrationMiddleware)
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_truthful_aura_sec_product(monkeypatch):
+def test_regular_member_dashboard_surfaces_rhian_core_game_forge_marketplace_and_truthful_sls_product(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
-    assert "Aura Core 0.20" in text
-    assert "Aura Today" in text
+    assert "Rhian Core 0.20" in text
+    assert "Rhian Today" in text
     assert "Voice Conversation" in text
     assert "Artifacts" in text
     assert "Tasks &amp; Briefings" in text
     assert "Connected Workspace" in text
     assert "Verified Workflows" in text
-    assert "Open Aura Intelligence" in text
-    assert "Pulsar-Frequency House is one integrated creation platform" in text
+    assert "Open Rhian Intelligence" in text
+    assert "Elevate Souls Productions Content Creation Command Center is one integrated creation platform" in text
 
     assert "Game Forge" in text
     assert "Open Game Forge" in text
@@ -88,8 +143,8 @@ def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_
     assert "href='/marketplace/account'" in text
     assert "marketplace participation remains opt-in" in text
 
-    assert "Aura Sec Security Center" in text
-    assert "Aura Sec available · same account" in text
+    assert "SLS Security Center" in text
+    assert "SLS available · same account" in text
     assert "included with Unlimited Pro" in text
     assert "can also be purchased separately where offered" in text
     assert "Commercial access never grants native device trust by itself" in text
@@ -106,7 +161,7 @@ def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_
     assert "Enter ESP Hub" not in text
 
 
-def test_dashboard_aura_sec_entry_never_exposes_native_authority_links(monkeypatch):
+def test_dashboard_sls_entry_never_exposes_native_authority_links(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
@@ -119,15 +174,15 @@ def test_dashboard_aura_sec_entry_never_exposes_native_authority_links(monkeypat
     assert "cannot" in text and "access command-signing keys" in text
 
 
-def test_approved_esp_member_gets_private_hub_and_truthful_aura_sec_entry(monkeypatch):
+def test_approved_esp_member_gets_private_hub_and_truthful_sls_entry(monkeypatch):
     response = _client(monkeypatch, {"status": "active", "roles": "creator"}).get("/dashboard")
     assert response.status_code == 200
     text = response.text
-    assert "Aura Sec Security Center" in text
-    assert "Aura Sec available · same account" in text
+    assert "SLS Security Center" in text
+    assert "SLS available · same account" in text
     assert "href='/aura-sec'" in text
     assert "Private Elevate Souls Productions Area" in text
-    assert "additional areas inside this same Pulsar-Frequency House account" in text
+    assert "additional areas inside this same Elevate Souls Productions Content Creation Command Center account" in text
     assert "These areas remain hidden from ordinary public members" in text
     assert "Enter ESP Hub" in text
     assert "href='/social-house'" not in text
