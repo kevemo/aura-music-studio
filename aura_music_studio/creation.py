@@ -7,8 +7,10 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy
+from .creative_ip_policy import build_clearance_record, require_input_rights
 from .lyrics import LyricRequest, generate_lyrics
 from .presets import get_preset, preset_dict
+from .rights import authorize_voice_profile
 from .song_dna import create_song_dna
 
 
@@ -17,6 +19,7 @@ class CreateSongRequest(BaseModel):
     concept: str = ""
     lyrics: str = ""
     generate_lyrics: bool = False
+    lyrics_rights_confirmed: bool = False
     genre: str = "pop"
     subgenre: str = ""
     mood: str = "uplifting"
@@ -31,7 +34,9 @@ class CreateSongRequest(BaseModel):
     vocal_mode: str = "ai_vocal"  # instrumental | ai_vocal | approved_voice
     vocal_gender: str | None = None
     voice_profile_id: str | None = None
+    voice_profile_project: str | None = None
     reference_audio: str | None = None
+    reference_audio_rights_confirmed: bool = False
     reference_strength: float = Field(default=0.65, ge=0.0, le=1.0)
     seed: int | None = None
     preferred_engines: list[str] = Field(default_factory=lambda: [
@@ -40,7 +45,55 @@ class CreateSongRequest(BaseModel):
     extra_prompt: str = ""
 
 
+def _resolve_same_tenant_project(projects_root: Path, project_name: str) -> Path:
+    """Resolve an existing direct child project without allowing traversal or cross-tenant paths."""
+    name = project_name or ""
+    if (
+        not name
+        or name.strip() != name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or Path(name).is_absolute()
+    ):
+        raise ValueError("Voice Profile source project name is invalid")
+    root = Path(projects_root).resolve()
+    candidate = (root / name).resolve()
+    if candidate.parent != root:
+        raise ValueError("Voice Profile source project must belong to the current member")
+    if not candidate.is_dir():
+        raise ValueError("Voice Profile source project was not found")
+    return candidate
+
+
 def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
+    user_lyrics_provided = bool(request.lyrics.strip())
+    reference_audio_provided = bool((request.reference_audio or "").strip())
+    require_input_rights(
+        "lyrics",
+        provided=user_lyrics_provided,
+        rights_confirmed=request.lyrics_rights_confirmed,
+    )
+    require_input_rights(
+        "audio_reference",
+        provided=reference_audio_provided,
+        rights_confirmed=request.reference_audio_rights_confirmed,
+    )
+
+    if request.vocal_mode == "approved_voice":
+        profile_id = (request.voice_profile_id or "").strip()
+        source_project_name = (request.voice_profile_project or "").strip()
+        if not profile_id or not source_project_name:
+            raise ValueError(
+                "Approved-voice creation requires a consent-approved Aura Voice Profile and its source project"
+            )
+        if not user_lyrics_provided and not request.generate_lyrics:
+            raise ValueError("Approved-voice song creation requires lyrics or generate_lyrics=true")
+        source_project = _resolve_same_tenant_project(projects_root, source_project_name)
+        # Admission-time check. Renderers MUST repeat this lookup immediately before every
+        # provider/model execution so consent withdrawn after admission still fails closed.
+        authorize_voice_profile(source_project / ".aura_rights", profile_id, "singing")
+
     enforce_creation_policy(
         request.title,
         request.concept,
@@ -51,7 +104,6 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
     slug = re.sub(r"[^a-z0-9]+", "-", request.title.lower()).strip("-") or "new-song"
     project = projects_root / slug
     input_dir = project / "input"
-    input_dir.mkdir(parents=True, exist_ok=True)
     preset = get_preset(request.genre)
     instruments = request.instruments or list(preset.instruments)
 
@@ -67,6 +119,10 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             extra=request.extra_prompt,
         ))
         enforce_creation_policy(lyrics, context="Generated lyrics")
+    if request.vocal_mode == "approved_voice" and not lyrics:
+        raise ValueError("Approved-voice song creation requires non-empty lyrics")
+
+    input_dir.mkdir(parents=True, exist_ok=True)
     if lyrics:
         (input_dir / "lyrics.txt").write_text(lyrics, encoding="utf-8")
 
@@ -103,11 +159,24 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
     if request.extra_prompt:
         style_bits.append(request.extra_prompt)
 
+    rights_clearance = build_clearance_record(
+        user_lyrics_provided=user_lyrics_provided,
+        lyrics_rights_confirmed=request.lyrics_rights_confirmed,
+        reference_audio_provided=reference_audio_provided,
+        reference_audio_rights_confirmed=request.reference_audio_rights_confirmed,
+        approved_voice_requested=request.vocal_mode == "approved_voice",
+    )
+    rights_confirmed = (
+        (not user_lyrics_provided or request.lyrics_rights_confirmed)
+        and (not reference_audio_provided or request.reference_audio_rights_confirmed)
+    )
+
     manifest = {
         "project_name": slug,
         "title": request.title,
         "mode": "original",
-        "rights_confirmed": True,
+        "rights_confirmed": rights_confirmed,
+        "rights_clearance": rights_clearance,
         "tempo_bpm": request.bpm,
         "meter": request.meter,
         "key": request.key,
@@ -163,6 +232,7 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "language": request.language,
             "vocal_mode": request.vocal_mode,
             "voice_profile_id": request.voice_profile_id,
+            "voice_profile_project": request.voice_profile_project,
             "seed": request.seed,
             "release_quality_standard": "release_grade_editable_master",
             "targeted_editing": {
@@ -202,6 +272,8 @@ def build_song_project(request: CreateSongRequest, projects_root: Path) -> Path:
             "reference_audio": request.reference_audio,
             "reference_strength": request.reference_strength,
             "seed": request.seed,
+            "rights_clearance": rights_clearance,
+            "voice_profile_project": request.voice_profile_project,
         },
     )
     return project

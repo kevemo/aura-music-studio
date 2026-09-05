@@ -1,15 +1,22 @@
-# Pulsar-Frequency House — Working Test Model
+# Elevate Souls Productions Content Creation Command Center — Working Test Model
 
-Production-style interactive preview:
+The working test model now follows the same architecture as production: **self-hosted Docker Compose behind Caddy**. There is no supported serverless/Vercel preview target.
 
-- `https://pulsar-frequency-house-test-model-51sgiwsgi.vercel.app`
-- stable project alias reported by the deployment platform: `https://pulsar-frequency-house-test-model-kevin-emerys-projects.vercel.app`
+Use a separate self-host staging environment with its own domain, database, project storage, credentials and provider sandbox accounts. Do not point staging at production member data or live provider credentials.
 
-This preview is intentionally a safe interactive model, not the GPU/rendering production deployment. It uses demo data and does not mutate live accounts, publish to social networks, consume generation credits, or expose owner credentials.
+## Release path
+
+1. Run local unit/integration tests.
+2. Push the candidate branch and require the GitHub CI, security and self-host smoke gates to pass.
+3. Deploy the approved candidate to the isolated self-host staging stack.
+4. Verify the unified route surface, authentication/role boundaries, renderers, workers, backups and public HTTPS `/health/ready` endpoint.
+5. Build the signed production release manifest with `deploy/selfhost/build-release.sh`.
+6. Approve that exact immutable manifest through the release process.
+7. Deploy with `deploy/selfhost/run-production.sh` using out-of-repository production environment and inference manifests.
+
+The production runner refuses mutable runtime images, missing real HTTPS origins, missing credentials, overlapping GPU assignments, failed vulnerability/signature gates, an unapproved release manifest, or a non-self-host deployment mode.
 
 ## Views to test
-
-Use the role selector in the top navigation to test these boundaries:
 
 1. **Regular Member** — creative tools only: Music Studio, Video Studio, Image Designer and Aura Intelligence. ESP social/agency tools are absent.
 2. **ESP Creator** — normal creative tools plus niche-specific training, ESP-only Social Manager and LIVE/Video Progress.
@@ -19,37 +26,16 @@ Use the role selector in the top navigation to test these boundaries:
 
 ## Key interaction checks
 
-- Request ESP verification from Regular Member view; the demo should keep private ESP access locked.
-- Switch to ESP Creator and select different niches; training context should remain distinct from regular creative tools.
-- Open Social Manager and add demo content to the ESP-only board.
+- Request ESP verification from Regular Member view; private ESP access must remain locked until authorised.
+- Switch to ESP Creator and select different niches; training context must remain distinct from regular creative tools.
+- Open Social Manager and verify content remains scoped to the ESP-only workspace.
 - Switch to ESP Agent and confirm Creator Roster appears only there.
-- Switch to Mary/Kev Admin and cycle a user's Free/Base/Pro subscription independently of their ESP role.
-- Approve/decline the demo ESP request.
-- Open Built vs staged to see which systems are functional architecture versus integrations still requiring production engines/API credentials.
+- Switch to Mary/Kev Admin and verify creative subscription state remains independent of ESP role.
+- Verify owner approval/decline flows and the owner audit trail.
+- Verify project continuity across Music, Image, Video and Game Forge workspaces.
+- Verify Game Forge private/public playtest navigation stays bound to the correct Creative project.
+- Verify `/health/live` and `/health/ready` through the real staging HTTPS gateway.
 
-## Current truthful integration state
+## Production integrations
 
-### Built in the main application
-
-- cross-media Creative DNA/project lineage;
-- music/audio production architecture;
-- dedicated Image Designer and Video Studio interfaces;
-- Aura Intelligence persistence/provider routing;
-- ESP self-request + owner approval model;
-- ESP niche profiles and niche-specific training context;
-- ESP-only social-management data/API layer;
-- LIVE/video progress tracking and owner oversight;
-- Mary/Kev owner persona switching;
-- independent creative-plan and ESP-role controls;
-- owner audit foundation;
-- professional content-safety baseline;
-- opaque server-side owner-session tokens.
-
-### Requires deployment configuration or third-party authorization
-
-- production ComfyUI image/video model workflows and GPU compute;
-- live Ollama/OpenAI-compatible Aura Intelligence model endpoint;
-- official TikTok/Meta/YouTube/LinkedIn/etc. OAuth publishing, analytics and inbox adapters;
-- production secrets, SMTP and payment verification configuration.
-
-The preview should never claim these staged integrations are connected when they are not.
+External services are considered connected only when their real credentials and end-to-end checks pass. This includes GPU model services, OAuth publishing/analytics/inbox providers, payment webhooks, SMTP, public DNS/TLS and any other third-party service. The repository contains no fake production credentials or substitute production domains.

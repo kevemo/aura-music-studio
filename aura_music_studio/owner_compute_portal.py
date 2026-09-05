@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 from html import escape
 
 from fastapi import APIRouter, Form, Request
@@ -10,11 +9,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from .branding import PRODUCT_FULL_NAME
 from .compute_capabilities import compatibility
 from .compute_nodes import ComputeNodeRegistry
+from .owner_auth import owner_authorized
 from .public_address import PublicAddressManager
 
 router = APIRouter()
 registry = ComputeNodeRegistry()
-ADMIN_COOKIE = "lss_admin_session"
 
 CSS = """
 body{font-family:system-ui,sans-serif;background:#08040c;color:#fff;margin:0}.wrap{max-width:1100px;margin:auto;padding:28px}.card{background:#170d20;border:1px solid #563364;border-radius:18px;padding:20px;margin:16px 0}.row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.muted{color:#cdbfd4}.gold{color:#f0ca72}.good{color:#72dfa0}.bad{color:#ff91a1}.warn{color:#ffd07a}.pill{border:1px solid #6f456f;border-radius:999px;padding:5px 9px}button,.btn{background:#e7b953;color:#160b18;border:0;border-radius:10px;padding:10px 14px;font-weight:800;text-decoration:none;cursor:pointer}button.danger{background:#672638;color:#fff}input{background:#0b0610;color:#fff;border:1px solid #51305d;border-radius:9px;padding:10px}code{word-break:break-all;color:#ffe29a}@media(max-width:760px){.grid{grid-template-columns:1fr}}
@@ -22,9 +21,7 @@ body{font-family:system-ui,sans-serif;background:#08040c;color:#fff;margin:0}.wr
 
 
 def _authorized(request: Request) -> bool:
-    configured = os.getenv("LSS_ADMIN_KEY") or ""
-    supplied = request.cookies.get(ADMIN_COOKIE) or ""
-    return bool(configured and supplied and secrets.compare_digest(configured, supplied))
+    return owner_authorized(request)
 
 
 def _page(body: str) -> HTMLResponse:

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
-from .esp_social_secret_refs import valid_social_token_ref
+from .esp_social_publish_capabilities import resolve_publish_capability
 from .social_management import ActivityEvent, SocialContent, SocialHouse, SocialHouseStore, utc_now
 
 QueueState = Literal[
@@ -108,26 +108,16 @@ class SocialPublishQueue:
 
     @staticmethod
     def _connection(house: SocialHouse, platform: str):
-        return next(
-            (
-                item
-                for item in house.connections
-                if item.platform == platform and item.state == "connected" and item.supports_auto_publish
-            ),
-            None,
-        )
+        return next((item for item in house.connections if item.platform == platform), None)
 
     @staticmethod
-    def _adapter_state(connection) -> tuple[str | None, list[str]]:
-        if connection is None:
-            return None, ["official publishing connection unavailable"]
-        reasons: list[str] = []
-        adapter = str(connection.metadata.get("publishing_adapter") or "").strip() or None
-        if not valid_social_token_ref(connection.token_secret_ref):
-            reasons.append("OAuth token reference must use the restricted social-token:// alias format")
-        if not adapter or connection.metadata.get("publishing_adapter_active") is not True:
-            reasons.append("official publishing adapter not active")
-        return adapter, reasons
+    def _adapter_state(connection, *, platform: str, content_type: str) -> tuple[str | None, list[str]]:
+        capability = resolve_publish_capability(
+            connection,
+            platform=platform,
+            content_type=content_type,
+        )
+        return capability.adapter, list(capability.reasons)
 
     @staticmethod
     def _content_variant(house: SocialHouse, entry_id: str):
@@ -157,7 +147,11 @@ class SocialPublishQueue:
 
         metadata = variant.metadata or {}
         connection = self._connection(house, variant.platform)
-        adapter, adapter_reasons = self._adapter_state(connection)
+        adapter, adapter_reasons = self._adapter_state(
+            connection,
+            platform=variant.platform,
+            content_type=variant.content_type,
+        )
         reasons: list[str] = []
         scheduled_utc: datetime | None = None
 
@@ -305,7 +299,11 @@ class SocialPublishQueue:
         house = self.store.load(space_id)
         content, variant, index = self._content_variant(house, entry_id)
         connection = self._connection(house, variant.platform)
-        active_adapter, reasons = self._adapter_state(connection)
+        active_adapter, reasons = self._adapter_state(
+            connection,
+            platform=variant.platform,
+            content_type=variant.content_type,
+        )
         if reasons or active_adapter != (adapter_name or "").strip():
             raise ValueError("Pending provider job does not match an active authorised publishing adapter")
         if variant.publish_state != "publishing":
@@ -416,7 +414,11 @@ class SocialPublishQueue:
         house = self.store.load(space_id)
         content, variant, index = self._content_variant(house, entry_id)
         connection = self._connection(house, variant.platform)
-        active_adapter, reasons = self._adapter_state(connection)
+        active_adapter, reasons = self._adapter_state(
+            connection,
+            platform=variant.platform,
+            content_type=variant.content_type,
+        )
         if reasons or active_adapter != adapter_name:
             raise ValueError("Provider confirmation does not match an active authorised publishing adapter")
 

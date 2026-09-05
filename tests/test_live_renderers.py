@@ -61,10 +61,16 @@ def test_acestep_client_uses_documented_async_contract(monkeypatch, tmp_path: Pa
     calls = []
 
     class Response:
-        def __init__(self, payload=None, content=b""):
+        def __init__(self, payload=None, content=b"", *, status_code=200, headers=None):
             self._payload = payload
             self.content = content
             self.ok = True
+            self.status_code = status_code
+            self.headers = dict(headers or {})
+            self.closed = False
+
+        def close(self):
+            self.closed = True
 
         def raise_for_status(self):
             return None
@@ -79,6 +85,7 @@ def test_acestep_client_uses_documented_async_contract(monkeypatch, tmp_path: Pa
             return self
 
         def __exit__(self, *_args):
+            self.close()
             return False
 
     client = AceStepClient(base_url="http://ace-step:8001", api_key="secret", timeout=5)
@@ -96,7 +103,8 @@ def test_acestep_client_uses_documented_async_contract(monkeypatch, tmp_path: Pa
     def get(url, **kwargs):
         calls.append(("GET", url, kwargs))
         if "/v1/audio" in url:
-            return Response(content=real.read_bytes())
+            payload = real.read_bytes()
+            return Response(content=payload, headers={"content-length": str(len(payload))})
         return Response({"data": {"models": []}})
 
     monkeypatch.setattr(client.session, "post", post)
@@ -108,6 +116,8 @@ def test_acestep_client_uses_documented_async_contract(monkeypatch, tmp_path: Pa
     assert outputs and outputs[0].is_file()
     assert any(url.endswith("/release_task") for method, url, _ in calls if method == "POST")
     assert any(url.endswith("/query_result") for method, url, _ in calls if method == "POST")
+    download_calls = [kwargs for method, url, kwargs in calls if method == "GET" and "/v1/audio" in url]
+    assert download_calls and download_calls[0]["allow_redirects"] is False
     assert probe_real_audio(outputs[0]).valid is True
 
 
@@ -125,9 +135,15 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
     monkeypatch.setenv("AURA_YUE_MAX_SEGMENTS", "2")
 
     class Response:
-        def __init__(self, payload=None, content=b""):
+        def __init__(self, payload=None, content=b"", *, status_code=200, headers=None):
             self._payload = payload
             self._content = content
+            self.status_code = status_code
+            self.headers = dict(headers or {})
+            self.closed = False
+
+        def close(self):
+            self.closed = True
 
         def raise_for_status(self):
             return None
@@ -142,19 +158,23 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
             return self
 
         def __exit__(self, *_args):
+            self.close()
             return False
 
     submitted = {}
+    download_kwargs = {}
 
     def post(url, **kwargs):
         submitted.update(kwargs.get("json") or {})
         return Response({"job_id": "job1", "status": "queued"})
 
-    def get(url, **_kwargs):
+    def get(url, **kwargs):
         if url.endswith("/v1/jobs/job1"):
             return Response({"job_id": "job1", "status": "completed", "audio_url": "/v1/audio/job1"})
         if url.endswith("/v1/audio/job1"):
-            return Response(content=source.read_bytes())
+            download_kwargs.update(kwargs)
+            payload = source.read_bytes()
+            return Response(content=payload, headers={"content-length": str(len(payload))})
         raise AssertionError(url)
 
     monkeypatch.setattr(yue_remote_command.requests, "post", post)
@@ -162,5 +182,6 @@ def test_yue_command_bridge_submits_polls_and_downloads(monkeypatch, tmp_path: P
     assert yue_remote_command.main() == 0
     assert submitted["segments"] == 2
     assert submitted["stage1_model"].startswith("m-a-p/YuE-s1")
+    assert download_kwargs["allow_redirects"] is False
     assert output.is_file()
     assert probe_real_audio(output).valid is True

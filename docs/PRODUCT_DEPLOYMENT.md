@@ -1,99 +1,136 @@
-# ESP Live Sound Studio — Product Deployment
+# Elevate Souls Productions Content Creation Command Center — Product Deployment
 
-**Elevate Souls Productions Presents: The Live Sound Studio**  
-**Music Making for Professionals · Powered by Aura**
+**Powered by Aura AI**  
+**Elevate Your Soul Through Purposeful Media**
 
-The primary deployment target is now **ESP-controlled self-hosting**. The product does not require Cloudflare, another paid domain, a paid app host, Firebase/Supabase, or a commercial music-generation API in order for the application architecture to operate.
+This document describes the deployment architecture for the **Elevate Souls Productions Content Creation Command Center**. The Python package name `aura_music_studio`, the `LSS_*` environment-variable namespace, database/cookie identifiers, and older repository terms are retained only where compatibility requires them. They are not the public product brand.
 
-See [`SELF_HOSTING.md`](SELF_HOSTING.md) for the public-address/network guide.
+The primary architecture supports **ESP-controlled self-hosting** while also retaining a web/serverless deployment path where appropriate. Infrastructure configuration is not, by itself, proof of production readiness: launch requires real provider, security, data, capacity, monitoring, backup/restore and rollback evidence.
 
-## What runs in the ESP Studio stack
+See [`SELF_HOSTING.md`](SELF_HOSTING.md) for the self-hosted public-address/network guide.
 
-The production `app.py` and supporting private services provide:
+## What the Command Center stack contains
 
-- public ESP-branded landing/pricing/discovery pages;
-- installable PWA metadata and tightly scoped public service worker;
-- sign-up and sign-in;
-- ESP membership approval lifecycle;
-- member dashboard and private Studio workspaces;
-- Free / Base / Pro entitlement enforcement;
-- Base daily confirmed-track accounting;
-- Pro unlimited tool access;
-- ESP owner/admin portal;
-- PayPal manual payment-link routing and verified billing periods;
-- private per-member projects/assets;
-- browser recording;
-- real-audio production orchestration;
-- build-around-upload workflows;
-- generative DAW/session/take/comp/revision systems;
-- mastering, splitter/stems, tuning, FX and engineering jobs;
-- asynchronous production worker;
-- Aura speech, reasoning and controlled web gateway;
-- private SearXNG metasearch;
-- Aura Public Address Manager;
-- owner-controlled backup/migration system;
-- health endpoint at `/health`.
+The integrated application and supporting private services include foundations for:
+
+- public ESP-branded landing, pricing and discovery pages;
+- installable PWA metadata and tightly scoped public service-worker behaviour;
+- sign-up, sign-in and account/session security;
+- membership approval and subscription lifecycle;
+- Free / Member / Unlimited Pro entitlement enforcement;
+- server-authoritative cross-studio usage/admission controls;
+- Cosmic Creation Coin catalogue, wallet and payment fulfilment controls;
+- private per-member projects and assets;
+- Music / Professional DAW workflows;
+- Voice House consent-bound workflows;
+- Image & Poster Studio workflows;
+- AI Video / Professional Video Editor workflows;
+- Game Forge creation/playtest foundations;
+- Social Media Centre planning, publishing-adapter and analytics foundations;
+- Aura LIVE Overlay Studio, Auto Cue and Guardian foundations;
+- private ESP Creator and Agent Hubs;
+- Mary & Kev Owner Command Center administration;
+- first-party marketplace, entitlement and settlement foundations;
+- background production workers and provider/model adapters;
+- Aura speech, reasoning, bounded tools and controlled web/research gateways;
+- privacy, consent, safeguarding, IP/provenance and audit controls;
+- owner-controlled backup/migration foundations;
+- production liveness, readiness and authenticated metrics surfaces.
+
+A module, route, UI label or adapter must not be represented as production-complete unless its required integration and external evidence gates have passed.
+
+## Authoritative membership model
+
+The public membership tiers are defined server-side in `aura_music_studio/plans.py`. The compatibility IDs remain `free`, `base` and `pro`, while customer-facing names are Free, Member and Unlimited Pro.
+
+### Free — £0
+
+Core Command Center exploration and limited eligible creative access. Current plan-level capabilities include Aura producer/songwriting assistance, starter creative tools, limited image/poster creation and public-safe Game Forge playtesting.
+
+### Member — £4.99/month
+
+Increased creative access across enabled Music, Video and Game workflows. The commercial target is up to **5 eligible creations/edits per day** across the defined cross-studio operation set, with eligible additional use handled through Cosmic Creation Coins where configured. The authoritative cross-studio allowance is enforced by the usage/admission layer rather than inferred from the plan object alone.
+
+### Unlimited Pro — £9.99/month
+
+Highest normal enabled creative access, **including the AuraSec entitlement**, and effectively unlimited ordinary use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety, rights and legal safeguards. Eligible publishing remains subject to marketplace, entitlement, rights and accounting gates.
+
+AuraSec can also be distributed and sold separately under its own approved commercial catalogue. This deployment document deliberately does not invent a standalone AuraSec price.
+
+Safety, privacy, consent and transparency protections are never paywalled.
+
+## Cosmic Creation Coins
+
+Authoritative public Coin packs are:
+
+- **1,000 Cosmic Creation Coins — £5**
+- **2,500 Cosmic Creation Coins — £10**
+- **6,000 Cosmic Creation Coins — £20**
+
+Coin price, quantity, debit, fulfilment, refund and reversal values remain server-authoritative. Browser-supplied commercial values must never be trusted as payment evidence.
+
+## Payment architecture
+
+The current codebase contains hardened Stripe subscription/Coin paths, verified marketplace fee/settlement/refund evidence foundations, and a server-authoritative hosted marketplace checkout release slice undergoing integration verification. Compatibility payment surfaces may remain where earlier architecture still requires them.
+
+Payment rules are fail-closed:
+
+- opening or returning from a checkout URL is never proof of payment;
+- browser values cannot grant a subscription, Coins, marketplace entitlement or ESP organisational role;
+- Stripe webhook evidence is cryptographically verified before covered mutations;
+- membership and marketplace commercial facts remain server-authoritative;
+- marketplace checkout must bind to an immutable local order and authenticated buyer;
+- marketplace settlement/refund mutation requires verified provider evidence rather than redirect state;
+- payment-provider configuration and live end-to-end evidence are launch gates.
+
+Any legacy/manual payment bridge that remains enabled must preserve the same rule: an owner/provider verification step, not the browser redirect, is the source of truth.
+
+## Marketplace economics
+
+For eligible creator marketplace publications, the intended revenue allocation is:
+
+- **50% Creator**
+- **50% Elevate Souls Productions**
+
+Eligible ESP-owned catalogue content explicitly created/published by Mary or Kev under Owner/Admin identity allocates **100% of eligible ESP-owned creation revenue to the ESP Admin Revenue Pool**.
+
+Production marketplace readiness additionally requires verified purchase/entitlement flow, provider fees/net evidence, creator liabilities, ESP allocation, refunds, chargebacks, pending/cleared balances, reporting, rights/safety gates and unpublish/revocation behaviour.
 
 ## Public and private URLs
 
-Public/indexable:
+Representative public/indexable surfaces include:
 
-- `/` — public landing page
-- `/pricing` — Free / Base / Pro comparison
-- `/signup` — membership request
-- `/signin` — member sign-in
-- `/ai-music-studio`
-- `/ai-song-generator`
-- `/backing-track-maker`
-- `/stem-splitter`
-- `/ai-mastering`
-- `/ai-vocal-studio`
+- `/`
+- `/pricing`
+- `/signup`
+- `/signin`
+- public discovery/studio landing routes
 - `/robots.txt`
 - `/sitemap.xml`
 - `/manifest.webmanifest`
 
-Private/member or owner surfaces include:
+Representative authenticated or role-gated surfaces include:
 
 - `/dashboard`
-- `/studio`
-- `/production-suite`
-- `/recording-studio`
-- `/take-manager`
-- `/history`
-- `/owner`
-- `/owner/backups`
-- `/projects/...`
+- creative project/studio routes
+- ESP Creator/Agent routes
+- Owner Command Center routes
+- private project/assets APIs
+- commercial/account/payment administration
 
-Private/member routes are deliberately excluded from the public sitemap and public service-worker cache.
+Private/member/owner routes must remain excluded from public search indexing and public service-worker caching unless an explicit reviewed exception exists.
 
 ## Membership lifecycle
 
-1. Applicant chooses Free, Base ($4.99) or Pro ($9.99).
-2. Account is created as `pending_approval`.
-3. Approval request is emailed to `elevatesoulsproductions@gmail.com`.
-4. Kev or Mary approves/rejects through the secure approval link.
-5. Free becomes active immediately after approval.
-6. Base/Pro become `approved_pending_payment` and receive the configured PayPal link.
-7. ESP verifies the PayPal payment in the owner dashboard.
-8. Verification creates a 31-day paid membership period.
-9. Additional verified payments extend the current paid-through date.
-10. If a paid period expires, access automatically returns to payment-pending until renewal is verified.
+The precise state machine is server-authoritative. At a high level:
 
-The current PayPal invoice links are used as a manual billing bridge; opening a payment URL is never treated as proof of payment.
-
-## Tier rules
-
-### Free
-
-Entry-level creative access, Aura Producer/songwriting tools, starter controls and basic previews. No confirmed finished full-track allowance.
-
-### Base — $4.99/month
-
-One **confirmed full track per day**. The member may regenerate the current draft before confirmation. Base includes the core full-song/backing-track workflow, browser recording, Build Around Upload complete-mix mode, MP3/WAV finished downloads, standard Aura Tune/FX/AutoMix, useful mastering and reduced splitter modes.
-
-### Pro — $9.99/month
-
-Unlimited full-track production and the complete enabled Studio: editable multitrack Build Around, detailed splitter/stems, Take Manager, phrase comping, automation, advanced instrument variants, Aura FX Designer, trusted plugin rack, advanced/custom Aura Tune, reference/album mastering, Sample Lab, Style DNA, repaint/remix/edit tools, consent-approved voice features, spatial/tone/video engineering, priority jobs and the complete download/export set.
+1. A user creates or requests the appropriate account/membership state.
+2. ESP approval rules are applied where required.
+3. Free access may activate without paid-provider evidence where allowed by policy.
+4. A paid tier requires the correct approved plan plus verified payment evidence.
+5. Subscription/payment evidence binds to the authenticated local user.
+6. Renewal, cancellation, expiry, refund or dispute handling updates access through verified provider/owner evidence rather than browser state.
+7. ESP organisational roles remain separate from commercial subscription entitlements.
 
 ## Self-host-first network architecture
 
@@ -106,192 +143,128 @@ browser on ESP host
 127.0.0.1:8000
         │
         ▼
-ESP Live Sound Studio
- ├─ membership/database
- ├─ private projects
- ├─ Aura production worker
+ESP Command Center
+ ├─ accounts / membership / commercial ledgers
+ ├─ private projects and assets
+ ├─ Aura production workers
  ├─ local/open model workers
- └─ private SearXNG
+ └─ private research/search services where enabled
 ```
 
-Optional public profile:
+Optional public self-host profile:
 
 ```text
 Internet
    │
    ▼
-free hostname OR direct public IP
+public hostname / approved public endpoint
    │
    ▼
-Caddy on ESP host (80/443)
+Caddy or approved TLS/reverse-proxy boundary
    │
    ▼
-private Live Sound Studio service
+private Command Center service
 ```
 
-The FastAPI application itself binds to host loopback in the Docker configuration. Caddy is the public reverse-proxy/TLS boundary when the public profile is enabled.
+The FastAPI service should remain behind the approved public TLS/reverse-proxy boundary in self-hosted production.
 
-## No paid domain requirement
+## Public addressing and HTTPS
 
-Aura Public Address Manager supports:
+Aura Public Address Manager supports self-hosting diagnostics and configured address-management modes. A provider account/record still has to exist when an external DDNS provider is used; provider credentials remain private deployment secrets.
 
-- local-only mode;
-- direct public-IP mode;
-- FreeDNS/afraid.org free hostname;
-- DuckDNS free hostname.
+For a hostname that resolves to the ESP server, configure the production base URL and secure cookies according to the validated deployment profile. Browser-trusted HTTPS, DNS readiness and inbound routing must be verified in the real production environment before launch.
 
-Aura monitors the address, can refresh the configured free-DDNS record, checks DNS readiness and warns about likely CGNAT. Full LAN/router/public network details are owner-only; ordinary member diagnostics receive only redacted readiness information.
+Do not treat a configuration file saying HTTPS is enabled as TLS evidence. Production evidence should include the live hostname/certificate and the actual application response through the intended ingress path.
 
-A provider account/record still has to exist for a free-DDNS hostname. Aura maintains it after ESP supplies the private provider credential.
+## Secure initialization and secrets
 
-## HTTPS
+Self-host initialization remains available through the repository setup/CLI paths. Deployment secrets must never be committed or supplied through unsafe shell-history patterns when a private environment/secret store is available.
 
-For a free hostname that resolves to the ESP server:
+At minimum, production secret handling must cover:
 
-```env
-LSS_PUBLIC_BASE_URL=auto
-LSS_PUBLIC_SITE_ADDRESS=your-free-host.example
-LSS_COOKIE_SECURE=true
-```
+- owner/provenance secrets;
+- session/security keys;
+- payment-provider keys/webhook secrets;
+- SMTP/email credentials;
+- external provider/API credentials;
+- DDNS credentials where used;
+- model/provider credentials where used;
+- production database/storage credentials where applicable.
 
-Caddy handles HTTPS on the ESP host once DNS and inbound ports 80/443 are correctly routed.
+## Email delivery
 
-Direct-IP mode deliberately defaults to HTTP rather than falsely assuming a browser-trusted certificate can be issued for every arbitrary IP:
+The Command Center supports SMTP-backed delivery paths. If development fallback/outbox behaviour is used, it must be reported as non-delivery and must not be presented as production email success.
 
-```env
-LSS_DDNS_PROVIDER=direct
-LSS_PUBLIC_SITE_ADDRESS=http://:80
-LSS_COOKIE_SECURE=false
-```
+Production launch requires verified delivery, sender configuration and failure/escalation behaviour for account, billing and operationally critical messages.
 
-## Secure initialization
+## Backups and recovery
 
-Before package installation:
+The backup architecture can create portable archives containing application data and private project material while excluding deployment secrets. Integrity checks and restore controls are part of the recovery design.
 
-```bash
-python scripts/setup_self_host.py --provider direct
-```
+Production readiness requires more than the existence of backup code. ESP must verify:
 
-After installation:
+- scheduled/operational backup creation;
+- integrity of the resulting backup;
+- access controls around backup data;
+- a successful restore drill into an isolated target;
+- documented recovery/rollback ownership and procedure.
 
-```bash
-aura self-host-init --provider direct
-```
+## Real-audio and AI compute architecture
 
-The initializer creates strong ESP owner/provenance secrets itself. Tokenized DDNS credentials are not accepted as CLI flags and must be placed privately in `.env` so they do not enter shell history.
+Customer/account web services are separated from heavy generation/rendering where possible. The production stack can route to self-hosted/open or approved external generation/rendering providers depending on the capability.
 
-## Public launch
+MIDI, MusicXML, notation and other symbolic representations are control layers only. They must not silently substitute for a required real/neural waveform Final Master.
 
-```bash
-docker compose --profile public up -d --build
-```
+GPU/AI compute is a physical/provider resource. A self-host-first architecture does not make generation unlimited or computationally free; throughput remains bounded by available hardware, model/provider limits and operational safeguards.
 
-Local-only/private launch:
+## Runtime health and readiness
 
-```bash
-docker compose up -d --build
-```
+The production application exposes:
 
-Convenience launchers:
+- `/health/live` for process liveness;
+- `/health/ready` for fail-closed deployment readiness;
+- authenticated `/internal/metrics` for operational metrics when monitoring is configured.
 
-```bash
-bash scripts/start_self_host.sh
-```
+Readiness evaluates configuration categories such as payments, required provider credentials, GPU/renderer requirements, monitoring, backups, security/HTTPS, storage and deployment environment. A green source-code test does not replace checking these gates in the real production environment.
 
-Windows:
+## Vercel / web deployment path
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/start_self_host.ps1
-```
+The repository retains a Vercel-compatible FastAPI bootstrap (`vercel_bootstrap:app`) for the web application path. Serverless/web deployment does not replace heavy-worker/GPU infrastructure where those workloads require separate compute.
 
-## Public-address owner controls
+A repository Vercel configuration or successful Vercel build alone is not full product production evidence. The authorised Vercel account must independently confirm that the intended project/deployment exists, and the release candidate still needs the complete provider/data/security/operations gates described below.
 
-The ESP owner dashboard reports:
+## Production release gates
 
-- recommended public URL;
-- configured hostname;
-- LAN/router/public address diagnosis;
-- DNS A/AAAA result;
-- CGNAT warning;
-- HTTPS readiness;
-- DDNS refresh state.
+`development/full-site-build` is the active integration branch. `main` is the production release target. Integration must not be promoted to `main` merely because feature code exists or an isolated feature PR passes.
 
-It never displays the DDNS update token/URL.
+Production promotion requires, at minimum:
 
-## Membership approval email URL
+- no unresolved P0 blockers;
+- acceptable disposition of P1 risks;
+- complete regression/security checks on the exact release candidate;
+- verified public domain/TLS and ingress;
+- verified production database and object/project storage strategy;
+- verified payment-provider configuration and end-to-end payment evidence;
+- verified email delivery;
+- verified required external provider/model capabilities and permissions;
+- secrets-management evidence;
+- monitoring, logs and alerting;
+- backup **and restore** evidence;
+- deployment rollback procedure and proof;
+- realistic capacity/load/failure testing for release-critical paths;
+- incident/support ownership and escalation procedures;
+- current public legal/privacy/commercial configuration and documentation;
+- release/integration branch-protection or equivalent repository-governance enforcement.
 
-Set:
+## Truth rule
 
-```env
-LSS_PUBLIC_BASE_URL=auto
-```
+The release status must distinguish between:
 
-and membership email links resolve from Aura Public Address Manager's current recommended URL. ESP does not need to manually rewrite the approval-link base every time an ISP address changes.
+- **implemented and verified**;
+- **implemented pending verification**;
+- **integrated pending production evidence**;
+- **external dependency**;
+- **gap confirmed**;
+- **planned**.
 
-## Email approval delivery
-
-The Studio supports SMTP directly. Gmail can be configured with:
-
-```env
-LSS_SMTP_HOST=smtp.gmail.com
-LSS_SMTP_PORT=587
-LSS_SMTP_USERNAME=elevatesoulsproductions@gmail.com
-LSS_SMTP_PASSWORD=<deployment secret / app-specific credential>
-LSS_SMTP_STARTTLS=true
-```
-
-If SMTP is not configured, the application writes a development-outbox message and explicitly reports that it was not delivered.
-
-## Backups and machine migration
-
-Aura's backup engine creates portable ZIP archives containing:
-
-- a transactionally consistent SQLite backup of accounts/memberships/billing/jobs;
-- private project files;
-- project sessions/revisions/work files when enabled;
-- finished outputs when enabled;
-- per-file SHA-256 hashes and a backup manifest.
-
-It deliberately excludes deployment `.env` and provider/payment/email/model secrets.
-
-Create:
-
-```bash
-aura backup
-```
-
-Optional standard `age` encryption:
-
-```bash
-aura backup --age-recipient age1...
-```
-
-Verify:
-
-```bash
-aura backup-inspect backups/ESP_Live_Sound_Studio_....zip
-```
-
-Restore requires the Studio/web/worker to be stopped and explicit confirmation:
-
-```bash
-aura restore-backup backup.zip --offline-confirmed
-```
-
-Aura verifies every manifest checksum before replacement and, by default, preserves the old database/project tree beside the restored state. The owner portal also provides backup creation/list/download controls; restore remains CLI/offline-only intentionally.
-
-Model checkpoints, Docker images and deployment secrets are not duplicated into every backup because they can be reinstalled/reconfigured separately and may be extremely large.
-
-## Real-audio compute architecture
-
-The customer/account web service is separate from heavy neural music generation. The Studio prefers a self-hosted ACE-Step worker and can route to additional local/open engines.
-
-MIDI, MusicXML and notation remain control layers only; they cannot be promoted to Final Master.
-
-GPU compute remains a physical resource. Avoiding paid generation APIs does not make unlimited generation computationally free; throughput is bounded by the GPU hardware ESP owns or otherwise has access to.
-
-## Startup-cost objective
-
-Assuming ESP already has suitable hardware, storage, electricity and Internet connectivity, the software is designed so the initial **additional domain/hosting/backend cost can be £0**.
-
-External rails still exist where the real-world function requires them (for example ISP connectivity, DNS if a hostname is used, public certificate authorities, PayPal and Gmail), but they do not own the Studio database, projects or music-production code.
+Code existence, UI presence, infrastructure-as-code, a provider adapter, or a successful browser redirect is not enough to claim a capability is production complete.

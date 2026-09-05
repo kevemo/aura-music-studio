@@ -7,7 +7,7 @@ $HostnameValue = $env:LSS_SETUP_HOSTNAME
 $DuckSub = $env:LSS_SETUP_DUCKDNS_SUBDOMAIN
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    throw "Docker is required to launch the self-hosted Studio stack."
+    throw "Docker is required to launch the self-hosted Command Center stack."
 }
 
 if (-not (Test-Path ".env")) {
@@ -28,5 +28,5 @@ if ($EnvText -match "(?m)^LSS_DDNS_PROVIDER=(direct|freedns|duckdns)$") {
 }
 
 Write-Host ""
-Write-Host "ESP Live Sound Studio started. Local owner access: http://127.0.0.1:8000"
+Write-Host "Elevate Souls Productions Content Creation Command Center started. Local owner access: http://127.0.0.1:8000"
 Write-Host "Run: docker compose exec live-sound-studio aura public-address --refresh"

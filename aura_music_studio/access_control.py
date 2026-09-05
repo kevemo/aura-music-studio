@@ -31,6 +31,7 @@ from .plans import (
     UPLOAD_AUDIO,
     VIDEO_SYNC,
     WAV_DOWNLOAD,
+    get_plan,
 )
 from .request_context import reset_current_user_id, set_current_user_id
 
@@ -44,6 +45,14 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    # Browser/link sources in TikTok LIVE Studio and OBS do not share the member's site session.
+    # These routes are public only at the middleware layer; every request is authenticated by a
+    # high-entropy, rotatable source token stored only as a SHA-256 digest server-side.
+    "/live-overlay/source/",
+    # Stripe checkout must also work for owner-approved accounts that are not active yet,
+    # and Stripe webhooks have no member session. Every state-changing Stripe route therefore
+    # performs its own session or cryptographic webhook verification before mutating state.
+    "/billing/stripe/",
 )
 
 
@@ -145,8 +154,65 @@ class MembershipAccessMiddleware(BaseHTTPMiddleware):
         self.store = AccountStore()
         self.memberships = MembershipService(self.store)
 
+    def _live_overlay_speech_denial(self, path: str, method: str) -> JSONResponse | None:
+        """Revalidate paid LIVE speech at execution time for bearer browser sources.
+
+        Browser-source URLs intentionally have no member session. A saved overlay profile must
+        therefore never act as a durable paid entitlement after the owning account is downgraded
+        or its paid period expires. Token authentication remains inside the overlay route; this
+        guard only applies after a valid token resolves to an account.
+        """
+        if method != "POST" or not path.startswith("/live-overlay/source/") or not path.endswith("/speech"):
+            return None
+        raw_token = path[len("/live-overlay/source/") : -len("/speech")].strip("/")
+        if not raw_token:
+            return None
+        try:
+            from .aura_live_overlay_studio import _profile, _user_for_source
+
+            user_id = _user_for_source(unquote(raw_token))
+            profile = _profile(user_id)
+        except Exception:
+            # Preserve the source route's own token/not-found response without turning this
+            # entitlement guard into a second source-authentication implementation.
+            return None
+
+        user = self.store.get_user(user_id)
+        if not user:
+            return JSONResponse({"detail": "Overlay source owner not found"}, status_code=404)
+        current_user = self.memberships.subscriptions.enforce(user)
+        if current_user.get("status") != "active":
+            return JSONResponse(
+                {"detail": "Active membership is required for server LIVE speech"},
+                status_code=403,
+            )
+        plan = get_plan(current_user.get("plan_id") or "free")
+        mode = str(profile.get("voice_mode") or "browser").lower()
+        if mode == "aura" and plan.id not in {"base", "pro"}:
+            return JSONResponse(
+                {
+                    "detail": "Aura overlay voice requires a current Basic or Pro membership",
+                    "plan": plan.id,
+                    "upgrade_required": True,
+                },
+                status_code=403,
+            )
+        if mode == "clone" and (plan.id != "pro" or not plan.has(APPROVED_VOICE_DUPLICATION)):
+            return JSONResponse(
+                {
+                    "detail": "Consent-approved cloned LIVE voice requires a current Pro membership",
+                    "plan": plan.id,
+                    "upgrade_required": True,
+                },
+                status_code=403,
+            )
+        return None
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        live_speech_denial = self._live_overlay_speech_denial(path, request.method)
+        if live_speech_denial is not None:
+            return live_speech_denial
         if request.method == "OPTIONS" or path in PUBLIC_EXACT or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES):
             return await call_next(request)
 

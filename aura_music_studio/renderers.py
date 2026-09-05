@@ -12,8 +12,14 @@ from gradio_client import Client, handle_file
 
 from .acestep_api import AceStepClient, AceStepRequest
 from .cloud_providers import ElevenMusicClient, MurekaClient
+from .creative_runtime_readiness import (
+    RuntimeReadinessError,
+    creative_runtime_workload_ready,
+    load_creative_runtime_evidence,
+)
 from .models import ArrangementPlan, ProjectManifest, RenderResult
 from .project import ProjectWorkspace
+from .rights import authorize_voice_profile
 
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".ogg", ".m4a"}
 
@@ -49,6 +55,53 @@ def _lyrics(workspace: ProjectWorkspace, manifest: ProjectManifest) -> str:
     return ""
 
 
+def _approved_voice_binding(manifest: ProjectManifest) -> tuple[str, str] | None:
+    dna = manifest.project_dna if isinstance(manifest.project_dna, dict) else {}
+    if str(dna.get("vocal_mode") or "") != "approved_voice":
+        return None
+    source_project = str(dna.get("voice_profile_project") or "").strip()
+    profile_id = str(dna.get("voice_profile_id") or "").strip()
+    if not source_project or not profile_id:
+        raise PermissionError(
+            "Approved-voice project is missing its authoritative Voice House source binding and cannot render."
+        )
+    return source_project, profile_id
+
+
+def _resolve_voice_source_project(workspace: ProjectWorkspace, source_project_name: str) -> Path:
+    name = source_project_name or ""
+    if (
+        not name
+        or name.strip() != name
+        or name in {".", ".."}
+        or "/" in name
+        or "\\" in name
+        or Path(name).is_absolute()
+    ):
+        raise PermissionError("Approved-voice source project reference is invalid.")
+    current = workspace.root.resolve()
+    tenant_root = current.parent
+    candidate = (tenant_root / name).resolve()
+    if candidate.parent != tenant_root or not candidate.is_dir():
+        raise PermissionError("Approved-voice source project is unavailable in the current member workspace.")
+    return candidate
+
+
+def _project_confined_voice_reference(source_project: Path, reference_files: list[str]) -> Path:
+    root = source_project.resolve()
+    for value in reference_files:
+        try:
+            candidate = Path(value)
+            if not candidate.is_absolute():
+                candidate = root / candidate
+            candidate = candidate.resolve()
+        except Exception:
+            continue
+        if candidate.is_file() and root in candidate.parents:
+            return candidate
+    raise PermissionError("Approved Voice Profile has no valid project-confined reference audio.")
+
+
 class BaseRenderer:
     name = "base"
 
@@ -56,7 +109,9 @@ class BaseRenderer:
         return True
 
     def render(self, workspace: ProjectWorkspace, manifest: ProjectManifest, plan: ArrangementPlan) -> RenderResult:
-        raise NotImplementedError
+        raise RuntimeError(
+            "BaseRenderer is a non-executable renderer contract; select a configured concrete renderer."
+        )
 
 
 class AceStepApiRenderer(BaseRenderer):
@@ -194,8 +249,53 @@ class MurekaRenderer(BaseRenderer):
         return bool(os.getenv("MUREKA_API_KEY"))
 
     def render(self, workspace, manifest, plan):
-        client = MurekaClient()
         lyrics = _lyrics(workspace, manifest)
+        approved_binding = _approved_voice_binding(manifest)
+
+        if approved_binding is not None:
+            if not lyrics:
+                raise RuntimeError("Approved-voice rendering requires non-empty lyrics.")
+            source_project_name, profile_id = approved_binding
+            source_project = _resolve_voice_source_project(workspace, source_project_name)
+            rights_root = source_project / ".aura_rights"
+
+            # Authorize immediately before sending any protected voice reference to a provider.
+            admitted_profile = authorize_voice_profile(rights_root, profile_id, "singing")
+            reference = _project_confined_voice_reference(source_project, admitted_profile.reference_files)
+            client = MurekaClient()
+            vocal_id = client.clone_vocal(
+                reference,
+                f"Aura Voice Profile: {admitted_profile.name}; owner: {admitted_profile.owner_label}",
+            )
+            if not vocal_id:
+                raise RuntimeError("Voice provider did not return a vocal identifier.")
+
+            # Consent may be withdrawn while the clone call is in flight. Re-read the
+            # authoritative source ledger again immediately before actual song generation.
+            authorize_voice_profile(rights_root, profile_id, "singing")
+            out = workspace.work_dir / "neural_master_mureka_approved_voice.mp3"
+            client.lyrics_to_song(
+                out,
+                lyrics=lyrics[:5000],
+                prompt=plan.render_prompt[:1024],
+                model=os.getenv("MUREKA_MODEL", "auto"),
+                vocal_id=vocal_id,
+            )
+            return RenderResult(
+                renderer=self.name,
+                audio_path=out,
+                metadata={
+                    "model": os.getenv("MUREKA_MODEL", "auto"),
+                    "approved_voice": True,
+                    "voice_profile_id": profile_id,
+                    "voice_profile_project": source_project_name,
+                    "consent_checked_before_clone": True,
+                    "consent_checked_before_generation": True,
+                    "generic_vocal_fallback_allowed": False,
+                },
+            )
+
+        client = MurekaClient()
         if lyrics:
             out = workspace.work_dir / "neural_master_mureka.mp3"
             client.lyrics_to_song(
@@ -258,15 +358,58 @@ class AceStepSpaceRenderer(BaseRenderer):
 
 
 class ExternalCommandRenderer(BaseRenderer):
-    def __init__(self, name: str, env_var: str, output_name: str):
+    def __init__(self, name: str, env_var: str, output_name: str, readiness_env_var: str):
         self.name = name
         self.env_var = env_var
         self.output_name = output_name
+        self.readiness_env_var = readiness_env_var
 
-    def available(self) -> bool:
+    def configured(self) -> bool:
         return bool(os.getenv(self.env_var))
 
+    def _command_tokens(self) -> list[str]:
+        command = os.getenv(self.env_var, "")
+        if not command:
+            raise RuntimeReadinessError(f"{self.name} runtime command is not configured.")
+        try:
+            tokens = shlex.split(command)
+        except ValueError as exc:
+            raise RuntimeReadinessError(f"{self.name} runtime command is malformed.") from exc
+        if not tokens:
+            raise RuntimeReadinessError(f"{self.name} runtime command is empty.")
+        executable = Path(tokens[0])
+        if executable.is_absolute():
+            if not executable.is_file() or not os.access(executable, os.X_OK):
+                raise RuntimeReadinessError(f"{self.name} runtime executable is unavailable or not executable.")
+        elif shutil.which(tokens[0]) is None:
+            raise RuntimeReadinessError(f"{self.name} runtime executable is not available on PATH.")
+        return tokens
+
+    def _load_readiness(self):
+        path = os.getenv(self.readiness_env_var, "").strip()
+        if not path:
+            raise RuntimeReadinessError(
+                f"{self.name} is configured but has no workload-readiness evidence ({self.readiness_env_var})."
+            )
+        return load_creative_runtime_evidence(path, expected_engine=self.name)
+
+    def available(self) -> bool:
+        if not self.configured():
+            return False
+        try:
+            self._command_tokens()
+        except RuntimeReadinessError:
+            return False
+        path = os.getenv(self.readiness_env_var, "").strip()
+        return bool(path) and creative_runtime_workload_ready(path, expected_engine=self.name)
+
     def render(self, workspace, manifest, plan):
+        # Re-read executable and attestation immediately before execution. A renderer that
+        # passed availability earlier must still fail closed if health/capacity/model state
+        # changed while the job was queued.
+        command_tokens = self._command_tokens()
+        readiness = self._load_readiness()
+
         out = workspace.work_dir / self.output_name
         source = _source_or_guide(workspace, manifest)
         lyrics_path = workspace.resolve_asset(manifest.lyrics_file)
@@ -283,11 +426,19 @@ class ExternalCommandRenderer(BaseRenderer):
             "AURA_METER": plan.meter,
             "AURA_DURATION": str(_target_duration(workspace, manifest, plan)),
             "AURA_OUTPUT": str(out),
+            "AURA_RUNTIME_MODEL_ID": readiness.model_id,
+            "AURA_RUNTIME_MODEL_DIGEST": readiness.model_digest,
+            "AURA_RUNTIME_ID": readiness.runtime_id,
+            "AURA_RUNTIME_DIGEST": readiness.runtime_digest,
         })
-        subprocess.run(shlex.split(os.environ[self.env_var]), cwd=workspace.root, env=env, check=True)
+        subprocess.run(command_tokens, cwd=workspace.root, env=env, check=True)
         if not out.exists():
             raise RuntimeError(f"{self.name} command completed but did not create {out}")
-        return RenderResult(renderer=self.name, audio_path=out)
+        return RenderResult(
+            renderer=self.name,
+            audio_path=out,
+            metadata=readiness.provenance_metadata(),
+        )
 
 
 def _source_or_guide(workspace: ProjectWorkspace, manifest: ProjectManifest) -> Path | None:
@@ -323,12 +474,37 @@ def render_with_failover(workspace: ProjectWorkspace, manifest: ProjectManifest,
         "eleven_music": ElevenMusicRenderer(),
         "mureka": MurekaRenderer(),
         "acestep_space": AceStepSpaceRenderer(),
-        "local_acestep": ExternalCommandRenderer("local_acestep", "AURA_LOCAL_RENDER_CMD", "neural_master_local.wav"),
-        "muser": ExternalCommandRenderer("muser", "AURA_MUSER_CMD", "neural_master_muser.wav"),
-        "yue": ExternalCommandRenderer("yue", "AURA_YUE_CMD", "neural_master_yue.wav"),
+        "local_acestep": ExternalCommandRenderer(
+            "local_acestep",
+            "AURA_LOCAL_RENDER_CMD",
+            "neural_master_local.wav",
+            "AURA_LOCAL_RENDER_READINESS_FILE",
+        ),
+        "muser": ExternalCommandRenderer(
+            "muser",
+            "AURA_MUSER_CMD",
+            "neural_master_muser.wav",
+            "AURA_MUSER_READINESS_FILE",
+        ),
+        "yue": ExternalCommandRenderer(
+            "yue",
+            "AURA_YUE_CMD",
+            "neural_master_yue.wav",
+            "AURA_YUE_READINESS_FILE",
+        ),
     }
     requested = list(manifest.renderer.preferred)
-    if manifest.mode in {"cover", "remix", "backing_track"}:
+
+    # Today Mureka is the only whole-song adapter in this renderer layer that accepts a
+    # consent-bound voice identifier. Never silently turn an approved-voice request into a
+    # generic singer by failing over to an engine that cannot honor that identity/consent.
+    if _approved_voice_binding(manifest) is not None:
+        if "mureka" not in requested:
+            raise RuntimeError(
+                "Approved-voice rendering requires a configured voice-capable renderer; generic vocal fallback is disabled."
+            )
+        requested = ["mureka"]
+    elif manifest.mode in {"cover", "remix", "backing_track"}:
         guide_first = ["acestep_api", "local_acestep", "muser", "acestep_space", "deapi", "mureka", "eleven_music", "yue"]
         requested = [x for x in guide_first if x in requested] + [x for x in requested if x not in guide_first]
 
