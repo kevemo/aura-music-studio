@@ -28,7 +28,8 @@ def test_toolbar_injection_is_idempotent_and_keeps_existing_studio_markup():
     assert once.count("id='transportConsole'") == 1
     assert "<h2>Inspector</h2>" in once
     assert "Broadcast transport controls" in once
-    assert "Authoritative transport" not in once  # no fabricated readiness banner
+    assert "preflight passed" not in TOOLBAR_HTML.lower()
+    assert ">LIVE<" not in TOOLBAR_HTML
 
 
 def test_toolbar_uses_only_chat2_chat3_operator_contracts_and_unique_idempotency_keys():
@@ -66,8 +67,14 @@ def test_toolbar_exposes_preflight_evidence_destination_retry_and_stop_confirmat
     assert "warnings" in TOOLBAR_JS
     assert "data-retry-destination" in TOOLBAR_JS
     assert "confirm('Stop the active Shared Sky broadcast and its delivery paths?')" in TOOLBAR_JS
-    assert "role='status'" not in TOOLBAR_HTML  # existing page notice already owns primary status role
+    assert "role='status'" not in TOOLBAR_HTML
     assert "aria-live='polite'" in TOOLBAR_HTML
+
+
+def test_runtime_preflight_message_is_only_set_after_authoritative_response():
+    assert "transportUI.preflight=await api" in TOOLBAR_JS
+    assert "transportUI.preflight?.ready?'Authoritative transport preflight passed.'" in TOOLBAR_JS
+    assert "Transport preflight is blocked; review the listed evidence." in TOOLBAR_JS
 
 
 def test_installer_wraps_canvas_renderer_once(monkeypatch):
