@@ -92,12 +92,13 @@ def roles_from_account(account: Mapping[str, object]) -> frozenset[OrgRole]:
             roles.add(OrgRole(value))
 
     # Moderator is deliberately not accepted from esp_roles. Owners assign it
-    # separately as an additive permission/role, preserving dual permission.
+    # separately as an additive permission/role, and it becomes effective only
+    # while the same active account also has the Agent role.
     additional = (
         _role_tokens(account.get("esp_permissions"))
         + _role_tokens(account.get("esp_additional_roles"))
     )
-    if OrgRole.MODERATOR.value in additional:
+    if OrgRole.AGENT in roles and OrgRole.MODERATOR.value in additional:
         roles.add(OrgRole.MODERATOR)
 
     return frozenset(roles or {OrgRole.USER})
