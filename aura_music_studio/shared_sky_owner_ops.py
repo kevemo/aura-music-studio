@@ -166,8 +166,10 @@ def install_shared_sky_owner_ops(app: Any) -> None:
 # compatibility-router snapshotting; every handler retains its own membership/owner gate.
 from .api import app as _canonical_app
 from .shared_sky_control_room import install_shared_sky_control_room
+from .shared_sky_control_room_extensions import install_shared_sky_control_room_extensions
 
 install_shared_sky_control_room(_canonical_app)
+install_shared_sky_control_room_extensions(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 
 
