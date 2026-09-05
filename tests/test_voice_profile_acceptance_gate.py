@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi import FastAPI
 
 from aura_music_studio import voice_house_api
 from aura_music_studio.request_context import reset_current_user_id, set_current_user_id
@@ -153,7 +154,13 @@ def test_voice_profile_version_rename_revoke_delete_lifecycle(tmp_path):
 
 
 def test_voice_profile_lifecycle_routes_are_mounted_once():
-    routes = [(getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set()))) for route in studio_router.routes]
-    assert ("/projects/{project_name}/voice-house/profiles/{profile_id}", ("GET",)) in routes
-    assert ("/projects/{project_name}/voice-house/profiles/{profile_id}", ("PATCH",)) in routes
-    assert ("/projects/{project_name}/voice-house/profiles/{profile_id}", ("DELETE",)) in routes
+    app = FastAPI()
+    app.include_router(studio_router)
+    routes = [
+        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
+        for route in app.routes
+    ]
+    expected = "/projects/{project_name}/voice-house/profiles/{profile_id}"
+    assert routes.count((expected, ("GET",))) == 1
+    assert routes.count((expected, ("PATCH",))) == 1
+    assert routes.count((expected, ("DELETE",))) == 1
