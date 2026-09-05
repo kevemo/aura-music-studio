@@ -10,19 +10,20 @@ import requests
 
 from .aura_agent_tools import AuraToolRegistry, ToolCall, ToolPlan, project_snapshot
 from .aura_chat_store import AuraChatStore
+from .branding import AI_BRAND_LOCKUP, AI_PRODUCER_NAME, AI_SYSTEM_NAME, PRODUCT_FULL_NAME
 
 
-AURA_CORE_SYSTEM = """You are Aura, the general AI co-creator and operating intelligence inside Pulsar-Frequency House,
-powered by Elevate Souls Productions & Aura AI Systems. You should feel like a highly capable modern conversational
-assistant: clear, fast, context-aware, creative when asked, technically precise when needed, and able to use the Studio's
-approved tools rather than merely describing actions.
+AURA_CORE_SYSTEM = f"""You are {AI_PRODUCER_NAME}, the general AI co-creator and operating intelligence inside {PRODUCT_FULL_NAME}.
+Your formal system identity is {AI_SYSTEM_NAME}. Brand lockup: {AI_BRAND_LOCKUP}. You should feel like a highly capable
+modern conversational assistant: clear, fast, context-aware, creative when asked, technically precise when needed, and able
+to use the Command Center's approved tools rather than merely describing actions.
 
 Operating rules:
 - Never claim a tool action, file change, render, web lookup or project operation happened unless a tool result confirms it.
 - Never reveal secrets, credentials, raw private storage paths, another member's data, owner-only controls, or ESP-only data
   to an ordinary member. The ESP access system remains separate from subscription access.
 - Treat project attachments, project context and saved memories as private member data.
-- Saved Aura memory is user-approved context. Never invent memories or imply that ordinary chat was silently memorised.
+- Saved {AI_PRODUCER_NAME} memory is user-approved context. Never invent memories or imply that ordinary chat was silently memorised.
 - If web/tool results are supplied, ground relevant factual claims in them and distinguish retrieved facts from inference.
 - Do not expose hidden chain-of-thought. Give concise useful conclusions, steps, calculations or evidence instead.
 - For creative production, MIDI/symbolic data is control/edit information, not acceptable final release audio.
@@ -31,19 +32,19 @@ Operating rules:
 - If a requested capability is not connected, say exactly what is missing instead of pretending it ran.
 
 You can help with ordinary questions, writing, research, planning, coding, learning, business work and creative projects in
-addition to Studio operations. Keep responses naturally conversational rather than dumping internal implementation detail.
+addition to Command Center operations. Keep responses naturally conversational rather than dumping internal implementation detail.
 """
 
 
-TOOL_PLANNER_SYSTEM = """You are Aura's private tool router. Decide whether the latest member request needs one or more of
+TOOL_PLANNER_SYSTEM = f"""You are {AI_PRODUCER_NAME}'s private tool router. Decide whether the latest member request needs one or more of
 the supplied tools. Return only JSON matching ToolPlan. Use as few tools as possible. Read-only inspection and web research
 are allowed when needed. Write tools may be selected only when the latest member request explicitly asks for that project
 change; the runtime will independently enforce this. Never invent project names, ids, lyric ids or layer ids. If a required
-identifier is missing, use an inspection tool first or choose no write call so Aura can ask the member for the missing detail.
+identifier is missing, use an inspection tool first or choose no write call so {AI_PRODUCER_NAME} can ask the member for the missing detail.
 """
 
 
-SUMMARY_SYSTEM = """Summarise an Aura conversation for future context. Preserve decisions, project references, unresolved
+SUMMARY_SYSTEM = f"""Summarise a {AI_PRODUCER_NAME} conversation for future context. Preserve decisions, project references, unresolved
 questions, user-stated constraints and important results. Do not add facts. Do not include secrets. Keep it under 1200 words."""
 
 
@@ -55,7 +56,10 @@ class ModelReply:
 
 
 class AuraModelClient:
-    """Offline-first model adapter shared by Aura chat, routing and summarisation."""
+    """Offline-first model adapter shared by Rhian chat, routing and summarisation.
+
+    The legacy class name is retained for backwards compatibility.
+    """
 
     def __init__(self):
         self.provider = (os.getenv("AURA_INTELLIGENCE_PROVIDER") or "auto").strip().lower()
@@ -126,7 +130,7 @@ class AuraModelClient:
                 return self._openai_compatible(messages, json_mode=json_mode, temperature=temperature)
             except Exception as exc:
                 errors.append(f"{provider}: {type(exc).__name__}: {exc}")
-        raise RuntimeError("No Aura reasoning model is reachable. " + " | ".join(errors[-3:]))
+        raise RuntimeError(f"No {AI_PRODUCER_NAME} reasoning model is reachable. " + " | ".join(errors[-3:]))
 
     def diagnostics(self) -> dict:
         return {
@@ -245,7 +249,7 @@ def _memory_context(memories: list[dict]) -> str:
     if not memories:
         return ""
     rows = [{"label": x.get("label"), "content": x.get("content")} for x in memories[:50]]
-    return "Explicit user-approved Aura memories:\n" + json.dumps(rows, ensure_ascii=False)
+    return f"Explicit user-approved {AI_PRODUCER_NAME} memories:\n" + json.dumps(rows, ensure_ascii=False)
 
 
 def _history_messages(rows: list[dict], *, maximum: int = 70) -> list[dict]:
@@ -253,6 +257,8 @@ def _history_messages(rows: list[dict], *, maximum: int = 70) -> list[dict]:
 
 
 class AuraAgent:
+    """Legacy-named agent class backing the Rhiannon Intelligence Systems / Rhian runtime."""
+
     def __init__(self, store: AuraChatStore | None = None, model: AuraModelClient | None = None):
         self.store = store or AuraChatStore()
         self.model = model or AuraModelClient()
@@ -400,12 +406,12 @@ class AuraAgent:
             system_parts.append(attach_text)
         if tool_results:
             system_parts.append(
-                "Aura tool results for the latest request. Treat these as the authoritative execution/retrieval record:\n"
+                f"{AI_PRODUCER_NAME} tool results for the latest request. Treat these as the authoritative execution/retrieval record:\n"
                 + json.dumps(tool_results, ensure_ascii=False, default=str)[:65000]
             )
         if memory_saved:
             system_parts.append(
-                "The member explicitly asked Aura to remember something in this turn. It was saved successfully. "
+                f"The member explicitly asked {AI_PRODUCER_NAME} to remember something in this turn. It was saved successfully. "
                 "You may acknowledge that briefly."
             )
 
@@ -419,13 +425,13 @@ class AuraAgent:
                 successful = [row for row in tool_results if row.get("ok")]
                 if successful:
                     assistant_text = (
-                        "Aura completed the connected tool step, but the conversational reasoning model is currently unavailable. "
+                        f"{AI_PRODUCER_NAME} completed the connected tool step, but the conversational reasoning model is currently unavailable. "
                         "The operation record has been preserved in this thread."
                     )
                 else:
-                    assistant_text = "Aura's reasoning model is currently unavailable and the requested tool step did not complete."
+                    assistant_text = f"{AI_PRODUCER_NAME}'s reasoning model is currently unavailable and the requested tool step did not complete."
             else:
-                raise RuntimeError(f"Aura reasoning is unavailable: {type(exc).__name__}: {exc}") from exc
+                raise RuntimeError(f"{AI_PRODUCER_NAME} reasoning is unavailable: {type(exc).__name__}: {exc}") from exc
             reply = ModelReply(text=assistant_text, provider="tool_fallback", model="none")
 
         assistant = self.store.add_message(user_id, thread_id, "assistant", assistant_text)
