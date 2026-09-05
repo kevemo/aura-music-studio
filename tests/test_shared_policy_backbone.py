@@ -3,11 +3,13 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
+from aura_music_studio.api_errors import ApiError, ApiErrorCode
 from aura_music_studio.authorization import (
     AuthorizationContext, EntitlementDeniedError, InvalidOverrideError,
     require_authorized_feature, require_product_entitlement,
 )
 from aura_music_studio.capabilities import CapabilityRegistry, CapabilityStatus, derive_provider_capability
+from aura_music_studio.events import EventEnvelope
 from aura_music_studio.feature_routes import ROUTES, RouteImplementationState, RouteRegistry
 from aura_music_studio.org_authority import OrgAction, OrgAuthorityDeniedError, OrgRole, roles_from_account
 from aura_music_studio.plans import MULTITRACK_DAW
@@ -78,6 +80,52 @@ def test_runtime_config_never_exposes_secret():
                                                "YOUTUBE_FEATURE_FLAG":"true","YOUTUBE_APPROVED":"true"})
     assert "super-secret" not in repr(config.public_payload())
     assert config.public_payload()["available"] is True
+
+
+def test_public_errors_and_event_audit_metadata_scrub_secrets():
+    bearer = "Bearer very-sensitive-token-value"
+    error = ApiError(
+        code=ApiErrorCode.VALIDATION_FAILED,
+        message=f"Provider rejected {bearer}",
+        correlation_id="corr-public-error",
+        details={"api_key": "sk-live-secret-value-123456", "note": bearer},
+    )
+    public = error.public_payload()
+    serialized = repr(public)
+    assert "very-sensitive-token-value" not in serialized
+    assert "sk-live-secret-value-123456" not in serialized
+
+    internal = ApiError(
+        code=ApiErrorCode.INTERNAL_ERROR,
+        message="Traceback: /srv/app/secret.py line 9",
+        correlation_id="corr-internal",
+        details={"stack": "Traceback: sensitive implementation detail"},
+    ).public_payload()
+    assert internal["message"] == "Internal error"
+    assert internal["details"] == {}
+
+    event = EventEnvelope(
+        event_id="evt-1",
+        type="test.event",
+        subject_type="test",
+        subject_id="subject-1",
+        occurred_at=NOW,
+        correlation_id="corr-event",
+        source="tests",
+        audit_metadata={"note": bearer},
+    )
+    assert "very-sensitive-token-value" not in repr(event.audit_metadata)
+    with pytest.raises(ValidationError):
+        EventEnvelope(
+            event_id="evt-2",
+            type="test.event",
+            subject_type="test",
+            subject_id="subject-2",
+            occurred_at=NOW,
+            correlation_id="corr-event-2",
+            source="tests",
+            audit_metadata={"access_token": "must-never-be-accepted"},
+        )
 
 
 def test_routes_are_discovery_only_until_domain_owners_wire_them():
