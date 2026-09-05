@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import struct
 from pathlib import Path
@@ -7,6 +9,13 @@ from typing import Any
 
 _GLB_MAGIC = 0x46546C67
 _JSON_CHUNK = 0x4E4F534A
+_MAX_EMBEDDED_IMAGE_URI_BYTES = 8 * 1024 * 1024
+_ALLOWED_EMBEDDED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/ktx2",
+    "image/png",
+    "image/webp",
+}
 _REQUIRED_STATE_ALIASES = {
     "idle": ("idle", "breathing", "stand"),
     "welcoming": ("welcome", "welcoming", "greet", "greeting"),
@@ -81,6 +90,101 @@ def _match_animation_map(
     return {channel: _match_animation(names, aliases) for channel, aliases in contract.items()}
 
 
+def _collect_uri_fields(value: Any, path: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], Any]]:
+    references: list[tuple[tuple[str, ...], Any]] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = (*path, str(key))
+            if str(key) == "uri":
+                references.append((child_path, child))
+            references.extend(_collect_uri_fields(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            references.extend(_collect_uri_fields(child, (*path, str(index))))
+    return references
+
+
+def _embedded_image_data_uri_error(uri: str) -> str | None:
+    if len(uri.encode("utf-8")) > _MAX_EMBEDDED_IMAGE_URI_BYTES:
+        return "embedded image data URI exceeds the 8 MiB validation limit"
+    header, separator, payload = uri.partition(",")
+    if not separator or not header.lower().startswith("data:"):
+        return "image URI must be an embedded data URI"
+    metadata = [part.strip().lower() for part in header[5:].split(";")]
+    mime_type = metadata[0] if metadata else ""
+    if mime_type not in _ALLOWED_EMBEDDED_IMAGE_MIME_TYPES:
+        return f"embedded image MIME type {mime_type or '<missing>'} is not allowlisted"
+    if "base64" not in metadata[1:]:
+        return "embedded image data URI must use base64 encoding"
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        return "embedded image data URI contains invalid base64 data"
+    if not decoded:
+        return "embedded image data URI is empty"
+    if mime_type == "image/png" and not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "embedded image data does not match its PNG MIME type"
+    if mime_type == "image/jpeg" and not decoded.startswith(b"\xff\xd8\xff"):
+        return "embedded image data does not match its JPEG MIME type"
+    if mime_type == "image/webp" and not (
+        len(decoded) >= 12 and decoded.startswith(b"RIFF") and decoded[8:12] == b"WEBP"
+    ):
+        return "embedded image data does not match its WebP MIME type"
+    if mime_type == "image/ktx2" and not decoded.startswith(b"\xabKTX 20\xbb\r\n\x1a\n"):
+        return "embedded image data does not match its KTX2 MIME type"
+    return None
+
+
+def _assess_resource_isolation(document: dict[str, Any]) -> dict[str, Any]:
+    references = _collect_uri_fields(document)
+    errors: list[str] = []
+    embedded_image_data_uri_count = 0
+    external_resource_count = 0
+
+    for path, value in references:
+        location = ".".join(path)
+        if not isinstance(value, str) or not value.strip():
+            errors.append(f"{location} must be a non-empty string")
+            continue
+        uri = value.strip()
+        is_buffer_uri = len(path) == 3 and path[0] == "buffers" and path[2] == "uri"
+        is_image_uri = len(path) == 3 and path[0] == "images" and path[2] == "uri"
+
+        if is_buffer_uri:
+            external_resource_count += 1
+            errors.append(
+                f"{location} is not permitted; production GLB buffers must be embedded in the GLB BIN chunk"
+            )
+            continue
+        if is_image_uri and uri.lower().startswith("data:"):
+            embedded_image_data_uri_count += 1
+            data_error = _embedded_image_data_uri_error(uri)
+            if data_error:
+                errors.append(f"{location}: {data_error}")
+            continue
+        if is_image_uri:
+            external_resource_count += 1
+            errors.append(
+                f"{location} is external; production GLB images must use bufferView storage or an allowlisted embedded data URI"
+            )
+            continue
+
+        external_resource_count += 1
+        errors.append(
+            f"{location} is an unsupported URI-bearing field; extension and custom resource references fail closed"
+        )
+
+    return {
+        "resource_uri_count": len(references),
+        "embedded_image_data_uri_count": embedded_image_data_uri_count,
+        "external_resource_count": external_resource_count,
+        "blocked_resource_count": len(errors),
+        "import_safe": not errors,
+        "import_policy": "self_contained_glb_v1",
+        "errors": errors,
+    }
+
+
 def _read_glb_json(path: Path, max_json_bytes: int = 16 * 1024 * 1024) -> tuple[dict[str, Any], dict[str, Any]]:
     size = path.stat().st_size
     if size < 20:
@@ -152,6 +256,12 @@ def validate_aura_glb(path: str | Path) -> dict[str, Any]:
         "root_bone_signal": False,
         "lod_signal": False,
         "production_rig_ready": False,
+        "resource_uri_count": 0,
+        "embedded_image_data_uri_count": 0,
+        "external_resource_count": 0,
+        "blocked_resource_count": 0,
+        "import_safe": False,
+        "import_policy": "self_contained_glb_v1",
         "warnings": [],
         "error": None,
     }
@@ -165,6 +275,22 @@ def validate_aura_glb(path: str | Path) -> dict[str, Any]:
         document, meta = _read_glb_json(target)
     except Exception as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
+        return result
+
+    result.update(meta)
+    resource_isolation = _assess_resource_isolation(document)
+    for field in (
+        "resource_uri_count",
+        "embedded_image_data_uri_count",
+        "external_resource_count",
+        "blocked_resource_count",
+        "import_safe",
+        "import_policy",
+    ):
+        result[field] = resource_isolation[field]
+    if not resource_isolation["import_safe"]:
+        details = "; ".join(resource_isolation["errors"][:8])
+        result["error"] = f"Unsafe GLB resource references: {details}"
         return result
 
     animations = [
@@ -234,7 +360,6 @@ def validate_aura_glb(path: str | Path) -> dict[str, Any]:
         and layered_performance_ready
     )
 
-    result.update(meta)
     result.update(
         {
             "valid_glb": True,
