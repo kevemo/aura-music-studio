@@ -9,6 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .game_forge_gameplay import _safe_behavior as _safe_gameplay_behavior
 from .game_forge_models import GameDNA
 from .game_forge_store import game_dir, load_game, remove_public_snapshot, save_game
 from .game_forge_world import BehaviorNodeDNA, GameWorldDNA, WorldEntityDNA, ensure_world, save_world
@@ -18,8 +19,20 @@ from .plans import GAME_CREATE
 router = APIRouter(tags=["Game Forge Visual Logic"])
 
 VISUAL_LOGIC_SCHEMA = "game_forge_visual_logic.v1"
-VISUAL_LOGIC_COMPILER = "aura_world_logic.v1"
-VisualLogicOp = Literal["follow_target", "timer", "door"]
+VISUAL_LOGIC_COMPILER = "aura_world_logic.v2"
+VisualLogicOp = Literal[
+    "follow_target",
+    "timer",
+    "door",
+    "collectible",
+    "damage",
+    "checkpoint",
+    "patrol",
+    "quest_trigger",
+]
+_WORLD_LOGIC_OPS = {"follow_target", "timer", "door"}
+_GAMEPLAY_OPS = {"collectible", "damage", "checkpoint", "patrol", "quest_trigger"}
+_RUNTIME_OPS = _WORLD_LOGIC_OPS | _GAMEPLAY_OPS
 _NODE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 _PROTECTED_ENTITY_IDS = {"player", "camera"}
 
@@ -186,10 +199,15 @@ def _ordered_node_ids(nodes: list[VisualLogicNode], edges: list[VisualLogicEdge]
 
 def _sanitize_node(game_id: str, entity_id: str, node: VisualLogicNode) -> tuple[VisualLogicNode, BehaviorNodeDNA]:
     behavior_id = _behavior_id(game_id, entity_id, node.id)
-    # Reuse the exact sanitizer used by the executable World Logic runtime. Probe as enabled so
-    # disabled authoring nodes are still normalized without becoming executable.
+    # Probe as enabled so disabled authoring nodes are normalized without becoming executable.
+    # Each operation reuses the exact sanitizer already trusted by its production runtime path.
     probe = BehaviorNodeDNA(id=behavior_id, op=node.op, params=dict(node.params), enabled=True)
-    safe = _safe_logic_behavior(probe)
+    if node.op in _WORLD_LOGIC_OPS:
+        safe = _safe_logic_behavior(probe)
+    elif node.op in _GAMEPLAY_OPS:
+        safe = _safe_gameplay_behavior(probe)
+    else:
+        safe = None
     if safe is None:
         raise ValueError(f"Visual Logic operation '{node.op}' is not executable in the current Aura runtime")
     sanitized = VisualLogicNode(
@@ -223,6 +241,12 @@ def _validate_runtime_requirements(world: GameWorldDNA, entity: WorldEntityDNA, 
         elif behavior.op == "door":
             if entity.physics is None or entity.physics.mode != "kinematic":
                 raise ValueError("Visual Logic door requires kinematic Physics DNA on the entity")
+        elif behavior.op in {"collectible", "damage", "checkpoint", "quest_trigger"}:
+            if entity.physics is None:
+                raise ValueError(f"Visual Logic {behavior.op} requires Physics DNA for collision behavior")
+        elif behavior.op == "patrol":
+            if entity.physics is None or entity.physics.mode not in {"kinematic", "dynamic"}:
+                raise ValueError("Visual Logic patrol requires kinematic or dynamic Physics DNA on the entity")
 
 
 def compile_visual_logic_graph(
@@ -307,7 +331,9 @@ def visual_logic_capabilities(game_id: str) -> dict[str, Any]:
         "game_id": game_id,
         "schema_version": VISUAL_LOGIC_SCHEMA,
         "compiler": VISUAL_LOGIC_COMPILER,
-        "runtime_ops": ["follow_target", "timer", "door"],
+        "runtime_ops": sorted(_RUNTIME_OPS),
+        "world_logic_ops": sorted(_WORLD_LOGIC_OPS),
+        "aura3d_gameplay_ops": sorted(_GAMEPLAY_OPS),
         "edge_semantics": "compile_order_only",
         "compiled_target": "WorldEntityDNA.behaviors",
         "arbitrary_script_source_allowed": False,
