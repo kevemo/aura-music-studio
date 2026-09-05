@@ -19,6 +19,7 @@ Aura AI is the intelligence and orchestration layer across the Command Center. A
 - **Endorsement:** Powered by Aura AI
 - **Company:** Elevate Souls Productions LCN LLC & LTD
 - **Tagline:** Elevate Your Soul Through Purposeful Media
+- **Security system:** Elevate Souls Productions Secure Lattice System (**SLS**)
 
 Older names such as **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current product identity.
 
@@ -136,20 +137,21 @@ The cross-studio five-per-day admission counter is **server-authoritative, imple
 ### Unlimited Pro — £9.99/month
 
 - highest normal enabled creative access;
+- Elevate Souls Productions Secure Lattice System (SLS) entitlement included with the subscription;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
-
-Command Center membership does **not** by itself grant a native/device SLS licence, device count or protection entitlement. Elevate Souls Productions Secure Lattice System licensing and native capabilities are a separate server-configured, approval-gated product boundary unless a later authoritative commercial specification explicitly changes that rule.
 
 Safety, privacy, consent and transparency protections are never paywalled.
 
 ## Cosmic Creation Coins
 
-Authoritative public Coin packs are:
+The locked baseline is **1,000 Cosmic Creation Coins = £5**, therefore **£0.005 per Coin**. Any discounted bulk or promotional pack must be explicitly configured and clearly displayed as such rather than silently changing the baseline rate.
 
-- **1,000 Cosmic Creation Coins — £5**
-- **2,500 Cosmic Creation Coins — £10**
-- **6,000 Cosmic Creation Coins — £20**
+Current configured public packs documented by the repository are:
+
+- **1,000 Cosmic Creation Coins — £5** — baseline pack;
+- **2,500 Cosmic Creation Coins — £10** — discounted bulk pack;
+- **6,000 Cosmic Creation Coins — £20** — discounted bulk pack.
 
 Coin pricing, balances, debits, fulfilment, refunds and reversals remain server-authoritative and ledger-backed. Live launch additionally requires verified provider configuration and operational reconciliation; client-side success can never mint value by itself.
 
@@ -166,13 +168,15 @@ Eligible content explicitly created/published by Mary or Kev under Owner/Admin i
 
 The integration branch contains server-authoritative marketplace orders, provider-bound checkout validation, provider fee evidence, 50/50 creator-versus-ESP and explicit owner-catalogue settlement policy, refunds/reversals, payout reconciliation foundations, buyer purchase history, seller earnings/reversal/net reporting and account-scoped read surfaces. These transaction/accounting paths are code-complete and regression-tested within the repository boundary. **Production financial readiness is still evidence-gated** by real live payment credentials/webhook delivery, end-to-end real-money payment/refund/payout certification, tax/accounting review and independent bank/Open-Banking reconciliation evidence. Provider payout status alone is not represented as bank-statement proof.
 
+The marketplace revenue split is a marketplace rule only. It does **not** define or imply a LIVE Gift creator payout percentage.
+
 ## Privacy, safeguarding, consent and governance
 
 The platform contains technical governance foundations for tenant/project isolation, role separation, privacy access/portability, deletion/retention, consent evidence, voice/digital-likeness boundaries, copyright/IP provenance, safety reporting/appeals, data minimisation, audit evidence, prompt-injection/connector security and human review for consequential matters.
 
 ## Elevate Souls Productions Secure Lattice System (SLS)
 
-**Elevate Souls Productions Secure Lattice System (SLS)** is the locked public/formal name for the security system in the wider Elevate Souls Productions ecosystem. Legacy public names such as Aura Sec, Aura Security, Cosmic Security or Elevate Shield are superseded; internal package/API/database/environment identifiers may retain legacy names where compatibility requires them until a safe tested migration exists.
+The **Elevate Souls Productions Secure Lattice System (SLS)** is the locked public/formal name for the security system inside the wider Elevate Souls Productions ecosystem. Legacy internal identifiers may retain earlier names only where compatibility requires them; they must not be presented as the current public product name.
 
 The repository includes substantial web/control-plane and bounded native-execution architecture for device state, command contracts, device proof, release trust, artifact verification, recovery/threat/vulnerability state and security administration. These controls are tested as software boundaries and must fail closed when production trust evidence is absent.
 
@@ -222,9 +226,9 @@ Feature work should use focused branches and pull requests. A change is not cons
 
 A production release requires, at minimum, no unresolved P0 issues, an acceptable P1 disposition, complete regression on the release candidate, verified payment/email/provider paths, security and privacy review, production monitoring, backup/restore proof, incident/rollback procedures, capacity testing, authoritative commercial configuration and current public documentation.
 
-Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a real production-backup restore drill, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
+Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a real restore drill, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
 
-The main Command Center and the full native SLS commercial product may reach different release stages and must not be conflated.
+The main Command Center and the SLS full native commercial product may reach different release stages and must not be conflated.
 
 ## Final product identity
 
