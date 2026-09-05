@@ -23,31 +23,63 @@ _FORBIDDEN = {
 }
 
 
+def _route_snapshot(routes) -> list[dict[str, object]]:
+    items: list[dict[str, object]] = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        if not isinstance(path, str):
+            continue
+        methods = sorted(str(method).upper() for method in (getattr(route, "methods", None) or set()))
+        items.append({"path": path, "methods": methods})
+    return items
+
+
 def _fresh_production_snapshot() -> dict[str, object]:
     """Read routes from a clean canonical production-app boot.
 
-    The repository's test suite imports and exercises shared application objects across thousands
-    of tests and some tests legitimately change process working directories. Run the probe from
-    the repository root so ``import app`` resolves the production ``app.py`` exactly as Uvicorn's
-    documented ``uvicorn app:app`` entrypoint does, independent of surrounding test state.
+    Run from the repository root so ``import app`` resolves the production entrypoint exactly as
+    ``uvicorn app:app`` does. The diagnostic also records the source Battle router and the final
+    route-integrity removals so a missing production route cannot be misclassified as test state.
     """
     script = r'''
 import json
 import app as production_app_module
+from aura_music_studio.shared_sky_battle_api import router as battle_router
 
 application = production_app_module.app
-routes = []
-for route in application.router.routes:
-    path = getattr(route, "path", None)
-    methods = sorted(str(method).upper() for method in (getattr(route, "methods", None) or set()))
-    if isinstance(path, str) and (
-        path.startswith("/shared-sky/api/")
-        or path.startswith("/owner/shared-sky/api/battle")
-    ):
-        routes.append({"path": path, "methods": methods})
+
+def snapshot(routes):
+    items = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        if not isinstance(path, str):
+            continue
+        methods = sorted(str(method).upper() for method in (getattr(route, "methods", None) or set()))
+        items.append({"path": path, "methods": methods})
+    return items
+
+all_app_routes = snapshot(application.router.routes)
+battle_routes = snapshot(battle_router.routes)
+selected = [item for item in all_app_routes if (
+    item["path"].startswith("/shared-sky/api/")
+    or item["path"].startswith("/owner/shared-sky/api/battle")
+)]
+related = [item for item in all_app_routes if "battle" in item["path"].lower() or "shared-sky" in item["path"].lower()]
+integrity = getattr(application.state, "route_integrity", {})
+removed = []
+if isinstance(integrity, dict):
+    removed = [item for item in integrity.get("removed", []) if (
+        "battle" in str(item.get("path", "")).lower()
+        or "shared-sky" in str(item.get("path", "")).lower()
+    )]
 print("CHAT6_ROUTE_SNAPSHOT=" + json.dumps({
     "module_file": getattr(production_app_module, "__file__", None),
-    "routes": routes,
+    "app_route_count": len(all_app_routes),
+    "battle_router_route_count": len(battle_routes),
+    "battle_router_routes": battle_routes,
+    "routes": selected,
+    "related_app_routes": related,
+    "integrity_removed": removed,
 }, sort_keys=True))
 '''
     completed = subprocess.run(
@@ -85,7 +117,7 @@ def test_chat6_battle_routes_are_mounted_on_fresh_canonical_production_app():
     missing = sorted(_REQUIRED - mounted)
     assert not missing, (
         "Fresh canonical production app is missing Chat 6 routes: "
-        f"{missing}; module_file={snapshot.get('module_file')!r}; routes={routes}"
+        f"{missing}; diagnostics={snapshot}"
     )
 
 
