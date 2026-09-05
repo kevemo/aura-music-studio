@@ -146,7 +146,7 @@ class StudioSession(BaseModel):
     markers: list[Marker] = Field(default_factory=list)
     loop_start: float | None = None
     loop_end: float | None = None
-    chat_history: list[dict] = Field(default_factory=dict)
+    chat_history: list[dict] = Field(default_factory=list)
     project_dna: dict = Field(default_factory=dict)
     generation_history: list[dict] = Field(default_factory=list)
 
