@@ -120,3 +120,51 @@ def test_failed_event_id_cannot_be_replayed_as_cancelled(tmp_path):
         ).fetchone()
     assert stored["status"] == "failed"
     assert e.get_balance("viewer-1")["available_coins"] == 0
+
+
+def test_failed_purchase_cannot_confirm_with_a_new_provider_event(tmp_path):
+    e = economy(tmp_path)
+    p = purchase(e)
+    e.apply_verified_payment_event(event(p, event_id="evt-failed", event_type="failed"))
+
+    with pytest.raises(EconomyError) as exc:
+        e.apply_verified_payment_event(
+            event(p, event_id="evt-late-confirm", event_type="confirmed")
+        )
+
+    assert exc.value.code == "PAYMENT_STATE_CONFLICT"
+    assert exc.value.details["current_status"] == "failed"
+    assert e.get_balance("viewer-1")["available_coins"] == 0
+    conflicts = e.operational_events(event_type="economy.payment_state_conflict")
+    assert len(conflicts) == 1
+    assert conflicts[0]["details"]["presented_event_type"] == "confirmed"
+
+
+def test_second_chargeback_after_dispute_recovery_requires_review(tmp_path):
+    e = economy(tmp_path)
+    p = purchase(e)
+    e.apply_verified_payment_event(event(p, event_id="evt-confirm", event_type="confirmed"))
+    e.apply_verified_payment_event(event(p, event_id="evt-chargeback-1", event_type="chargeback"))
+    assert e.get_balance("viewer-1")["available_coins"] == 0
+
+    restored = e.apply_verified_payment_event(
+        event(p, event_id="evt-dispute-won", event_type="dispute_won")
+    )
+    assert restored["purchase"]["status"] == "confirmed"
+    assert e.get_balance("viewer-1")["available_coins"] == 1000
+
+    with pytest.raises(EconomyError) as exc:
+        e.apply_verified_payment_event(
+            event(p, event_id="evt-chargeback-2", event_type="chargeback")
+        )
+
+    assert exc.value.code == "PAYMENT_DISPUTE_CYCLE_REQUIRES_REVIEW"
+    assert e.get_balance("viewer-1")["available_coins"] == 1000
+    with e._connect() as con:
+        stored = con.execute(
+            "SELECT status FROM coin_purchases WHERE id=?",
+            (p["id"],),
+        ).fetchone()
+    assert stored["status"] == "confirmed"
+    review_events = e.operational_events(event_type="economy.payment_dispute_cycle_review")
+    assert len(review_events) == 1
