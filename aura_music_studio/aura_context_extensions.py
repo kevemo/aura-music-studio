@@ -7,7 +7,7 @@ from typing import Callable
 from . import aura_agent_core as core
 from .aura_esp_tools import install_aura_esp_tools
 from .brand_migration import rebrand_text
-from .branding import PRODUCT_FULL_NAME
+from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME
 
 ContextProvider = Callable[[str, str], str | None]
 
@@ -15,6 +15,7 @@ _INSTALLED = False
 _PROVIDERS: list[ContextProvider] = []
 _PROVIDER_LOCK = RLock()
 _ACTIVE_SCOPE: ContextVar[tuple[str, str] | None] = ContextVar("aura_context_extension_scope", default=None)
+_CORE_IDENTITY_PREFIX = "You are Aura, the general AI co-creator and operating intelligence inside"
 _CORE_SIGNATURES = (
     "You are Aura, the general AI co-creator and operating intelligence inside Pulsar-Frequency House",
     f"You are Aura, the general AI co-creator and operating intelligence inside {PRODUCT_FULL_NAME}",
@@ -64,10 +65,16 @@ def _inject_messages(messages: list[dict], user_id: str, thread_id: str) -> list
     if first.get("role") != "system" or not any(signature in content for signature in _CORE_SIGNATURES):
         return messages
 
-    # Aura's authoritative identity must be current before inference, not only rewritten in the
-    # HTTP response after the model has already received a retired product identity.
+    # Keep the legacy core constant/signature stable for compatibility and context detection, but
+    # ensure the model itself receives the current public identity before inference.
     copied = [dict(item) for item in messages]
-    copied[0]["content"] = rebrand_text(content)
+    branded_content = rebrand_text(content)
+    branded_content = branded_content.replace(
+        _CORE_IDENTITY_PREFIX,
+        f"You are {AI_PRODUCER_NAME}, the general AI co-creator and operating intelligence inside",
+        1,
+    )
+    copied[0]["content"] = branded_content
 
     extensions = context_extensions(user_id, thread_id)
     if extensions:
