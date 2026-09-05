@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +22,13 @@ from .cosmic_economy import (
 
 
 class IntegratedCosmicEconomy(CosmicEconomy):
-    """Canonical runtime service with cross-account idempotency hardening.
+    """Canonical runtime service with financial integration hardening.
 
-    The underlying ledger/schema remains CosmicEconomy. This subclass adds a migration-safe
-    global uniqueness invariant for each money-moving command family so a client retry key
-    can never migrate between accounts. If legacy duplicate keys are found, initialization
-    fails closed instead of deleting or rewriting financial history.
+    The underlying ledger/schema remains ``CosmicEconomy``. This subclass adds migration-safe
+    global idempotency ownership, bounded server-side purchase/Gift request admission and the
+    compatibility seams used while shared Chat 1/2/10 contracts land. Rate admission is stored
+    in the same durable database so multiple workers sharing the canonical store cannot each
+    maintain an independent in-memory allowance.
     """
 
     def _init_schema(self) -> None:
@@ -51,6 +54,78 @@ class IntegratedCosmicEconomy(CosmicEconomy):
             con.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_gift_idempotency_global ON gift_transactions(idempotency_key)"
             )
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS economy_rate_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    occurred_at_epoch INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_economy_rate_events_scope
+                    ON economy_rate_events(user_id, action, occurred_at_epoch);
+                """
+            )
+
+    @staticmethod
+    def _configured_positive_int(name: str, default: int) -> int:
+        raw = (os.getenv(name) or "").strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise EconomyError(
+                "ECONOMY_RATE_LIMIT_CONFIG_INVALID",
+                f"{name} must be a positive integer.",
+                status_code=503,
+            ) from exc
+        if value < 1:
+            raise EconomyError(
+                "ECONOMY_RATE_LIMIT_CONFIG_INVALID",
+                f"{name} must be a positive integer.",
+                status_code=503,
+            )
+        return value
+
+    def _consume_rate_limit(self, *, user_id: str, action: str, limit_env: str, default_limit: int) -> None:
+        """Atomically admit one new financial command for this account/action.
+
+        Idempotent replays are checked before this method and therefore do not consume additional
+        admission capacity. The limiter protects the financial service itself, not only one HTTP
+        route. Chat 10 may add an edge/distributed abuse-control layer without changing this
+        financial invariant.
+        """
+        limit = self._configured_positive_int(limit_env, default_limit)
+        window = self._configured_positive_int("LSS_ECONOMY_RATE_WINDOW_SECONDS", 60)
+        now = int(time.time())
+        cutoff = now - window
+        with self._connect() as con:
+            self._begin(con)
+            con.execute(
+                "DELETE FROM economy_rate_events WHERE occurred_at_epoch<=?",
+                (cutoff,),
+            )
+            rows = con.execute(
+                """SELECT occurred_at_epoch FROM economy_rate_events
+                   WHERE user_id=? AND action=? AND occurred_at_epoch>?
+                   ORDER BY occurred_at_epoch ASC""",
+                (user_id, action, cutoff),
+            ).fetchall()
+            if len(rows) >= limit:
+                retry_after = max(1, int(rows[0]["occurred_at_epoch"]) + window - now + 1)
+                con.rollback()
+                raise EconomyError(
+                    "RATE_LIMITED",
+                    "Too many financial requests. Try again after the retry period.",
+                    status_code=429,
+                    details={"retry_after_seconds": retry_after, "action": action},
+                )
+            con.execute(
+                "INSERT INTO economy_rate_events(user_id,action,occurred_at_epoch) VALUES (?,?,?)",
+                (user_id, action, now),
+            )
+            con.commit()
 
     def create_purchase(self, *, user_id: str, idempotency_key: str, **kwargs: Any) -> dict:
         with self._connect() as con:
@@ -62,6 +137,13 @@ class IntegratedCosmicEconomy(CosmicEconomy):
                 "IDEMPOTENCY_KEY_SCOPE_MISMATCH",
                 "Idempotency key is already bound to another account.",
                 status_code=409,
+            )
+        if not existing:
+            self._consume_rate_limit(
+                user_id=user_id,
+                action="coin_purchase",
+                limit_env="LSS_COIN_PURCHASE_RATE_LIMIT",
+                default_limit=8,
             )
         try:
             return super().create_purchase(user_id=user_id, idempotency_key=idempotency_key, **kwargs)
@@ -88,6 +170,13 @@ class IntegratedCosmicEconomy(CosmicEconomy):
                 "IDEMPOTENCY_KEY_SCOPE_MISMATCH",
                 "Idempotency key is already bound to another account.",
                 status_code=409,
+            )
+        if not existing:
+            self._consume_rate_limit(
+                user_id=sender_user_id,
+                action="gift_send",
+                limit_env="LSS_GIFT_SEND_RATE_LIMIT",
+                default_limit=120,
             )
         try:
             return super().send_gift(
