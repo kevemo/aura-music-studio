@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from .audit import AuditLedger
 from .esp_command_center import esp
-from .esp_creator_data_import import ImportConfirm, STANDARD_METRICS
+from .esp_creator_data_import import ImportConfirm
 from .esp_niche import require_esp_hub_member
 
 router = APIRouter(tags=["ESP Creator Import Governance"])
@@ -33,15 +33,23 @@ def _clean(value: str | None, limit: int) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-def source_sha256(content: bytes) -> str:
-    return hashlib.sha256(content).hexdigest()
-
-
 def _loads(value: str | None, default: Any) -> Any:
     try:
         return json.loads(value or "")
     except Exception:
         return default
+
+
+def source_sha256(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _require_creator_member(request: Request):
+    member, membership = require_esp_hub_member(request)
+    role = "owner" if membership.get("status") == "owner" else (membership.get("roles") or "").lower()
+    if role not in {"creator", "both", "owner"}:
+        raise HTTPException(403, "ESP Creator access is required for analytics import governance")
+    return member
 
 
 class ImportProvenanceInput(BaseModel):
@@ -63,11 +71,10 @@ class ImportMappingTemplateCreate(BaseModel):
 
 
 class CreatorImportGovernanceStore:
-    """Adds provenance, source-file deduplication and reusable mappings to Creator imports.
+    """Add provenance, source deduplication and reusable mappings to Creator imports.
 
-    The existing CreatorDataImportStore remains authoritative for parsing, private file storage,
-    human confirmation and Creator Progress writes. This store deliberately does not create a
-    second analytics ledger or copy imported metrics into parallel tables.
+    CreatorDataImportStore remains authoritative for parsing, private file storage, human
+    confirmation and Creator Progress writes. This store never creates a second metrics ledger.
     """
 
     def __init__(self, db_path: str | None = None, audit: AuditLedger | None = None):
@@ -105,7 +112,6 @@ class CreatorImportGovernanceStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_creator_import_sources_import
                     ON esp_creator_import_sources(import_id);
-
                 CREATE TABLE IF NOT EXISTS esp_creator_import_mapping_templates (
                     id TEXT PRIMARY KEY,
                     owner_user_id TEXT NOT NULL,
@@ -186,12 +192,11 @@ class CreatorImportGovernanceStore:
             )
 
     def attach_import(self, *, user_id: str, digest: str, import_id: str) -> dict:
-        now = _now()
         with self._connect() as con:
             cursor = con.execute(
                 """UPDATE esp_creator_import_sources SET import_id=?,attached_at=?
                    WHERE user_id=? AND source_sha256=? AND import_id IS NULL""",
-                (import_id, now, user_id, digest),
+                (import_id, _now(), user_id, digest),
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Evidence source reservation could not be attached to the staged import")
@@ -222,7 +227,6 @@ class CreatorImportGovernanceStore:
         return item
 
     def create_mapping(self, owner_user_id: str, payload: ImportMappingTemplateCreate) -> dict:
-        # Reuse the existing import confirmation validator so template rules cannot drift.
         validated = ImportConfirm(
             kind=payload.kind,
             mapping=payload.mapping,
@@ -311,7 +315,7 @@ governance = CreatorImportGovernanceStore()
 
 @router.get("/command-center/api/progress/import-mappings")
 def list_import_mappings(request: Request, source_format: str | None = None):
-    member, _membership = require_esp_hub_member(request)
+    member = _require_creator_member(request)
     try:
         return {"mappings": governance.list_mappings(member.user_id, source_format)}
     except ValueError as exc:
@@ -320,7 +324,7 @@ def list_import_mappings(request: Request, source_format: str | None = None):
 
 @router.post("/command-center/api/progress/import-mappings")
 def create_import_mapping(body: ImportMappingTemplateCreate, request: Request):
-    member, _membership = require_esp_hub_member(request)
+    member = _require_creator_member(request)
     try:
         return {"mapping": governance.create_mapping(member.user_id, body)}
     except FileExistsError as exc:
@@ -331,10 +335,7 @@ def create_import_mapping(body: ImportMappingTemplateCreate, request: Request):
 
 @router.get("/command-center/api/progress/imports/{import_id}/provenance")
 def import_provenance(import_id: str, request: Request):
-    member, membership = require_esp_hub_member(request)
-    role = "owner" if membership.get("status") == "owner" else (membership.get("roles") or "").lower()
-    if role not in {"creator", "both", "owner"}:
-        raise HTTPException(403, "ESP Creator access is required")
+    member = _require_creator_member(request)
     try:
         return {"provenance": governance.provenance_for_import(member.user_id, import_id)}
     except KeyError as exc:
