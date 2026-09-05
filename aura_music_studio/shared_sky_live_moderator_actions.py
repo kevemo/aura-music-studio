@@ -114,7 +114,7 @@ def _ensure_schema() -> None:
                 id TEXT PRIMARY KEY,
                 report_id TEXT NOT NULL,
                 broadcast_id TEXT NOT NULL,
-                actor_user_id TEXT,
+                actor_user_id TEXT NOT NULL,
                 actor_kind TEXT NOT NULL,
                 reason TEXT NOT NULL,
                 idempotency_key TEXT NOT NULL,
@@ -129,7 +129,7 @@ def _ensure_schema() -> None:
             CREATE TABLE IF NOT EXISTS shared_sky_stream_review_flags (
                 id TEXT PRIMARY KEY,
                 broadcast_id TEXT NOT NULL,
-                actor_user_id TEXT,
+                actor_user_id TEXT NOT NULL,
                 actor_kind TEXT NOT NULL,
                 severity TEXT NOT NULL DEFAULT 'review',
                 reason TEXT NOT NULL,
@@ -146,17 +146,17 @@ def _ensure_schema() -> None:
         )
 
 
-def _request_actor(request: Request) -> tuple[str | None, bool, str]:
+def _request_actor(request: Request) -> tuple[str, bool, str]:
     owner = owner_session_authorized(request)
     if owner:
         member = getattr(request.state, "member", None)
-        user_id = str(getattr(member, "user_id", "") or "") or None
+        user_id = str(getattr(member, "user_id", "") or "") or "owner"
         return user_id, True, "owner"
     member = live.require_member(request)
     return str(member.user_id), False, "member"
 
 
-def _require_queue_authority(broadcast_id: str, request: Request) -> tuple[str | None, str]:
+def _require_queue_authority(broadcast_id: str, request: Request) -> tuple[str, str]:
     user_id, owner, actor_kind = _request_actor(request)
     kind = _authority_kind(live.community, broadcast_id, user_id, owner)
     if kind == "none":
@@ -226,7 +226,7 @@ def escalate_report(broadcast_id: str, report_id: str, body: EscalateReportReque
             raise HTTPException(404, "Shared Sky report not found")
         existing = con.execute(
             """SELECT id,created_at FROM shared_sky_report_escalations
-               WHERE report_id=? AND actor_user_id IS ? AND idempotency_key=?""",
+               WHERE report_id=? AND actor_user_id=? AND idempotency_key=?""",
             (report_id, user_id, body.idempotency_key),
         ).fetchone()
         if existing:
@@ -243,10 +243,10 @@ def escalate_report(broadcast_id: str, report_id: str, body: EscalateReportReque
         con.execute("COMMIT")
     live.community.emit(
         broadcast_id,
-        user_id,
+        None if user_id == "owner" else user_id,
         "moderation.action",
         {"action": "escalate_report", "report_id": report_id},
-        idempotency_key=f"report-escalation:{report_id}:{body.idempotency_key}",
+        idempotency_key=f"report-escalation:{report_id}:{user_id}:{body.idempotency_key}",
         audience="moderators",
     )
     return {"report_id": report_id, "state": "escalated", "escalation_id": escalation_id, "created_at": now}
@@ -260,12 +260,15 @@ def flag_stream_for_review(broadcast_id: str, body: FlagStreamRequest, request: 
     now = _now()
     audit_id = uuid4().hex
     with live.community._connect() as con:
+        con.isolation_level = None
+        con.execute("BEGIN IMMEDIATE")
         existing = con.execute(
             """SELECT id,state,audit_id,created_at FROM shared_sky_stream_review_flags
-               WHERE broadcast_id=? AND actor_user_id IS ? AND idempotency_key=?""",
+               WHERE broadcast_id=? AND actor_user_id=? AND idempotency_key=?""",
             (broadcast_id, user_id, body.idempotency_key),
         ).fetchone()
         if existing:
+            con.execute("COMMIT")
             return {
                 "flag_id": existing["id"],
                 "state": existing["state"],
@@ -279,12 +282,13 @@ def flag_stream_for_review(broadcast_id: str, body: FlagStreamRequest, request: 
                VALUES(?,?,?,?,?,?,'submitted',?,?,?)""",
             (flag_id, broadcast_id, user_id, actor_kind, body.severity, reason, body.idempotency_key, audit_id, now),
         )
+        con.execute("COMMIT")
     live.community.emit(
         broadcast_id,
-        user_id,
+        None if user_id == "owner" else user_id,
         "moderation.action",
         {"action": "flag_stream_for_review", "flag_id": flag_id, "severity": body.severity},
-        idempotency_key=f"stream-review:{broadcast_id}:{body.idempotency_key}",
+        idempotency_key=f"stream-review:{broadcast_id}:{user_id}:{body.idempotency_key}",
         audience="moderators",
     )
     return {"flag_id": flag_id, "state": "submitted", "audit_id": audit_id, "created_at": now}
