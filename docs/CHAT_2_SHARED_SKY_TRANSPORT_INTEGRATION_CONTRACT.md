@@ -506,4 +506,5 @@ Provider-specific behaviour must be rechecked before future endpoint/scope chang
 
 Final Chat 2 merge acceptance is evidence-based: only exact-head Command Center CI, Security
 Gates and Self-Host Smoke results on the current PR head qualify. Earlier cancelled/superseded
-runs are not acceptance evidence.
+runs are not acceptance evidence. This contract is now locked for the PR acceptance run; code,
+test or contract changes require a fresh exact-head gate cycle.
