@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -54,6 +55,32 @@ def test_stable_idempotency_key_returns_original_job_even_after_completion(tmp_p
     repeated = queue.submit(user, "song", job_type="editor_render", idempotency_key="render-request-1")
     assert repeated["id"] == first["id"]
     assert repeated["status"] == "completed"
+
+
+def test_concurrent_idempotent_submissions_return_one_job(tmp_path):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "parallel-idem@example.com")
+    queue = StudioJobQueue(store)
+
+    def submit_once(_: int) -> str:
+        return queue.submit(
+            user,
+            "same-song",
+            job_type="editor_render",
+            idempotency_key="same-render-request",
+        )["id"]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        job_ids = list(pool.map(submit_once, range(32)))
+
+    assert len(set(job_ids)) == 1
+    with queue._connect() as con:
+        count = con.execute(
+            """SELECT COUNT(*) FROM studio_jobs
+               WHERE user_id=? AND job_type=? AND idempotency_key=?""",
+            (user, "editor_render", "same-render-request"),
+        ).fetchone()[0]
+    assert count == 1
 
 
 def test_job_payload_admission_is_bounded(tmp_path, monkeypatch):
