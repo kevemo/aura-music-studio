@@ -147,7 +147,8 @@ def test_destination_ssrf_validation_rejects_private_and_embedded_credentials():
 
 
 def test_partial_destination_failure_is_isolated_and_broadcast_is_degraded(tmp_path, monkeypatch):
-    from aura_music_studio import shared_sky_transport_operations as module
+    from aura_music_studio import shared_sky_transport_extensions as extension_module
+    from aura_music_studio import shared_sky_transport_operations as operations_module
 
     monkeypatch.setenv("SHARED_SKY_INGEST_BASE_URL", "rtmps://ingest.example.com/live")
     user, base, transport = _setup(tmp_path)
@@ -178,9 +179,10 @@ def test_partial_destination_failure_is_isolated_and_broadcast_is_degraded(tmp_p
         internal_playback=False,
     )
 
-    monkeypatch.setattr(module, "validate_destination_url", lambda value, resolve_dns=True: value)
+    for module in (operations_module, extension_module):
+        monkeypatch.setattr(module, "validate_destination_url", lambda value, resolve_dns=True: value)
     monkeypatch.setattr(
-        module.relay,
+        operations_module.relay,
         "health",
         lambda: SimpleNamespace(
             enabled=True,
@@ -202,10 +204,10 @@ def test_partial_destination_failure_is_isolated_and_broadcast_is_degraded(tmp_p
 
     def fake_start_output(**kwargs):
         if "key-two" in kwargs["output_url"]:
-            raise module.SharedSkyRelayError("simulated destination outage")
+            raise operations_module.SharedSkyRelayError("simulated destination outage")
         return 12345
 
-    monkeypatch.setattr(module.relay, "start_output", fake_start_output)
+    monkeypatch.setattr(operations_module.relay, "start_output", fake_start_output)
     result = transport.start(user["id"], broadcast["id"], "partial-start-123")
     assert result["partial"] is True
     assert result["started_destinations"] == 1
@@ -213,6 +215,157 @@ def test_partial_destination_failure_is_isolated_and_broadcast_is_degraded(tmp_p
     states = {row["destination_id"]: row["state"] for row in result["broadcast"]["destinations"]}
     assert states[first["id"]] == "live"
     assert states[second["id"]] == "reconnecting"
+
+
+def test_internal_playback_can_start_when_external_destination_is_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHARED_SKY_PLAYBACK_BASE_URL", "https://playback.example.com/live")
+    monkeypatch.setenv("SHARED_SKY_PLAYBACK_SIGNING_SECRET", "test-playback-signing-secret")
+    user, base, transport = _setup(tmp_path)
+    project, source = _project_source(user, base, transport)
+    destination = base.create_destination(
+        user["id"],
+        DestinationCreate(
+            platform_id="youtube",
+            label="YouTube pending approval",
+            auth_mode="oauth",
+            endpoint="",
+        ),
+    )
+    broadcast = base.create_broadcast(
+        user["id"],
+        BroadcastCreate(project_id=project["id"], destination_ids=[destination["id"]]),
+    )
+    _configure(transport, user["id"], broadcast["id"], source["id"], internal_playback=True)
+
+    check = transport.preflight(user["id"], broadcast["id"])
+    assert check["ready"] is True
+    assert check["blocking_errors"] == []
+    assert any(
+        warning.get("scope") == "destination"
+        and warning.get("non_fatal_delivery_path_failure") is True
+        for warning in check["warnings"]
+    )
+    started = transport.start(user["id"], broadcast["id"], "internal-only-partial-123")
+    assert started["internal_playback"] is True
+    assert started["partial"] is True
+    assert started["broadcast"]["session"]["state"] == BroadcastState.DEGRADED
+
+
+def test_destination_presets_are_durable_tenant_scoped_and_apply_to_draft(tmp_path):
+    user, base, transport = _setup(tmp_path)
+    project, source = _project_source(user, base, transport)
+    first = base.create_destination(
+        user["id"],
+        DestinationCreate(label="One", endpoint="rtmps://one.example.com/live", credential="one"),
+    )
+    second = base.create_destination(
+        user["id"],
+        DestinationCreate(label="Two", endpoint="rtmps://two.example.com/live", credential="two"),
+    )
+    broadcast = base.create_broadcast(
+        user["id"],
+        BroadcastCreate(project_id=project["id"], destination_ids=[first["id"]]),
+    )
+    _configure(
+        transport,
+        user["id"],
+        broadcast["id"],
+        source["id"],
+        internal_playback=False,
+    )
+
+    preset = transport.create_destination_preset(
+        user["id"], "Launch Pair", [first["id"], second["id"], first["id"]]
+    )
+    assert preset["destination_ids"] == [first["id"], second["id"]]
+    assert SharedSkyTransportStore(base).destination_preset(user["id"], preset["id"])["id"] == preset["id"]
+    with pytest.raises(KeyError):
+        transport.destination_preset("different-user", preset["id"])
+
+    applied = transport.apply_destination_preset(user["id"], broadcast["id"], preset["id"])
+    assert {row["destination_id"] for row in applied["destinations"]} == {first["id"], second["id"]}
+    assert base.broadcast(user["id"], broadcast["id"])["destination_ids"] == [first["id"], second["id"]]
+
+
+def test_provider_resource_ids_are_persisted_before_relay_and_reused_on_retry(tmp_path, monkeypatch):
+    from aura_music_studio import shared_sky_transport_extensions as extension_module
+
+    monkeypatch.setenv("SHARED_SKY_INGEST_BASE_URL", "rtmps://ingest.example.com/live")
+    user, base, transport = _setup(tmp_path)
+    project, source = _project_source(user, base, transport)
+    destination = base.create_destination(
+        user["id"],
+        DestinationCreate(label="Provider", endpoint="rtmps://provider.example.com/live", credential="key"),
+    )
+    broadcast = base.create_broadcast(
+        user["id"],
+        BroadcastCreate(project_id=project["id"], destination_ids=[destination["id"]]),
+    )
+    _configure(
+        transport,
+        user["id"],
+        broadcast["id"],
+        source["id"],
+        internal_playback=False,
+    )
+    session = transport.status(user["id"], broadcast["id"])["session"]
+    seen_existing = []
+
+    class FakeAdapter:
+        def capability(self, **kwargs):
+            return SimpleNamespace(
+                state=CapabilityState.READY,
+                reason_code="ready",
+                message="ready",
+            )
+
+        def prepare(self, *, profile, **kwargs):
+            seen_existing.append(dict(profile.get("_existing_run") or {}))
+            return {
+                "provider_broadcast_id": "provider-broadcast-1",
+                "provider_stream_id": "provider-stream-1",
+                "output_url": "rtmps://provider.example.com/live/key",
+            }
+
+        def stop(self, **kwargs):
+            return None
+
+    transport.adapters["custom-rtmp"] = FakeAdapter()
+    monkeypatch.setattr(
+        extension_module,
+        "validate_destination_url",
+        lambda value, resolve_dns=True: value,
+    )
+
+    def fail_start(**kwargs):
+        raise extension_module.SharedSkyRelayError("relay unavailable")
+
+    monkeypatch.setattr(extension_module.relay, "start_output", fail_start)
+    ok, failure = transport._start_destination(
+        user["id"], broadcast, session, destination["id"]
+    )
+    assert ok is False
+    assert failure["reason_code"] == "destination_start_failed"
+    with transport.connect() as con:
+        run = dict(
+            con.execute(
+                "SELECT * FROM shared_sky_destination_runs WHERE broadcast_id=? AND destination_id=?",
+                (broadcast["id"], destination["id"]),
+            ).fetchone()
+        )
+    assert run["provider_external_id"] == "provider-broadcast-1"
+    assert run["provider_stream_id"] == "provider-stream-1"
+
+    monkeypatch.setattr(extension_module.relay, "start_output", lambda **kwargs: 12345)
+    ok, failure = transport._start_destination(
+        user["id"], broadcast, transport.status(user["id"], broadcast["id"])["session"], destination["id"]
+    )
+    assert ok is True
+    assert failure is None
+    assert seen_existing[-1] == {
+        "provider_external_id": "provider-broadcast-1",
+        "provider_stream_id": "provider-stream-1",
+    }
 
 
 def test_playback_descriptor_is_short_lived_and_authorized(tmp_path, monkeypatch):
@@ -280,6 +433,31 @@ def test_transport_health_keeps_only_measurable_normalized_metrics(tmp_path):
     assert "invented_gpu_temperature" not in metrics
 
 
+def test_capacity_snapshot_reports_measured_transport_pressure(tmp_path, monkeypatch):
+    monkeypatch.setenv("SHARED_SKY_PLAYBACK_BASE_URL", "https://playback.example.com/live")
+    monkeypatch.setenv("SHARED_SKY_PLAYBACK_SIGNING_SECRET", "test-playback-signing-secret")
+    user, base, transport = _setup(tmp_path)
+    project, source = _project_source(user, base, transport)
+    broadcast = base.create_broadcast(
+        user["id"], BroadcastCreate(project_id=project["id"], destination_ids=[])
+    )
+    _configure(transport, user["id"], broadcast["id"], source["id"])
+    transport.start(user["id"], broadcast["id"], "capacity-start-123")
+    transport.report_health(
+        user["id"],
+        broadcast["id"],
+        "transport_pressure",
+        "ok",
+        {"queue_depth": 4, "buffer_ms": 180},
+    )
+
+    snapshot = transport.capacity_snapshot(user["id"])
+    assert snapshot["active_broadcast_sessions"] == 1
+    assert snapshot["max_reported_queue_depth_last_5m"] == 4
+    assert snapshot["max_reported_buffer_ms_last_5m"] == 180
+    assert snapshot["cpu_gpu_values_fabricated"] is False
+
+
 def test_transport_state_recovers_from_same_database(tmp_path):
     user, base, transport = _setup(tmp_path)
     project, source = _project_source(user, base, transport)
@@ -343,6 +521,10 @@ def test_transport_api_exposes_handoff_routes():
         "/shared-sky/api/broadcasts/{broadcast_id}/transport/stop",
         "/shared-sky/api/broadcasts/{broadcast_id}/playback",
         "/shared-sky/api/destination-capabilities",
+        "/shared-sky/api/destination-presets",
+        "/shared-sky/api/broadcasts/{broadcast_id}/destination-presets/{preset_id}/apply",
+        "/shared-sky/api/transport/capacity",
+        "/owner/shared-sky/api/transport/capacity",
         "/shared-sky/api/destinations/validate",
     }
     assert expected.issubset(paths)
