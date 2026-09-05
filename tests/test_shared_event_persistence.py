@@ -40,6 +40,10 @@ def test_canonical_request_hash_is_order_stable_and_json_strict():
 
     with pytest.raises(TypeError):
         canonical_request_hash({"not_json": {1, 2, 3}})
+    with pytest.raises(TypeError):
+        canonical_request_hash({"not_json": (1, 2, 3)})
+    with pytest.raises(TypeError):
+        canonical_request_hash({1: "non-string-key"})
     with pytest.raises(ValueError):
         canonical_request_hash({"not_finite": float("nan")})
 
