@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .shared_sky_destination_adapters import CapabilityState
 from .shared_sky_transport_extensions import TransportExtensionsMixin
+from .shared_sky_transport_local_recording import TransportLocalRecordingMixin
 from .shared_sky_transport_media import TransportMediaMixin
 from .shared_sky_transport_media_lifecycle import TransportMediaLifecycleMixin
 from .shared_sky_transport_models import (
@@ -19,6 +20,7 @@ from .shared_sky_transport_support import TransportSupport
 
 class SharedSkyTransportStore(
     TransportMediaLifecycleMixin,
+    TransportLocalRecordingMixin,
     TransportMediaMixin,
     TransportRecoveryMixin,
     TransportExtensionsMixin,
