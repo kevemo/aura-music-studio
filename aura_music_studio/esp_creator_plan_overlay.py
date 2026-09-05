@@ -27,11 +27,14 @@ from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_casework import router as support_casework_router
 from .esp_support_center import router as support_center_router
+from .esp_support_privacy_guard import install_support_activity_privacy_guard
 from .esp_support_sla import router as support_sla_router
 from .shared_sky_streaming_studios import router as shared_sky_router
 from .shared_sky_transport_api import router as shared_sky_transport_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
 from .universal_creative_library import router as universal_creative_library_router
+
+install_support_activity_privacy_guard()
 
 router = APIRouter()
 router.include_router(member_hub_router)
