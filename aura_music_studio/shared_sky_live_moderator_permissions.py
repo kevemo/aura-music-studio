@@ -184,13 +184,20 @@ class ModeratorPermissionService:
             raise PermissionError("Only the LIVE creator or an Owner can assign LIVE moderators")
         if not self._user_exists(user_id):
             raise KeyError(user_id)
-        if assigned and not self.is_enabled(user_id):
-            raise PermissionError("Owner-enabled Moderator permission is required before LIVE assignment")
         now = _now()
         with self.community._connect() as con:
             con.isolation_level = None
             con.execute("BEGIN IMMEDIATE")
             if assigned:
+                permission = con.execute(
+                    "SELECT enabled FROM shared_sky_moderator_permissions WHERE user_id=?",
+                    (user_id,),
+                ).fetchone()
+                if not permission or not bool(permission["enabled"]):
+                    con.execute("ROLLBACK")
+                    raise PermissionError(
+                        "Owner-enabled Moderator permission is required before LIVE assignment"
+                    )
                 con.execute(
                     """INSERT INTO shared_sky_live_moderators(broadcast_id,user_id,granted_by,created_at)
                        VALUES(?,?,?,?)
