@@ -149,10 +149,12 @@ def create_browser_playback_session(broadcast_id: str, request: Request):
 
     Chat 4 performs viewer visibility/access admission. Chat 2 remains the signing and media-cookie
     authority: its canonical exchange function verifies the bearer and creates the Secure,
-    HttpOnly, SameSite=Strict, broadcast-path-scoped cookie. The bearer is never returned to the
-    browser, placed in a URL or persisted by Chat 4.
+    HttpOnly, SameSite=Strict, broadcast-path-scoped cookie. The bearer is never exposed to browser
+    JavaScript, HTML/JSON payloads, URLs or storage.
     """
 
+    if request.headers.get("x-shared-sky-playback-intent", "").strip().lower() != "watch":
+        raise HTTPException(400, "Explicit Shared Sky Watch playback intent is required")
     _access_or_raise(broadcast_id, request)
     descriptor, token = _chat2_browser_contract(broadcast_id, request)
     try:
