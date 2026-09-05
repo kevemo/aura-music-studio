@@ -18,7 +18,7 @@ CSS = """
 def _page(role: str) -> HTMLResponse:
     staff = role in {"agent", "both", "owner"}
     owner = role == "owner"
-    staff_controls = """
+    staff_controls = ""
     if staff:
         staff_controls = """
         <section class='card' id='staffTools'>
