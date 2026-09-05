@@ -18,8 +18,12 @@ def _request(
     *,
     scheme: str = "https",
     host: str = "command.example",
+    watch_intent: bool = True,
 ) -> Request:
     host_header = host.encode("ascii")
+    headers = [(b"host", host_header), (b"user-agent", b"pytest-wave4")]
+    if watch_intent:
+        headers.append((b"x-shared-sky-playback-intent", b"watch"))
     return Request(
         {
             "type": "http",
@@ -29,7 +33,7 @@ def _request(
             "path": path,
             "raw_path": path.encode(),
             "query_string": b"",
-            "headers": [(b"host", host_header), (b"user-agent", b"pytest-wave4")],
+            "headers": headers,
             "client": ("127.0.0.1", 12345),
             "server": (host, 443 if scheme == "https" else 80),
         }
@@ -120,6 +124,25 @@ def _install_fake_chat2(monkeypatch: pytest.MonkeyPatch, playback: dict):
         lambda broadcast_id: {"id": broadcast_id, "user_id": "creator-1"},
     )
     return seen
+
+
+def test_browser_session_requires_explicit_watch_intent_before_access_or_exchange(monkeypatch: pytest.MonkeyPatch):
+    called = {"access": 0}
+
+    def access(*args, **kwargs):
+        called["access"] += 1
+        return "viewer-1"
+
+    monkeypatch.setattr(wave4, "_access_or_raise", access)
+    with pytest.raises(HTTPException) as exc:
+        wave4.create_browser_playback_session(
+            "live-1",
+            _request(watch_intent=False),
+        )
+
+    assert exc.value.status_code == 400
+    assert "Watch playback intent" in str(exc.value.detail)
+    assert called["access"] == 0
 
 
 def test_browser_session_exchanges_bearer_server_side_and_never_returns_it(monkeypatch: pytest.MonkeyPatch):
@@ -267,6 +290,7 @@ def test_wave4_watch_wrapper_injects_post_exchange_without_bearer_or_token_stora
     assert response.status_code == 200
     assert "browser-playback-session" in html
     assert "method:'POST'" in html
+    assert "X-Shared-Sky-Playback-Intent" in html
     assert "/shared-sky/media/${encoded}/authorize" in html
     assert "method:'DELETE'" in html
     assert "localStorage" not in watch_v4._BROWSER_EXCHANGE_SCRIPT
