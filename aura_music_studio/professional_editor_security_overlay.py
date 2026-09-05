@@ -83,6 +83,7 @@ def install_professional_editor_patch_guard() -> None:
             professional_editor_router.routes.insert(0, guarded)
 
     from .cinema_production import router as cinema_production_router
+    from .cinema_structure import router as cinema_structure_router
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
     from .tv_production import router as tv_production_router
@@ -99,6 +100,7 @@ def install_professional_editor_patch_guard() -> None:
     # endpoints prepare delivery metadata only; Shared Skies transmission remains Chat 5 authority.
     _install_routes_once(tv_production_router.routes)
     _install_routes_once(cinema_production_router.routes)
+    _install_routes_once(cinema_structure_router.routes)
     # Guarded duplicate signatures are intentionally installed first. The final route-integrity
     # pass retains the hardened endpoint and removes the later legacy signature exactly once.
     _install_routes_once(visual_effect_hardening_router.routes)
