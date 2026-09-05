@@ -503,3 +503,7 @@ Verified against current official documentation on 5 September 2026:
 - TikTok Developer Guidelines/app review: https://developers.tiktok.com/doc/our-guidelines-developer-guidelines
 
 Provider-specific behaviour must be rechecked before future endpoint/scope changes.
+
+Final Chat 2 merge acceptance is evidence-based: only exact-head Command Center CI, Security
+Gates and Self-Host Smoke results on the current PR head qualify. Earlier cancelled/superseded
+runs are not acceptance evidence.
