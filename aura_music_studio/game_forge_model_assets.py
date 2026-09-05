@@ -119,6 +119,31 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _runtime_capabilities(mesh_summary: dict | None = None) -> dict:
+    summary = mesh_summary or {}
+    animations_present = bool(summary.get("animations_present"))
+    skins_present = bool(summary.get("skins_present"))
+    warnings: list[str] = []
+    if animations_present:
+        warnings.append("Animation clips are present in the source asset but are not executed by the current Aura3D static-model runtime.")
+    if skins_present:
+        warnings.append("Skin/rig data is present in the source asset but skinning is not executed by the current Aura3D static-model runtime.")
+    return {
+        "projection_mode": "closed_static_mesh",
+        "runtime_mesh_projection": True,
+        "skeletal_animation_runtime": False,
+        "skinning_runtime": False,
+        "animation_clips_runtime": False,
+        "animations_present": animations_present,
+        "skins_present": skins_present,
+        "source_animation_or_skin_data_executed": False,
+        "embedded_materials_executed": False,
+        "external_resources_allowed": False,
+        "runtime_network_required": False,
+        "warnings": warnings,
+    }
+
+
 def _public_model(record: GameModelAssetRecord) -> dict:
     return {
         "id": record.id,
@@ -133,6 +158,7 @@ def _public_model(record: GameModelAssetRecord) -> dict:
         "rights_attestation": record.rights_attestation,
         "imported_at": record.imported_at,
         "mesh_summary": record.mesh_summary,
+        "runtime_capabilities": _runtime_capabilities(record.mesh_summary),
         "raw_model_browser_url": None,
         "filesystem_path_exposed": False,
     }
@@ -169,6 +195,7 @@ def runtime_model_manifest(game_id: str) -> list[dict]:
                 "sha256": record.source_sha256,
                 "byte_size": record.byte_size,
                 "mesh": mesh,
+                "runtime_capabilities": _runtime_capabilities(mesh),
             }
         )
     return sorted(rows, key=lambda row: row["id"])
@@ -286,6 +313,7 @@ def game_models(game_id: str, request: Request):
         "supported_formats": ["glb", "gltf-embedded"],
         "external_gltf_resources_allowed": False,
         "runtime_mesh_projection": True,
+        "model_runtime_capabilities": _runtime_capabilities(),
         "filesystem_paths_exposed": False,
     }
 
@@ -319,6 +347,7 @@ async def import_game_model(
         "invalidated_previous_build_and_rating": True,
         "runtime_network_required": False,
         "generated_model_code_executed": False,
+        "runtime_capabilities": _runtime_capabilities(record.mesh_summary),
     }
 
 

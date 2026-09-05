@@ -26,12 +26,26 @@ from .game_forge_assets import (
     public_asset,
 )
 from .game_forge_export_readiness import aura_web_export_readiness
+from .game_forge_live_integration import router as game_live_router
+from .game_forge_live_transport_guard import router as game_live_transport_guard_router
+from .game_forge_model_generation import router as game_model_generation_router
 from .game_forge_models import GameDNA
+from .game_forge_shared_sky_transport import router as game_shared_sky_transport_router
 from .game_forge_store import active_editable_games, list_games, load_game, save_game
+from .game_forge_visual_logic import router as game_visual_logic_router
+from .game_forge_visual_logic_portal import router as game_visual_logic_portal_router
 from .plans import GAME_CREATE, GAME_CREATE_UNLIMITED
 from .tenant_storage import project_path
 
 router = APIRouter(tags=["Game Forge Creative Project Continuity"])
+# The guard must be registered before the legacy live router so the established API paths
+# synchronise any already-bound Chat 2 programme source instead of leaving stale ready state.
+router.include_router(game_live_transport_guard_router)
+router.include_router(game_live_router)
+router.include_router(game_model_generation_router)
+router.include_router(game_shared_sky_transport_router)
+router.include_router(game_visual_logic_router)
+router.include_router(game_visual_logic_portal_router)
 
 _BINDING_KEY = "creative_project_name"
 
@@ -80,6 +94,9 @@ def _binding_payload(game: GameDNA) -> dict:
         "project_bound": bool(name),
         "legacy_unbound_compatibility": not bool(name),
         "single_project_workspace": bool(name),
+        "go_live_create_url": f"/game-creation/live/{game.id}",
+        "visual_logic_capabilities_url": f"/api/game-forge/games/{game.id}/visual-logic",
+        "visual_logic_editor_url_template": f"/game-creation/visual-logic/{game.id}/{{entity_id}}",
     }
 
 
