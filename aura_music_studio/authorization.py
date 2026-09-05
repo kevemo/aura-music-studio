@@ -5,7 +5,12 @@ from typing import FrozenSet
 
 from pydantic import Field
 
-from .org_authority import OrgAction, OrgAuthority, OrgRole
+from .org_authority import (
+    LIVE_MODERATION_ACTIONS,
+    OrgAction,
+    OrgAuthority,
+    OrgRole,
+)
 from .plans import get_plan
 from .shared_contracts import ContractModel, NonEmptyId, OwnerOverrideEvidence
 
@@ -36,6 +41,19 @@ def require_org_authority(
     authority: OrgAuthority | None = None,
 ) -> None:
     (authority or OrgAuthority()).require(context.org_roles, action)
+
+
+def require_live_moderation_authority(
+    context: AuthorizationContext,
+    action: OrgAction,
+    *,
+    authority: OrgAuthority | None = None,
+) -> None:
+    """Require the shared Agent + Moderator gate for a LIVE moderation action."""
+
+    if action not in LIVE_MODERATION_ACTIONS:
+        raise ValueError(f"{action.value!r} is not a LIVE moderation action")
+    require_org_authority(context, action, authority=authority)
 
 
 def _validate_override(
