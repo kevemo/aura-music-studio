@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from .backup import StudioBackupManager
 from .backup_scheduler import BackupScheduler
 from .branding import PRODUCT_FULL_NAME
+from .owner_auth import owner_authorized
 from .protected_data_auth import authorize_protected_action
 from .protected_data_portal import router as protected_data_router
 from .studio_settings import StudioSettings
@@ -23,7 +24,17 @@ manager = StudioBackupManager()
 settings = StudioSettings()
 
 
-def _authorized(request: Request, action: str) -> bool:
+def _authorized(request: Request, action: str | None = None) -> bool:
+    """Compatibility owner check plus protected-action admission.
+
+    The no-action form is retained for the shared owner-auth bridge contract and tests only.
+    Every live Recovery Vault route supplies an explicit action and therefore requires both
+    a valid opaque Owner session and the independent Protected Data step-up/audit admission.
+    """
+    if not owner_authorized(request):
+        return False
+    if action is None:
+        return True
     try:
         return authorize_protected_action(request, action) is not None
     except Exception:
