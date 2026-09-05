@@ -9,23 +9,22 @@ from aura_music_studio.operational_evidence import run_restore_drill, write_rest
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run an isolated Command Center backup/restore drill")
-    parser.add_argument("--environment", default="ci", choices=["test", "ci", "integration", "staging", "recovery"])
-    parser.add_argument("--output", type=Path, required=True, help="Secret-free JSON evidence file to write")
-    parser.add_argument(
-        "--production-backup",
-        type=Path,
-        default=None,
-        help="Optional real backup archive to restore in isolation. Omit for deterministic synthetic evidence.",
+    parser = argparse.ArgumentParser(
+        description=(
+            "Run the deterministic isolated Command Center backup/restore mechanism drill. "
+            "This CLI does not certify restoration of a real production backup."
+        )
     )
+    parser.add_argument(
+        "--environment",
+        default="ci",
+        choices=["test", "ci", "integration", "staging", "recovery"],
+    )
+    parser.add_argument("--output", type=Path, required=True, help="Secret-free JSON evidence file to write")
     args = parser.parse_args()
 
     with tempfile.TemporaryDirectory(prefix="esp-restore-drill-") as tmp:
-        evidence = run_restore_drill(
-            Path(tmp),
-            environment=args.environment,
-            production_backup=args.production_backup,
-        )
+        evidence = run_restore_drill(Path(tmp), environment=args.environment)
     output = write_restore_evidence(args.output, evidence)
     print(json.dumps({"evidence": str(output), **evidence}, sort_keys=True))
     return 0 if evidence.get("result") == "verified" else 1
