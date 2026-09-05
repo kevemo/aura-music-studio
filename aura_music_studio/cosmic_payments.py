@@ -15,7 +15,13 @@ class CoinCheckout:
 
 
 class CoinPaymentProvider(Protocol):
-    """Provider boundary for Coin checkout and verified webhook translation."""
+    """Provider boundary for Coin checkout and verified webhook translation.
+
+    `create_checkout` MUST use the supplied server-generated idempotency key with the
+    provider's official idempotency mechanism (or equivalent retrieve-or-create behaviour).
+    A retry for the same internal purchase must resolve to the same provider payment/checkout,
+    never create a second chargeable intent.
+    """
 
     name: str
 
@@ -27,6 +33,7 @@ class CoinPaymentProvider(Protocol):
         fiat_amount_minor: int,
         fiat_currency: str,
         coin_quantity: int,
+        idempotency_key: str,
     ) -> CoinCheckout:
         ...
 
@@ -39,7 +46,8 @@ class CoinPaymentProviderRegistry:
 
     Chat 5 does not reuse the existing manual subscription PayPal invoice links for Coins:
     those links cannot prove a Coin purchase server-side. A real provider adapter must be
-    registered by deployment code with official signature verification.
+    registered by deployment code with official signature verification and idempotent checkout
+    creation.
     """
 
     def __init__(self):
