@@ -20,6 +20,12 @@ from .esp_social_oauth import (
 )
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
+from .esp_social_threads_oauth import (
+    threads_oauth_callback,
+    threads_oauth_capability,
+    threads_oauth_disconnect,
+    threads_oauth_start,
+)
 from .social_management import (
     BrandPersona,
     ContentStatus,
@@ -394,9 +400,9 @@ def register_connection_state(
 # Nested private routes inherit /command-center/api/social and the same server-side ESP gates.
 router.include_router(publish_queue_router)
 
-# Register the Facebook Page endpoints directly on the canonical Social router. This avoids the
-# late nested-router composition edge that can leave newly added child routes absent from an
-# already-composed production router. Every endpoint still independently rechecks the ESP gate.
+# Register provider-specific OAuth endpoints directly on the canonical Social router. FastAPI
+# copies child-router routes at include time, so OAuth routes that must precede a generic wildcard
+# are kept here explicitly. Every endpoint still independently rechecks the ESP membership gate.
 router.add_api_route(
     "/oauth/facebook/capability",
     facebook_oauth_capability,
@@ -420,10 +426,32 @@ router.add_api_route(
     facebook_oauth_disconnect,
     methods=["POST"],
 )
+router.add_api_route(
+    "/oauth/threads/capability",
+    threads_oauth_capability,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/oauth/threads/start",
+    threads_oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/threads/callback",
+    threads_oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/threads/disconnect",
+    threads_oauth_disconnect,
+    methods=["POST"],
+)
 
-# Register the existing TikTok/Instagram/YouTube OAuth endpoints directly as well. The previous
-# child-router composition could omit these routes from the canonical production router. Keep the
-# generic provider routes after Facebook so /oauth/facebook/* always resolves to the bounded Page flow.
+# Register the existing TikTok/Instagram/YouTube OAuth endpoints directly as well. Keep every
+# provider-specific route above these wildcards so an exact provider flow can never be shadowed.
 router.add_api_route("/oauth/providers", oauth_providers, methods=["GET"])
 router.add_api_route(
     "/oauth/{provider}/start",
