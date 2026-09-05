@@ -27,6 +27,7 @@ from .game_forge_assets import (
 )
 from .game_forge_export_readiness import aura_web_export_readiness
 from .game_forge_live_integration import router as game_live_router
+from .game_forge_model_generation import router as game_model_generation_router
 from .game_forge_models import GameDNA
 from .game_forge_store import active_editable_games, list_games, load_game, save_game
 from .plans import GAME_CREATE, GAME_CREATE_UNLIMITED
@@ -34,6 +35,7 @@ from .tenant_storage import project_path
 
 router = APIRouter(tags=["Game Forge Creative Project Continuity"])
 router.include_router(game_live_router)
+router.include_router(game_model_generation_router)
 
 _BINDING_KEY = "creative_project_name"
 
@@ -155,7 +157,6 @@ def games_in_creative_project(project_name: str, request: Request):
         "project_bound_view": True,
         "can_create": can_create,
         "unlimited_active_projects": unlimited,
-        # The create entitlement is global to Game Forge, so this remains deliberately unscoped.
         "active_editable_count": len(active_editable_games()),
         "basic_active_limit": None if unlimited else (1 if can_create else 0),
     }
