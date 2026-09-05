@@ -36,8 +36,47 @@ jobs:
       - name: Scanner regression tests
         run: python -m pip install pytest && python -m pytest -q tests/test_committed_secret_scan.py
 
-  aura-sec-release-trust:
-    name: Aura Sec release trust gates
+  supply-chain:
+    name: Dependency, SAST and SBOM gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install application and security scanners
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m pip install pip-audit bandit cyclonedx-bom
+
+      - name: Audit installed Python dependencies
+        run: pip-audit --local --progress-spinner off
+
+      - name: Static application security scan
+        run: bandit -q -r aura_music_studio -x tests -lll
+
+      - name: Generate CycloneDX SBOM
+        run: cyclonedx-py environment --output-format JSON --output-file chat10-sbom.cdx.json
+
+      - name: Upload SBOM evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: command-center-python-sbom
+          path: chat10-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  sls-release-trust:
+    name: Elevate Souls Productions Secure Lattice System release trust gates
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -63,8 +102,8 @@ jobs:
           tests/test_aura_sec_platform_release.py
           tests/test_aura_sec_release_readiness.py
 
-  aura-sec-native-execution:
-    name: Aura Sec native execution gates
+  sls-native-execution:
+    name: Elevate Souls Productions Secure Lattice System native execution gates
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
