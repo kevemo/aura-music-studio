@@ -40,6 +40,15 @@ def test_prompt_composes_bounded_executable_editable_graph():
     assert len(result["prompt_fingerprint"]) == 64
 
 
+def test_plain_and_composes_each_effect_without_breaking_grayscale_alias():
+    result = compose_image_effect_system("increase brightness and contrast and black and white")
+    assert [node["kind"] for node in result["graph"]["nodes"]] == [
+        "brightness",
+        "contrast",
+        "grayscale",
+    ]
+
+
 def test_unsupported_prompt_instruction_fails_closed():
     with pytest.raises(ValueError, match="Unsupported image effect instruction"):
         compose_image_effect_system("brighten the portrait, then run my custom plugin")
@@ -60,6 +69,7 @@ def test_preview_executes_real_pixels_preserves_source_and_returns_exact_token(t
     source = _source(tmp_path / "source.png")
     before = source.read_bytes()
     composed = compose_image_effect_system("increase brightness and contrast")
+    assert [node["kind"] for node in composed["graph"]["nodes"]] == ["brightness", "contrast"]
     preview = tmp_path / "preview.png"
 
     result = preview_image_effect_system(source, preview, composed["graph"])
