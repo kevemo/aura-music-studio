@@ -34,6 +34,15 @@ LEGACY_PRODUCT_NAMES = (
     "Live Sound Studio",
 )
 
+# The assistant identity changed publicly on 5 September 2026. Internal module, route,
+# database, cookie, environment-variable and provider identifiers may retain Aura-based
+# names until a tested compatibility migration is available.
+LEGACY_AI_NAMES = (
+    "Aura",
+    "Aura AI",
+    "Aura AI Systems",
+)
+
 
 def product_header() -> str:
     return f"{PRODUCT_FULL_NAME} — {ENDORSEMENT}"
