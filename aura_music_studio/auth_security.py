@@ -1,15 +1,28 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from urllib.parse import urlsplit
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from .auth_rate_limit import AuthRateLimitStore
+
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _PRODUCTION_ENV = "production"
+_DURABLE_RATE_ENVIRONMENTS = {"production", "staging"}
 _COOKIE_NAMES = ("lss_session", "lss_admin_session")
+_AUTH_RATE_PATHS = {
+    "/auth/login",
+    "/auth/signup",
+    "/owner/login",
+    "/auth/password-reset/request",
+    "/auth/password-reset/confirm",
+    "/auth/email-verification/request",
+    "/auth/email-verification/confirm",
+}
 
 
 def _origin(value: str | None) -> str | None:
@@ -76,6 +89,52 @@ def _has_cookie_auth(request: Request) -> bool:
     return any(bool(request.cookies.get(name)) for name in _COOKIE_NAMES)
 
 
+def _client_key(request: Request) -> str:
+    # Uvicorn/ASGI proxy-header trust must be configured at deployment if a trusted edge should
+    # replace request.client with the originating client address. This middleware deliberately
+    # does not trust arbitrary X-Forwarded-For input by itself.
+    return request.client.host if request.client else "unknown"
+
+
+def _durable_auth_rate_admission(request: Request) -> JSONResponse | None:
+    """Apply cross-worker auth throttling for production/staging on the shared durable database."""
+    if request.method.upper() != "POST" or request.url.path not in _AUTH_RATE_PATHS:
+        return None
+    if _deployment_environment() not in _DURABLE_RATE_ENVIRONMENTS:
+        return None
+
+    try:
+        limit = int((os.getenv("LSS_AUTH_RATE_LIMIT") or "12").strip())
+        window = int((os.getenv("LSS_AUTH_RATE_WINDOW_SECONDS") or "900").strip())
+    except ValueError:
+        return JSONResponse(
+            {"detail": "Authentication rate-limit security policy is unavailable", "security_gate": "durable_auth_rate_limit"},
+            status_code=503,
+        )
+
+    db_path = (os.getenv("LSS_DB_PATH") or "data/live_sound_studio.sqlite3").strip()
+    try:
+        allowed, retry = AuthRateLimitStore(db_path).allow(
+            _client_key(request),
+            request.url.path,
+            limit=limit,
+            window_seconds=window,
+        )
+    except (sqlite3.Error, OSError, ValueError):
+        return JSONResponse(
+            {"detail": "Authentication rate-limit security policy is unavailable", "security_gate": "durable_auth_rate_limit"},
+            status_code=503,
+        )
+
+    if not allowed:
+        return JSONResponse(
+            {"detail": "Too many authentication attempts. Try again later.", "security_gate": "durable_auth_rate_limit"},
+            status_code=429,
+            headers={"Retry-After": str(retry)},
+        )
+    return None
+
+
 def _merge_vary(response, *names: str) -> None:
     existing = [part.strip() for part in (response.headers.get("vary") or "").split(",") if part.strip()]
     lowered = {part.lower() for part in existing}
@@ -88,15 +147,19 @@ def _merge_vary(response, *names: str) -> None:
 
 
 class CrossSiteRequestGuardMiddleware(BaseHTTPMiddleware):
-    """Reject cross-site browser state changes before application routing.
+    """Enforce shared browser-origin and durable auth-abuse boundaries before application routing.
 
-    Bearer-token API clients are excluded because they do not rely on ambient browser cookies.
-    Production cookie-authenticated writes require browser origin/fetch evidence and compare it
-    only with explicitly configured trusted origins. This avoids using attacker-controlled Host
-    input as its own authorization source while keeping local development ergonomics intact.
+    Production/staging authentication endpoints use the shared SQLite rate ledger so multiple
+    application workers cannot each grant an independent attempt budget. Bearer-token API clients
+    remain excluded from ambient-cookie CSRF rules, but authentication attempts are still rate
+    admitted before that distinction because bearer headers must not bypass credential abuse gates.
     """
 
     async def dispatch(self, request: Request, call_next):
+        rate_rejection = _durable_auth_rate_admission(request)
+        if rate_rejection is not None:
+            return rate_rejection
+
         if request.method.upper() not in _UNSAFE_METHODS:
             return await call_next(request)
         if _authorization_is_bearer(request):
