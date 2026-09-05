@@ -14,7 +14,7 @@ from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .mailer import notify_membership_request
 from .membership import MembershipService
 from .membership_billing_periods import MembershipBillingPreferenceStore
-from .native_products import BillingPeriod
+from .native_products import BillingPeriod, SLS_PUBLIC_NAME
 from .plans import PLANS, OWNERSHIP_NOTICE
 
 router = APIRouter()
@@ -27,6 +27,7 @@ CSS = """
 :root{--bg:#0b0712;--panel:#171020;--panel2:#21132d;--gold:#e8bd62;--text:#fff;--muted:#cbbfd5;--line:#3b294b;--good:#86e0a8;--bad:#ff9aa9}
 *{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:radial-gradient(circle at top,#26113b 0,#0b0712 45%);color:var(--text);min-height:100vh}
 a{color:inherit}.wrap{max-width:1180px;margin:auto;padding:22px}.nav{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0}.brand{font-weight:900;letter-spacing:-.02em}.brand small{display:block;color:var(--gold);font-weight:700;font-size:.75rem;letter-spacing:.08em;text-transform:uppercase}.navlinks{display:flex;gap:10px;flex-wrap:wrap}.btn,button{display:inline-block;border:1px solid var(--line);background:#21152d;color:#fff;padding:11px 16px;border-radius:12px;text-decoration:none;font-weight:800;cursor:pointer}.btn.primary,button.primary{background:linear-gradient(135deg,#f1cf7a,#c99b3f);color:#160e1e;border:0}.btn.ghost{background:transparent}.hero{padding:80px 0 54px;display:grid;grid-template-columns:1.15fr .85fr;gap:35px;align-items:center}.hero h1{font-size:clamp(2.7rem,7vw,5.7rem);line-height:.94;margin:0 0 22px;letter-spacing:-.055em}.hero h1 span{color:var(--gold)}.hero p{font-size:1.2rem;line-height:1.65;color:var(--muted);max-width:760px}.hero-card,.card{background:linear-gradient(145deg,#1d1228,#110b18);border:1px solid var(--line);border-radius:24px;padding:26px;box-shadow:0 25px 80px #0006}.meter{height:9px;background:#30213d;border-radius:99px;overflow:hidden;margin:14px 0}.meter i{display:block;height:100%;width:88%;background:linear-gradient(90deg,#9d53d6,#e8bd62)}.eyebrow{color:var(--gold);text-transform:uppercase;letter-spacing:.16em;font-weight:900;font-size:.77rem}.section{padding:44px 0}.section h2{font-size:2.3rem;margin:0 0 12px}.section>p{color:var(--muted);max-width:780px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}.price-card{position:relative}.price-card.pro{border-color:#bd8fe2;box-shadow:0 25px 75px #662a9b35}.badge{position:absolute;right:16px;top:16px;background:var(--gold);color:#1b1024;border-radius:99px;padding:6px 10px;font-size:.72rem;font-weight:900}.price{font-size:2.7rem;font-weight:950;margin:14px 0}.price small{font-size:.9rem;color:var(--muted)}ul.features{padding:0;list-style:none;line-height:1.55}.features li{padding:7px 0;border-bottom:1px solid #ffffff0e}.features li:before{content:'✓';color:var(--gold);font-weight:900;margin-right:8px}.form-card{max-width:590px;margin:52px auto}.form-card h1{margin-top:0}.field{margin:15px 0}.field label{display:block;font-weight:800;margin-bottom:7px}.field input,.field select,.field textarea{width:100%;background:#0e0914;border:1px solid var(--line);color:#fff;border-radius:12px;padding:13px;font:inherit}.help,.muted{color:var(--muted);font-size:.92rem}.alert{padding:13px 15px;border-radius:12px;margin:14px 0;background:#321c29;border:1px solid #6a3146}.alert.good{background:#143122;border-color:#2c704a}.dashboard{display:grid;grid-template-columns:280px 1fr;gap:20px;padding:32px 0}.sidebar h3{margin-top:0}.tier{font-size:1.45rem;color:var(--gold);font-weight:950}.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.tile{background:#15101d;border:1px solid var(--line);padding:18px;border-radius:17px}.tile strong{display:block;font-size:1.1rem;margin-bottom:5px}.locked{opacity:.43}.esp-request{border-color:#e8bd6270;background:linear-gradient(145deg,#26182e,#120d18)}.footer{border-top:1px solid #ffffff10;color:var(--muted);padding:30px 0 50px;margin-top:35px;font-size:.88rem}
+.skip-link{position:absolute;left:12px;top:-80px;z-index:100;background:#fff;color:#160e1e;padding:10px 14px;border-radius:10px;font-weight:900}.skip-link:focus{top:12px}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
 @media(max-width:820px){.hero,.grid3,.dashboard,.tiles{grid-template-columns:1fr}.hero{padding-top:45px}.nav{align-items:flex-start}.hero h1{font-size:3rem}}
 """
 
@@ -40,9 +41,9 @@ def _page(title: str, body: str, request: Request | None = None) -> HTMLResponse
         if member else
         "<a class='btn ghost' href='/signin'>Sign in</a><a class='btn primary' href='/signup'>Join Studio</a>"
     )
-    html = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+    html = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>{escape(title)} — {escape(PRODUCT_NAME)}</title><style>{CSS}</style></head><body>
-<div class='wrap'><nav class='nav'><a class='brand' href='/' style='text-decoration:none'>{escape(PRODUCT_NAME)}<small>Elevate Souls Productions</small></a><div class='navlinks'><a class='btn ghost' href='/pricing'>Pricing</a>{auth_nav}</div></nav>{body}
+<a class='skip-link' href='#main-content'>Skip to main content</a><div class='wrap'><nav class='nav' aria-label='Primary'><a class='brand' href='/' style='text-decoration:none'>{escape(PRODUCT_NAME)}<small>Elevate Souls Productions</small></a><div class='navlinks'><a class='btn ghost' href='/pricing'>Pricing</a>{auth_nav}</div></nav><main id='main-content'>{body}</main>
 <footer class='footer'>{escape(PRODUCT_FULL_NAME)} · {escape(TAGLINE)}<br><br>{escape(OWNERSHIP_NOTICE)}</footer></div></body></html>"""
     return HTMLResponse(html)
 
@@ -52,7 +53,7 @@ def _feature_names(plan_id: str) -> list[str]:
         return ["Song ideas and basic creation", "Basic AI lyrics", "Aura Producer planning", "Basic real-audio previews"]
     if plan_id == "base":
         return ["1 confirmed full track every day", "Unlimited regeneration until that track is confirmed", "MP3 + WAV finished downloads", "Basic mastering", "Audio/score uploads", "Backing-track creation", "Harmony tools"]
-    return ["Unlimited confirmed full tracks", "Unlimited regeneration", "All MP3/WAV/FLAC downloads", "Splitter + separated stems", "Full multitrack studio", "Advanced + reference mastering", "Cover/remix/repaint tools", "Sample Lab + Style DNA", "Harmony Architect", "Consent-approved voice duplication", "Automation + take lanes", "BandLab/stem exports", "Aura OS + Aura Sec included", "Every enabled studio feature"]
+    return ["Unlimited confirmed full tracks", "Unlimited regeneration", "All MP3/WAV/FLAC downloads", "Splitter + separated stems", "Full multitrack studio", "Advanced + reference mastering", "Cover/remix/repaint tools", "Sample Lab + Style DNA", "Harmony Architect", "Consent-approved voice duplication", "Automation + take lanes", "BandLab/stem exports", "Aura OS included", f"{SLS_PUBLIC_NAME} licensed separately", "Every enabled studio feature"]
 
 
 def _pricing_cards(selected: str | None = None) -> str:
@@ -191,7 +192,7 @@ def home(request: Request):
 
 @router.get("/pricing", response_class=HTMLResponse)
 def pricing(request: Request):
-    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Basic is £4.99/month. Unlimited Pro is £9.99/month or £99/year, includes Aura OS and Aura Sec entitlement, and unlocks the highest enabled creative access.</p>{_pricing_cards()}</section>"
+    body = f"<section class='section'><div class='eyebrow'>Plans</div><h2>Choose your studio level</h2><p>Basic is £4.99/month. Unlimited Pro is £9.99/month or £99/year and includes Aura OS. {escape(SLS_PUBLIC_NAME)} native/device licensing is separate from Command Center membership.</p>{_pricing_cards()}</section>"
     return _page("Pricing", body, request)
 
 
@@ -207,7 +208,7 @@ def signup_page(
         selected_period = _period_value(billing_period)
     except ValueError:
         selected_period = BillingPeriod.MONTHLY
-    error_html = f"<div class='alert'>{escape(error)}</div>" if error else ""
+    error_html = f"<div class='alert' role='alert'>{escape(error)}</div>" if error else ""
     options = "".join(
         f"<option value='{pid}' {'selected' if pid == plan else ''}>{escape(PLANS[pid].name)} — {escape(PLANS[pid].display_price_for(BillingPeriod.MONTHLY))}</option>"
         for pid in ("free", "base", "pro")
@@ -217,7 +218,7 @@ def signup_page(
         f"<option value='annual' {'selected' if selected_period is BillingPeriod.ANNUAL else ''}>Yearly — Unlimited Pro only (£99/year)</option>"
     )
     body = f"""<div class='card form-card'><div class='eyebrow'>Membership request</div><h1>Create your account</h1><p class='muted'>Your plan and billing period are part of the request Kev or Mary approves. Basic is monthly-only; Unlimited Pro can be monthly or yearly. Paid access activates only after verified payment evidence.</p>{error_html}
-<form method='post' action='/signup'><div class='field'><label>Name</label><input name='display_name' required minlength='2' autocomplete='name'></div><div class='field'><label>Email</label><input type='email' name='email' required autocomplete='email'></div><div class='field'><label>Password</label><input type='password' name='password' required minlength='10' autocomplete='new-password'><div class='help'>Minimum 10 characters.</div></div><div class='field'><label>Membership</label><select name='plan_id'>{options}</select></div><div class='field'><label>Billing period</label><select name='billing_period'>{period_options}</select><div class='help'>Yearly billing is available for Unlimited Pro only.</div></div><button class='primary' type='submit'>Send membership request</button></form><p class='help'>Already have an account? <a href='/signin'>Sign in</a>.</p></div>"""
+<form method='post' action='/signup'><div class='field'><label for='signup-display-name'>Name</label><input id='signup-display-name' name='display_name' required minlength='2' autocomplete='name'></div><div class='field'><label for='signup-email'>Email</label><input id='signup-email' type='email' name='email' required autocomplete='email'></div><div class='field'><label for='signup-password'>Password</label><input id='signup-password' type='password' name='password' required minlength='10' autocomplete='new-password' aria-describedby='signup-password-help'><div class='help' id='signup-password-help'>Minimum 10 characters.</div></div><div class='field'><label for='signup-plan'>Membership</label><select id='signup-plan' name='plan_id'>{options}</select></div><div class='field'><label for='signup-billing-period'>Billing period</label><select id='signup-billing-period' name='billing_period' aria-describedby='signup-billing-help'>{period_options}</select><div class='help' id='signup-billing-help'>Yearly billing is available for Unlimited Pro only.</div></div><button class='primary' type='submit'>Send membership request</button></form><p class='help'>Already have an account? <a href='/signin'>Sign in</a>.</p></div>"""
     return _page("Sign up", body, request)
 
 
@@ -255,8 +256,8 @@ def signup_submit(
 
 @router.get("/signin", response_class=HTMLResponse)
 def signin_page(request: Request, error: str | None = None):
-    error_html = f"<div class='alert'>{escape(error)}</div>" if error else ""
-    body = f"""<div class='card form-card'><div class='eyebrow'>Member access</div><h1>Sign in</h1>{error_html}<form method='post' action='/signin'><div class='field'><label>Email</label><input type='email' name='email' required autocomplete='email'></div><div class='field'><label>Password</label><input type='password' name='password' required autocomplete='current-password'></div><button class='primary' type='submit'>Sign in</button></form><p class='help'>New here? <a href='/signup'>Request membership</a>.</p></div>"""
+    error_html = f"<div class='alert' role='alert'>{escape(error)}</div>" if error else ""
+    body = f"""<div class='card form-card'><div class='eyebrow'>Member access</div><h1>Sign in</h1>{error_html}<form method='post' action='/signin'><div class='field'><label for='signin-email'>Email</label><input id='signin-email' type='email' name='email' required autocomplete='email'></div><div class='field'><label for='signin-password'>Password</label><input id='signin-password' type='password' name='password' required autocomplete='current-password'></div><button class='primary' type='submit'>Sign in</button></form><p class='help'>New here? <a href='/signup'>Request membership</a>.</p></div>"""
     return _page("Sign in", body, request)
 
 
