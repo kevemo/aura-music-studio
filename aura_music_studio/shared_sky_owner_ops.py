@@ -134,14 +134,7 @@ body{{margin:0;background:#07101d;color:#eef7ff;font-family:Inter,system-ui,sans
 
 
 def install_shared_sky_owner_ops(app: Any) -> None:
-    """Bind owner runtime handlers directly to the canonical FastAPI app once.
-
-    The production application uses a compatibility router composition layer whose late
-    ``include_router`` calls are not guaranteed to flatten newly imported routes. Direct handler
-    registration preserves the same owner-authenticated functions while making reachability
-    deterministic. The signature guard keeps repeated imports idempotent.
-    """
-
+    """Bind owner runtime handlers directly to the canonical FastAPI app once."""
     existing = {
         (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
         for route in app.router.routes
@@ -177,17 +170,37 @@ def install_shared_sky_media_plane(app: Any) -> None:
             existing.add(signature)
 
 
-# ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Register authoritative Battle/multi-host control, owner runtime, first-party
-# viewer/community, and the signed media-plane routes at import time to bypass late compatibility-
-# router snapshotting. Their handlers retain their own membership/owner/node-secret checks and
-# fail closed when deployment credentials are absent.
+# ``app.py`` imports the canonical app before importing this module, so the app is fully created.
+# Preserve neighbouring Shared Sky bootstraps and mount Chat 3 Studio routes on the same canonical
+# application. Every handler retains its own membership/owner/node-secret gate.
 from .api import app as _canonical_app
+from .shared_sky_chat2_studio_integration import install_chat2_studio_integration
+from .shared_sky_chat2_studio_operator import install_chat2_studio_operator
+from .shared_sky_control_room import install_shared_sky_control_room
+from .shared_sky_control_room_extensions import install_shared_sky_control_room_extensions
+from .shared_sky_operator_profiles import install_shared_sky_operator_profiles
+from .shared_sky_professional_canvas import install_shared_sky_professional_canvas
+from .shared_sky_professional_operator_ui import install_professional_operator_ui
+from .shared_sky_professional_transport_toolbar import install_professional_transport_toolbar
+from .shared_sky_studio_history_graphics import install_shared_sky_studio_history_graphics
+from .shared_sky_studio_ingest import install_shared_sky_studio_ingest
+from .shared_sky_studio_recovery_hardening import install_history_recovery_versioning
 
+install_history_recovery_versioning()
 install_shared_sky_battle_routes(_canonical_app)
 install_shared_sky_live_community(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 install_shared_sky_media_plane(_canonical_app)
+install_shared_sky_control_room(_canonical_app)
+install_shared_sky_control_room_extensions(_canonical_app)
+install_shared_sky_operator_profiles(_canonical_app)
+install_shared_sky_professional_canvas(_canonical_app)
+install_professional_transport_toolbar(_canonical_app)
+install_professional_operator_ui(_canonical_app)
+install_shared_sky_studio_history_graphics(_canonical_app)
+install_shared_sky_studio_ingest(_canonical_app)
+install_chat2_studio_integration(_canonical_app)
+install_chat2_studio_operator(_canonical_app)
 
 
 __all__ = ["install_shared_sky_media_plane", "install_shared_sky_owner_ops", "router"]
