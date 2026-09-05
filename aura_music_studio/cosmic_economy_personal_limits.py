@@ -6,10 +6,10 @@ from typing import Any
 from uuid import uuid4
 
 from .cosmic_economy import EconomyError, _iso
-from .cosmic_economy_integrations import IntegratedCosmicEconomy
+from .cosmic_economy_command_idempotency import CommandBoundCosmicEconomy
 
 
-class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
+class PersonalLimitCosmicEconomy(CommandBoundCosmicEconomy):
     """Adds member-controlled lower spending caps without weakening platform policy."""
 
     def _init_schema(self) -> None:
