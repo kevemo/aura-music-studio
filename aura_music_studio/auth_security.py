@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import os
 import sqlite3
 from urllib.parse import urlsplit
@@ -13,7 +15,19 @@ from .auth_rate_limit import AuthRateLimitStore
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 _PRODUCTION_ENV = "production"
 _DURABLE_RATE_ENVIRONMENTS = {"production", "staging"}
+_TRUSTED_PROXY_ENVIRONMENTS = {"production", "staging"}
 _COOKIE_NAMES = ("lss_session", "lss_admin_session")
+_PROXY_AUTH_HEADER = "x-esp-proxy-auth"
+_PROXY_TOKEN_ENV = "LSS_TRUSTED_PROXY_TOKEN"
+_FORWARDED_HEADERS = ("x-forwarded-for", "x-forwarded-proto")
+_PLACEHOLDER_PROXY_FRAGMENTS = (
+    "changeme",
+    "change-me",
+    "placeholder",
+    "example-secret",
+    "replace-me",
+    "your-secret",
+)
 _AUTH_RATE_PATHS = {
     "/auth/login",
     "/auth/signup",
@@ -89,10 +103,98 @@ def _has_cookie_auth(request: Request) -> bool:
     return any(bool(request.cookies.get(name)) for name in _COOKIE_NAMES)
 
 
+def _proxy_token_is_strong(value: str) -> bool:
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+    return len(raw) >= 32 and not any(part in lowered for part in _PLACEHOLDER_PROXY_FRAGMENTS)
+
+
+def _strip_proxy_auth_header(request: Request) -> None:
+    request.scope["headers"] = [
+        (name, value)
+        for name, value in request.scope.get("headers", [])
+        if name.lower() != _PROXY_AUTH_HEADER.encode("ascii")
+    ]
+
+
+def _trusted_proxy_attribution(request: Request) -> JSONResponse | None:
+    """Admit Caddy-supplied client identity only after authenticating the proxy boundary.
+
+    Uvicorn proxy-header parsing is disabled in the container entrypoint, so ``request.client`` is
+    the immediate network peer until this function verifies the shared Caddy-to-application token.
+    Caddy overwrites the internal auth header and, by default, ignores client-supplied X-Forwarded
+    values before constructing its own. Production/staging therefore fail closed rather than
+    trusting arbitrary forwarded headers or collapsing every user into the reverse-proxy address.
+    """
+    xff = request.headers.get("x-forwarded-for")
+    xfp = request.headers.get("x-forwarded-proto")
+    supplied_token = request.headers.get(_PROXY_AUTH_HEADER)
+    has_forwarded = xff is not None or xfp is not None
+    if not has_forwarded:
+        if supplied_token is not None:
+            _strip_proxy_auth_header(request)
+        return None
+
+    deployment = _deployment_environment()
+    configured_token = (os.getenv(_PROXY_TOKEN_ENV) or "").strip()
+    strict = deployment in _TRUSTED_PROXY_ENVIRONMENTS
+    if strict and not _proxy_token_is_strong(configured_token):
+        return JSONResponse(
+            {
+                "detail": "Trusted reverse-proxy identity policy is unavailable",
+                "security_gate": "trusted_proxy_configuration",
+            },
+            status_code=503,
+        )
+
+    if not configured_token or not supplied_token or not hmac.compare_digest(configured_token, supplied_token):
+        if strict:
+            return JSONResponse(
+                {
+                    "detail": "Forwarded client identity was not supplied by the trusted reverse proxy",
+                    "security_gate": "trusted_proxy_authentication",
+                },
+                status_code=403,
+            )
+        _strip_proxy_auth_header(request)
+        return None
+
+    if xff is None or xfp is None:
+        return JSONResponse(
+            {"detail": "Trusted proxy forwarding metadata is incomplete", "security_gate": "trusted_proxy_metadata"},
+            status_code=400,
+        )
+
+    forwarded_parts = [part.strip() for part in xff.split(",") if part.strip()]
+    if len(forwarded_parts) != 1 or "%" in forwarded_parts[0]:
+        return JSONResponse(
+            {"detail": "Trusted proxy client address is malformed", "security_gate": "trusted_proxy_client"},
+            status_code=400,
+        )
+    try:
+        client_ip = str(ipaddress.ip_address(forwarded_parts[0]))
+    except ValueError:
+        return JSONResponse(
+            {"detail": "Trusted proxy client address is malformed", "security_gate": "trusted_proxy_client"},
+            status_code=400,
+        )
+
+    scheme = xfp.strip().lower()
+    if scheme not in {"http", "https"}:
+        return JSONResponse(
+            {"detail": "Trusted proxy scheme is malformed", "security_gate": "trusted_proxy_scheme"},
+            status_code=400,
+        )
+
+    request.scope["client"] = (client_ip, 0)
+    request.scope["scheme"] = scheme
+    _strip_proxy_auth_header(request)
+    return None
+
+
 def _client_key(request: Request) -> str:
-    # Uvicorn/ASGI proxy-header trust must be configured at deployment if a trusted edge should
-    # replace request.client with the originating client address. This middleware deliberately
-    # does not trust arbitrary X-Forwarded-For input by itself.
+    # Client identity is either the raw ASGI peer or an address authenticated by
+    # _trusted_proxy_attribution. Raw X-Forwarded-For is never authoritative here.
     return request.client.host if request.client else "unknown"
 
 
@@ -147,7 +249,7 @@ def _merge_vary(response, *names: str) -> None:
 
 
 class CrossSiteRequestGuardMiddleware(BaseHTTPMiddleware):
-    """Enforce shared browser-origin and durable auth-abuse boundaries before application routing.
+    """Enforce proxy identity, browser-origin and durable auth-abuse boundaries before routing.
 
     Production/staging authentication endpoints use the shared SQLite rate ledger so multiple
     application workers cannot each grant an independent attempt budget. Bearer-token API clients
@@ -156,6 +258,10 @@ class CrossSiteRequestGuardMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
+        proxy_rejection = _trusted_proxy_attribution(request)
+        if proxy_rejection is not None:
+            return proxy_rejection
+
         rate_rejection = _durable_auth_rate_admission(request)
         if rate_rejection is not None:
             return rate_rejection
