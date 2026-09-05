@@ -110,6 +110,16 @@ def _route_pairs(routes: list[dict[str, object]]) -> set[tuple[str, str]]:
     return pairs
 
 
+def _route_pair_counts(routes: list[dict[str, object]]) -> dict[tuple[str, str], int]:
+    counts: dict[tuple[str, str], int] = {}
+    for route in routes:
+        path = str(route.get("path") or "")
+        for method in route.get("methods") or []:
+            pair = (path, str(method).upper())
+            counts[pair] = counts.get(pair, 0) + 1
+    return counts
+
+
 def test_chat6_battle_routes_are_mounted_on_fresh_canonical_production_app():
     snapshot = _fresh_production_snapshot()
     routes = list(snapshot.get("routes") or [])
@@ -118,6 +128,16 @@ def test_chat6_battle_routes_are_mounted_on_fresh_canonical_production_app():
     assert not missing, (
         "Fresh canonical production app is missing Chat 6 routes: "
         f"{missing}; diagnostics={snapshot}"
+    )
+
+
+def test_chat6_required_routes_have_one_canonical_dispatch_authority():
+    snapshot = _fresh_production_snapshot()
+    counts = _route_pair_counts(list(snapshot.get("routes") or []))
+    duplicates = {pair: counts.get(pair, 0) for pair in _REQUIRED if counts.get(pair, 0) != 1}
+    assert not duplicates, (
+        "Required Chat 6 routes must each have exactly one canonical dispatch authority: "
+        f"{duplicates}; diagnostics={snapshot}"
     )
 
 
