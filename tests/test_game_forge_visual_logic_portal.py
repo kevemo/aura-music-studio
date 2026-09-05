@@ -25,15 +25,26 @@ def test_visual_logic_workbench_is_mounted_on_release_app_and_uses_typed_api_onl
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_visual_logic_workbench_source_has_no_arbitrary_code_execution_controls():
+def test_visual_logic_workbench_source_has_only_runtime_backed_typed_controls():
     from aura_music_studio import game_forge_visual_logic_portal as portal
 
     source = portal.visual_logic_portal.__code__.co_consts
     joined = "\n".join(item for item in source if isinstance(item, str))
     assert "Compile Graph" in joined
-    assert "follow_target" in joined
-    assert "timer" in joined
-    assert "door" in joined
+    for op in (
+        "follow_target",
+        "timer",
+        "door",
+        "collectible",
+        "damage",
+        "checkpoint",
+        "patrol",
+        "quest_trigger",
+    ):
+        assert f"data-add='{op}'" in joined
+    assert "8 runtime-backed ops" in joined
+    assert "Collision nodes require Physics DNA" in joined
     assert "eval(" not in joined
     assert "new Function" not in joined
     assert "javascript source" not in joined.lower()
+    assert "<textarea" not in joined.lower()
