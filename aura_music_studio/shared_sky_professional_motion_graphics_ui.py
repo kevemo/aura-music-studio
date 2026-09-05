@@ -57,6 +57,7 @@ def install_professional_motion_graphics_ui(app: Any) -> None:
     for marker in (
         "_shared_sky_operator_ui",
         "_shared_sky_transport_toolbar",
+        "_shared_sky_ingest_ui",
         "_shared_sky_motion_graphics_ui",
     ):
         if marker == "_shared_sky_motion_graphics_ui" or getattr(current, marker, False):
