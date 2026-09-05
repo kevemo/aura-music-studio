@@ -148,6 +148,23 @@ def gift_availability(
         _raise(exc)
 
 
+@router.get("/operational-events")
+def operational_events(
+    request: Request,
+    event_type: str | None = None,
+    user_id: str | None = None,
+    limit: int = 100,
+):
+    _owner(request)
+    return {
+        "events": economy_service().operational_events(
+            event_type=event_type,
+            user_id=user_id,
+            limit=limit,
+        )
+    }
+
+
 @router.get("/discrepancies")
 def reconciliation_discrepancies(request: Request, status: str = "open", limit: int = 100):
     _owner(request)
