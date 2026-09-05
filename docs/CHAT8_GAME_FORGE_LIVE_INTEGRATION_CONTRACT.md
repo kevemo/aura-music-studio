@@ -2,13 +2,11 @@
 
 Status: Chat 8 compatibility contract for `development/full-site-build`.
 
-This document is intentionally narrow. Game Forge owns project/game source truth. Shared Sky transport, programme composition, community, Gifts and Battle truth remain in their canonical domains.
+Game Forge owns project/game source truth. Shared Sky transport, programme composition, community, Gifts and Battle truth remain in their canonical domains. The contract is additive and reuses the existing tenant/project, runtime, asset, build, playtest and sandbox architecture rather than creating a second engine or project store.
 
-## Canonical Game Forge foundations reused
+## Canonical Game Forge foundations
 
-Game Forge already persists member-scoped Game DNA below the tenant-aware `projects_root()` via `aura_music_studio.game_forge_store`. It already has native 2D/3D runtime modules, world/gameplay/state-machine systems, media/model asset bindings, project continuity, export/build/playtest paths and deterministic tests. Chat 8 must extend those systems rather than create a second project store or engine.
-
-Primary existing imports used by this integration:
+Primary existing imports:
 
 - `aura_music_studio.game_forge_models.GameDNA`
 - `aura_music_studio.game_forge_models.GameBuild`
@@ -17,51 +15,116 @@ Primary existing imports used by this integration:
 - `aura_music_studio.game_forge_project_binding.creative_project_name`
 - `aura_music_studio.game_forge_api._creator`
 - `aura_music_studio.aura_sandbox.AuraSandboxClient`
+- `aura_music_studio.game_forge_model_assets.GameModelAssetRecord`
 
-The Shared Sky compatibility consumer currently recognises `source_type="game_forge"`. Game Forge does not write destination OAuth tokens or claim destination delivery success.
+Game DNA and its subresources are stored below request-scoped member storage. Generated/user code remains delegated to `AuraSandboxClient`; Chat 8 does not execute arbitrary member code on the FastAPI host.
 
-## Chat 8 live module
+## Router composition
 
-Canonical module:
-
-`aura_music_studio.game_forge_live_integration`
-
-Mounted through:
+Both Chat 8 routers are mounted through:
 
 `aura_music_studio.game_forge_project_binding.router`
 
-Safe portal:
+Modules:
 
-`GET /game-creation/live/{game_id}`
+- `aura_music_studio.game_forge_live_integration`
+- `aura_music_studio.game_forge_model_generation`
 
-Project continuity responses expose:
+Project-context payloads expose:
 
 `go_live_create_url=/game-creation/live/{game_id}`
 
-## Durable live state
+## Existing project/scene/runtime contracts reused
 
-Per-member/per-game state is stored beneath the existing tenant-scoped game directory:
+The current repository already supplies canonical Game DNA, World DNA, entity/transform/physics/behavior state, native Aura2D/Aura3D runtime generation, static GLTF/GLB model import, project asset snapshots, build records, private playtest runtime, deterministic runtime state saves, accessibility controls and project-aware Aura command routes.
 
-`projects/members/<request-user>/_games/<game_id>/live/shared_sky.json`
+Chat 8 does not redefine those schemas. When neighbouring chats need project identity they use the canonical Game DNA `id` plus logical Creative-project binding when present, never an arbitrary filesystem path.
 
-The path is resolved through `game_forge_store.game_dir`; callers do not supply filesystem paths.
+## 3D model import contract
 
-State schema:
+Canonical module:
 
-`GameForgeLiveState`
+`aura_music_studio.game_forge_model_assets`
 
-Fields:
+Current truthful formats:
 
-- `schema_version`
+- `.glb`
+- embedded `.gltf`
+
+Current import lifecycle includes size/type checks, SHA-256 integrity, closed static-mesh extraction/validation, metadata, rights attestation, tenant-scoped storage, build/rating invalidation, runtime projection and deletion/reference cleanup.
+
+External GLTF resources are not enabled. Unsupported formats are not advertised. Skeletal animation/retargeting is not claimed by this contract.
+
+## AI text/image-to-3D generation job contract
+
+Canonical module:
+
+`aura_music_studio.game_forge_model_generation`
+
+Schema:
+
+`ModelGenerationJob` version `1`.
+
+Request model:
+
+`CreateModelGenerationRequest`.
+
+Capabilities:
+
+- `text_to_3d`
+- `image_to_3d`
+
+Durable per-project job location:
+
+`<tenant Game Forge game directory>/generation_jobs/gfgen_*.json`
+
+Callers cannot supply filesystem paths.
+
+A job records:
+
+- `generation_request_id`
 - `project_id`
-- `sources: dict[source_adapter_id, GameForgeSafeLiveSource]`
-- `feedback: dict[feedback_id, GameForgeLiveFeedback]`
-- `returns: dict[idempotency_key, GameForgeLiveReturnRecord]`
-- `updated_at`
+- target asset kind
+- capability
+- provider identifier
+- prompt SHA-256, not prompt text
+- project-owned reference asset IDs
+- quality profile/poly budget/texture request
+- state: `queued | running | succeeded | failed | cancelled`
+- provider-reported progress only
+- provider result reference
+- validation state
+- final validated asset-version reference
+- entitlement reference
+- error/correlation data
+- provider/provenance metadata
+- created/updated timestamps
 
-Writes use a same-directory temporary file followed by atomic replacement.
+Production provider selection is server-side through `AURA_GAME_3D_PROVIDER` plus `AURA_GAME_3D_PROVIDER_<NAME>_ENABLED`. Provider credentials are not represented in the job record or client response.
 
-## Safe source schema
+When no provider is configured, the request is persisted as `failed` with `generation_provider_unavailable` and the HTTP request returns `503`. No sample GLB, fake completion, fake progress or success artifact is produced.
+
+When a provider is enabled, creation records an internal `queued` job. Submission/execution is delegated to the canonical worker/queue boundary rather than performing provider work in the request process.
+
+Internal worker hooks:
+
+- `claim_generation_job(...)`
+- `report_generation_progress(...)`
+- `fail_generation_job(...)`
+- `complete_generation_job(...)`
+
+Only a running job can complete. Completion requires both an opaque provider result reference and an opaque final validated asset-version reference. Provider mismatch is rejected. Progress is absent until a worker/provider reports it; running progress is limited to `0..99`, with `100` only on validated completion.
+
+Public API:
+
+- `GET /api/game-forge/games/{game_id}/model-generation`
+- `POST /api/game-forge/games/{game_id}/model-generation`
+- `GET /api/game-forge/games/{game_id}/model-generation/{job_id}`
+- `DELETE /api/game-forge/games/{game_id}/model-generation/{job_id}`
+
+Image-to-3D requires project-owned opaque reference asset IDs; path-like references are rejected.
+
+## Safe Game Forge LIVE source schema
 
 Canonical model:
 
@@ -71,36 +134,39 @@ Schema version:
 
 `game_forge_live_source.v1`
 
-Core fields:
+Durable state:
 
-- `source_adapter_id`
+`GameForgeLiveState` under `<tenant Game Forge game directory>/live/shared_sky.json`.
+
+State includes:
+
+- project ID
+- sources keyed by stable source-adapter ID
+- promoted/structured playtest feedback
+- idempotent Shared Sky return records
+- schema/update metadata
+
+Safe-source fields include:
+
+- source adapter ID/schema version
 - `studio_type="game_forge"`
-- `project_id`
-- logical `workspace_id` when bound to a Creative project
-- `creator_identity_ref`
-- `live_session_id`
-- optional `participant_ref`
-- `source_type`
-- `safe_display_label`
-- `media_kind`
-- `aspect_profile`
-- pinned `project_version`
-- pinned `build_id` where relevant
-- project and audience visibility classifications
-- `LiveInclusionManifest`
-- fixed `exclusion_policy`
+- project/workspace/creator/session/participant references
+- source type and safe display label
+- media/aspect profile
+- pinned project version and build ID
+- project/audience/privacy classification
+- inclusion manifest and fixed exclusion policy
 - rights readiness
-- optional Shared Sky registration reference
+- Shared Sky registration reference slot
 - health/status/revocation state
-- presentation mode
-- optional opaque presentation-surface reference
+- presentation mode and optional approved presentation-surface reference
 - timestamps/correlation ID
 
-The source descriptor never serialises the Game DNA document, scene document, source code, repository paths, environment variables, API keys, destination credentials or arbitrary caller-provided source configuration.
+The descriptor does not contain the Game DNA document, scene document, source code, private repository contents, credentials or destination tokens.
 
-## Supported Game Forge source types
+## Safe source types
 
-`GameForgeLiveSourceType`:
+Supported Game Forge source intents:
 
 - `clean_game_output`
 - `playtest_runtime`
@@ -114,15 +180,15 @@ The source descriptor never serialises the Game DNA document, scene document, so
 - `microphone`
 - `game_audio`
 
-The default is `clean_game_output`.
+Default gameplay source: `clean_game_output`.
 
-Gameplay/build source types require a real `latest_build` with `private_playtest_ready=true`. `approved_build_output` additionally requires a current approved test assessment whose content hash matches the build.
+Gameplay/build sources require a real `latest_build` with `private_playtest_ready=true`. `approved_build_output` additionally requires a current approved assessment matching the build content hash.
 
-Editor, scene, coding, node-graph and profiler sources require an explicit opaque `presentation_surface_ref`. Paths and URLs are rejected. Whole-window capture is never the implicit implementation of these source types.
+Editor/scene/code/node/profiler sources require an explicit opaque `presentation_surface_ref`; paths and URLs are rejected. Whole-window capture is never the implicit source implementation.
 
 ## Privacy exclusion contract
 
-`LIVE_PRIVACY_EXCLUSIONS` is fixed code-owned policy and includes:
+`LIVE_PRIVACY_EXCLUSIONS` is fixed code-owned policy and excludes:
 
 - API keys/tokens/environment variables
 - signing/destination credentials
@@ -137,35 +203,33 @@ Editor, scene, coding, node-graph and profiler sources require an explicit opaqu
 - private test accounts
 - private training/reference assets
 - other tenant projects
-- crash/log payloads carrying secrets or personal data
+- crash/log payloads containing secrets or personal data
 
-The inclusion manifest is allowlist-based. It carries only approved presentation surface IDs or safe runtime/device labels.
+The inclusion manifest is allowlist-based and explicitly records that private editor panels, source-code payloads, credentials and whole-window capture are not included.
 
-## Rights and project privacy
+## Rights and privacy
 
 Public audience attachment requires `GameDNA.rights_confirmed=true`.
 
-Private/unlisted development sources may exist with `rights_readiness="unverified"` so creators can work privately without falsely asserting clearance.
+Private/unlisted development sources may remain `rights_readiness="unverified"`; this permits private work without falsely asserting commercial/public clearance.
 
-Attaching a Game Forge source never changes `GameDNA.status`, `public_id`, public test publication, or project storage visibility. Live audience visibility and project visibility remain separate states.
+Attaching a LIVE source never changes Game DNA publication status, public ID or project privacy. Project visibility and LIVE audience visibility remain distinct states.
 
-## Version pinning
+## Version pinning and reconnect
 
-On source attachment, Chat 8 records the current `GameDNA.version` and, for gameplay/build sources, the current `GameBuild.build_id`.
+On attach, Chat 8 records the current Game DNA version and, for gameplay/build sources, the current build ID.
 
-Re-attaching the same source identity in the same LIVE session is idempotent and returns the already pinned source. Later working-project edits do not silently move viewers to a new version.
+The source ID is deterministic for the same creator/project/LIVE session/participant/source identity (or supplied idempotency key). Repeated attach returns the existing source rather than duplicating registration.
 
-Explicit promotion route:
+Later working-project edits do not silently change the pinned viewer version.
+
+Explicit promotion:
 
 `POST /api/game-forge/games/{game_id}/live/sources/{source_adapter_id}/promote-version`
 
-Request model:
+A stale expected project version or build ID returns `stale_project_version`.
 
-`PromoteLiveVersionRequest(expected_project_version, expected_build_id?)`
-
-A stale project version or build ID is rejected with `stale_project_version`.
-
-## Presentation transitions
+## Development/playtest/showcase transition
 
 Presentation modes:
 
@@ -182,7 +246,7 @@ Route:
 
 `PATCH /api/game-forge/games/{game_id}/live/sources/{source_adapter_id}/presentation`
 
-The route mutates source presentation state while preserving the same canonical `live_session_id` and `source_adapter_id`; it does not create another LIVE session.
+The transition preserves the same canonical `live_session_id` and source-adapter ID. It does not create a second LIVE session.
 
 ## Emergency hide and revocation
 
@@ -190,49 +254,41 @@ Route:
 
 `POST /api/game-forge/games/{game_id}/live/sources/{source_adapter_id}/emergency-hide`
 
-A normal emergency hide switches the source to BRB/hidden without deleting the project, terminating autosave, or deleting a playtest build.
+Normal emergency hide changes the presentation to BRB/hidden without deleting the project, terminating autosave or deleting the playtest build.
 
-`revoke=true` additionally revokes the source handle.
+`revoke=true` also revokes the source handle.
 
-Chat 1/auth integration hook:
+Authoritative auth/project-lifecycle compatibility hook:
 
-`aura_music_studio.game_forge_live_integration.revoke_project_live_sources(game_id, reason=...)`
+`revoke_project_live_sources(game_id, reason=...)`
 
-The caller must already have authoritative permission-revocation context. The hook does not invent an auth decision.
+The caller must already possess the canonical permission-revocation decision.
 
 ## Shared Sky Chat 2/3 handoff
 
 Function:
 
-`shared_sky_compatibility_payload(source: GameForgeSafeLiveSource) -> dict`
+`shared_sky_compatibility_payload(source)`
 
-The returned shape is compatible with the existing Shared Sky source vocabulary:
+It emits the existing Shared Sky source vocabulary with `source_type="game_forge"`, a safe label/visibility flag and bounded config containing only project/session/participant refs, media/aspect metadata, version/build pins, privacy inclusion/exclusion metadata, rights state, presentation state, health/revocation and correlation fields.
 
-- `source_type="game_forge"`
-- safe display `name`
-- `visible`
-- `locked`
-- bounded `config`
-
-The bounded config contains only source adapter/project/session/participant refs, media/aspect data, version/build pins, privacy classifications, allowlist/exclusion metadata, rights readiness, presentation state and correlation data.
-
-Chat 2 owns transport/ingest/relay/recording delivery.
+Chat 2 owns transport/ingest/transcode/relay/recording/destination delivery.
 
 Chat 3 owns scene placement, crop/transform, Preview/Programme, transitions, overlays and generic source composition.
 
-Game Forge does not persist destination OAuth tokens or destination stream keys.
+Game Forge stores neither destination OAuth tokens nor destination stream keys and never reports destination delivery success.
 
-## Chat 4/5/6 read-only boundaries
+## Chat 4/5/6 boundaries
 
-Viewer chat, Q&A, polls, reactions and presence are Chat 4 truth.
+Chat 4 owns viewer chat/Q&A/polls/reactions/presence.
 
-Cosmic Creation Coin wallet/Gift financial truth is Chat 5 truth.
+Chat 5 owns Cosmic Creation Coin/Gift financial truth.
 
-Co-host/Battle participant state, score and timer truth are Chat 6 truth.
+Chat 6 owns participant/co-host/Battle score/timer truth.
 
-Game Forge may display those events beside the editor, but inbound community/Gift/Battle events do not mutate Game DNA automatically.
+Game Forge may consume those events read-only beside the editor. Inbound community/Gift/Battle events never mutate Game DNA automatically.
 
-A viewer suggestion only becomes durable Game Forge feedback through an explicit creator promotion or a session explicitly configured as a structured playtest.
+A viewer suggestion becomes Game Forge feedback only when a creator explicitly promotes it or the LIVE is configured as a structured playtest.
 
 ## Feedback contract
 
@@ -240,54 +296,31 @@ Route:
 
 `POST /api/game-forge/games/{game_id}/live/feedback`
 
-Model:
+`GameForgeLiveFeedback` records feedback ID, project/build/version, live session/source, optional opaque author ref, LIVE time, category, text, optional clip ref, moderation/triage state and correlation metadata.
 
-`GameForgeLiveFeedback`
+Casual viewer chat is rejected unless `creator_promoted=true` or `structured_playtest=true`.
 
-Carries:
-
-- feedback ID
-- project/build/version
-- live session/source adapter
-- optional opaque author reference
-- live timestamp
-- category
-- text
-- optional clip reference
-- moderation/triage state
-- creation/correlation timestamps
-
-Casual chat is rejected unless `creator_promoted=true` or `structured_playtest=true`.
-
-## Returned recording/clip contract
+## Returned recording/clip/highlight contract
 
 Route:
 
 `POST /api/game-forge/games/{game_id}/live/returns`
 
-Model:
+`GameForgeLiveReturnRecord` records project/build/version, LIVE session/source, opaque recording/replay/clip/highlight ref, time range, asset type, `provenance="shared_sky"`, processing state, idempotency key and correlation metadata.
 
-`GameForgeLiveReturnRecord`
+Repeated callbacks resolve to the same return record rather than creating duplicates.
 
-Carries:
+## Safe embedded Go Live & Create portal
 
-- project/build/version
-- live session/source adapter
-- opaque recording/replay/clip/highlight reference
-- time range
-- asset type
-- `provenance="shared_sky"`
-- processing state
-- idempotency key
-- correlation/creation data
+Route:
 
-Repeated callbacks with the same idempotency material resolve to the same return record rather than creating duplicate project assets.
+`GET /game-creation/live/{game_id}`
 
-## Error codes introduced at this boundary
+The portal exposes safe Game Forge source attach, Playtest, Launch/Showcase, BRB and Emergency Hide controls plus a link to the existing private playtest runtime. It uses a CSP nonce and states the clean game output privacy boundary. It is a Game Forge source controller, not a replacement Shared Sky compositor.
 
-Structured error payloads use `detail.code`, `detail.message` and `detail.correlation_id`.
+## Error contracts
 
-Relevant codes:
+Live boundary structured codes include:
 
 - `unauthenticated`
 - `project_unauthorised`
@@ -297,88 +330,79 @@ Relevant codes:
 - `rights_not_verified`
 - `internal`
 
-Sensitive stack traces, file paths, tokens and source snippets are not returned by these errors.
+3D generation boundary codes include:
 
-## Tests and deterministic fixtures
+- `project_unauthorised`
+- `project_read_only`
+- `asset_invalid`
+- `generation_provider_unavailable`
+- `generation_failed`
+- `generation_cancelled`
 
-Primary tests:
+Sensitive stack traces, provider credentials, paths and source snippets are not exposed intentionally by these contracts.
 
-`tests/test_game_forge_live_integration.py`
+## Tests and fixtures
 
-Coverage includes:
+Chat 8 tests:
 
-- clean gameplay source allowlisting
-- build/version pinning
-- no whole-window/code/credential flags
-- explicit opaque editor/code presentation surfaces
-- public rights gate
-- idempotent source attach/reconnect
-- explicit version promotion
-- development-to-playtest/showcase transition on one LIVE session
-- emergency hide/BRB
-- explicit feedback promotion
-- idempotent clip/record return linkage
-- project permission revocation
-- production-app route composition
+- `tests/test_game_forge_live_integration.py`
+- `tests/test_game_forge_model_generation.py`
 
-No external streaming provider credentials are needed for these tests.
+Live tests cover privacy allowlisting, explicit safe presentation surfaces, rights gating, attach/reconnect idempotency, build/version pinning and promotion, same-session transitions, emergency hide, feedback promotion, returned-asset deduplication, permission revocation and production route composition.
 
-## Inter-chat import and route handoff
+3D generation tests cover honest unavailable-provider failure, no fake asset/progress, idempotent generation request, configured-provider queue/claim/progress/complete transitions, wrong-provider rejection, required image reference IDs, path-reference rejection, failed-provider cleanup semantics and production route composition.
 
-Chat 1:
+No external provider credentials are required for deterministic tests.
 
-- import `revoke_project_live_sources`
-- use `project_id`, `workspace_id`, creator identity, correlation and authoritative auth context
+## Inter-chat handoff
 
-Chat 2:
+### Chat 1
 
-- consume `shared_sky_compatibility_payload`
-- return recording/replay/clip IDs through `/live/returns`
-- never send destination credentials into Game Forge
+Use canonical user/workspace/project IDs, auth/entitlements/correlation contracts. Import `revoke_project_live_sources` only after an authoritative revocation decision.
 
-Chat 3:
+### Chat 2
 
-- register the `game_forge` compatibility source
-- retain canonical scene/source registration ID in Shared Sky
-- treat Game Forge presentation changes as source intent, not a new broadcast session
+Consume `shared_sky_compatibility_payload`. Return recording/replay/clip IDs through `/live/returns`. Never send destination credentials to Game Forge.
 
-Chat 4:
+### Chat 3
 
-- keep viewer/community truth external to Game Forge
-- only promoted/structured feedback enters `/live/feedback`
+Register the `game_forge` compatibility source and own all compositor placement/mixing/transition semantics. Preserve canonical source identity across presentation transitions.
 
-Chat 5:
+### Chat 4
 
-- expose Gift activity read-only beside Game Forge
-- no wallet/ledger mutation through this module
+Keep viewer/community truth external. Only creator-promoted or structured playtest feedback enters Game Forge.
 
-Chat 6:
+### Chat 5
 
-- pass authoritative `participant_ref`/session association when registering Game Forge sources
-- reconnect must preserve participant/source association
-- no Battle scores/timers in Game Forge
+Gift data is display/read-only at the Game Forge boundary. No Coin/wallet/ledger mutation exists here.
 
-Chat 7:
+### Chat 6
 
-- converge on `studio_type`, source adapter ID/schema version, project/workspace refs, source type, safe label, media/aspect, version refs, privacy inclusion/exclusion, rights, registration/health/revocation and correlation fields
+Provide authoritative participant/session association for Game Forge sources. Game Forge does not calculate Battle scores/timers.
 
-Chat 9:
+### Chat 7
 
-- consume project/showcase/build readiness and returned promotional candidates
-- do not bypass Game Forge rights/build readiness for publishing
+Converge on shared creation-source vocabulary: studio type, source adapter/schema IDs, project/workspace refs, safe source type/label, media/aspect metadata, version refs, inclusion/exclusion policy, rights, health/revocation and correlation fields.
 
-Chat 10:
+### Chat 9
 
-- harden sandbox/container isolation, provider/build queues, resource limits, telemetry and secret scanning
-- Game Forge arbitrary code continues to use `AuraSandboxClient`; no host execution is added here
+Consume Game Forge project/showcase/build readiness and returned promotional candidates. Do not bypass Game Forge rights/build readiness for publishing.
 
-Chat 11:
+### Chat 10
 
-- release gate the migration-free JSON state schema, new routes, tests and duplicate-source behavior
-- replace compatibility imports only after canonical Chat 1–7 contracts land and their tests prove equivalence
+Own provider workers/queues, sandbox/container isolation, provider credentials, global resource limits, telemetry and secret scanning. The Game Forge 3D job module exports worker lifecycle hooks and does not implement a second infrastructure stack.
 
-## Migration note
+### Chat 11
 
-No database migration is introduced by this unit. The live adapter is additive and stores schema-versioned state within each existing tenant-scoped Game Forge project directory.
+Release-gate these additive schemas/routes/tests, detect duplicate source/provider implementations and replace compatibility imports only after canonical neighbouring contracts prove equivalent.
 
-If a future canonical Shared Sky source registry replaces the compatibility payload, migrate by source adapter ID and preserve `live_session_id`, participant association, project/build pins, privacy state and idempotency keys.
+## Migration references
+
+No database migration is introduced by this Chat 8 unit.
+
+Added durable schemas are versioned JSON beneath the existing tenant-scoped Game Forge directory:
+
+- `live/shared_sky.json`
+- `generation_jobs/gfgen_*.json`
+
+If canonical Shared Sky or provider queue persistence later moves these records into shared database tables, migrate by source-adapter/generation-request ID while preserving LIVE session/participant association, project/build pins, privacy state, provider state, provenance, correlation IDs and idempotency keys.
