@@ -302,9 +302,10 @@ class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
         }
 
     def apply_verified_payment_event(self, event: VerifiedPaymentEvent) -> dict:
-        """Reject provider event-ID reuse when the verified financial payload has changed."""
+        """Enforce event identity and a fail-closed provider payment state machine."""
         if not event.verified:
             return super().apply_verified_payment_event(event)
+
         payload_hash = _fingerprint(
             {
                 "provider": event.provider,
@@ -315,33 +316,117 @@ class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
                 "occurred_at": event.occurred_at,
             }
         )
+        known_events = {
+            "confirmed",
+            "failed",
+            "cancelled",
+            "refunded",
+            "chargeback",
+            "dispute_won",
+        }
         with self._connect() as con:
             seen = con.execute(
-                """SELECT purchase_id,payload_hash FROM payment_webhook_events
+                """SELECT event_type,purchase_id,payload_hash FROM payment_webhook_events
                    WHERE provider=? AND provider_event_id=?""",
                 (event.provider, event.provider_event_id),
             ).fetchone()
-        if seen and seen["payload_hash"] != payload_hash:
+            purchase = con.execute(
+                "SELECT id,user_id,status FROM coin_purchases WHERE id=?",
+                (event.purchase_id,),
+            ).fetchone()
+            prior_chargeback = None
+            prior_dispute_won = None
+            if purchase:
+                prior_chargeback = con.execute(
+                    """SELECT 1 FROM payment_webhook_events
+                       WHERE purchase_id=? AND event_type='chargeback' LIMIT 1""",
+                    (event.purchase_id,),
+                ).fetchone()
+                prior_dispute_won = con.execute(
+                    """SELECT 1 FROM payment_webhook_events
+                       WHERE purchase_id=? AND event_type='dispute_won' LIMIT 1""",
+                    (event.purchase_id,),
+                ).fetchone()
+
+        if seen:
+            if seen["payload_hash"] != payload_hash:
+                self._record_operational_event(
+                    event_type="economy.payment_event_id_conflict",
+                    user_id=purchase["user_id"] if purchase else None,
+                    details={
+                        "provider": event.provider,
+                        "provider_event_id": event.provider_event_id,
+                        "stored_purchase_id": seen["purchase_id"],
+                        "presented_purchase_id": event.purchase_id,
+                        "presented_event_type": event.event_type,
+                    },
+                )
+                raise EconomyError(
+                    "PAYMENT_EVENT_ID_REUSED",
+                    "Payment provider event ID was reused with different financial data.",
+                    status_code=409,
+                    details={
+                        "provider": event.provider,
+                        "provider_event_id": event.provider_event_id,
+                    },
+                )
+            return super().apply_verified_payment_event(event)
+
+        if event.event_type not in known_events or not purchase:
+            return super().apply_verified_payment_event(event)
+
+        allowed = {
+            "pending": {"confirmed", "failed", "cancelled"},
+            "confirmed": {"confirmed", "refunded", "chargeback"},
+            "failed": {"failed"},
+            "cancelled": {"cancelled"},
+            "refunded": {"refunded"},
+            "chargeback": {"chargeback", "dispute_won"},
+        }
+        current_status = str(purchase["status"])
+        if event.event_type not in allowed.get(current_status, set()):
             self._record_operational_event(
-                event_type="economy.payment_event_id_conflict",
-                user_id=None,
+                event_type="economy.payment_state_conflict",
+                user_id=purchase["user_id"],
                 details={
-                    "provider": event.provider,
-                    "provider_event_id": event.provider_event_id,
-                    "stored_purchase_id": seen["purchase_id"],
-                    "presented_purchase_id": event.purchase_id,
+                    "purchase_id": event.purchase_id,
+                    "current_status": current_status,
                     "presented_event_type": event.event_type,
+                    "provider_event_id": event.provider_event_id,
                 },
             )
             raise EconomyError(
-                "PAYMENT_EVENT_ID_REUSED",
-                "Payment provider event ID was reused with different financial data.",
+                "PAYMENT_STATE_CONFLICT",
+                "Payment event is not valid for the purchase's current state.",
                 status_code=409,
                 details={
-                    "provider": event.provider,
+                    "purchase_id": event.purchase_id,
+                    "current_status": current_status,
+                    "event_type": event.event_type,
+                },
+            )
+
+        if (
+            current_status == "confirmed"
+            and event.event_type == "chargeback"
+            and prior_chargeback
+            and prior_dispute_won
+        ):
+            self._record_operational_event(
+                event_type="economy.payment_dispute_cycle_review",
+                user_id=purchase["user_id"],
+                details={
+                    "purchase_id": event.purchase_id,
                     "provider_event_id": event.provider_event_id,
                 },
             )
+            raise EconomyError(
+                "PAYMENT_DISPUTE_CYCLE_REQUIRES_REVIEW",
+                "A second chargeback after dispute recovery requires manual financial review.",
+                status_code=409,
+                details={"purchase_id": event.purchase_id},
+            )
+
         return super().apply_verified_payment_event(event)
 
     def send_gift(self, *, sender_user_id: str, idempotency_key: str, **kwargs: Any) -> dict:
