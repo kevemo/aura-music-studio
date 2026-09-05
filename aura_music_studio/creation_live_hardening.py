@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 _IN_PROGRESS = json.dumps({"_creation_live_state": "in_progress"}, separators=(",", ":"))
 _TERMINAL_BROADCAST_STATES = {"ended", "failed", "cancelled", "canceled"}
+_ACTIVE_BROADCAST_STATES = {"starting", "live", "degraded", "reconnecting", "stopping"}
 _PATCHED = False
 _ORIGINAL_GET: Callable[..., dict] | None = None
 _ORIGINAL_MUTATE: Callable[..., dict] | None = None
@@ -80,15 +81,17 @@ def _revoke_item(store: Any, item: dict[str, Any]) -> dict[str, Any]:
 
 
 def hardened_get(store: Any, user_id: str, source_adapter_id: str) -> dict[str, Any]:
-    """Return canonical source state after fail-closed expiry/session reconciliation."""
+    """Return canonical source state after fail-closed expiry/session reconciliation.
+
+    Discovery handles expire normally. Once a source is attached to an *active* authoritative
+    Shared Sky session, that session becomes the lease: a long legitimate broadcast must not be
+    cut off merely because the original discovery TTL elapsed. Draft/configuring sessions do not
+    bypass expiry, and missing/terminal sessions revoke immediately.
+    """
     assert _ORIGINAL_GET is not None
     item = _ORIGINAL_GET(store, user_id, source_adapter_id)
     if item.get("source_status") in {"revoked", "detached"}:
         return item
-
-    expires_at = _parse_timestamp((item.get("descriptor") or {}).get("expires_at"))
-    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-        return _revoke_item(store, item)
 
     broadcast_id = str(item.get("broadcast_id") or "").strip()
     if broadcast_id:
@@ -98,8 +101,15 @@ def hardened_get(store: Any, user_id: str, source_adapter_id: str) -> dict[str, 
             broadcast = shared_sky.broadcast(user_id, broadcast_id)
         except KeyError:
             return _revoke_item(store, item)
-        if str(broadcast.get("state") or "").lower() in _TERMINAL_BROADCAST_STATES:
+        state = str(broadcast.get("state") or "").lower()
+        if state in _TERMINAL_BROADCAST_STATES:
             return _revoke_item(store, item)
+        if state in _ACTIVE_BROADCAST_STATES:
+            return item
+
+    expires_at = _parse_timestamp((item.get("descriptor") or {}).get("expires_at"))
+    if expires_at is not None and expires_at <= datetime.now(timezone.utc):
+        return _revoke_item(store, item)
     return item
 
 
@@ -342,8 +352,6 @@ def _harden_ui(script: str) -> str:
     )
     script = script.replace(capture_old, capture_new)
 
-    # Registration, transport readiness and Programme truth are separate. Surface Chat 2 blockers
-    # in the creator drawer but never let a ready transport preflight imply this source is ON AIR.
     attach_old = (
         "state.selected=data.source;state.status=data;renderStatus();"
         "msg(data.transport?.available?'Source registered with Shared Sky transport.':"
@@ -359,8 +367,6 @@ def _harden_ui(script: str) -> str:
     )
     script = script.replace(attach_old, attach_new)
 
-    # The merged Chat 4 community projection is part of the production creative drawer, not only
-    # a test helper. It is display-only and uses text nodes for viewer-controlled content.
     from .creation_live_ui_community import harden_community_ui
 
     return harden_community_ui(script)
