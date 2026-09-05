@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 from pathlib import Path
+
+from .command_templates import render_command_argv
 
 
 class NeuralToneProcessor:
@@ -14,10 +15,8 @@ class NeuralToneProcessor:
 
     @staticmethod
     def _render(template: str, values: dict[str, str]) -> None:
-        command = template
-        for key, value in values.items():
-            command = command.replace("{" + key + "}", shlex.quote(value))
-        subprocess.run(command, shell=True, check=True)
+        argv = render_command_argv(template, values)
+        subprocess.run(argv, check=True)
 
     def process(
         self,
