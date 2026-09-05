@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from pydantic import Field, field_validator
 
+from .aura_sec_dlp import sanitize_audit_details
 from .shared_contracts import ContractModel, NonEmptyId
 
 
@@ -58,8 +59,18 @@ class EventEnvelope(ContractModel):
     @field_validator("audit_metadata")
     @classmethod
     def safe_metadata(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Reject secret-shaped fields and scrub secret patterns from free-form values."""
+
         _assert_audit_safe(value)
-        return value
+        sanitized = sanitize_audit_details(
+            value,
+            max_depth=6,
+            max_items=100,
+            max_string_length=2000,
+        )
+        if not isinstance(sanitized, dict):
+            raise ValueError("audit metadata must remain an object after sanitization")
+        return sanitized
 
 
 class EventPublisher(Protocol):
