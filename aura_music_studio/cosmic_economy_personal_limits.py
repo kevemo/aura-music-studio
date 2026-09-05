@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -10,7 +11,7 @@ from .cosmic_purchase_checkout import CheckoutBoundCosmicEconomy
 
 
 class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
-    """Adds member-controlled lower spending caps without weakening platform policy."""
+    """Canonical runtime safety layer for member caps and recipient Gift controls."""
 
     def _init_schema(self) -> None:
         super()._init_schema()
@@ -34,6 +35,25 @@ class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
                 );
                 CREATE INDEX IF NOT EXISTS idx_personal_spending_limit_changes_user_time
                     ON personal_spending_limit_changes(user_id, created_at DESC);
+
+                CREATE TABLE IF NOT EXISTS creator_gift_controls (
+                    creator_recipient_id TEXT PRIMARY KEY,
+                    receiving_enabled INTEGER NOT NULL DEFAULT 1 CHECK(receiving_enabled IN (0,1)),
+                    reason TEXT,
+                    updated_at TEXT NOT NULL,
+                    updated_by TEXT NOT NULL
+                );
+
+                CREATE TRIGGER IF NOT EXISTS trg_gift_transaction_recipient_receiving_enabled
+                BEFORE INSERT ON gift_transactions
+                WHEN COALESCE(
+                    (SELECT receiving_enabled FROM creator_gift_controls
+                     WHERE creator_recipient_id=NEW.recipient_creator_id),
+                    1
+                ) = 0
+                BEGIN
+                    SELECT RAISE(ABORT, 'CREATOR_GIFT_RECEIVING_DISABLED');
+                END;
                 """
             )
 
@@ -212,3 +232,94 @@ class PersonalLimitCosmicEconomy(CheckoutBoundCosmicEconomy):
         state["effective_hard_limits"] = effective
         state["remaining_hard_limit"] = remaining
         return state
+
+    def set_creator_gift_receiving(
+        self,
+        creator_recipient_id: str,
+        *,
+        enabled: bool,
+        actor: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        creator_recipient_id = (creator_recipient_id or "").strip()
+        reason = (reason or "").strip()
+        if not creator_recipient_id:
+            raise EconomyError("INVALID_CREATOR_RECIPIENT", "Creator recipient ID is required.")
+        if len(reason) < 3:
+            raise EconomyError(
+                "INVALID_CREATOR_GIFT_CONTROL",
+                "Gift receiving availability change requires a reason.",
+            )
+        correlation_id = uuid4().hex
+        now = _iso()
+        with self._connect() as con:
+            self._begin(con)
+            con.execute(
+                """INSERT INTO creator_gift_controls
+                   (creator_recipient_id,receiving_enabled,reason,updated_at,updated_by)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(creator_recipient_id) DO UPDATE SET
+                     receiving_enabled=excluded.receiving_enabled,
+                     reason=excluded.reason,
+                     updated_at=excluded.updated_at,
+                     updated_by=excluded.updated_by""",
+                (creator_recipient_id, int(enabled), reason, now, actor[:160]),
+            )
+            self._enqueue_locked(
+                con,
+                "economy.creator_gift_receiving_changed",
+                "creator_recipient",
+                creator_recipient_id,
+                {
+                    "creator_recipient_id": creator_recipient_id,
+                    "receiving_enabled": enabled,
+                    "reason": reason,
+                    "actor": actor[:160],
+                },
+                correlation_id=correlation_id,
+            )
+            row = con.execute(
+                "SELECT * FROM creator_gift_controls WHERE creator_recipient_id=?",
+                (creator_recipient_id,),
+            ).fetchone()
+            con.commit()
+        return dict(row)
+
+    def creator_gift_receiving_state(self, creator_recipient_id: str) -> dict[str, Any]:
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT * FROM creator_gift_controls WHERE creator_recipient_id=?",
+                (creator_recipient_id,),
+            ).fetchone()
+        if row:
+            return dict(row)
+        return {
+            "creator_recipient_id": creator_recipient_id,
+            "receiving_enabled": 1,
+            "reason": None,
+            "updated_at": None,
+            "updated_by": None,
+        }
+
+    def send_gift(self, *, sender_user_id: str, idempotency_key: str, **kwargs: Any) -> dict:
+        try:
+            return super().send_gift(
+                sender_user_id=sender_user_id,
+                idempotency_key=idempotency_key,
+                **kwargs,
+            )
+        except sqlite3.IntegrityError as exc:
+            if "CREATOR_GIFT_RECEIVING_DISABLED" in str(exc):
+                creator_recipient_id = kwargs.get("recipient_creator_id")
+                self._record_operational_event(
+                    event_type="economy.creator_receiving_block",
+                    user_id=sender_user_id,
+                    details={"creator_recipient_id": creator_recipient_id},
+                )
+                raise EconomyError(
+                    "CREATOR_GIFT_RECEIVING_DISABLED",
+                    "This creator is not currently accepting Shared Sky LIVE Gifts.",
+                    status_code=403,
+                    details={"creator_recipient_id": creator_recipient_id},
+                ) from exc
+            raise
