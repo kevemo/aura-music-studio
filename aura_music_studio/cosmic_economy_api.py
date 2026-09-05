@@ -188,7 +188,12 @@ def create_coin_purchase(
     payload: PurchaseRequest,
     idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=200),
 ):
-    """Create provider checkout using server catalogue price; does not credit Coins."""
+    """Create/reuse a provider checkout from server catalogue data.
+
+    The internal purchase ID is used as the provider idempotency key. Once a provider checkout
+    is bound locally, retries return the stored checkout without invoking the provider again.
+    Coins are never credited by this route; verified provider events remain authoritative.
+    """
     user_id = _member_user_id(request)
     try:
         provider = coin_payment_providers.get(payload.provider)
@@ -200,20 +205,46 @@ def create_coin_purchase(
             provider=payload.provider.strip().lower(),
             idempotency_key=idempotency_key,
         )
+        cached = economy.get_purchase_checkout(purchase["id"])
+        if cached:
+            return {
+                "purchase": purchase,
+                "checkout": {
+                    "provider": cached["provider"],
+                    "provider_payment_id": cached["provider_payment_id"],
+                    "checkout_url": cached["checkout_url"],
+                    "status": cached["status"],
+                },
+                "idempotent_replay": True,
+                "coins_credited": purchase["status"] == "confirmed",
+                "credit_condition": "verified_provider_event",
+            }
         checkout = provider.create_checkout(
             purchase_id=purchase["id"],
             user_id=user_id,
             fiat_amount_minor=int(purchase["fiat_amount_minor"]),
             fiat_currency=purchase["fiat_currency"],
             coin_quantity=int(purchase["coin_quantity"]),
+            idempotency_key=purchase["id"],
         )
         if checkout.provider.strip().lower() != payload.provider.strip().lower():
-            raise EconomyError("PAYMENT_PROVIDER_MISMATCH", "Checkout provider does not match requested provider.", status_code=502)
-        purchase = economy.bind_provider_payment(purchase["id"], provider_payment_id=checkout.provider_payment_id)
+            raise EconomyError(
+                "PAYMENT_PROVIDER_MISMATCH",
+                "Checkout provider does not match requested provider.",
+                status_code=502,
+            )
+        bound = economy.bind_purchase_checkout(
+            purchase["id"],
+            provider=checkout.provider,
+            provider_payment_id=checkout.provider_payment_id,
+            checkout_url=checkout.checkout_url,
+            status=checkout.status,
+        )
         return {
-            "purchase": purchase,
+            "purchase": bound["purchase"],
             "checkout": asdict(checkout),
-            "coins_credited": False,
+            "idempotent_replay": bool(bound["idempotent_replay"]),
+            "coins_credited": bound["purchase"]["status"] == "confirmed",
             "credit_condition": "verified_provider_event",
         }
     except EconomyError as exc:
