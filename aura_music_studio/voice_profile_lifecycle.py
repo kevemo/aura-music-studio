@@ -125,8 +125,10 @@ def delete_voice_profile(project_name: str, profile_id: str, request: DeleteVoic
 
     # Revoke first so a concurrent execution boundary cannot legitimately authorise the profile
     # once deletion has begun. Runtime callers re-read this authoritative ledger before execution.
+    revoked_before_delete = False
     if profile.active:
         profile = ledger.revoke_voice(profile.id, request.reason)
+        revoked_before_delete = True
 
     storage_root = _safe_profile_root(project, profile.id)
     deleted_private_artifacts = False
@@ -138,7 +140,7 @@ def delete_voice_profile(project_name: str, profile_id: str, request: DeleteVoic
     return {
         "deleted": True,
         "profile_id": profile.id,
-        "revoked_before_delete": True,
+        "revoked_before_delete": revoked_before_delete,
         "private_artifacts_deleted": deleted_private_artifacts,
         "raw_reference_paths_exposed": False,
         "detail": "Voice Profile removed from the active rights ledger; bounded private profile artefacts were erased when present.",
