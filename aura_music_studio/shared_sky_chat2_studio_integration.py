@@ -81,6 +81,16 @@ class CanonicalChat2StudioTransportAdapter:
     def _source_ref(self, project_id: str) -> str:
         return f"studio://{project_id}/programme/main"
 
+    def _transport_status(self, user_id: str, broadcast_id: str, *, reconcile: bool = False) -> dict[str, Any]:
+        resolver = getattr(self.provider, "reconcile", None) if reconcile else None
+        if callable(resolver):
+            result = resolver(user_id, broadcast_id)
+        else:
+            result = self.provider.status(user_id, broadcast_id)
+        if not isinstance(result, dict):
+            raise StudioTransportError("Chat 2 transport returned invalid authoritative status")
+        return result
+
     def _existing_source(self, user_id: str, project_id: str) -> dict[str, Any] | None:
         source_ref = self._source_ref(project_id)
         connector = getattr(self.provider, "connect", None)
@@ -96,8 +106,14 @@ class CanonicalChat2StudioTransportAdapter:
                 return self.provider.source(user_id, str(row["id"]))
         return None
 
-    def _bound_source(self, user_id: str, broadcast_id: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        status = self.provider.status(user_id, broadcast_id)
+    def _bound_source(
+        self,
+        user_id: str,
+        broadcast_id: str,
+        *,
+        reconcile: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        status = self._transport_status(user_id, broadcast_id, reconcile=reconcile)
         session = dict(status.get("session") or {})
         source = None
         source_id = session.get("source_id")
@@ -134,15 +150,62 @@ class CanonicalChat2StudioTransportAdapter:
         current, bound = self._bound_source(user_id, broadcast_id)
         transport_session = dict(current.get("session") or {})
         state = str(transport_session.get("state") or "draft")
+        active = state in _ACTIVE_TRANSPORT_STATES
+        desired_profile = _profile_rendition(profile)
+        use_internal = (
+            bool(transport_session.get("internal_playback", True))
+            if internal_playback is None
+            else bool(internal_playback)
+        )
+        use_recording = (
+            bool(transport_session.get("recording_enabled", False))
+            if recording_enabled is None
+            else bool(recording_enabled)
+        )
+
         if self._source_matches(bound, project_id):
+            if active:
+                return {
+                    "source": bound,
+                    "transport": current,
+                    "created": False,
+                    "configured": True,
+                    "reconfigured": False,
+                    "authoritative": True,
+                }
+            configuration_matches = (
+                bool(transport_session.get("internal_playback", True)) == use_internal
+                and bool(transport_session.get("recording_enabled", False)) == use_recording
+                and dict(transport_session.get("rendition_profile") or {}) == desired_profile
+            )
+            if configuration_matches:
+                return {
+                    "source": bound,
+                    "transport": current,
+                    "created": False,
+                    "configured": True,
+                    "reconfigured": False,
+                    "authoritative": True,
+                }
+            configured = self.provider.configure(
+                user_id,
+                broadcast_id,
+                source_id=str(bound["id"]),
+                internal_playback=use_internal,
+                rendition_profile=desired_profile,
+                recording_enabled=use_recording,
+                ingest_session_id=None,
+            )
             return {
                 "source": bound,
-                "transport": current,
+                "transport": configured,
                 "created": False,
                 "configured": True,
+                "reconfigured": True,
                 "authoritative": True,
             }
-        if state in _ACTIVE_TRANSPORT_STATES:
+
+        if active:
             raise StudioTransportError(
                 "Active Chat 2 transport is not bound to this Studio programme source; "
                 "stop/reconfigure the broadcast before changing its programme source"
@@ -169,22 +232,12 @@ class CanonicalChat2StudioTransportAdapter:
         else:
             created = False
 
-        use_internal = (
-            bool(transport_session.get("internal_playback", True))
-            if internal_playback is None
-            else bool(internal_playback)
-        )
-        use_recording = (
-            bool(transport_session.get("recording_enabled", False))
-            if recording_enabled is None
-            else bool(recording_enabled)
-        )
         configured = self.provider.configure(
             user_id,
             broadcast_id,
             source_id=str(source["id"]),
             internal_playback=use_internal,
-            rendition_profile=_profile_rendition(profile),
+            rendition_profile=desired_profile,
             recording_enabled=use_recording,
             ingest_session_id=None,
         )
@@ -193,6 +246,7 @@ class CanonicalChat2StudioTransportAdapter:
             "transport": configured,
             "created": created,
             "configured": True,
+            "reconfigured": False,
             "authoritative": True,
         }
 
@@ -206,7 +260,7 @@ class CanonicalChat2StudioTransportAdapter:
                 "source": "studio",
             }
         broadcast = shared_sky.broadcast(user_id, broadcast_id)
-        current, source = self._bound_source(user_id, broadcast_id)
+        current, source = self._bound_source(user_id, broadcast_id, reconcile=True)
         transport_session = dict(current.get("session") or {})
         state = str(transport_session.get("state") or broadcast.get("state") or "unknown")
         bound = self._source_matches(source, str(broadcast["project_id"]))
@@ -313,7 +367,7 @@ class CanonicalChat2StudioTransportAdapter:
                 "state": "unavailable",
                 "reason": "Recording requires a broadcast session",
             }
-        current = self.provider.status(user_id, broadcast_id)
+        current = self._transport_status(user_id, broadcast_id, reconcile=True)
         recordings = list(current.get("recordings") or [])
         programme = next((row for row in recordings if row.get("kind") == "programme"), None)
         return {
