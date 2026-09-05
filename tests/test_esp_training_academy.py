@@ -88,7 +88,10 @@ def test_published_training_version_is_immutable_and_answer_key_is_hidden(tmp_pa
     assert member_course["status"] == "published"
     assert "correct_options" not in member_course["questions"][0]
     assert store.audience_matches(member_course, creator_membership) is True
-    assert store.audience_matches(member_course, owner_membership) is True
+    # The learner catalogue applies role/region scopes even to an Owner account. Owner course
+    # administration is intentionally exposed through separate Owner-only APIs instead of
+    # bypassing learner audience targeting.
+    assert store.audience_matches(member_course, owner_membership) is False
 
     with pytest.raises(PermissionError, match="immutable"):
         store.update_draft(
