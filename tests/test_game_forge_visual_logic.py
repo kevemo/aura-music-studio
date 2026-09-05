@@ -260,7 +260,16 @@ def test_visual_logic_delete_removes_only_graph_owned_behaviors(monkeypatch, tmp
 
 def test_visual_logic_capability_contract_is_truthful():
     caps = visual_logic_capabilities("game_1")
-    assert caps["runtime_ops"] == ["follow_target", "timer", "door"]
+    assert caps["runtime_ops"] == [
+        "checkpoint",
+        "collectible",
+        "damage",
+        "door",
+        "follow_target",
+        "patrol",
+        "quest_trigger",
+        "timer",
+    ]
     assert caps["edge_semantics"] == "compile_order_only"
     assert caps["compiled_target"] == "WorldEntityDNA.behaviors"
     assert caps["arbitrary_script_source_allowed"] is False
