@@ -21,18 +21,18 @@ TASKS_SCRIPT = r"""
     if(q('auraTasksDrawer'))return q('auraTasksDrawer');
     const drawer=document.createElement('div');drawer.id='auraTasksDrawer';drawer.className='drawer';
     drawer.innerHTML=`
-      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Aura Tasks</b><div class="muted" style="font-size:.72rem">Durable reminders, research & connected briefings</div></div><button class="btn" id="auraTasksClose">✕</button></div>
+      <div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Rhian Tasks</b><div class="muted" style="font-size:.72rem">Durable reminders, research & connected briefings</div></div><button class="btn" id="auraTasksClose">✕</button></div>
       <div id="auraTasksWorker" style="margin:12px 0;padding:10px;border:1px solid #ffffff18;border-radius:12px"></div>
       <div style="display:grid;gap:8px;padding:10px;border:1px solid #ffffff18;border-radius:12px;background:#ffffff04">
         <input id="auraTaskTitle" class="search" style="margin:0" placeholder="Task title">
-        <select id="auraTaskKind" class="select"><option value="reminder">Reminder</option><option value="prompt">Aura follow-up</option><option value="research">Scheduled web research</option><option value="workspace_briefing">Workspace briefing</option></select>
+        <select id="auraTaskKind" class="select"><option value="reminder">Reminder</option><option value="prompt">Rhian follow-up</option><option value="research">Scheduled web research</option><option value="workspace_briefing">Workspace briefing</option></select>
         <textarea id="auraTaskPrompt" class="search" style="margin:0;min-height:92px;resize:vertical" placeholder="Instruction. For Workspace briefing enter ‘general’ or an optional Drive topic/project."></textarea>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div><label class="muted" style="font-size:.68rem">Run after</label><select id="auraTaskDelay" class="select"><option value="60">1 hour</option><option value="180">3 hours</option><option value="360">6 hours</option><option value="720">12 hours</option><option value="1440">1 day</option><option value="10080">1 week</option><option value="custom">Specific time</option></select></div>
           <div><label class="muted" style="font-size:.68rem">Repeat</label><select id="auraTaskRepeat" class="select"><option value="">One time</option><option value="60">Hourly</option><option value="360">Every 6 hours</option><option value="720">Every 12 hours</option><option value="1440">Daily</option><option value="10080">Weekly</option></select></div>
         </div>
         <input id="auraTaskRunAt" type="datetime-local" class="search" style="display:none;margin:0">
-        <button id="auraTaskCreate" class="btn primary">＋ Create Aura Task</button>
+        <button id="auraTaskCreate" class="btn primary">＋ Create Rhian Task</button>
         <div class="muted" style="font-size:.65rem;line-height:1.45">Background tasks are read-only. Workspace briefings can read only explicitly connected Google services. Tasks cannot edit projects, send email, create calendar events, publish social posts, run code, clone voices or perform other high-impact actions.</div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px"><b>Scheduled</b><button id="auraTasksRefresh" class="mini">Refresh</button></div>
@@ -57,23 +57,23 @@ TASKS_SCRIPT = r"""
   }
 
   async function loadTasks(){
-    try{const data=await request(`${api}/tasks`);q('auraTasksWorker').innerHTML=workerHTML(data.worker||{});q('auraTasksRows').innerHTML=(data.tasks||[]).map(rowHTML).join('')||'<p class="muted">No Aura Tasks yet.</p>';bindRows()}catch(error){toast(error.message,true)}
+    try{const data=await request(`${api}/tasks`);q('auraTasksWorker').innerHTML=workerHTML(data.worker||{});q('auraTasksRows').innerHTML=(data.tasks||[]).map(rowHTML).join('')||'<p class="muted">No Rhian Tasks yet.</p>';bindRows()}catch(error){toast(error.message,true)}
   }
   function bindRows(){
     document.querySelectorAll('[data-task-toggle]').forEach(b=>b.onclick=async()=>{try{const enabled=b.dataset.enabled!=='1';await request(`${api}/tasks/${encodeURIComponent(b.dataset.taskToggle)}`,{method:'PATCH',body:JSON.stringify({enabled})});await loadTasks()}catch(e){toast(e.message,true)}});
-    document.querySelectorAll('[data-task-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this Aura Task?'))return;try{await request(`${api}/tasks/${encodeURIComponent(b.dataset.taskDelete)}`,{method:'DELETE'});await loadTasks()}catch(e){toast(e.message,true)}});
+    document.querySelectorAll('[data-task-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this Rhian Task?'))return;try{await request(`${api}/tasks/${encodeURIComponent(b.dataset.taskDelete)}`,{method:'DELETE'});await loadTasks()}catch(e){toast(e.message,true)}});
   }
   async function createTask(){
     try{
-      if(typeof current==='undefined'||!current)throw new Error('Open an Aura conversation first.');
+      if(typeof current==='undefined'||!current)throw new Error('Open a Rhian conversation first.');
       const title=q('auraTaskTitle').value.trim(),prompt=q('auraTaskPrompt').value.trim();if(!title||!prompt)throw new Error('Enter a title and task instruction.');
       const delay=q('auraTaskDelay').value,repeat=q('auraTaskRepeat').value;const body={title,kind:q('auraTaskKind').value,prompt,interval_minutes:repeat?Number(repeat):null};
       if(delay==='custom'){const raw=q('auraTaskRunAt').value;if(!raw)throw new Error('Choose the run time.');body.run_at=new Date(raw).toISOString()}else body.delay_minutes=Number(delay);
-      const task=await request(`${api}/threads/${encodeURIComponent(current)}/tasks`,{method:'POST',body:JSON.stringify(body)});q('auraTaskTitle').value='';q('auraTaskPrompt').value='';toast(`Aura Task scheduled: ${task.title}`);await loadTasks();
+      const task=await request(`${api}/threads/${encodeURIComponent(current)}/tasks`,{method:'POST',body:JSON.stringify(body)});q('auraTaskTitle').value='';q('auraTaskPrompt').value='';toast(`Rhian Task scheduled: ${task.title}`);await loadTasks();
     }catch(error){toast(error.message,true)}
   }
 
-  const foot=document.querySelector('.sideFoot');if(foot&&!q('auraTasksButton')){const b=document.createElement('button');b.id='auraTasksButton';b.className='btn';b.textContent='⏰ Aura Tasks';b.onclick=async()=>{ensureDrawer().classList.add('open');await loadTasks()};foot.prepend(b)}
+  const foot=document.querySelector('.sideFoot');if(foot&&!q('auraTasksButton')){const b=document.createElement('button');b.id='auraTasksButton';b.className='btn';b.textContent='⏰ Rhian Tasks';b.onclick=async()=>{ensureDrawer().classList.add('open');await loadTasks()};foot.prepend(b)}
 })();
 """
 
@@ -84,7 +84,7 @@ def tasks_ui_script():
 
 
 class AuraTasksUIMiddleware(BaseHTTPMiddleware):
-    """Inject Aura Tasks only into the signed-in Aura HTML workspace."""
+    """Inject Rhian Tasks only into the signed-in Rhian HTML workspace."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
