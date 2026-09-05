@@ -7,6 +7,7 @@ from fastapi import APIRouter
 # Importing the hardening modules installs service-boundary guards before any workflow
 # endpoint is served. They do not add parallel HTTP ingestion or publishing surfaces.
 from . import esp_product_workflows_hardening as _product_workflow_hardening  # noqa: F401
+from . import esp_product_workflows_lead_hardening as _lead_hardening  # noqa: F401
 from . import esp_product_workflows_scheduling_hardening as _scheduling_hardening  # noqa: F401
 from .esp_product_workflows import router as product_workflows_router
 from .esp_product_workflows_portal import router as product_workflows_portal_router
