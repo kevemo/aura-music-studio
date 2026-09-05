@@ -46,6 +46,92 @@ def _json_list(value: Any) -> list[Any]:
     return []
 
 
+_RENDITION_METADATA_FIELDS = (
+    "name",
+    "id",
+    "label",
+    "profile",
+    "width",
+    "height",
+    "fps",
+    "bitrate",
+    "video_bitrate",
+    "audio_bitrate",
+    "video_codec",
+    "audio_codec",
+    "codec",
+    "mime_type",
+)
+
+
+def _safe_rendition_metadata(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep descriptive rendition metadata only; media URLs/auth remain Chat 2-owned."""
+
+    safe: dict[str, Any] = {}
+    for key in _RENDITION_METADATA_FIELDS:
+        if key not in item:
+            continue
+        value = item[key]
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            safe[key] = value
+            continue
+        if key == "profile" and isinstance(value, dict):
+            nested = {
+                nested_key: nested_value
+                for nested_key, nested_value in value.items()
+                if nested_key in _RENDITION_METADATA_FIELDS
+                and isinstance(nested_value, (str, int, float, bool, type(None)))
+            }
+            if nested:
+                safe[key] = nested
+    return safe
+
+
+def _normalise_rendition_profile(value: Any) -> list[dict[str, Any]]:
+    """Normalize both canonical Chat 2 list profiles and the older flat compatibility map.
+
+    Chat 2's merged media runtime stores profiles such as ``{"renditions": ["720p", "480p"]}``.
+    Older transport fixtures used ``{"landscape_720p": {...}}``. Preserve the latter exactly,
+    while expanding the canonical list one item at a time. A nested-list item may carry descriptive
+    metadata, but URLs, bearer material and other authority-bearing fields are intentionally dropped.
+    """
+
+    profiles = _json_dict(value)
+    if "renditions" not in profiles:
+        return [
+            {"name": str(name), "profile": profile}
+            for name, profile in sorted(profiles.items(), key=lambda item: str(item[0]))
+        ]
+
+    raw_renditions = profiles.get("renditions")
+    if not isinstance(raw_renditions, list):
+        return []
+
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw_renditions:
+        if isinstance(item, str):
+            name = item.strip()
+            profile: Any = name
+        elif isinstance(item, dict):
+            metadata = _safe_rendition_metadata(dict(item))
+            candidate = (
+                metadata.get("name")
+                or metadata.get("id")
+                or metadata.get("label")
+                or (metadata.get("profile") if isinstance(metadata.get("profile"), str) else None)
+            )
+            name = str(candidate or "").strip()
+            profile = metadata
+        else:
+            continue
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        result.append({"name": name, "profile": profile})
+    return result
+
+
 class Chat2PlaybackAdapter:
     """Chat 4 viewer adapter for Chat 2's canonical transport/playback service.
 
@@ -111,11 +197,7 @@ class Chat2PlaybackAdapter:
             }
 
         session = _dict(status.get("session"))
-        profiles = _json_dict(session.get("rendition_profile"))
-        renditions = [
-            {"name": str(name), "profile": profile}
-            for name, profile in sorted(profiles.items(), key=lambda item: str(item[0]))
-        ]
+        renditions = _normalise_rendition_profile(session.get("rendition_profile"))
         captions = raw.get("captions") if isinstance(raw.get("captions"), list) else []
 
         return {
