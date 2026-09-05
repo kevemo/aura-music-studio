@@ -60,6 +60,60 @@ def _same_origin_media_url(request: Request, value: Any) -> str:
     return raw
 
 
+def _safe_renditions(request: Request, raw: Any) -> list[dict[str, Any]]:
+    """Project only same-origin rendition URLs; never forward arbitrary neighbour metadata."""
+
+    if not isinstance(raw, list):
+        return []
+    safe: list[dict[str, Any]] = []
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            continue
+        url = _same_origin_media_url(
+            request,
+            item.get("manifest_url") or item.get("url"),
+        )
+        if not url:
+            profile = item.get("profile")
+            if isinstance(profile, dict):
+                url = _same_origin_media_url(
+                    request,
+                    profile.get("manifest_url") or profile.get("url"),
+                )
+        if not url:
+            continue
+        safe.append(
+            {
+                "name": str(item.get("name") or item.get("label") or "Rendition")[:80],
+                "manifest_url": url,
+            }
+        )
+    return safe
+
+
+def _safe_captions(request: Request, raw: Any) -> list[dict[str, Any]]:
+    """Project only same-origin caption tracks into the browser descriptor."""
+
+    if not isinstance(raw, list):
+        return []
+    safe: list[dict[str, Any]] = []
+    for item in raw[:20]:
+        if not isinstance(item, dict):
+            continue
+        src = _same_origin_media_url(request, item.get("src") or item.get("url"))
+        if not src:
+            continue
+        safe.append(
+            {
+                "src": src,
+                "srclang": str(item.get("srclang") or item.get("language") or "en")[:20],
+                "label": str(item.get("label") or item.get("language") or "Captions")[:80],
+                "default": bool(item.get("default", False)),
+            }
+        )
+    return safe
+
+
 def _access_or_raise(broadcast_id: str, request: Request) -> str | None:
     member = live.optional_member(request)
     user_id = member.user_id if member else None
@@ -135,8 +189,8 @@ def _chat2_browser_contract(broadcast_id: str, request: Request) -> tuple[dict[s
         "browser_authorization_mode": "cookie_exchange",
         "token_expires_at": auth.get("expires_at"),
         "dvr": bool(raw.get("dvr", False)),
-        "captions": raw.get("captions") if isinstance(raw.get("captions"), list) else [],
-        "renditions": raw.get("renditions") if isinstance(raw.get("renditions"), list) else [],
+        "captions": _safe_captions(request, raw.get("captions")),
+        "renditions": _safe_renditions(request, raw.get("renditions")),
         "transport_state": state,
         "source": "chat2_secure_cookie_exchange",
     }
