@@ -55,16 +55,18 @@ def enhanced_operator_html(project_id: str, base_html) -> str:
 
 
 def install_professional_operator_ui(app: Any) -> None:
-    del app
+    from .shared_sky_motion_graphics import install_shared_sky_motion_graphics
+    from .shared_sky_professional_motion_graphics_ui import install_professional_motion_graphics_ui
+
+    install_shared_sky_motion_graphics(app)
     current = canvas.professional_html
-    if getattr(current, "_shared_sky_operator_ui", False):
-        return
+    if not getattr(current, "_shared_sky_operator_ui", False):
+        def wrapped(project_id: str) -> str:
+            return enhanced_operator_html(project_id, current)
 
-    def wrapped(project_id: str) -> str:
-        return enhanced_operator_html(project_id, current)
-
-    setattr(wrapped, "_shared_sky_operator_ui", True)
-    canvas.professional_html = wrapped
+        setattr(wrapped, "_shared_sky_operator_ui", True)
+        canvas.professional_html = wrapped
+    install_professional_motion_graphics_ui(app)
 
 
 __all__ = [
