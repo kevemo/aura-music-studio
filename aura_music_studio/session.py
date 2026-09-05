@@ -73,9 +73,10 @@ class AutomationLane(BaseModel):
 class Effect(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     type: Literal[
-        "gain", "eq", "highpass", "lowpass", "compressor", "limiter", "gate", "deesser",
-        "reverb", "delay", "distortion", "saturation", "exciter", "chorus", "flanger", "phaser",
-        "tremolo", "pitch_shift", "doubler", "convolution", "stereo_width", "custom_safe_chain"
+        "gain", "eq", "highpass", "lowpass", "bandpass", "notch", "low_shelf", "high_shelf",
+        "compressor", "limiter", "gate", "expander", "deesser", "reverb", "delay", "distortion",
+        "saturation", "exciter", "chorus", "flanger", "phaser", "tremolo", "pitch_shift", "doubler",
+        "convolution", "stereo_width", "custom_safe_chain"
     ]
     enabled: bool = True
     # Static wet/dry balance. A scoped ``fx:<id>:mix`` lane can automate this in real audio.
