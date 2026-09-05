@@ -14,7 +14,7 @@ Chat 5 continues and integrates the already-merged canonical implementations rat
 - `shared_sky_control_room` and extensions — Preview/Programme, scenes/sources, transitions, operator controls, layouts, graphics, ingest handoff and transport console.
 - `shared_sky_live_*` — Live Now, Watch, viewer presence, community/chat/Q&A/polls/reactions, upcoming events/reminders, access rules, blocking and bounded moderation.
 - `shared_sky_battles` / `shared_sky_battle_api` — multi-host participant lifecycle, invitations/join requests, green room/stage, deterministic append-only Battle scoring, plans/challenges/rematches/series, finalisation, correction/reconciliation and viewer-safe projections.
-- `aura_live_overlay_effects` / `aura_live_overlay_interactives` — executable bounded LIVE overlay/effect catalogue. Rhiannon-facing naming/integration must consume Chat 1 intelligence authority rather than creating a second assistant authority.
+- `aura_live_overlay_effects` / `aura_live_overlay_interactives` — legacy-named executable bounded LIVE overlay/effect catalogue. Rhiannon-facing integration consumes Chat 1 intelligence authority rather than creating a second assistant authority.
 - Creation Live / Game Forge LIVE adapters — safe creative source registration and Preview materialisation while Shared Skies retains transport and public runtime truth.
 
 ## Financial boundary
@@ -78,6 +78,28 @@ Readiness must remain fail closed and blockers must be safe projections. Stream 
 
 Existing contribution-ingest revoke and Creation Live detach flows remain separate canonical actions. Emergency Programme hide does not replace them.
 
+### Private Auto Cue
+
+`GET /shared-sky/live/auto-cue` is a member-only browser-local prompter.
+
+- script text is typed/pasted only into the page DOM and is never submitted to a Shared Skies endpoint;
+- the page uses no `localStorage`, `sessionStorage`, Beacon or fetch/XHR persistence path;
+- includes start/pause/reset, bounded speed and text size, three-second countdown, mirror, fullscreen, keyboard control and browser-local second-screen mode;
+- response is `no-store`, `no-referrer`, `nosniff` and uses a nonce-scoped Content Security Policy;
+- the second-screen copy is created inside the browser and does not create a public LIVE overlay or server record.
+
+### Rhiannon LIVE Guardian
+
+`GET /shared-sky/live/api/watch/{broadcast_id}/rhiannon-guardian/readiness` provides a creator/Owner-only safe readiness contract for Chat 1 Rhiannon intelligence.
+
+- consumes existing Shared Skies moderation and effective-assignment truth;
+- reports active LIVE state and an effective assigned-moderator count without granting authority;
+- preserves the dual Moderator rule: Agent alone is never Moderator, and delegated moderation requires both Owner-enabled global permission and explicit LIVE assignment;
+- exposes only advisory capabilities such as surfacing queue context and suggesting bounded moderation actions;
+- explicitly prohibits permission grants, LIVE assignments, provider moderation writes, transport mutations, Battle score mutation, Coin/Gift finance mutation and arbitrary commands;
+- external provider moderation write remains `ready=false` unless a separately authorised provider adapter is evidenced; Guardian does not manufacture provider authority;
+- Chat 1 remains the Rhiannon intelligence authority. Chat 5 supplies only the LIVE context/readiness boundary.
+
 ## Acceptance status
 
 The following capabilities are already represented by merged canonical implementations and remain subject to regression validation on every current integration candidate:
@@ -93,7 +115,7 @@ The following capabilities are already represented by merged canonical implement
 - executable bounded LIVE overlay/effects library;
 - Music/Video/Image/Game Forge creation-source adapters consuming Shared Skies transport truth.
 
-This continuation specifically adds regression coverage for singular emergency route composition, emergency snapshot isolation/no-secret behavior and canonical configured participant capacity.
+This continuation adds regression coverage for singular emergency/assist route composition, emergency snapshot isolation/no-secret behavior, canonical configured participant capacity, browser-local Auto Cue privacy controls, and Rhiannon Guardian least-authority projections.
 
 ## Remaining external/runtime gates
 
@@ -103,6 +125,7 @@ These are not converted into “complete” merely by repository code:
 - production ingress/egress capacity and failure testing;
 - CDN/public playback deployment evidence where required;
 - provider app review, Live scopes, account eligibility and real credential validation;
+- provider-backed moderation writes for Rhiannon Guardian;
 - production monitoring/alerting/backup/rollback/security evidence owned by Chat 7;
 - final Coin/Gift/payment production evidence owned by Chat 6;
 - exact release-candidate CI/Security/Self-Host evidence after all seven chat branches reconcile.
