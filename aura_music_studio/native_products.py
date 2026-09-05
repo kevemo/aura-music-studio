@@ -10,6 +10,7 @@ class BillingPeriod(StrEnum):
     ANNUAL = "annual"
 
 
+# Compatibility-stable persisted entitlement identifiers. Public display naming is SLS.
 AURA_OS_ENTITLEMENT = "aura_os"
 AURA_SEC_ENTITLEMENT = "aura_sec"
 
@@ -74,7 +75,7 @@ NATIVE_PRODUCTS: dict[str, NativeProduct] = {
     ),
     "aura_sec": NativeProduct(
         id="aura_sec",
-        name="Aura Sec",
+        name="Elevate Souls Productions Secure Lattice System (SLS)",
         currency="GBP",
         monthly_price=Decimal("4.99"),
         annual_price=Decimal("34.99"),
@@ -83,7 +84,7 @@ NATIVE_PRODUCTS: dict[str, NativeProduct] = {
     ),
     "aura_os_sec_bundle": NativeProduct(
         id="aura_os_sec_bundle",
-        name="Aura OS + Aura Sec",
+        name="Aura OS + Elevate Souls Productions Secure Lattice System (SLS)",
         currency="GBP",
         monthly_price=Decimal("7.99"),
         annual_price=Decimal("69.99"),
