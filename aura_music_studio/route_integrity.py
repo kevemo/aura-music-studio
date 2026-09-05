@@ -1,12 +1,43 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from hashlib import sha256
 from typing import Any
 
 
 _SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
+_ROUTE_COMPOSITION_HOOKS: dict[str, Callable[[Any], None]] = {}
+
+
+def register_route_composition_hook(name: str, hook: Callable[[Any], None]) -> None:
+    """Register an idempotent final-composition hook by stable name.
+
+    Large production surfaces compose routers in several phases. Domain packages that must
+    preserve authoritative route ownership after those phases can register a deterministic hook
+    here instead of depending on import order. Hooks run immediately before duplicate-route and
+    OpenAPI integrity enforcement.
+    """
+
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Route composition hook name is required")
+    if not callable(hook):
+        raise TypeError("Route composition hook must be callable")
+    existing = _ROUTE_COMPOSITION_HOOKS.get(clean_name)
+    if existing is not None and existing is not hook:
+        raise RuntimeError(f"Route composition hook already registered: {clean_name}")
+    _ROUTE_COMPOSITION_HOOKS[clean_name] = hook
+
+
+def run_route_composition_hooks(app: Any) -> list[str]:
+    """Run every registered final-composition hook in stable registration order."""
+
+    ran: list[str] = []
+    for name, hook in tuple(_ROUTE_COMPOSITION_HOOKS.items()):
+        hook(app)
+        ran.append(name)
+    return ran
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
@@ -187,18 +218,20 @@ def _install_openapi_integrity(app: Any) -> None:
 
 
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
-    """Remove unreachable exact duplicate HTTP routes and harden schema identity.
+    """Run final composition hooks, remove exact duplicates and harden schema identity.
 
     Starlette/FastAPI dispatches routes in registration order, so when the same exact path and
-    HTTP-method set is registered twice, every later copy is unreachable. Preserve the first
-    authoritative route exactly as runtime dispatch already does and remove only later exact
-    copies. Mounts, websocket routes, and different method sets are untouched.
+    HTTP-method set is registered twice, every later copy is unreachable. Final-composition hooks
+    run first so authoritative domain routes can survive overlay installers deterministically.
+    The deduplicator then preserves the first remaining exact route and removes later copies.
+    Mounts, websocket routes, and different method sets are untouched.
 
     After runtime duplicates are removed, repair route-level schema collisions and install a
     canonical OpenAPI wrapper that also handles per-method collisions. Runtime paths, methods,
-    endpoints, dependencies and dispatch precedence remain unchanged.
+    endpoints, dependencies and dispatch precedence remain unchanged after composition.
     """
 
+    composition_hooks_run = run_route_composition_hooks(app)
     seen: set[tuple[str, tuple[str, ...]]] = set()
     kept: list[Any] = []
     removed: list[dict[str, Any]] = []
@@ -228,6 +261,7 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     operation_ids_repaired = ensure_unique_operation_ids(app.router.routes)
     app.openapi_schema = None
     app.state.route_integrity = {
+        "composition_hooks_run": composition_hooks_run,
         "duplicates_removed": len(removed),
         "removed": removed,
         "operation_id_collisions_repaired": len(operation_ids_repaired),
@@ -243,4 +277,6 @@ __all__ = [
     "deduplicate_http_routes",
     "duplicate_http_signatures",
     "ensure_unique_operation_ids",
+    "register_route_composition_hook",
+    "run_route_composition_hooks",
 ]
