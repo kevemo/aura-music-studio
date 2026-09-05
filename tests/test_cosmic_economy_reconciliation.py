@@ -21,7 +21,7 @@ class Live:
         return LiveGiftContext(live_session_id, recipient_creator_id, True, True, True)
 
 
-def economy(tmp_path):
+def make_economy(tmp_path):
     return IntegratedCosmicEconomy(
         tmp_path / "economy.sqlite3",
         live_sessions=Live(),
@@ -55,23 +55,23 @@ def event(purchase, event_type, event_id):
 
 
 def test_verified_failed_purchase_event_closes_pending_without_credit(tmp_path):
-    economy = economy(tmp_path)
-    purchase = pending_purchase(economy)
-    result = economy.apply_verified_payment_event(event(purchase, "failed", "evt-failed"))
+    econ = make_economy(tmp_path)
+    purchase = pending_purchase(econ)
+    result = econ.apply_verified_payment_event(event(purchase, "failed", "evt-failed"))
     assert result["purchase"]["status"] == "failed"
-    assert economy.get_balance("viewer-1")["available_coins"] == 0
+    assert econ.get_balance("viewer-1")["available_coins"] == 0
 
 
 def test_purchase_reconciliation_detects_missing_credit_reference(tmp_path):
-    economy = economy(tmp_path)
-    purchase = pending_purchase(economy)
-    economy.apply_verified_payment_event(event(purchase, "confirmed", "evt-confirm"))
-    with economy._connect() as con:
+    econ = make_economy(tmp_path)
+    purchase = pending_purchase(econ)
+    econ.apply_verified_payment_event(event(purchase, "confirmed", "evt-confirm"))
+    with econ._connect() as con:
         con.execute(
             "UPDATE coin_purchases SET ledger_credit_id=NULL WHERE id=?",
             (purchase["id"],),
         )
-    result = economy.reconcile()
+    result = econ.reconcile()
     assert result["ok"] is False
     assert any(
         row["discrepancy_type"] == "PURCHASE_LEDGER_CREDIT_MISMATCH"
