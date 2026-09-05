@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
 from .chord_intelligence import router as chord_intelligence_router
+from .chord_midi import router as chord_midi_router
 from .daw_fx_lab import router as daw_fx_lab_router
 from .performance_generation_portal import router as performance_generation_router
 from .song_dna_focus_locks import router as focus_locks_router
@@ -16,6 +17,7 @@ from .voice_house_portal import router as voice_house_portal_router
 
 router = APIRouter()
 router.include_router(chord_intelligence_router)
+router.include_router(chord_midi_router)
 router.include_router(daw_fx_lab_router)
 router.include_router(performance_generation_router)
 router.include_router(focus_locks_router)
