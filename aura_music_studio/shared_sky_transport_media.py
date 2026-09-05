@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from uuid import uuid4
 
 from .shared_sky_destination_adapters import CapabilityState
 from .shared_sky_internal_media import SharedSkyInternalMediaError, internal_media
-from .shared_sky_transport_models import BroadcastState, iso
+from .shared_sky_relay import SharedSkyRelayError
+from .shared_sky_transport_models import BroadcastState, PreflightBlocked, iso
 
 
 _ACTIVE = {
@@ -152,13 +152,24 @@ class TransportMediaMixin:
             raise SharedSkyInternalMediaError("No Shared Sky HLS rendition could be started")
         for job in jobs:
             self._persist_media_job(user_id, job)
-        self.emit(
-            broadcast["id"],
-            "internal_playback_started",
-            "ok",
-            {"output_bitrate_kbps": 0},
-        )
+        self.emit(broadcast["id"], "internal_playback_started", "ok")
         return True
+
+    def _internal_delivery_active(self, user_id: str, broadcast_id: str) -> bool:
+        self._session(user_id, broadcast_id)
+        with self.connect() as con:
+            rows = con.execute(
+                """SELECT id FROM shared_sky_internal_media_jobs
+                   WHERE broadcast_id=? AND user_id=? AND kind='hls' AND state='running'""",
+                (broadcast_id, user_id),
+            ).fetchall()
+        if not rows:
+            return False
+        active = False
+        for row in rows:
+            runtime = internal_media.state(str(row["id"]))
+            active = active or bool(runtime.get("running"))
+        return active
 
     def _stop_internal_delivery(self, user_id: str, broadcast_id: str, *, reason: str) -> None:
         self._session(user_id, broadcast_id)
@@ -170,6 +181,87 @@ class TransportMediaMixin:
         )
         if stopped:
             self.emit(broadcast_id, "internal_playback_stopped", reason)
+
+    def start(self, user_id: str, broadcast_id: str, key: str) -> dict:
+        self.rate_limit(user_id, "start", limit=10)
+
+        def run():
+            check = self.preflight(user_id, broadcast_id)
+            if not check["ready"]:
+                raise PreflightBlocked(check)
+            session = self._set_state(
+                user_id,
+                broadcast_id,
+                BroadcastState.STARTING,
+                reason="start_requested",
+            )
+            broadcast = self.base.broadcast(user_id, broadcast_id)
+            started = 0
+            failures: list[dict] = []
+            for destination_id in broadcast["destination_ids"]:
+                ok, failure = self._start_destination(user_id, broadcast, session, destination_id)
+                started += int(ok)
+                if failure:
+                    failures.append(failure)
+
+            internal = False
+            if session["internal_playback"]:
+                try:
+                    internal = self._start_internal_delivery(user_id, broadcast, session)
+                except SharedSkyInternalMediaError as exc:
+                    failures.append(
+                        {
+                            "scope": "internal_playback",
+                            "reason_code": "internal_playback_start_failed",
+                        }
+                    )
+                    self.emit(
+                        broadcast_id,
+                        "internal_playback_failure",
+                        "internal_playback_start_failed",
+                    )
+
+            if not started and not internal:
+                self._set_state(
+                    user_id,
+                    broadcast_id,
+                    BroadcastState.FAILED,
+                    force=True,
+                    reason="no_delivery_path_started",
+                )
+                raise SharedSkyRelayError("No delivery path could be started")
+
+            self._set_state(
+                user_id,
+                broadcast_id,
+                BroadcastState.DEGRADED if failures else BroadcastState.LIVE,
+                force=True,
+                reason="partial_live" if failures else "live",
+            )
+            if session["recording_enabled"]:
+                try:
+                    self.request_recording(user_id, broadcast_id, "programme")
+                except (RuntimeError, SharedSkyInternalMediaError):
+                    failures.append(
+                        {"scope": "recording", "reason_code": "recording_start_failed"}
+                    )
+                    self.emit(broadcast_id, "recording_failure", "recording_start_failed")
+                    self._set_state(
+                        user_id,
+                        broadcast_id,
+                        BroadcastState.DEGRADED,
+                        force=True,
+                        reason="recording_start_failed",
+                    )
+            return {
+                "broadcast": self.status(user_id, broadcast_id),
+                "partial": bool(failures),
+                "failures": failures,
+                "started_destinations": started,
+                "internal_playback": internal,
+            }
+
+        return self._idem(user_id, broadcast_id, "start", key, {}, run)
 
     def request_recording(self, user_id: str, broadcast_id: str, kind: str) -> dict:
         recording = super().request_recording(user_id, broadcast_id, kind)
@@ -284,10 +376,8 @@ class TransportMediaMixin:
                        SET state=?,reason_code=?,ended_at=?,updated_at=? WHERE id=?""",
                     (state, reason, iso(), iso(), row["id"]),
                 )
-            row["state"] = state
-            row["reason_code"] = reason
         with self.connect() as con:
-            rows = [
+            return [
                 dict(row)
                 for row in con.execute(
                     """SELECT id,broadcast_id,kind,rendition,state,pid,worker_mode,
@@ -297,7 +387,31 @@ class TransportMediaMixin:
                     (broadcast_id, user_id),
                 ).fetchall()
             ]
-        return rows
+
+    def reconcile(self, user_id: str, broadcast_id: str) -> dict:
+        session = self._session(user_id, broadcast_id)
+        payload = super().reconcile(user_id, broadcast_id)
+        current = BroadcastState(payload["session"]["state"])
+        if current in {
+            BroadcastState.LIVE,
+            BroadcastState.DEGRADED,
+            BroadcastState.RECONNECTING,
+        } and session.get("internal_playback"):
+            self.reconcile_media_jobs(user_id, broadcast_id)
+            if not self._internal_delivery_active(user_id, broadcast_id):
+                live_external = any(
+                    item.get("state") == "live" for item in payload.get("destinations", [])
+                )
+                target = BroadcastState.DEGRADED if live_external else BroadcastState.FAILED
+                self._set_state(
+                    user_id,
+                    broadcast_id,
+                    target,
+                    force=True,
+                    reason="internal_playback_process_exited",
+                )
+                payload = self.status(user_id, broadcast_id)
+        return payload
 
     def status(self, user_id: str, broadcast_id: str) -> dict:
         payload = super().status(user_id, broadcast_id)
