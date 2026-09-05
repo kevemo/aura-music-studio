@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .cosmic_economy import EconomyError, _iso
+from .cosmic_economy import EconomyError, VerifiedPaymentEvent, _iso
 from .cosmic_economy_command_idempotency import CommandBoundCosmicEconomy
 
 
@@ -133,3 +133,24 @@ class CheckoutBoundCosmicEconomy(CommandBoundCosmicEconomy):
             ).fetchone()
             con.commit()
         return {"purchase": dict(purchase), "checkout": dict(checkout), "idempotent_replay": False}
+
+    def apply_verified_payment_event(self, event: VerifiedPaymentEvent) -> dict:
+        result = super().apply_verified_payment_event(event)
+        purchase = result.get("purchase") if isinstance(result, dict) else None
+        if not purchase:
+            return result
+        purchase_id = purchase.get("id")
+        status = purchase.get("status")
+        if not purchase_id or not status:
+            return result
+        with self._connect() as con:
+            con.execute(
+                """UPDATE coin_purchase_checkouts
+                   SET status=?,updated_at=? WHERE purchase_id=?""",
+                (str(status), _iso(), purchase_id),
+            )
+        checkout = self.get_purchase_checkout(purchase_id)
+        if checkout:
+            result = dict(result)
+            result["checkout"] = checkout
+        return result
