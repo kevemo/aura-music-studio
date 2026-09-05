@@ -14,6 +14,7 @@ from aura_music_studio.game_forge_mesh import (
     _validate_document_shape,
     extract_static_mesh,
 )
+from aura_music_studio.game_forge_model_assets import _runtime_capabilities
 
 
 def _triangle_document(binary: bytes) -> dict:
@@ -107,3 +108,19 @@ def test_static_projection_truthfully_reports_present_animation_and_skin_as_not_
     assert mesh["skinning_executed"] is False
     assert mesh["generated_code_executed"] is False
     assert mesh["external_resources_allowed"] is False
+
+
+def test_model_runtime_capabilities_warn_without_claiming_rig_or_clip_execution():
+    capabilities = _runtime_capabilities({"animations_present": True, "skins_present": True})
+
+    assert capabilities["projection_mode"] == "closed_static_mesh"
+    assert capabilities["runtime_mesh_projection"] is True
+    assert capabilities["skeletal_animation_runtime"] is False
+    assert capabilities["skinning_runtime"] is False
+    assert capabilities["animation_clips_runtime"] is False
+    assert capabilities["source_animation_or_skin_data_executed"] is False
+    assert capabilities["external_resources_allowed"] is False
+    assert capabilities["runtime_network_required"] is False
+    assert len(capabilities["warnings"]) == 2
+    assert "not executed" in capabilities["warnings"][0]
+    assert "not executed" in capabilities["warnings"][1]
