@@ -5,6 +5,7 @@ import pytest
 from aura_music_studio.native_products import (
     AURA_OS_ENTITLEMENT,
     AURA_SEC_ENTITLEMENT,
+    SLS_PUBLIC_NAME,
     BillingPeriod,
     get_native_product,
     public_native_products,
@@ -96,6 +97,16 @@ def test_native_entitlement_checks_are_product_scoped():
 
     with pytest.raises(PermissionError):
         require_native_entitlement("aura_sec", AURA_OS_ENTITLEMENT)
+
+
+def test_public_catalogue_uses_locked_sls_name_but_keeps_legacy_ids_for_compatibility():
+    products = {product["id"]: product for product in public_native_products()}
+
+    assert products["aura_sec"]["name"] == SLS_PUBLIC_NAME
+    assert products["aura_os_sec_bundle"]["name"] == f"Aura OS + {SLS_PUBLIC_NAME}"
+    assert "Aura Sec" not in products["aura_sec"]["name"]
+    assert products["aura_sec"]["id"] == "aura_sec"
+    assert products["aura_os_sec_bundle"]["id"] == "aura_os_sec_bundle"
 
 
 def test_public_catalogue_marks_founding_offer_as_renewing_at_standard_annual_price():
