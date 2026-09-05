@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .shared_sky_destination_adapters import CapabilityState
+from .shared_sky_transport_browser_playback import TransportBrowserPlaybackMixin
 from .shared_sky_transport_extensions import TransportExtensionsMixin
 from .shared_sky_transport_local_recording import TransportLocalRecordingMixin
 from .shared_sky_transport_media import TransportMediaMixin
@@ -21,6 +22,7 @@ from .shared_sky_transport_support import TransportSupport
 
 class SharedSkyTransportStore(
     TransportMediaPrivacyMixin,
+    TransportBrowserPlaybackMixin,
     TransportMediaLifecycleMixin,
     TransportLocalRecordingMixin,
     TransportMediaMixin,
@@ -34,8 +36,10 @@ class SharedSkyTransportStore(
 
     The privacy boundary is intentionally first in the cooperative MRO so member-facing
     status responses cannot expose local filesystem roots added by lower media-runtime
-    layers. Media/recovery/compatibility mixins extend the durable transport contract
-    without replacing its tenant, identity, destination or persistence boundaries.
+    layers. Browser playback then decorates the already-signed playback descriptor with a
+    one-time bearer-to-HttpOnly-cookie exchange contract while keeping credentials out of
+    manifest and segment URLs. Lower media/recovery/compatibility layers retain ownership
+    of lifecycle, persistence and provider state.
     """
 
 
