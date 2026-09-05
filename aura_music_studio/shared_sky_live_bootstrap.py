@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import access_control
+from .shared_sky_live_browser_playback import harden_browser_playback_integration
 from .shared_sky_live_community import router as live_community_router
 from .shared_sky_live_controls import router as live_controls_router
 from .shared_sky_live_integrations import (
@@ -44,6 +45,9 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     Neighbour contracts are registered at application composition time. If Chat 2/5 modules are not
     merged yet, registration remains fail-closed and the original unavailable adapters stay active.
+    Chat 2 playback is then hardened for the actual browser runtime: a descriptor that requires a
+    custom Bearer header is not advertised as native-video playable until a browser-safe credential
+    mode or a deliberately packaged header-capable HLS runtime exists.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -54,6 +58,7 @@ def install_shared_sky_live_community(app: Any) -> None:
     access_control.PUBLIC_PREFIXES = prefixes
 
     configure_neighbor_live_integrations()
+    harden_browser_playback_integration()
 
     existing = {_route_signature(route) for route in app.router.routes}
     for route in (
