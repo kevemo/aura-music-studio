@@ -198,7 +198,12 @@ def test_gift_reversal_key_cannot_reverse_two_gifts_or_credit_twice(tmp_path):
         )
     assert reused.value.code == "IDEMPOTENCY_KEY_REUSED"
     assert e.get_balance("viewer-1")["available_coins"] == 90
-    assert e.get_gift_transaction(second["gift_transaction"]["id"])["status"] == "committed"
+    with e._connect() as con:
+        second_row = con.execute(
+            "SELECT status FROM gift_transactions WHERE id=?",
+            (second["gift_transaction"]["id"],),
+        ).fetchone()
+    assert second_row["status"] == "committed"
 
     with pytest.raises(EconomyError) as new_key:
         e.reverse_gift(
