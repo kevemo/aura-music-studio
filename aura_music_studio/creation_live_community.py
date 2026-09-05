@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -12,6 +13,7 @@ _COMMUNITY_SIGNATURE = (
     "/creation-live/projects/{project_name}/community",
     frozenset({"GET"}),
 )
+_SOURCE_REVALIDATE_SECONDS = 30
 
 
 def _signature(route: Any) -> tuple[str, frozenset[str]] | None:
@@ -43,6 +45,21 @@ def _active_project_source(user_id: str, project_name: str) -> dict[str, Any] | 
         return cl.creation_live_store.get(user_id, str(row["source_adapter_id"]))
     except KeyError:
         return None
+
+
+def _needs_source_revalidation(item: dict[str, Any], *, now: datetime | None = None) -> bool:
+    """Bound project/rights discovery work while keeping long LIVE permissions reasonably fresh."""
+    stamp = str(item.get("updated_at") or "").strip()
+    if not stamp:
+        return True
+    try:
+        updated = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return (current.astimezone(timezone.utc) - updated.astimezone(timezone.utc)).total_seconds() >= _SOURCE_REVALIDATE_SECONDS
 
 
 def _safe_chat(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -95,6 +112,33 @@ def authoritative_community_panel(project_name: str, request: Request):
             "project_mutated": False,
             "truth_note": "Attach this project to a Shared Sky session before loading LIVE community state.",
         }
+
+    # The drawer polls community frequently, but source/rights discovery is intentionally bounded
+    # to at most once every 30 seconds. This catches permission/privacy/source changes during long
+    # LIVE sessions without turning the project filesystem into a high-frequency polling backend.
+    if _needs_source_revalidation(source):
+        previous_source_id = source["source_adapter_id"]
+        try:
+            cl.discover_sources(user_id, project_name, source["studio_type"])
+        except (FileNotFoundError, OSError, ValueError):
+            return {
+                "available": False,
+                "state": "source_revalidation_unavailable",
+                "project_id": project_name,
+                "source_adapter_id": previous_source_id,
+                "project_mutated": False,
+                "truth_note": "Current project source authority could not be refreshed. No new LIVE readiness is being claimed.",
+            }
+        source = _active_project_source(user_id, project_name)
+        if source is None:
+            return {
+                "available": False,
+                "state": "source_revoked_after_revalidation",
+                "project_id": project_name,
+                "source_adapter_id": previous_source_id,
+                "project_mutated": False,
+                "truth_note": "Fresh project source/rights discovery no longer authorises this contribution, so Chat 7 revoked its source handle. This does not prove the Shared Sky Programme has been cut; use the authoritative control room/emergency hide when available.",
+            }
 
     broadcast_id = str(source.get("broadcast_id") or "").strip()
     if not broadcast_id:
