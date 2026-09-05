@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from datetime import datetime, timedelta, timezone
@@ -21,7 +22,14 @@ def _now() -> str:
 
 
 class StudioJobQueue:
-    """SQLite-backed production queue with no external broker dependency."""
+    """SQLite-WAL durable queue for studio work.
+
+    The queue is intentionally broker-free for the current self-host topology, but still provides
+    bounded payload admission, active-job de-duplication, optional stable idempotency keys,
+    atomic leases, stale-worker recovery and an explicit dead-letter state. Dead-letter replay is
+    fail-closed until the caller confirms that any externally consequential operation is safe to
+    repeat under its domain idempotency contract.
+    """
 
     def __init__(self, store: AccountStore | None = None):
         self.store = store or AccountStore()
@@ -33,6 +41,7 @@ class StudioJobQueue:
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA journal_mode=WAL")
         con.execute("PRAGMA foreign_keys=ON")
+        con.execute("PRAGMA busy_timeout=30000")
         return con
 
     def _init_schema(self) -> None:
@@ -54,15 +63,38 @@ class StudioJobQueue:
                     result_json TEXT,
                     error TEXT,
                     attempts INTEGER NOT NULL DEFAULT 0,
+                    idempotency_key TEXT,
+                    dead_lettered_at TEXT,
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
                 CREATE INDEX IF NOT EXISTS idx_studio_jobs_queue
                 ON studio_jobs(status, priority DESC, created_at ASC);
+                CREATE INDEX IF NOT EXISTS idx_studio_jobs_dead_letter
+                ON studio_jobs(status, dead_lettered_at ASC);
                 """
             )
             columns = {row["name"] for row in con.execute("PRAGMA table_info(studio_jobs)").fetchall()}
             if "payload_json" not in columns:
                 con.execute("ALTER TABLE studio_jobs ADD COLUMN payload_json TEXT")
+            if "idempotency_key" not in columns:
+                con.execute("ALTER TABLE studio_jobs ADD COLUMN idempotency_key TEXT")
+            if "dead_lettered_at" not in columns:
+                con.execute("ALTER TABLE studio_jobs ADD COLUMN dead_lettered_at TEXT")
+            con.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_jobs_idempotency
+                   ON studio_jobs(user_id, job_type, idempotency_key)
+                   WHERE idempotency_key IS NOT NULL"""
+            )
+
+    @staticmethod
+    def _payload_json(payload: dict | None) -> str | None:
+        if payload is None:
+            return None
+        encoded = json.dumps(payload, default=str, separators=(",", ":"))
+        limit = max(1024, int(os.getenv("LSS_JOB_MAX_PAYLOAD_BYTES", "262144")))
+        if len(encoded.encode("utf-8")) > limit:
+            raise ValueError(f"Job payload exceeds the configured {limit}-byte admission limit")
+        return encoded
 
     def submit(
         self,
@@ -72,10 +104,25 @@ class StudioJobQueue:
         job_type: str = "produce",
         priority: int = 10,
         payload: dict | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
         job_id = uuid4().hex
-        payload_json = json.dumps(payload, default=str) if payload is not None else None
+        payload_json = self._payload_json(payload)
+        idem = (idempotency_key or "").strip() or None
+        if idem and len(idem) > 200:
+            raise ValueError("Job idempotency key must be 200 characters or fewer")
+
         with self._connect() as con:
+            if idem:
+                existing = con.execute(
+                    """SELECT * FROM studio_jobs
+                       WHERE user_id=? AND job_type=? AND idempotency_key=?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (user_id, job_type, idem),
+                ).fetchone()
+                if existing:
+                    return dict(existing)
+
             existing = con.execute(
                 """SELECT * FROM studio_jobs
                    WHERE user_id=? AND project_name=? AND job_type=? AND status IN ('queued','running')
@@ -84,11 +131,12 @@ class StudioJobQueue:
             ).fetchone()
             if existing:
                 return dict(existing)
+
             con.execute(
                 """INSERT INTO studio_jobs
-                   (id,user_id,project_name,job_type,status,priority,created_at,payload_json)
-                   VALUES (?,?,?,?, 'queued', ?, ?, ?)""",
-                (job_id, user_id, project_name, job_type, int(priority), _now(), payload_json),
+                   (id,user_id,project_name,job_type,status,priority,created_at,payload_json,idempotency_key)
+                   VALUES (?,?,?,?, 'queued', ?, ?, ?, ?)""",
+                (job_id, user_id, project_name, job_type, int(priority), _now(), payload_json, idem),
             )
             row = con.execute("SELECT * FROM studio_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row)
@@ -115,30 +163,66 @@ class StudioJobQueue:
             oldest = con.execute(
                 "SELECT created_at FROM studio_jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
             ).fetchone()
+            oldest_dlq = con.execute(
+                "SELECT dead_lettered_at FROM studio_jobs WHERE status='dead_letter' ORDER BY dead_lettered_at ASC LIMIT 1"
+            ).fetchone()
         return {
             "counts": {row["status"]: int(row["count"]) for row in rows},
             "oldest_queued_at": oldest["created_at"] if oldest else None,
+            "oldest_dead_lettered_at": oldest_dlq["dead_lettered_at"] if oldest_dlq else None,
             "backend": "sqlite_wal",
             "payload_jobs": True,
             "remote_node_leases": True,
+            "dead_letter_supported": True,
+            "bounded_payloads": True,
         }
 
     def requeue_stale(self, *, stale_after_seconds: int = 10_800, max_attempts: int = 3) -> int:
         cutoff = (_now_dt() - timedelta(seconds=max(60, stale_after_seconds))).isoformat()
         now = _now()
+        max_attempts = max(1, int(max_attempts))
         with self._connect() as con:
-            failed = con.execute(
-                """UPDATE studio_jobs SET status='failed', completed_at=?, error='Worker lease expired after maximum retries'
+            dead_lettered = con.execute(
+                """UPDATE studio_jobs
+                   SET status='dead_letter', completed_at=?, dead_lettered_at=?, worker_id=NULL,
+                       error='Worker lease expired after maximum retries'
                    WHERE status='running' AND started_at<? AND attempts>=?""",
-                (now, cutoff, max_attempts),
+                (now, now, cutoff, max_attempts),
             ).rowcount
             recovered = con.execute(
-                """UPDATE studio_jobs SET status='queued', started_at=NULL, worker_id=NULL,
+                """UPDATE studio_jobs
+                   SET status='queued', started_at=NULL, worker_id=NULL, completed_at=NULL,
                        error='Recovered after stale worker lease'
                    WHERE status='running' AND started_at<? AND attempts<?""",
                 (cutoff, max_attempts),
             ).rowcount
-        return int(recovered + failed)
+        return int(recovered + dead_lettered)
+
+    def retry_dead_letter(self, job_id: str, *, idempotency_verified: bool = False) -> bool:
+        """Requeue a dead-lettered job only after external side-effect safety is verified."""
+        if not idempotency_verified:
+            return False
+        with self._connect() as con:
+            cur = con.execute(
+                """UPDATE studio_jobs
+                   SET status='queued', started_at=NULL, completed_at=NULL, dead_lettered_at=NULL,
+                       worker_id=NULL, error='Authorised retry after dead-letter idempotency verification'
+                   WHERE id=? AND status='dead_letter'""",
+                (job_id,),
+            )
+        return cur.rowcount == 1
+
+    def resolve_dead_letter(self, job_id: str, *, reason: str) -> bool:
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("A dead-letter resolution reason is required")
+        with self._connect() as con:
+            cur = con.execute(
+                """UPDATE studio_jobs SET status='resolved', completed_at=?, worker_id=NULL, error=?
+                   WHERE id=? AND status='dead_letter'""",
+                (_now(), reason[:8000], job_id),
+            )
+        return cur.rowcount == 1
 
     def _claim_query(self, worker_id: str, where_sql: str = "", params: tuple = ()) -> dict | None:
         with self._connect() as con:
@@ -152,7 +236,8 @@ class StudioJobQueue:
                 con.commit()
                 return None
             cur = con.execute(
-                """UPDATE studio_jobs SET status='running', started_at=?, worker_id=?, attempts=attempts+1
+                """UPDATE studio_jobs SET status='running', started_at=?, worker_id=?, attempts=attempts+1,
+                       completed_at=NULL, dead_lettered_at=NULL
                    WHERE id=? AND status='queued'""",
                 (_now(), worker_id, row["id"]),
             )
@@ -172,7 +257,7 @@ class StudioJobQueue:
         clean = sorted({str(x).strip() for x in job_types if str(x).strip()})
         if not clean:
             return None
-        stale = max(60, int(__import__("os").getenv("LSS_NODE_LEASE_SECONDS", "3600")))
+        stale = max(60, int(os.getenv("LSS_NODE_LEASE_SECONDS", "3600")))
         self.requeue_stale(stale_after_seconds=stale)
         placeholders = ",".join("?" for _ in clean)
         return self._claim_query(worker_id, f"AND job_type IN ({placeholders})", tuple(clean))
@@ -189,7 +274,9 @@ class StudioJobQueue:
     def complete(self, job_id: str, result: dict) -> None:
         with self._connect() as con:
             con.execute(
-                "UPDATE studio_jobs SET status='completed', completed_at=?, result_json=?, error=NULL WHERE id=?",
+                """UPDATE studio_jobs
+                   SET status='completed', completed_at=?, result_json=?, error=NULL, dead_lettered_at=NULL
+                   WHERE id=?""",
                 (_now(), json.dumps(result, default=str), job_id),
             )
 
@@ -197,7 +284,8 @@ class StudioJobQueue:
         """Complete a remotely leased job only when the submitting node still owns its lease."""
         with self._connect() as con:
             cur = con.execute(
-                """UPDATE studio_jobs SET status='completed', completed_at=?, result_json=?, error=NULL
+                """UPDATE studio_jobs
+                   SET status='completed', completed_at=?, result_json=?, error=NULL, dead_lettered_at=NULL
                    WHERE id=? AND status='running' AND worker_id=?""",
                 (_now(), json.dumps(result, default=str), job_id, worker_id),
             )
