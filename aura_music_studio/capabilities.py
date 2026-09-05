@@ -80,6 +80,7 @@ def derive_provider_capability(
     key: str,
     provider: str,
     implemented: bool,
+    configured: bool = True,
     owner_enabled: bool,
     feature_flag_enabled: bool,
     credentials_present: bool,
@@ -92,6 +93,8 @@ def derive_provider_capability(
 
     if not implemented:
         status, reason = CapabilityStatus.PROVIDER_UNSUPPORTED, "Provider/API capability is not implemented."
+    elif not configured:
+        status, reason = CapabilityStatus.NOT_CONFIGURED, "Provider capability has not been configured."
     elif not owner_enabled:
         status, reason = CapabilityStatus.DISABLED, "Disabled by Owner configuration."
     elif not feature_flag_enabled:
