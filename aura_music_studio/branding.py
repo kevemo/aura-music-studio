@@ -2,17 +2,19 @@
 
 Legacy package/module identifiers are intentionally retained for compatibility with
 existing projects, databases, sessions and deployment configuration. Public product
-copy should use the constants in this module.
+and assistant copy should use the constants in this module.
 """
 
 PRODUCT_NAME = "Elevate Souls Productions Content Creation Command Center"
 PRODUCT_FULL_NAME = "Elevate Souls Productions Content Creation Command Center"
 PRODUCT_SHORT_NAME = "Content Creation Command Center"
 TAGLINE = "Elevate Your Soul Through Purposeful Media"
-ENDORSEMENT = "Powered by Aura AI"
+ENDORSEMENT = "Powered by Rhiannon Intelligence Systems"
 PLATFORM_DESCRIPTOR = "Music, Video, Image, Voice, Creator Intelligence, Commerce & Security"
-AI_PRODUCER_NAME = "Aura"
-AI_SYSTEM_NAME = "Aura AI"
+AI_PRODUCER_NAME = "Rhian"
+AI_SYSTEM_NAME = "Rhiannon Intelligence Systems"
+AI_BRAND_LOCKUP = "Rhiannon Intelligence Systems — Powered by Elevate Souls Productions"
+AI_LEGACY_NAME = "Aura"
 COMPANY_NAME = "Elevate Souls Productions"
 BRAND_LOGO_PATH = "/static/elevate-souls-command-center-logo.svg"
 BRAND_MARK_ROUTE = "/brand/command-center-mark.svg"

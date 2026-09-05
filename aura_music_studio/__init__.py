@@ -1,10 +1,11 @@
-"""Elevate Souls Productions Content Creation Command Center — Powered by Aura AI.
+"""Elevate Souls Productions Content Creation Command Center — Powered by Rhiannon Intelligence Systems.
 
 Elevate Your Soul Through Purposeful Media.
 
+Public AI/system identity: Rhiannon Intelligence Systems. Everyday assistant name: Rhian.
 The ``aura_music_studio`` package identifier remains for backwards compatibility with
 existing installs, project data, automation and deployment configuration. It is not the
-public product brand.
+public product or assistant brand.
 """
 
 from importlib.util import find_spec
