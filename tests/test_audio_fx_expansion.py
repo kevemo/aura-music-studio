@@ -6,6 +6,7 @@ import struct
 import wave
 
 import pytest
+import soundfile as sf
 
 from aura_music_studio.audio_fx_expansion import (
     ADVANCED_EXPANDED_TYPES,
@@ -99,7 +100,8 @@ def test_expanded_fx_chain_renders_real_waveform(tmp_path):
     assert output.is_file()
     assert output.stat().st_size > 1000
 
-    with wave.open(str(output), "rb") as handle:
-        assert handle.getframerate() == 48000
-        assert handle.getnframes() > 0
-        assert handle.getnchannels() >= 1
+    info = sf.info(str(output))
+    assert info.samplerate == 48000
+    assert info.frames > 0
+    assert info.channels >= 1
+    assert info.subtype == "PCM_24"
