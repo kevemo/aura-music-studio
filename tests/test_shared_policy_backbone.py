@@ -105,16 +105,17 @@ def test_runtime_config_never_exposes_secret():
 
 def test_public_errors_and_event_audit_metadata_scrub_secrets():
     bearer = "Bearer very-sensitive-token-value"
+    placeholder_secret = "test-provider-secret-placeholder"
     error = ApiError(
         code=ApiErrorCode.VALIDATION_FAILED,
         message=f"Provider rejected {bearer}",
         correlation_id="corr-public-error",
-        details={"api_key": "sk-live-secret-value-123456", "note": bearer},
+        details={"api_key": placeholder_secret, "note": bearer},
     )
     public = error.public_payload()
     serialized = repr(public)
     assert "very-sensitive-token-value" not in serialized
-    assert "sk-live-secret-value-123456" not in serialized
+    assert placeholder_secret not in serialized
 
     internal = ApiError(
         code=ApiErrorCode.INTERNAL_ERROR,
