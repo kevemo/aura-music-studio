@@ -44,6 +44,7 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    "/shared-sky/public/",
 )
 
 
