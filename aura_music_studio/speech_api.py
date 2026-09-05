@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from .producer import llm_plan
 from .speech import AuraSpeechService
 
-router = APIRouter(prefix="/speech", tags=["Spoken Aura"])
+router = APIRouter(prefix="/speech", tags=["Spoken Rhian"])
 
 
 class SpeakRequest(BaseModel):
@@ -46,11 +46,11 @@ def synthesize(request: SpeakRequest, background_tasks: BackgroundTasks):
         AuraSpeechService().speak(request.text, target)
     except Exception as exc:
         target.unlink(missing_ok=True)
-        raise HTTPException(503, f"Aura speech synthesis is unavailable: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(503, f"Rhian speech synthesis is unavailable: {type(exc).__name__}: {exc}") from exc
     background_tasks.add_task(_delete, str(target))
     return FileResponse(
         target,
         media_type="audio/wav",
-        filename="Aura_Reply.wav",
+        filename="Rhian_Reply.wav",
         background=background_tasks,
     )
