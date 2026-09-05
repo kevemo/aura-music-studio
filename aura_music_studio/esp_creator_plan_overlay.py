@@ -25,6 +25,7 @@ from .esp_role_dashboard_switch import router as role_dashboard_router
 from .esp_service_registry import router as service_registry_router
 from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
+from .esp_support_casework import router as support_casework_router
 from .esp_support_center import router as support_center_router
 from .esp_support_sla import router as support_sla_router
 from .shared_sky_streaming_studios import router as shared_sky_router
@@ -51,6 +52,7 @@ router.include_router(progress_intelligence_router)
 router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(support_sla_router)
+router.include_router(support_casework_router)
 router.include_router(broadcast_tech_router)
 router.include_router(shared_sky_router)
 router.include_router(shared_sky_transport_router)
