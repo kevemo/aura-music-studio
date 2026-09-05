@@ -8,6 +8,8 @@ from .audit import AuditLedger
 from .cosmic_economy import EconomyError
 from .cosmic_economy_integrations import economy_service
 from .cosmic_economy_owner_ops import EconomyOwnerOperations
+from .cosmic_economy_settlement import CoinSettlementReconciler
+from .cosmic_payments import coin_payment_providers
 from .owner_auth import owner_authorized
 
 router = APIRouter(prefix="/owner/economy", tags=["Cosmic Economy Owner Operations"])
@@ -199,6 +201,66 @@ def operational_events(
             limit=limit,
         )
     }
+
+
+@router.post("/settlement-reconciliation/{provider_name}")
+def provider_settlement_reconciliation(
+    provider_name: str,
+    request: Request,
+    limit: int = 500,
+):
+    """Compare internal Coin purchases to authenticated provider settlement state."""
+    _owner(request)
+    try:
+        economy = economy_service()
+        provider = coin_payment_providers.get(provider_name)
+        result = CoinSettlementReconciler(economy).reconcile_provider(
+            provider=provider,
+            limit=limit,
+        )
+        AuditLedger(AccountStore(economy.db_path)).append(
+            actor="owner_session",
+            action="cosmic_economy.provider_settlement_reconciled",
+            details={
+                "provider": result["provider"],
+                "checked": result["checked"],
+                "matched": result["matched"],
+                "mismatched": result["mismatched"],
+            },
+        )
+        return result
+    except EconomyError as exc:
+        _raise(exc)
+
+
+@router.post("/settlement-reconciliation/{provider_name}/purchases/{purchase_id}")
+def purchase_settlement_reconciliation(
+    provider_name: str,
+    purchase_id: str,
+    request: Request,
+):
+    """Reconcile one Coin purchase without mutating its financial state."""
+    _owner(request)
+    try:
+        economy = economy_service()
+        provider = coin_payment_providers.get(provider_name)
+        result = CoinSettlementReconciler(economy).reconcile_purchase(
+            purchase_id,
+            provider=provider,
+        )
+        AuditLedger(AccountStore(economy.db_path)).append(
+            actor="owner_session",
+            action="cosmic_economy.purchase_settlement_reconciled",
+            details={
+                "provider": result["provider"],
+                "purchase_id": result["purchase_id"],
+                "ok": result["ok"],
+                "discrepancy_count": len(result["discrepancies"]),
+            },
+        )
+        return result
+    except EconomyError as exc:
+        _raise(exc)
 
 
 @router.get("/discrepancies")
