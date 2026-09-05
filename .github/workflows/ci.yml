@@ -49,6 +49,30 @@ jobs:
       - name: Run test suite
         run: python -m pytest -q -ra
 
+      - name: Isolated backup restore drill
+        run: |
+          python scripts/run_restore_drill.py \
+            --environment ci \
+            --output /tmp/chat10-restore-evidence.json
+          python - <<'PY'
+          import json
+          evidence = json.load(open('/tmp/chat10-restore-evidence.json', encoding='utf-8'))
+          assert evidence['result'] == 'verified'
+          assert evidence['database_integrity'] == 'ok'
+          assert evidence['application_data_check'] is True
+          assert evidence['backup_hashes_verified'] is True
+          assert evidence['production_backup_used'] is False
+          print('PASS: isolated restore mechanism verified; no production-backup claim made')
+          PY
+
+      - name: Upload restore drill evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat10-restore-drill-evidence
+          path: /tmp/chat10-restore-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Self-host Compose validation
         run: |
           cp .env.example .env
@@ -99,7 +123,7 @@ jobs:
             -f deploy/production/docker-compose.production.yml \
             --profile public config -q
 
-      - name: Production readiness fail-closed smoke
+      - name: Production configuration fail-closed smoke
         run: |
           env \
             AURA_DEPLOYMENT_ENV=production \
@@ -120,6 +144,7 @@ jobs:
             LSS_AUTO_BACKUP_INTERVAL_HOURS=12 \
             LSS_AUTO_BACKUP_KEEP=14 \
             LSS_BACKUP_AGE_RECIPIENT=age1ci0123456789012345678901234567890 \
+            LSS_RESTORE_EVIDENCE_PATH=/tmp/chat10-restore-evidence.json \
             LSS_PUBLIC_BASE_URL=https://ci.example.test \
             LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
             LSS_COOKIE_SECURE=true \
@@ -133,9 +158,15 @@ jobs:
           python - <<'PY'
           import json
           report = json.load(open('/tmp/aura-production-readiness.json', encoding='utf-8'))
-          if not report.get('production_ready') or report.get('secret_values_exposed'):
-              raise SystemExit(f'FAIL: production readiness smoke failed: {report}')
-          print('PASS: production readiness contract is fail-closed and secret-free')
+          if not report.get('configuration_ready') or report.get('secret_values_exposed'):
+              raise SystemExit(f'FAIL: production configuration readiness smoke failed: {report}')
+          if not report['categories']['restore_evidence']['ok']:
+              raise SystemExit(f'FAIL: CI restore evidence was not accepted: {report}')
+          if report.get('production_ready'):
+              raise SystemExit('FAIL: config-only CI must never claim deployed production readiness')
+          if report.get('release_blocking_categories') != ['runtime_dependencies']:
+              raise SystemExit(f"FAIL: expected runtime deployment verification blocker: {report['release_blocking_categories']}")
+          print('PASS: config is valid, restore mechanism is evidenced, deployed runtime remains explicitly unverified')
           PY
 
       - name: ESP compute-node Compose validation
