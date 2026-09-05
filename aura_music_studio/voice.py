@@ -10,6 +10,7 @@ import librosa
 import numpy as np
 
 from .cloud_providers import MurekaClient
+from .request_context import current_user_id
 from .rights import RightsLedger, VoiceProfile, authorize_voice_profile
 
 
@@ -46,17 +47,34 @@ def create_voice_profile(
     consent_statement: str,
     allowed_uses: list[str] | None = None,
 ) -> VoiceProfile:
+    """Compatibility-only import path for older UI/API callers.
+
+    Ordinary uploads must never become immediately usable identity-replicating profiles. This
+    helper therefore stores a *locked candidate* only. The production Voice House challenge route
+    records the explicit verification recording and creates the authorised reusable profile.
+    """
     if not reference_files:
         raise ValueError("At least one voice reference file is required")
     analysis = {str(p): analyze_voice_sample(p) for p in reference_files}
+    user_id = current_user_id()
     profile = VoiceProfile(
         name=name,
         owner_label=owner_label,
         reference_files=[str(p) for p in reference_files],
-        consent_confirmed=True,
-        consent_statement=consent_statement,
+        consent_confirmed=False,
+        consent_statement=(consent_statement or "").strip(),
+        verification_state="unverified",
+        verification_method="legacy_upload_locked_pending_voice_house_challenge",
         allowed_uses=allowed_uses or ["singing", "backing_harmony", "voice_conversion"],
-        metadata={"voice_scan": analysis},
+        created_by_user_id=user_id,
+        tenant_user_id=user_id,
+        subject_relationship="legacy_unspecified",
+        metadata={
+            "voice_scan": analysis,
+            "identity_profile_locked": True,
+            "requires_voice_house_challenge": True,
+            "legacy_creation_path": True,
+        },
     )
     return ledger.save_voice(profile)
 
