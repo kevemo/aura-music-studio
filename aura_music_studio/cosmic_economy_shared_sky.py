@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import copy
 from threading import RLock
 from typing import Any
 
@@ -17,6 +18,19 @@ _INTEGRATION_STATUS: dict[str, Any] = {
     "reason": "shared_sky_live_adapter_not_available",
 }
 _BIND_LOCK = RLock()
+
+# The production billing hardening layer has already published these operation-ID prefixes as the
+# stable public schema identity for the two historical Creation Coin read paths. Chat 5 owns their
+# runtime semantics now, but preserving those hardened IDs avoids breaking generated clients and
+# proves that final composition did not silently fall back to the deprecated credit-wallet routes.
+_PRODUCTION_COMPAT_UNIQUE_IDS: dict[tuple[str, tuple[str, ...]], str] = {
+    ("/billing/creation-coins", ("GET",)): (
+        "hardened_creation_coin_storefront_billing_creation_coins_get"
+    ),
+    ("/billing/creation-coins/catalog", ("GET",)): (
+        "hardened_creation_coin_catalog_billing_creation_coins_catalog_get"
+    ),
+}
 
 
 def _registered_status(adapter: object, *, source: str | None = None) -> dict[str, Any]:
@@ -102,6 +116,22 @@ def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
     return path, tuple(sorted(str(method).upper() for method in methods))
 
 
+def _production_compat_route(route: Any) -> Any:
+    """Clone a legacy bridge route and retain the hardened public schema identity when required."""
+
+    signature = _http_signature(route)
+    unique_id = _PRODUCTION_COMPAT_UNIQUE_IDS.get(signature) if signature is not None else None
+    if unique_id is None:
+        return route
+
+    cloned = copy(route)
+    # Leave operation_id unset so FastAPI uses this stable per-route unique_id. Runtime endpoint,
+    # dependencies, response model and compiled ASGI handler remain the canonical Chat 5 bridge.
+    cloned.operation_id = None
+    cloned.unique_id = unique_id
+    return cloned
+
+
 def _restore_chat5_economy_routes(app: Any) -> None:
     """Reassert Chat 5 route ownership after the production overlay graph is composed.
 
@@ -110,6 +140,10 @@ def _restore_chat5_economy_routes(app: Any) -> None:
     path+method copies and appends the canonical Chat 5 APIRoutes once. This deliberately includes
     the legacy Creation Coin compatibility URLs so they cannot fall back to the older credit-wallet
     checkout implementation.
+
+    The two historical read-only Creation Coin paths retain their previously hardened OpenAPI
+    identities, but their endpoint modules and behavior remain Chat 5's canonical compatibility
+    bridge. The legacy direct credit checkout remains disabled.
     """
 
     from .cosmic_economy_api import router as economy_router
@@ -129,8 +163,13 @@ def _restore_chat5_economy_routes(app: Any) -> None:
             for route in app.router.routes
             if _http_signature(route) not in claimed
         ]
-    for source_router in source_routers:
-        app.router.routes.extend(source_router.routes)
+
+    # Economy and Owner routes have no legacy public schema identity to preserve.
+    app.router.routes.extend(economy_router.routes)
+    # Compatibility routes keep Chat 5 runtime behavior; only the two established read-path schema
+    # IDs are preserved for compatibility with the production billing hardening contract.
+    app.router.routes.extend(_production_compat_route(route) for route in legacy_router.routes)
+    app.router.routes.extend(owner_router.routes)
     app.openapi_schema = None
 
 
