@@ -66,8 +66,10 @@ def test_macro_execution_is_explicit_sequential_and_aborts_on_failure():
 
 
 def test_operator_commands_use_existing_versioned_studio_and_marker_routes():
-    for route in ("/cut", "/transition", "/transition/complete", "/undo", "/redo", "/preview", "/markers"):
+    for route in ("/cut", "/transition", "/transition/complete", "/preview", "/markers"):
         assert route in OPERATOR_JS
+    assert "command==='undo'||command==='redo'" in OPERATOR_JS
+    assert "/sessions/${state.session.id}/${command}" in OPERATOR_JS
     assert "expected_version:state.session.version" in OPERATOR_JS
     assert "expected_studio_version" not in OPERATOR_JS
 
@@ -110,6 +112,7 @@ def test_composed_installer_wraps_professional_renderer_once(monkeypatch):
     assert first is second
     assert getattr(second, "_shared_sky_operator_ui", False) is True
     assert getattr(second, "_shared_sky_motion_graphics_ui", False) is True
+    assert getattr(second, "_shared_sky_ingest_ui", False) is True
     page = second("project-1")
     assert page.count("id='operatorConsole'") == 1
     assert page.count("id='addTicker'") == 1
