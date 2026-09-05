@@ -8,7 +8,7 @@ Chat 4 remains the viewer-facing LIVE network. This extension binds canonical ne
 
 The integration bootstrap remains fail-closed. A missing neighbouring module does not make a capability appear available.
 
-## Canonical runtime module
+## Canonical runtime modules
 
 ```python
 from aura_music_studio.shared_sky_live_integrations import (
@@ -18,32 +18,58 @@ from aura_music_studio.shared_sky_live_integrations import (
     configure_neighbor_live_integrations,
     integration_status,
 )
+from aura_music_studio.shared_sky_live_browser_playback import (
+    BrowserSafeChat2PlaybackAdapter,
+    harden_browser_playback_integration,
+)
 ```
 
-`aura_music_studio.shared_sky_live_bootstrap.install_shared_sky_live_community(...)` calls `configure_neighbor_live_integrations()` during canonical application composition.
+`aura_music_studio.shared_sky_live_bootstrap.install_shared_sky_live_community(...)` calls `configure_neighbor_live_integrations()` during canonical application composition and then applies the browser-playback hardening layer.
 
 The bootstrap uses import-time immutable route snapshots, so repeated installation remains idempotent even when the repository's late router composition has already flattened source routers.
 
 ## Chat 2 playback integration
 
-When `aura_music_studio.shared_sky_transport_domain.transport` is importable, Chat 4 registers `Chat2PlaybackAdapter` as the viewer playback adapter.
+When `aura_music_studio.shared_sky_transport_domain.transport` is importable, Chat 4 initially binds the canonical Chat 2 transport through `Chat2PlaybackAdapter`, then replaces it with `BrowserSafeChat2PlaybackAdapter` for the actual Watch runtime.
 
-The adapter:
+The base adapter:
 
 - resolves the canonical creator/owner from `shared_sky_broadcasts`;
 - calls Chat 2 `transport.status(owner_user_id, broadcast_id)`;
 - consumes the `playback` descriptor already returned by Chat 2;
-- exposes playback only when Chat 2 reports `capability_state=ready` and transport is `live`, `degraded` or `reconnecting`;
-- passes through the server-issued manifest URL and authorization token rather than signing or constructing them itself;
+- requires Chat 2 `capability_state=ready` and transport `live`, `degraded` or `reconnecting` before considering the media descriptor available;
+- never constructs a manifest URL or signs a token locally;
 - maps Chat 2 rendition-profile metadata into a viewer-facing rendition list without pretending the browser can switch variants unless the player/runtime supports it;
 - exposes no invented captions or DVR state;
 - fails closed on missing/invalid transport state.
+
+### Browser authorization gate
+
+The audited Chat 2 contract currently supplies HLS as a `manifest_url` plus separate `authorization: {scheme: Bearer, token, expires_at}`. The current Shared Sky Watch runtime uses the native HTML `<video>` element and the repository does not include a packaged header-capable HLS loader. Native media-element manifest/segment requests cannot attach that custom Authorization header.
+
+Therefore `BrowserSafeChat2PlaybackAdapter` deliberately converts an otherwise-ready Bearer-header descriptor into:
+
+- `available=false`;
+- `state=unavailable`;
+- `reason=browser_bearer_playback_runtime_pending`;
+- `manifest_url=null`;
+- `authorization=null`;
+- `token_expires_at=null`.
+
+This is a release-safety boundary, not a transport failure. It prevents Chat 4 from claiming browser playback works and prevents a media bearer token from being exposed to a browser runtime that cannot use it correctly.
+
+The gate can be removed only when one of these canonical capabilities exists and is tested:
+
+1. Chat 2 provides a browser-safe playback credential/session exchange compatible with native or repository-standard media loading; or
+2. Chat 4 deliberately packages and tests a header-capable HLS runtime with explicit CORS, token-refresh, error/reconnect and accessibility behavior.
+
+Bearer tokens must not simply be moved into query strings to bypass this gate.
 
 Viewer refresh route:
 
 - `GET /shared-sky/live/api/watch/{broadcast_id}/playback`
 
-The route independently re-checks direct Watch access before returning a fresh descriptor/token.
+The route independently re-checks direct Watch access before returning a fresh descriptor.
 
 ### Replay
 
@@ -100,19 +126,24 @@ Current keys:
 - `chat5_gifts`
 - `chat6_battles`
 
-States are compatibility truth (`registered`, `pending`, or `degraded`) and not provider/runtime readiness claims. For example, a registered Chat 2 adapter can still truthfully return playback unavailable if the LL-HLS origin/signing deployment is not configured.
+States are compatibility truth (`registered`, `pending`, or `degraded`) and not provider/runtime readiness claims. A registered Chat 2 adapter can still truthfully return playback unavailable because origin/signing is not deployed or because its current Bearer-header authorization mode is not consumable by the native Watch runtime.
 
 ## Tests
 
 `tests/test_shared_sky_live_integrations.py` verifies:
 
-- Chat 2's server-issued manifest/token are preserved without local construction;
+- Chat 2's server-issued transport descriptor is consumed without local manifest/token construction;
 - non-ready playback fails closed and does not leak a manifest;
 - replay asset IDs are not converted into invented playback URLs;
 - canonical LIVE/creator validation for Chat 5;
 - Gift display is a projection of Chat 5 state rather than a financial mutation;
 - eligibility blocks disable sending;
 - integration/refresh routes mount idempotently.
+
+`tests/test_shared_sky_live_browser_playback.py` additionally verifies:
+
+- Bearer-header HLS is hidden/fail-closed for the current native-video runtime;
+- a ready descriptor that genuinely requires no custom request header remains playable.
 
 ## Merge sequencing
 
