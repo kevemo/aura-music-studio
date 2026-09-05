@@ -26,6 +26,7 @@ from .esp_service_registry import router as service_registry_router
 from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_casework import router as support_casework_router
+from .esp_support_casework_portal import router as support_casework_portal_router
 from .esp_support_center import router as support_center_router
 from .esp_support_privacy_guard import install_support_activity_privacy_guard
 from .esp_support_sla import router as support_sla_router
@@ -56,6 +57,7 @@ router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(support_sla_router)
 router.include_router(support_casework_router)
+router.include_router(support_casework_portal_router)
 router.include_router(broadcast_tech_router)
 router.include_router(shared_sky_router)
 router.include_router(shared_sky_transport_router)
@@ -118,6 +120,7 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn primary' href='/command-center/progress/intelligence'>Progress Intelligence</a>",
         "<a class='btn' href='/command-center/my-plan/reviews'>30/60/90 Reviews</a>",
         "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>",
+        "<a class='btn primary' href='/command-center/support/casework'>Support Casework Desk</a>",
         "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>",
         "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>",
     ]
