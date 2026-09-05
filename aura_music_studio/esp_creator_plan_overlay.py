@@ -7,6 +7,7 @@ from .esp_broadcast_tech import router as broadcast_tech_router
 from .esp_creator_plan import router as creator_plan_router
 from .esp_creator_reviews import router as creator_reviews_router
 from .esp_level_up import level_up_portal as base_level_up_portal
+from .esp_product_workflows import router as product_workflows_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_center import router as support_center_router
 
@@ -16,6 +17,7 @@ router.include_router(creator_reviews_router)
 router.include_router(support_center_router)
 router.include_router(broadcast_tech_router)
 router.include_router(social_media_library_router)
+router.include_router(product_workflows_router)
 
 
 @router.get("/command-center/level-up", response_class=HTMLResponse, include_in_schema=False)
