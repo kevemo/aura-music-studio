@@ -124,8 +124,9 @@ def start_transport(session_id: str, body: TransportActionRequest, request: Requ
             str(session["project_id"]),
             dict(session.get("profile") or {}),
         )
-        if not bool((prepared.get("preflight") or {}).get("ready")):
-            raise StudioTransportError("Chat 2 authoritative preflight did not pass")
+        preflight = dict(prepared.get("preflight") or {})
+        if not bool(preflight.get("ready")):
+            raise PreflightBlocked(preflight)
         result = transport.start(member.user_id, broadcast_id, body.idempotency_key)
         shared_sky.event(
             member.user_id,
@@ -133,7 +134,7 @@ def start_transport(session_id: str, body: TransportActionRequest, request: Requ
             "studio_transport_start",
             {"session_id": session_id},
         )
-        return {"preflight": prepared["preflight"], **result}
+        return {"preflight": preflight, **result}
     except Exception as exc:
         _raise(exc)
 
