@@ -66,6 +66,7 @@ aura = "aura_music_studio.cli:app"
 aura-task-worker = "aura_music_studio.aura_task_worker:run_worker"
 aura-social-publish-worker = "aura_music_studio.esp_social_publish_worker:run_worker"
 shared-sky-worker = "aura_music_studio.shared_sky_worker:run_worker"
+shared-sky-battle-worker = "aura_music_studio.shared_sky_battle_worker:run_worker"
 
 [tool.setuptools.packages.find]
 include = ["aura_music_studio*"]
