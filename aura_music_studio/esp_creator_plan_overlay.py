@@ -26,6 +26,7 @@ from .esp_service_registry import router as service_registry_router
 from .esp_shop_automation_overlay import router as shop_automation_router
 from .esp_social_media_library import router as social_media_library_router
 from .esp_support_casework import router as support_casework_router
+from .esp_support_casework_integration import install_support_casework_integration
 from .esp_support_casework_portal import router as support_casework_portal_router
 from .esp_support_center import router as support_center_router
 from .esp_support_privacy_guard import install_support_activity_privacy_guard
@@ -35,6 +36,7 @@ from .shared_sky_transport_api import router as shared_sky_transport_router
 from .shared_sky_worker_control import scheduler_run_due, scheduler_status
 from .universal_creative_library import router as universal_creative_library_router
 
+install_support_casework_integration()
 install_support_activity_privacy_guard()
 
 router = APIRouter()
