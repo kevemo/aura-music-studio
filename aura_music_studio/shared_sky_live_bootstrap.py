@@ -5,6 +5,10 @@ from typing import Any
 from . import access_control
 from .shared_sky_live_community import router as live_community_router
 from .shared_sky_live_controls import router as live_controls_router
+from .shared_sky_live_integrations import (
+    configure_neighbor_live_integrations,
+    router as live_integrations_router,
+)
 
 
 PUBLIC_LIVE_PREFIXES = ("/watch/", "/shared-sky/live/api/")
@@ -15,6 +19,7 @@ PUBLIC_LIVE_PREFIXES = ("/watch/", "/shared-sky/live/api/")
 # later mutates or replaces a router's live ``routes`` collection.
 _LIVE_COMMUNITY_ROUTES = tuple(live_community_router.routes)
 _LIVE_CONTROL_ROUTES = tuple(live_controls_router.routes)
+_LIVE_INTEGRATION_ROUTES = tuple(live_integrations_router.routes)
 
 
 def _route_signature(route: Any) -> tuple[str, tuple[str, ...]]:
@@ -36,6 +41,9 @@ def install_shared_sky_live_community(app: Any) -> None:
     late ``include_router`` flattening pass. The repository already uses direct canonical-app route
     binding for late Shared Sky modules; this keeps Chat 4 registration idempotent and deterministic
     for both the production application and isolated FastAPI test applications.
+
+    Neighbour contracts are registered at application composition time. If Chat 2/5 modules are not
+    merged yet, registration remains fail-closed and the original unavailable adapters stay active.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -45,8 +53,14 @@ def install_shared_sky_live_community(app: Any) -> None:
             prefixes += (prefix,)
     access_control.PUBLIC_PREFIXES = prefixes
 
+    configure_neighbor_live_integrations()
+
     existing = {_route_signature(route) for route in app.router.routes}
-    for route in (*_LIVE_COMMUNITY_ROUTES, *_LIVE_CONTROL_ROUTES):
+    for route in (
+        *_LIVE_COMMUNITY_ROUTES,
+        *_LIVE_CONTROL_ROUTES,
+        *_LIVE_INTEGRATION_ROUTES,
+    ):
         signature = _route_signature(route)
         if signature in existing:
             continue
