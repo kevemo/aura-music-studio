@@ -141,6 +141,24 @@ def test_episode_schedule_requires_timezone_offset():
         )
 
 
+def test_tv_request_models_reject_undeclared_execution_fields():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        EpisodeRequest(
+            programme_id="tvprog_1",
+            series_id="tvseries_1",
+            title="Unsafe Request",
+            episode_number=1,
+            editor_sequence_id="seq_1",
+            ffmpeg_args=["-filter_complex", "movie=/etc/passwd"],
+        )
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        GraphicsPackageRequest(name="Unsafe Package", plugin="arbitrary.module")
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        EpisodePatchRequest(shell="rm -rf /tmp/example")
+
+
 def test_shared_skies_handoff_is_prepared_only_and_exposes_no_host_path(tmp_path):
     _, video, _, _ = _editor(tmp_path)
     store = TVProductionStore(tmp_path)
