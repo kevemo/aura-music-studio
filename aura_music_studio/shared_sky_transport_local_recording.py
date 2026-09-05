@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from uuid import uuid4
 
-from .shared_sky_internal_media import internal_media
+from .shared_sky_internal_media import SharedSkyInternalMediaError, internal_media
 from .shared_sky_transport_models import BroadcastState, iso
 
 
@@ -22,11 +22,17 @@ class TransportLocalRecordingMixin:
     def _local_recording_ready(self) -> bool:
         settings = internal_media.settings
         health = internal_media.health()
-        return bool(
+        if not (
             settings.enabled
             and settings.recording_root
             and health.ffmpeg_available
-        )
+        ):
+            return False
+        try:
+            settings.recording_root.mkdir(parents=True, exist_ok=True)
+            return settings.recording_root.is_dir() and os.access(settings.recording_root, os.W_OK)
+        except OSError:
+            return False
 
     def preflight(self, user_id: str, broadcast_id: str) -> dict:
         result = super().preflight(user_id, broadcast_id)
@@ -72,9 +78,14 @@ class TransportLocalRecordingMixin:
         session = self._session(user_id, broadcast_id)
         settings = internal_media.settings
         assert settings.recording_root is not None
-        root = (settings.recording_root / broadcast_id).resolve()
-        root.mkdir(parents=True, exist_ok=True)
-        placeholder = (root / f"{kind}.pending").resolve().as_uri()
+        try:
+            root = (settings.recording_root / broadcast_id).resolve()
+            root.mkdir(parents=True, exist_ok=True)
+            placeholder = (root / f"{kind}.pending").resolve().as_uri()
+        except OSError as exc:
+            raise SharedSkyInternalMediaError(
+                "Shared Sky local recording storage is not writable"
+            ) from exc
         stamp = iso()
         with self.connect() as con:
             row = con.execute(
@@ -100,11 +111,18 @@ class TransportLocalRecordingMixin:
                     (broadcast_id, f"recording:{kind}"),
                 ).fetchone()
             if not existing:
-                job = internal_media.start_recording(
-                    broadcast_id=broadcast_id,
-                    input_url=self.base.contribution_url(broadcast_id),
-                    kind=kind,
-                )
+                try:
+                    job = internal_media.start_recording(
+                        broadcast_id=broadcast_id,
+                        input_url=self.base.contribution_url(broadcast_id),
+                        kind=kind,
+                    )
+                except SharedSkyInternalMediaError:
+                    raise
+                except OSError as exc:
+                    raise SharedSkyInternalMediaError(
+                        "Shared Sky local recording process could not be started"
+                    ) from exc
                 self._persist_media_job(user_id, job)
                 with self.connect() as con:
                     con.execute(
