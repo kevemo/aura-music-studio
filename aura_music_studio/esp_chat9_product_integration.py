@@ -14,6 +14,7 @@ from .esp_product_workflows_portal import router as product_workflows_portal_rou
 from .esp_support_conversations import router as support_conversations_router
 from .esp_training_academy import router as training_academy_router
 from .owner_chat9_dashboard_ui import install_owner_chat9_dashboard_ui
+from .owner_chat9_lead_routing import router as owner_chat9_lead_routing_router
 from .owner_chat9_operations import router as owner_chat9_operations_router
 
 # Install the read-only Owner dashboard panel during canonical production composition. This adds
@@ -26,5 +27,6 @@ router.include_router(product_workflows_portal_router)
 router.include_router(support_conversations_router)
 router.include_router(training_academy_router)
 router.include_router(owner_chat9_operations_router)
+router.include_router(owner_chat9_lead_routing_router)
 
 __all__ = ["router"]
