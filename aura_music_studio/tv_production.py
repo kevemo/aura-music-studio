@@ -7,7 +7,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .plans import BASIC_TIMELINE
 from .professional_editor import ProfessionalEditorStore
@@ -43,6 +43,12 @@ def _aware_iso(value: datetime | None) -> str | None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("scheduled_at must include a timezone offset")
     return value.isoformat()
+
+
+class StrictRequest(BaseModel):
+    """Reject undeclared request fields at the TV metadata boundary."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class TVGraphicsPackage(BaseModel):
@@ -103,18 +109,18 @@ class TVProductionDocument(BaseModel):
     updated_at: str = Field(default_factory=_now)
 
 
-class ProgrammeRequest(BaseModel):
+class ProgrammeRequest(StrictRequest):
     title: str = Field(min_length=1, max_length=200)
     synopsis: str = Field(default="", max_length=4000)
     default_graphics_package_id: str | None = Field(default=None, max_length=200)
 
 
-class SeriesRequest(BaseModel):
+class SeriesRequest(StrictRequest):
     title: str = Field(min_length=1, max_length=200)
     season_number: int = Field(ge=1, le=10000)
 
 
-class GraphicsPackageRequest(BaseModel):
+class GraphicsPackageRequest(StrictRequest):
     name: str = Field(min_length=1, max_length=160)
     intro_sequence_id: str | None = Field(default=None, max_length=200)
     outro_sequence_id: str | None = Field(default=None, max_length=200)
@@ -122,7 +128,7 @@ class GraphicsPackageRequest(BaseModel):
     lower_third_sequence_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
-class EpisodeRequest(BaseModel):
+class EpisodeRequest(StrictRequest):
     programme_id: str = Field(min_length=1, max_length=200)
     series_id: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=240)
@@ -143,7 +149,7 @@ class EpisodeRequest(BaseModel):
         return value
 
 
-class EpisodePatchRequest(BaseModel):
+class EpisodePatchRequest(StrictRequest):
     title: str | None = Field(default=None, min_length=1, max_length=240)
     production_code: str | None = Field(default=None, max_length=120)
     synopsis: str | None = Field(default=None, max_length=4000)
