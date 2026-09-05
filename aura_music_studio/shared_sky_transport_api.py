@@ -7,6 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .esp_niche import require_esp_hub_member
+from .owner_identity import owner_session_authorized
 from .shared_sky_destination_adapters import validate_destination_url
 from .shared_sky_relay import SharedSkyRelayError
 from .shared_sky_security import SharedSkyVaultError
@@ -65,9 +66,19 @@ class DestinationValidateRequest(BaseModel):
     endpoint: str = Field(min_length=8, max_length=2000)
 
 
+class DestinationPresetRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    destination_ids: list[str] = Field(min_length=1, max_length=50)
+
+
 def _member_id(request: Request) -> str:
     member, _membership = require_esp_hub_member(request)
     return str(member.user_id)
+
+
+def _owner(request: Request) -> None:
+    if not owner_session_authorized(request):
+        raise HTTPException(401, "Owner authentication required")
 
 
 def _idempotency_key(value: str) -> str:
@@ -221,6 +232,50 @@ def destination_capabilities(request: Request):
     return {"destinations": transport.adapter_matrix(_member_id(request))}
 
 
+@router.post("/shared-sky/api/destination-presets")
+def create_destination_preset(body: DestinationPresetRequest, request: Request):
+    try:
+        return {
+            "preset": transport.create_destination_preset(
+                _member_id(request), body.name, body.destination_ids
+            )
+        }
+    except KeyError as exc:
+        raise HTTPException(404, "One or more Shared Sky destinations were not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/shared-sky/api/destination-presets")
+def list_destination_presets(request: Request):
+    return {"presets": transport.destination_presets(_member_id(request))}
+
+
+@router.post(
+    "/shared-sky/api/broadcasts/{broadcast_id}/destination-presets/{preset_id}/apply"
+)
+def apply_destination_preset(broadcast_id: str, preset_id: str, request: Request):
+    try:
+        return transport.apply_destination_preset(
+            _member_id(request), broadcast_id, preset_id
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Shared Sky broadcast, preset or destination not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/shared-sky/api/transport/capacity")
+def member_transport_capacity(request: Request):
+    return transport.capacity_snapshot(_member_id(request))
+
+
+@router.get("/owner/shared-sky/api/transport/capacity")
+def owner_transport_capacity(request: Request):
+    _owner(request)
+    return transport.capacity_snapshot()
+
+
 @router.post("/shared-sky/api/broadcasts/{broadcast_id}/recordings/{kind}")
 def request_recording(broadcast_id: str, kind: str, request: Request):
     try:
@@ -257,7 +312,6 @@ def validate_custom_destination(body: DestinationValidateRequest, request: Reque
     user_id = _member_id(request)
     try:
         transport.rate_limit(user_id, "destination_validate", limit=30)
-
         endpoint = validate_destination_url(body.endpoint, resolve_dns=True)
     except TransportRateLimited as exc:
         raise HTTPException(429, str(exc), headers={"Retry-After": str(exc.retry_after)}) from exc
@@ -273,6 +327,7 @@ def validate_custom_destination(body: DestinationValidateRequest, request: Reque
 
 
 __all__ = [
+    "DestinationPresetRequest",
     "DestinationValidateRequest",
     "HealthReportRequest",
     "RecordingFinalizeRequest",
