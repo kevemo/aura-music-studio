@@ -63,6 +63,49 @@ class BattleSnapshotMixin:
             rows=con.execute("SELECT cursor,battle_id,event_type,participant_id,correlation_id,created_at FROM shared_sky_battle_events WHERE battle_id=? AND cursor>? ORDER BY cursor LIMIT ?",(battle_id,max(0,int(after_cursor)),max(1,min(1000,int(limit))))).fetchall()
         return [dict(row) for row in rows]
 
+    def viewer_live_battle(self,live_session_id:str)->dict|None:
+        """Return the single current viewer-safe Battle for a LIVE session.
+
+        Terminal Battle history is deliberately excluded. The status ordering is defensive: the
+        normal domain invariant allows only one current Battle, but if legacy/corrupt data contains
+        more than one, an actually running Battle wins over a newer pre-start row. A post-query
+        status check prevents a Battle that terminalises during the lookup from leaking back into
+        the LIVE viewer surface.
+        """
+        session_id=str(live_session_id or "").strip()
+        if not session_id:
+            return None
+        current_statuses={"ready","countdown","active","paused","round_complete","finalising"}
+        for _attempt in range(2):
+            with self._connect() as con:
+                row=con.execute(
+                    """SELECT id FROM shared_sky_battles
+                       WHERE live_session_id=?
+                         AND status IN ('ready','countdown','active','paused','round_complete','finalising')
+                       ORDER BY CASE status
+                           WHEN 'active' THEN 0
+                           WHEN 'paused' THEN 1
+                           WHEN 'finalising' THEN 2
+                           WHEN 'round_complete' THEN 3
+                           WHEN 'countdown' THEN 4
+                           WHEN 'ready' THEN 5
+                           ELSE 6 END,
+                           updated_at DESC, created_at DESC, id DESC
+                       LIMIT 1""",
+                    (session_id,),
+                ).fetchone()
+            if not row:
+                return None
+            snapshot=self.viewer_snapshot(str(row["id"]))
+            battle=snapshot.get("battle") if isinstance(snapshot,dict) else None
+            if (
+                isinstance(battle,dict)
+                and str(battle.get("live_session_id") or "")==session_id
+                and str(battle.get("status") or "") in current_statuses
+            ):
+                return snapshot
+        return None
+
     def viewer_snapshot(self,battle_id:str)->dict:
         return self.battle_snapshot(battle_id,viewer_safe=True)
 
