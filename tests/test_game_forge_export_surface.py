@@ -41,28 +41,36 @@ def test_export_studio_redirects_anonymous_member_to_signin():
     assert response.headers["location"].startswith("/signin?next=/game-creation/export/")
 
 
-def test_export_studio_html_is_truthful_about_adapter_status():
+def test_export_studio_html_is_truthful_about_package_and_release_status():
     request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
     request.state.member = SimpleNamespace(plan=SimpleNamespace(has=lambda _cap: True))
     response = game_export_portal("game_demo", request)
     body = response.body.decode("utf-8")
     lowered = body.lower()
     assert "Game Export Studio" in body
-    assert "No fake engine exports" in body
-    assert "production-ready export" in lowered
+    assert "No fake engine exports or release claims" in body
+    assert "package-ready does not mean production-release-ready" in lowered
+    assert "publisher authenticity" in lowered
     assert "Godot 4 Source Project" in body
     assert "developer-preview" in lowered
     assert "full aura runtime parity" in lowered
 
 
-def test_capability_contract_keeps_external_engines_planned():
-    # The production export contract remains conservative. Godot's real source preview is exposed
-    # through its separate preview endpoint until pinned headless Godot validation earns promotion.
+def test_capability_contract_separates_aura_web_package_from_production_release():
+    # Aura Web can generate a verified executable package, but release readiness stays false until
+    # independently trusted publisher signing is verified. External engine adapters remain planned.
     caps = export_capabilities()
-    assert caps["targets"]["aura_web"]["production_ready"] is True
-    assert caps["targets"]["aura_web"]["executable_export"] is True
+    aura_web = caps["targets"]["aura_web"]
+    assert aura_web["package_ready"] is True
+    assert aura_web["production_ready"] is False
+    assert aura_web["production_release_ready"] is False
+    assert aura_web["executable_export"] is True
+    assert aura_web["publisher_authenticity_verified"] is False
+    assert "publisher_authenticity_not_verified" in aura_web["release_blockers"]
     for target in ("phaser4", "playcanvas", "babylon", "godot"):
+        assert caps["targets"][target]["package_ready"] is False
         assert caps["targets"][target]["production_ready"] is False
+        assert caps["targets"][target]["production_release_ready"] is False
         assert caps["targets"][target]["executable_export"] is False
 
 
