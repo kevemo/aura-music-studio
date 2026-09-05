@@ -34,6 +34,7 @@ class FakeTransport:
         self.register_calls = 0
         self.configure_calls = 0
         self.preflight_calls = 0
+        self.reconcile_calls = 0
         self.events: list[tuple] = []
         self.recordings: list[dict] = []
 
@@ -45,6 +46,10 @@ class FakeTransport:
             "playback": {"capability_state": "credentials_missing"},
             "relay": {"enabled": False},
         }
+
+    def reconcile(self, user_id: str, broadcast_id: str):
+        self.reconcile_calls += 1
+        return self.status(user_id, broadcast_id)
 
     def source(self, user_id: str, source_id: str):
         if source_id not in self.sources:
@@ -161,6 +166,28 @@ def test_inactive_programme_commit_registers_and_configures_one_stable_source(ad
     assert provider.configure_calls == 1
 
 
+def test_inactive_bound_source_reconfigures_without_registering_duplicate(adapter):
+    bridge, provider, _ = adapter
+    first = bridge.bind("u1", "b1", "p1", landscape_snapshot()["profile"])
+    source_id = first["source"]["id"]
+    second = bridge.bind(
+        "u1",
+        "b1",
+        "p1",
+        {"width": 1080, "height": 1920, "orientation": "portrait"},
+        internal_playback=False,
+        recording_enabled=True,
+    )
+    assert second["source"]["id"] == source_id
+    assert second["created"] is False
+    assert second["reconfigured"] is True
+    assert provider.register_calls == 1
+    assert provider.configure_calls == 2
+    assert provider.session["internal_playback"] is False
+    assert provider.session["recording_enabled"] is True
+    assert provider.session["rendition_profile"]["portrait"] == "1080x1920p30"
+
+
 def test_active_transport_rejects_cut_when_not_bound_to_chat3_programme(adapter):
     bridge, provider, base = adapter
     provider.session["state"] = "live"
@@ -191,6 +218,27 @@ def test_active_transport_accepts_cut_when_stable_studio_source_is_bound(adapter
     assert provider.events and provider.events[-1][1] == "studio_programme_committed"
 
 
+def test_active_bound_source_does_not_mutate_transport_configuration(adapter):
+    bridge, provider, base = adapter
+    source = provider.register_source(
+        "u1", "p1", "studio_program", "studio://p1/programme/main", state="ready"
+    )
+    provider.session.update({"state": "live", "source_id": source["id"]})
+    base.broadcasts["b1"]["state"] = "live"
+    result = bridge.bind(
+        "u1",
+        "b1",
+        "p1",
+        {"width": 1080, "height": 1920, "orientation": "portrait"},
+        internal_playback=False,
+        recording_enabled=True,
+    )
+    assert result["reconfigured"] is False
+    assert provider.configure_calls == 0
+    assert provider.session["internal_playback"] is True
+    assert provider.session["recording_enabled"] is False
+
+
 def test_preflight_binds_before_calling_chat2_authority(adapter):
     bridge, provider, _ = adapter
     result = bridge.preflight(
@@ -217,11 +265,13 @@ def test_status_exposes_actual_chat2_recording_and_correlation_truth(adapter):
     assert status["programme_source_bound"] is True
     assert status["correlation_id"] == "corr_1"
     assert status["recordings"][0]["state"] == "recording"
+    assert provider.reconcile_calls == 1
 
     capabilities = bridge.recording_capabilities("u1", "b1")
     assert capabilities["supported"] is True
     assert capabilities["state"] == "recording"
     assert capabilities["manual_stop_supported"] is False
+    assert provider.reconcile_calls == 2
 
 
 def test_recording_action_uses_chat2_request_and_refuses_fake_stop():
