@@ -15,6 +15,15 @@ router = APIRouter(tags=["Shared Sky Internal Media"])
 _PLAYBACK_COOKIE = "shared_sky_playback"
 
 
+def _allow_insecure_playback() -> bool:
+    return (os.getenv("SHARED_SKY_ALLOW_INSECURE_PLAYBACK", "0") or "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _bearer(value: str) -> str:
     clean = (value or "").strip()
     if not clean.lower().startswith("bearer "):
@@ -72,24 +81,6 @@ def shared_sky_media_asset(
     return FileResponse(target, media_type=media_type, headers=headers)
 
 
-@router.get(
-    "/shared-sky/media/{broadcast_id}/{asset_path:path}",
-    include_in_schema=False,
-)
-def shared_sky_media_asset_route(
-    broadcast_id: str,
-    asset_path: str,
-    request: Request,
-    authorization: str = Header(default="", alias="Authorization"),
-):
-    return shared_sky_media_asset(
-        broadcast_id,
-        asset_path,
-        authorization=authorization,
-        playback_cookie=request.cookies.get(_PLAYBACK_COOKIE, ""),
-    )
-
-
 @router.post(
     "/shared-sky/media/{broadcast_id}/authorize",
     include_in_schema=False,
@@ -109,19 +100,16 @@ def authorize_shared_sky_media(
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     seconds = max(1, min(600, int((expiry - datetime.now(timezone.utc)).total_seconds())))
-    allow_insecure = (os.getenv("SHARED_SKY_ALLOW_INSECURE_PLAYBACK", "0") or "0").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    response = Response(status_code=204, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+    response = Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
     response.set_cookie(
         key=_PLAYBACK_COOKIE,
         value=token,
         max_age=seconds,
         path=f"/shared-sky/media/{broadcast_id}/",
-        secure=not allow_insecure,
+        secure=not _allow_insecure_playback(),
         httponly=True,
         samesite="strict",
     )
@@ -138,11 +126,29 @@ def clear_shared_sky_media_authorization(broadcast_id: str):
     response.delete_cookie(
         key=_PLAYBACK_COOKIE,
         path=f"/shared-sky/media/{broadcast_id}/",
-        secure=True,
+        secure=not _allow_insecure_playback(),
         httponly=True,
         samesite="strict",
     )
     return response
+
+
+@router.get(
+    "/shared-sky/media/{broadcast_id}/{asset_path:path}",
+    include_in_schema=False,
+)
+def shared_sky_media_asset_route(
+    broadcast_id: str,
+    asset_path: str,
+    request: Request,
+    authorization: str = Header(default="", alias="Authorization"),
+):
+    return shared_sky_media_asset(
+        broadcast_id,
+        asset_path,
+        authorization=authorization,
+        playback_cookie=request.cookies.get(_PLAYBACK_COOKIE, ""),
+    )
 
 
 @router.get("/owner/shared-sky/api/internal-media/status")
