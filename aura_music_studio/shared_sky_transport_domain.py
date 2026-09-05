@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from .shared_sky_destination_adapters import CapabilityState
 from .shared_sky_transport_browser_playback import TransportBrowserPlaybackMixin
 from .shared_sky_transport_extensions import TransportExtensionsMixin
@@ -43,6 +45,40 @@ class SharedSkyTransportStore(
     path can count toward LIVE. Lower lifecycle/recovery/provider layers retain ownership of
     durable session and destination state.
     """
+
+    def participant_capacity(self, live_session_id: str) -> int:
+        """Return the measured/configured multi-host admission ceiling for one broadcast.
+
+        This is an admission contract only; it does not claim that WebRTC/SFU guest media is
+        deployed. Capacity remains fail-closed unless deployment explicitly configures a bounded
+        value and the referenced canonical transport session exists in a non-terminal state.
+        The product ceiling is eight total participants, including the host.
+        """
+
+        broadcast_id = str(live_session_id or "").strip()
+        if not broadcast_id:
+            return 0
+        try:
+            configured = int(os.getenv("SHARED_SKY_MULTIHOST_MAX_PARTICIPANTS", "0") or 0)
+        except ValueError:
+            return 0
+        configured = max(0, min(configured, 8))
+        if configured < 1:
+            return 0
+        try:
+            with self.connect() as con:
+                row = con.execute(
+                    "SELECT state FROM shared_sky_transport_sessions WHERE broadcast_id=? LIMIT 1",
+                    (broadcast_id,),
+                ).fetchone()
+        except Exception:
+            return 0
+        if not row:
+            return 0
+        state = str(row["state"] or "").strip().lower()
+        if state in {"ended", "failed", "cancelled"}:
+            return 0
+        return configured
 
 
 transport = SharedSkyTransportStore()
