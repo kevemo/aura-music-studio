@@ -4,14 +4,15 @@ import json
 import os
 import sqlite3
 import time
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping
 
 from .backup import StudioBackupManager
 
 EVIDENCE_SCHEMA_VERSION = 1
 _ALLOWED_RESTORE_ENVIRONMENTS = {"test", "ci", "integration", "staging", "recovery"}
+ApplicationRestoreValidator = Callable[[sqlite3.Connection, Path], bool]
 
 
 def _now() -> datetime:
@@ -35,12 +36,7 @@ def _parse_time(value: object) -> datetime | None:
 
 
 def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 30) -> dict:
-    """Load a secret-free restore-drill evidence document.
-
-    This is deliberately evidence, not authority: it can prove that a controlled restore drill
-    completed and remains fresh enough for a release gate, but it never claims that production
-    backups themselves have been restored unless the evidence was generated from that process.
-    """
+    """Load secret-free restore evidence without treating the document as authority by itself."""
     if not path:
         return {
             "configured": False,
@@ -115,6 +111,7 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
         "duration_seconds": payload.get("duration_seconds"),
         "database_integrity": integrity or None,
         "application_data_check": application_check,
+        "application_validation_source": payload.get("application_validation_source"),
         "backup_hashes_verified": hashes_verified,
         "production_backup_used": bool(payload.get("production_backup_used", False)),
         "reason": reason,
@@ -122,11 +119,7 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
 
 
 def probe_runtime_storage(environ: Mapping[str, str] | None = None) -> dict:
-    """Perform bounded, non-destructive connectivity probes of local durable-state dependencies.
-
-    Health/readiness is intentionally cheap. Full SQLite integrity verification belongs in the
-    isolated restore drill, not in an HTTP health endpoint or every metrics scrape.
-    """
+    """Perform bounded non-destructive connectivity probes of local durable-state dependencies."""
     env = environ or os.environ
     db = Path(str(env.get("LSS_DB_PATH") or "data/live_sound_studio.sqlite3")).expanduser().resolve()
     projects = Path(str(env.get("AURA_PROJECTS_ROOT") or "projects")).expanduser().resolve()
@@ -170,11 +163,19 @@ def probe_runtime_storage(environ: Mapping[str, str] | None = None) -> dict:
     }
 
 
-def run_restore_drill(work_dir: Path, *, environment: str = "ci", production_backup: Path | None = None) -> dict:
-    """Run a real isolated backup/restore drill and return secret-free release evidence.
+def run_restore_drill(
+    work_dir: Path,
+    *,
+    environment: str = "ci",
+    production_backup: Path | None = None,
+    application_validator: ApplicationRestoreValidator | None = None,
+) -> dict:
+    """Run an isolated backup/restore drill and return secret-free release evidence.
 
-    Without ``production_backup`` the drill uses deterministic synthetic data. That proves the
-    restore mechanism, not recoverability of current production data, and the evidence says so.
+    Synthetic mode proves the repository's backup/restore mechanism with deterministic probe data.
+    A supplied production backup is stricter: SQLite integrity alone is never treated as an
+    application-level verification. Production-backup evidence can become verified only when the
+    caller supplies an explicit validator that checks representative restored application state.
     """
     environment = str(environment or "").strip().lower()
     if environment not in _ALLOWED_RESTORE_ENVIRONMENTS:
@@ -220,10 +221,12 @@ def run_restore_drill(work_dir: Path, *, environment: str = "ci", production_bac
         integrity_row = con.execute("PRAGMA integrity_check").fetchone()
         integrity = str(integrity_row[0]).lower() if integrity_row else "unknown"
         if production_backup_used:
-            application_data_check = integrity == "ok"
+            application_data_check = bool(application_validator and application_validator(con, target_projects))
+            validation_source = "explicit_validator" if application_validator else "missing"
         else:
             row = con.execute("SELECT value FROM restore_probe WHERE id='probe-1'").fetchone()
             application_data_check = bool(row and row[0] == "expected-value")
+            validation_source = "synthetic_probe"
     finally:
         con.close()
 
@@ -250,6 +253,7 @@ def run_restore_drill(work_dir: Path, *, environment: str = "ci", production_bac
         "verified_file_count": int(inspected.get("verified_files") or 0),
         "database_integrity": integrity,
         "application_data_check": application_data_check,
+        "application_validation_source": validation_source,
         "production_backup_used": production_backup_used,
         "deployment_secrets_changed": bool(restored.get("deployment_secrets_changed", True)),
     }
@@ -263,6 +267,7 @@ def write_restore_evidence(path: Path, evidence: dict) -> Path:
 
 
 __all__ = [
+    "ApplicationRestoreValidator",
     "EVIDENCE_SCHEMA_VERSION",
     "load_restore_evidence",
     "probe_runtime_storage",
