@@ -77,6 +77,10 @@ class IdempotencyConflictError(RuntimeError):
     pass
 
 
+class IdempotencyLeaseLostError(RuntimeError):
+    """Raised when a worker no longer owns an in-progress idempotency claim."""
+
+
 class SharedPersistence:
     """Additive SQLite foundation for cross-domain idempotency and event outbox."""
 
@@ -250,15 +254,19 @@ class SharedPersistence:
         *,
         idempotency_key: str,
         request_hash: str,
+        correlation_id: str,
         response_status: int,
         response_body: Any,
     ) -> None:
-        # Replay state is part of the shared contract too. Reject arbitrary
-        # Python objects rather than silently stringifying them into a response.
-        response_json = _canonical_json(response_body)
+        """Complete a claim only while ``correlation_id`` still owns its lease."""
+
         with self.transaction() as connection:
             row = connection.execute(
-                "SELECT request_hash FROM shared_idempotency WHERE idempotency_key = ?",
+                """
+                SELECT request_hash, correlation_id, state
+                FROM shared_idempotency
+                WHERE idempotency_key = ?
+                """,
                 (idempotency_key,),
             ).fetchone()
             if row is None:
@@ -267,19 +275,36 @@ class SharedPersistence:
                 raise IdempotencyConflictError(
                     "idempotency key was already used for a different request"
                 )
-            connection.execute(
+            # Completion is itself idempotent. Once the first valid owner stores
+            # the replay result, later workers must never replace that result.
+            if row["state"] == "completed":
+                return
+            if row["correlation_id"] != correlation_id:
+                raise IdempotencyLeaseLostError(
+                    "idempotency claim was reclaimed by another worker"
+                )
+
+            # Replay state is part of the shared contract too. Reject arbitrary
+            # Python objects rather than silently stringifying them into a response.
+            response_json = _canonical_json(response_body)
+            cursor = connection.execute(
                 """
                 UPDATE shared_idempotency
                 SET state='completed', response_status=?, response_json=?, updated_at=?
-                WHERE idempotency_key=?
+                WHERE idempotency_key=? AND state='in_progress' AND correlation_id=?
                 """,
                 (
                     int(response_status),
                     response_json,
                     utc_now_iso(),
                     idempotency_key,
+                    correlation_id,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise IdempotencyLeaseLostError(
+                    "idempotency claim is no longer owned by this worker"
+                )
 
     def enqueue_event(
         self,
