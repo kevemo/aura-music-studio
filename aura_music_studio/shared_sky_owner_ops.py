@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
+from .shared_skies_branding import PRODUCT_NAME, install_shared_skies_branding
 from .shared_sky_battle_bootstrap import install_shared_sky_battle_routes
 from .shared_sky_live_bootstrap import install_shared_sky_live_community
 from .shared_sky_media_plane import router as shared_sky_media_plane_router
@@ -16,7 +17,7 @@ from .shared_sky_relay import relay
 from .shared_sky_streaming_studios import shared_sky
 from .shared_sky_worker import SharedSkyWorker, WorkerSettings
 
-router = APIRouter(tags=["Shared Sky Owner Operations"])
+router = APIRouter(tags=["Shared Skies Owner Operations"])
 
 
 def _owner(request: Request) -> None:
@@ -26,6 +27,14 @@ def _owner(request: Request) -> None:
 
 def _bool_env(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _bounded_int_env(name: str, *, default: int = 0, minimum: int = 0, maximum: int = 8) -> int:
+    try:
+        value = int((os.getenv(name) or str(default)).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(value, maximum))
 
 
 def _safe_worker_rows(rows: list[dict]) -> list[dict]:
@@ -54,7 +63,7 @@ def _runtime_snapshot() -> dict:
     relay_health = relay.health().__dict__
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
-        "product": "Shared Sky Streaming Studios",
+        "product": PRODUCT_NAME,
         "scheduler": {
             "enabled": settings.enabled,
             "poll_seconds": settings.poll_seconds,
@@ -75,6 +84,9 @@ def _runtime_snapshot() -> dict:
             "ffmpeg_available": bool(relay_health.get("ffmpeg_available")),
             "scheduler_enabled": settings.enabled,
             "provider_oauth_configured": _bool_env("SHARED_SKY_PROVIDER_OAUTH_READY"),
+            "multi_host_participant_capacity": _bounded_int_env(
+                "SHARED_SKY_MULTIHOST_MAX_PARTICIPANTS"
+            ),
         },
         "truth_boundary": {
             "production_ready": False,
@@ -115,18 +127,18 @@ def owner_shared_sky_runtime_page(request: Request):
         f"<td>{escape(str(row.get('started_at', '')))}</td>"
         "</tr>"
         for row in status["live_broadcasts"]
-    ) or "<tr><td colspan='3'>No live Shared Sky broadcasts.</td></tr>"
+    ) or "<tr><td colspan='3'>No live Shared Skies broadcasts.</td></tr>"
     readiness = (
         deployment["ingest_configured"]
         and deployment["relay_enabled"]
         and deployment["ffmpeg_available"]
         and deployment["scheduler_enabled"]
     )
-    html = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>Shared Sky Owner Runtime</title><style>
+    html = f"""<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>Shared Skies Owner Runtime</title><style>
 body{{margin:0;background:#07101d;color:#eef7ff;font-family:Inter,system-ui,sans-serif}}.wrap{{max-width:1200px;margin:auto;padding:28px}}.grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}}.card{{background:#0e1c31;border:1px solid #ffffff20;border-radius:16px;padding:16px;margin:14px 0}}.metric b{{display:block;font-size:1.7rem;margin-top:4px}}.ok{{color:#73e3aa}}.bad{{color:#ff94aa}}table{{width:100%;border-collapse:collapse}}th,td{{padding:9px;border-bottom:1px solid #ffffff18;text-align:left}}a{{color:#8edcff}}@media(max-width:800px){{.grid{{grid-template-columns:1fr 1fr}}}}
-</style></head><body><div class='wrap'><p><a href='/owner/shared-sky'>← Shared Sky owner controls</a></p><h1>Shared Sky Runtime & Operations</h1><p class='{'ok' if readiness else 'bad'}'>{'Core runtime prerequisites are configured.' if readiness else 'Runtime remains fail-closed until all required ingest/relay/scheduler prerequisites are configured.'}</p><div class='grid'>
+</style></head><body><div class='wrap'><p><a href='/owner/shared-sky'>← Shared Skies owner controls</a></p><h1>Shared Skies Runtime & Operations</h1><p class='{'ok' if readiness else 'bad'}'>{'Core runtime prerequisites are configured.' if readiness else 'Runtime remains fail-closed until all required ingest/relay/scheduler prerequisites are configured.'}</p><div class='grid'>
 <div class='card metric'><small>Projects</small><b>{counts.get('projects', 0)}</b></div><div class='card metric'><small>Destinations</small><b>{counts.get('destinations', 0)}</b></div><div class='card metric'><small>Live</small><b>{counts.get('live', 0)}</b></div><div class='card metric'><small>Schedules</small><b>{counts.get('schedules', 0)}</b></div></div>
-<div class='card'><h2>Deployment readiness</h2><p>Ingest configured: <b>{deployment['ingest_configured']}</b> · Relay enabled: <b>{deployment['relay_enabled']}</b> · FFmpeg available: <b>{deployment['ffmpeg_available']}</b> · Scheduler enabled: <b>{deployment['scheduler_enabled']}</b></p><p>Relay mode: {escape(str(relay_state.get('runtime_mode', 'unknown')))} · Active outputs: {escape(str(relay_state.get('active_outputs', 0)))}</p></div>
+<div class='card'><h2>Deployment readiness</h2><p>Ingest configured: <b>{deployment['ingest_configured']}</b> · Relay enabled: <b>{deployment['relay_enabled']}</b> · FFmpeg available: <b>{deployment['ffmpeg_available']}</b> · Scheduler enabled: <b>{deployment['scheduler_enabled']}</b></p><p>Multi-host admission cap: <b>{deployment['multi_host_participant_capacity']}</b> total participants (0 = disabled) · Relay mode: {escape(str(relay_state.get('runtime_mode', 'unknown')))} · Active outputs: {escape(str(relay_state.get('active_outputs', 0)))}</p></div>
 <div class='card'><h2>Scheduler workers</h2><p>Healthy workers: <b>{scheduler['healthy_workers']}</b> · Poll {scheduler['poll_seconds']}s · Lease {scheduler['lease_seconds']}s · Max attempts {scheduler['max_attempts']}</p><table><thead><tr><th>Worker</th><th>Status</th><th>Health</th><th>Last seen</th></tr></thead><tbody>{worker_rows}</tbody></table></div>
 <div class='card'><h2>Live broadcasts</h2><table><thead><tr><th>Title</th><th>Broadcast ID</th><th>Started</th></tr></thead><tbody>{live_rows}</tbody></table></div>
 <div class='card'><h2>Release truth</h2><p>Provider app/OAuth approval, production ingest, WebRTC/SFU guest media and pre-recorded playout remain separate deployment/provider gates. This page reports their state; it does not fabricate them.</p></div></div></body></html>"""
@@ -144,7 +156,7 @@ def install_shared_sky_owner_ops(app: Any) -> None:
             "/owner/shared-sky/api/runtime",
             owner_shared_sky_runtime,
             methods=["GET"],
-            tags=["Shared Sky Owner Operations"],
+            tags=["Shared Skies Owner Operations"],
         )
     if ("/owner/shared-sky/runtime", ("GET",)) not in existing:
         app.add_api_route(
@@ -153,7 +165,7 @@ def install_shared_sky_owner_ops(app: Any) -> None:
             methods=["GET"],
             response_class=HTMLResponse,
             include_in_schema=False,
-            tags=["Shared Sky Owner Operations"],
+            tags=["Shared Skies Owner Operations"],
         )
 
 
@@ -201,6 +213,7 @@ install_shared_sky_studio_history_graphics(_canonical_app)
 install_shared_sky_studio_ingest(_canonical_app)
 install_chat2_studio_integration(_canonical_app)
 install_chat2_studio_operator(_canonical_app)
+install_shared_skies_branding(_canonical_app)
 
 
 __all__ = ["install_shared_sky_media_plane", "install_shared_sky_owner_ops", "router"]
