@@ -1,21 +1,17 @@
 name: Probe Boppy Anonymous ACE-Step Flow
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/probe-boppy.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Find Boppy generate payload construction
         run: |
           mkdir -p generated/boppy
@@ -35,10 +31,10 @@ jobs:
           (out/'payload_contexts.txt').write_text('\n'.join(chunks),encoding='utf-8')
           print('captured',len(chunks))
           PY
-      - name: Commit probe
-        run: |
-          git config user.name "Aura Music Studio Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add generated/boppy/payload_contexts.txt
-          git commit -m "Inspect Boppy generate payload" || exit 0
-          git push
+      - name: Upload probe result for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: boppy-payload-probe
+          path: generated/boppy/payload_contexts.txt
+          if-no-files-found: error
+          retention-days: 14
