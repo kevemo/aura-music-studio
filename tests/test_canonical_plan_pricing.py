@@ -46,13 +46,14 @@ def test_period_lookup_fails_closed_for_unknown_period():
         get_plan("pro").price_for("weekly")
 
 
-def test_pricing_period_support_does_not_remove_pro_native_entitlements():
+def test_pricing_period_support_preserves_aura_os_but_not_standalone_sls():
     pro = get_plan("pro")
     basic = get_plan("base")
     free = get_plan("free")
 
     assert pro.features > basic.features > free.features
     assert AURA_OS in pro.features
-    assert AURASEC in pro.features
+    assert AURASEC not in pro.features
     assert AURA_OS not in basic.features
     assert AURASEC not in basic.features
+    assert AURASEC not in free.features
