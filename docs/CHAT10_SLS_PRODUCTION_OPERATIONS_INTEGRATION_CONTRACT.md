@@ -81,13 +81,15 @@ Environment variables below are configuration **names only**. Secret values must
 - `LSS_BACKUP_DIR`
 - `LSS_RESTORE_EVIDENCE_PATH`
 - `LSS_RESTORE_EVIDENCE_MAX_AGE_HOURS`
-- `LSS_METRICS_TOKEN`
+- `AURA_MONITORING_ENABLED`
+- `AURA_MONITORING_TOKEN`
 
 ### Request/security controls
 
 - `LSS_CSRF_HMAC_KEY`
 - `LSS_AUTH_RATE_LIMIT`
 - `LSS_AUTH_RATE_WINDOW_SECONDS`
+- `LSS_WEBHOOK_MAX_BYTES`
 - `AURA_WEB_ENABLED`
 - `AURA_WEB_ALLOW_HTTP`
 - `AURA_WEB_TIMEOUT`
@@ -265,6 +267,8 @@ In production:
 - bearer-authenticated non-browser clients do not depend on ambient-cookie CSRF controls.
 
 The application adds CSP, frame denial, MIME sniffing protection, referrer policy, permissions policy, cache controls and HSTS when served as HTTPS.
+
+Provider webhook POSTs are additionally admitted through a bounded raw-body gate before route code buffers the signed payload. Production operators should keep `LSS_WEBHOOK_MAX_BYTES` at a provider-compatible value no larger than the application edge ceiling and validate real provider delivery in staging.
 
 ## 13. Rate limiting and abuse contract
 
