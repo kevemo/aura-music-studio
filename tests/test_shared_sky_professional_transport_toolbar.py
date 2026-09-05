@@ -72,7 +72,8 @@ def test_toolbar_exposes_preflight_evidence_destination_retry_and_stop_confirmat
 
 
 def test_runtime_preflight_message_is_only_set_after_authoritative_response():
-    assert "transportUI.preflight=await api" in TOOLBAR_JS
+    assert "const d=await api(`/shared-sky/studio/api/sessions/${state.session.id}/transport/preflight`" in TOOLBAR_JS
+    assert "transportUI.preflight=d.preflight||null" in TOOLBAR_JS
     assert "transportUI.preflight?.ready?'Authoritative transport preflight passed.'" in TOOLBAR_JS
     assert "Transport preflight is blocked; review the listed evidence." in TOOLBAR_JS
 
