@@ -19,6 +19,7 @@ Command Center membership and SLS native/device licensing are separate commercia
 - `scripts/run_restore_drill.py`
 - `.github/workflows/ci.yml`
 - `.github/workflows/security-gates.yml`
+- `.github/workflows/self-host-smoke.yml`
 
 ### SLS compatibility/native boundary
 
@@ -42,11 +43,13 @@ Command Center membership and SLS native/device licensing are separate commercia
 
 - `aura_music_studio/security.py`
 - `aura_music_studio/auth_security.py`
+- `aura_music_studio/auth_rate_limit.py`
 - `aura_music_studio/csrf_tokens.py`
 - `aura_music_studio/upload_security.py`
 - `aura_music_studio/web_access.py`
 - `aura_music_studio/aura_sandbox.py`
 - `aura_music_studio/protected_data_authority.py`
+- `aura_music_studio/command_templates.py`
 
 ### Queue/background work
 
@@ -101,6 +104,16 @@ Environment variables below are configuration **names only**. Secret values must
 - `AURA_SANDBOX_TOKEN`
 - `AURA_SANDBOX_MAX_RESPONSE_BYTES`
 
+### Configured local media/speech execution
+
+- `AURA_DENOISE_CMD`
+- `AURA_SPATIAL_CMD`
+- `AURA_STT_CMD`
+- `AURA_TTS_CMD`
+- `AURA_NAM_CMD`
+
+These command values are direct executable argument templates, **not shell command lines**. They may use the placeholders documented by their owning adapter and normal shell-style quoting solely to group configured arguments. The application tokenizes the configured template, substitutes runtime values after tokenization and invokes the resulting argv directly without a shell. Pipes, redirects, command separators and background operators are rejected. An integration that genuinely needs a pipeline must expose it through a separately reviewed wrapper executable and configure that executable as the direct command.
+
 ### Queue/export/resource controls
 
 - `LSS_JOB_MAX_PAYLOAD_BYTES`
@@ -153,9 +166,9 @@ CI command:
 python scripts/run_restore_drill.py --environment ci --output /tmp/chat10-restore-evidence.json
 ```
 
-This verifies the restore mechanism with isolated synthetic data. Synthetic evidence must retain `production_backup_used=false` and must not be described as a production-backup restore.
+This verifies the restore mechanism with isolated synthetic data. Synthetic evidence must retain `production_backup_used=false`, may establish mechanism-level evidence, and must not satisfy the production recovery release gate.
 
-A production release candidate additionally requires a controlled restore drill from an actual production backup/snapshot into an isolated recovery environment. The restored data must pass archive/hash checks, SQLite integrity validation, application-level data verification and recorded duration/evidence freshness rules.
+A production release candidate additionally requires a controlled restore drill from an actual production backup/snapshot into an isolated recovery environment. The restored data must pass archive/hash checks, SQLite integrity validation, explicit representative application-level data verification and recorded duration/evidence freshness rules.
 
 Never restore a production backup over live production as a drill.
 
@@ -172,7 +185,7 @@ Operational rules:
 - Dead-letter resolution requires an operator reason.
 - A generic retry policy must never blindly replay financially or externally side-effecting jobs whose feature owner has not defined idempotent retry semantics.
 
-Distributed queue/backpressure behavior remains a release-evidence requirement where production uses multiple application instances.
+Distributed queue/backpressure behavior remains a release-evidence requirement where production uses multiple hosts or independent durable stores.
 
 ## 7. SLS device state contract
 
@@ -195,34 +208,17 @@ Signing/attestation status stays unverified unless cryptographic verification ac
 
 Browser/UI commercial access never grants native command authority.
 
-Privileged native commands require the existing SLS controls applicable to the action, including:
-
-- enrolled device identity;
-- strong re-authentication where required;
-- typed/allowlisted action parameters;
-- bounded approval lifetime;
-- server-side command signing;
-- command-bound attestation where applicable;
-- execute-once/idempotency admission;
-- command sequence/anti-rollback checks;
-- auditable request/approval/execution/verification state.
+Privileged native commands require the existing SLS controls applicable to the action, including enrolled device identity, strong re-authentication where required, typed/allowlisted parameters, bounded approval lifetime, server-side command signing, command-bound attestation where applicable, execute-once admission, command sequence/anti-rollback checks and auditable state.
 
 The application host must not execute arbitrary member-supplied native shell commands.
 
-## 9. Aura sandbox contract
+## 9. Aura sandbox and configured-process execution contract
 
 Aura code execution is available only through the separately configured sandbox transport. The FastAPI host must not execute member/LLM code.
 
-Sandbox requests are bounded and request:
+Sandbox requests are bounded and request no network, ephemeral filesystem, explicit execution timeout, bounded code/input and output, no redirects and explicit current-turn/member/project authorization. Diagnostics must not expose the sandbox bearer token.
 
-- no network;
-- ephemeral filesystem;
-- explicit execution timeout;
-- bounded code/input and response/output;
-- no redirects;
-- explicit current-turn/member/project authorization.
-
-Diagnostics must not expose the sandbox bearer token.
+Configured local media/speech adapters are a different boundary: operators may select a reviewed local executable through the command-template variables in section 3, but the application invokes it with an argv list and `shell=False` semantics. Runtime filenames, text and numeric values cannot introduce additional arguments or shell operators because substitution happens after tokenization. Shell pipelines and redirects are not accepted by these templates.
 
 ## 10. Game Forge execution/export contract
 
@@ -239,13 +235,7 @@ Aura Web export:
 - re-verifies package integrity before download;
 - does not include server secrets, sessions or creator-private host paths.
 
-Godot source adapter:
-
-- remains a developer/source preview;
-- uses a fixed reviewed GDScript template with creator/game text stored as JSON data;
-- does not claim Aura runtime parity;
-- applies aggregate export admission on the public route;
-- remains non-production until a pinned Godot 4 headless validation gate and production release signing evidence are independently verified.
+Godot source adapter remains a developer/source preview, uses a fixed reviewed GDScript template with creator/game text stored as JSON data, does not claim Aura runtime parity, applies aggregate export admission and remains non-production until a pinned Godot 4 headless validation gate and production release signing evidence are independently verified.
 
 ## 11. SSRF/outbound network contract
 
@@ -272,9 +262,11 @@ Provider webhook POSTs are additionally admitted through a bounded raw-body gate
 
 ## 13. Rate limiting and abuse contract
 
-The current authentication sliding-window limiter is process-local memory. It is suitable only as an application-instance guard and must not be described as distributed production rate limiting.
+Production/staging authentication attempts use a SQLite-backed sliding-window ledger on the configured durable `LSS_DB_PATH`. Count-and-insert admission is serialized so application workers sharing that database consume one authoritative attempt budget. Client identifiers are hashed before persistence, expired events are removed, and limiter-store failure is fail-closed at the protected authentication boundary.
 
-Multi-instance release requires a shared authoritative limiter or equivalent edge/gateway enforcement with evidence covering concurrency, expiry, failure behavior and bypass resistance.
+This proves shared-worker admission only for the current single-host/shared-SQLite topology. It must **not** be described as cross-host distributed rate limiting. A multi-host release requires a shared external limiter or equivalent trusted edge/gateway enforcement with evidence covering concurrency, expiry, outage behavior and bypass resistance.
+
+Production also requires trusted client-address attribution through the reverse-proxy/ASGI chain. Untrusted forwarded headers must not spoof identity, and a proxy must not collapse all internet users into one accidental source bucket.
 
 ## 14. Upload contract
 
@@ -282,19 +274,9 @@ Upload paths must use tenant-scoped storage, safe filenames, bounded streaming w
 
 ## 15. Security/release evidence contract
 
-Expected CI/security evidence includes:
+Expected CI/security evidence includes source-completeness audit, Python compilation, full automated tests, isolated restore artifact, Compose/config and Caddy validation, committed-secret scan, dependency audit, static application security scan, CycloneDX SBOM and focused SLS signing/trust/native-execution tests.
 
-- source-completeness audit;
-- Python compilation;
-- full automated test suite;
-- isolated restore drill artifact;
-- Compose/config validation;
-- Caddy validation where applicable;
-- committed-secret scan;
-- dependency vulnerability audit;
-- static application security scan;
-- CycloneDX SBOM artifact;
-- focused SLS signing/trust/native-execution tests.
+Repository GitHub Actions references used by the release evidence workflows are pinned to immutable action commit SHAs. Auxiliary external probe/render workflows are manual, read-only and return artifacts rather than pushing externally derived content into the repository.
 
 A workflow definition committed to the candidate branch is not itself evidence that the workflow ran. Release reports must record the actual run/check result or state the evidence as missing.
 
@@ -302,13 +284,15 @@ A workflow definition committed to the candidate branch is not itself evidence t
 
 Chat 10 cannot self-generate or fake the following evidence:
 
-- successful real production-backup restore drill;
+- successful real production-backup/snapshot restore drill with representative application validation;
 - production provider/network verification;
 - independently trusted native/release signing configuration and key-custody evidence;
 - required platform signing/notarisation evidence;
-- independent penetration test;
-- distributed rate-limit/load evidence;
+- independent penetration test and applicable SLS security benchmarking;
+- cross-host distributed rate-limit or trusted edge evidence if the topology is multi-host;
+- trusted proxy/client-attribution evidence;
 - production monitoring/alert delivery evidence;
+- browser/accessibility and realistic load/soak/fault/capacity evidence;
 - production rollback exercise evidence.
 
 Missing evidence keeps production readiness false.
@@ -323,7 +307,7 @@ Branch/ruleset protection is a repository release-control requirement and remain
 
 ## 18. Operational ownership/escalation
 
-- Coin/Gift ledger, financial reversals and economy correctness: escalate to Chat 5/domain owner.
+- Coin/Gift ledger, financial reversals and economy correctness: Chat 5/domain owner.
 - Shared Sky transport/destination infrastructure: Chat 2/domain owner.
 - Shared Sky professional studio: Chat 3/domain owner.
 - Live viewer/community realtime: Chat 4/domain owner.
@@ -337,17 +321,6 @@ Chat 10 may harden shared production boundaries but must not replace the authori
 
 ## 19. Release evidence handoff
 
-Chat 11 should consume:
-
-- this integration contract;
-- PR/check results and artifacts;
-- restore evidence;
-- SLS trust/signing evidence;
-- unresolved blocker register;
-- incident/rollback runbooks;
-- security scan results/SBOM;
-- performance/load/fault evidence;
-- browser/accessibility evidence;
-- production provider/monitoring evidence.
+Chat 11 should consume this integration contract, PR/check results and artifacts, restore evidence, SLS trust/signing evidence, unresolved blocker register, incident/rollback runbooks, security scan/SBOM evidence, performance/load/fault evidence, browser/accessibility evidence and production provider/monitoring evidence.
 
 No percentage, badge or UI label overrides missing evidence.
