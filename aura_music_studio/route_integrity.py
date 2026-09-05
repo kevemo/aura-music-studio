@@ -7,7 +7,23 @@ from typing import Any
 
 
 _SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
-_CREATION_LIVE_SENTINEL = "/creation-live/capabilities"
+_CREATION_LIVE_PREFIX = "/creation-live"
+_CREATION_LIVE_REQUIRED = {
+    ("/creation-live/capabilities", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/media", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/attach", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/transition", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/emergency-hide", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/detach", ("POST",)),
+    ("/creation-live/shared-sky/broadcasts", ("GET",)),
+    ("/creation-live/projects/{project_name}/markers", ("POST",)),
+    ("/creation-live/projects/{project_name}/returns", ("POST",)),
+    ("/creation-live/projects/{project_name}/community", ("GET",)),
+    ("/creation-live/projects/{project_name}/aura-assistance", ("GET",)),
+    ("/creation-live/ui.js", ("GET",)),
+}
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
@@ -50,13 +66,7 @@ def _operation_suffix(route: Any, *, ordinal: int) -> str:
 
 
 def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
-    """Repair route-level OpenAPI operation-ID collisions without changing dispatch.
-
-    Preserve the first public identifier exactly. Only later route-level collisions receive a
-    deterministic suffix. A separate schema pass handles the one case routes alone cannot model:
-    a single APIRoute exposing multiple HTTP methods under one FastAPI ``unique_id``.
-    """
-
+    """Repair route-level OpenAPI operation-ID collisions without changing dispatch."""
     seen: set[str] = set()
     repaired: list[dict[str, Any]] = []
 
@@ -76,7 +86,6 @@ def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
 
         route.operation_id = candidate
         route.unique_id = candidate
-
         endpoint = getattr(route, "endpoint", None)
         signature = _http_signature(route)
         repaired.append(
@@ -96,14 +105,7 @@ def ensure_unique_operation_ids(routes: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 def _normalize_schema_operation_ids(schema: dict[str, Any]) -> list[dict[str, str]]:
-    """Guarantee per-operation uniqueness in the emitted OpenAPI document.
-
-    FastAPI uses one route-level ID for every method on an APIRoute. When a route intentionally
-    accepts more than one method, OpenAPI therefore receives duplicate IDs even though there is no
-    duplicate runtime route object. Keep the first emitted ID stable and suffix only later schema
-    operations using their exact path and method.
-    """
-
+    """Guarantee per-operation uniqueness in the emitted OpenAPI document."""
     seen: set[str] = set()
     repaired: list[dict[str, str]] = []
     paths = schema.get("paths")
@@ -156,14 +158,9 @@ def _install_openapi_integrity(app: Any) -> None:
         if app.openapi_schema is not None:
             return app.openapi_schema
 
-        # Re-run route-level repair at schema time in case a compatibility installer added a
-        # legitimate route after the initial composition pass.
         late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
         with warnings.catch_warnings():
-            # FastAPI emits this warning before callers can inspect/repair its completed schema.
-            # Suppress only this exact generator warning inside the canonical boundary; every
-            # collision is then repaired and audited immediately below. Other warnings remain.
             warnings.filterwarnings(
                 "ignore",
                 message=r"^Duplicate Operation ID .*",
@@ -188,46 +185,33 @@ def _install_openapi_integrity(app: Any) -> None:
 
 
 def _ensure_creation_live_routes(app: Any) -> None:
-    """Mount Chat 7 on each target app without draining shared module-level routers.
+    """Compose Chat 7 from fresh route objects for every target FastAPI application.
 
-    The repository creates more than one FastAPI instance during validation.  Clearing the whole
-    ``/creation-live`` namespace made later app instances depend on mutable global router state.
-    Instead, keep any valid base routes already mounted, add the base router only when its sentinel
-    is absent, then let the authority/community installers replace only the exact routes they own.
+    The repository builds more than one FastAPI instance during tests and production bootstrap.
+    Module-level APIRouter route lists are mutable process state and therefore cannot be an
+    authoritative installation source.  Rebuild the namespace from endpoint functions on every
+    composition pass, then fail closed unless the complete Chat 7 surface is present.
     """
     from .creation_live_hardening import install_creation_live_hardening
 
     install_creation_live_hardening()
 
-    from .creation_live import CreationLiveMiddleware, router as creation_live_router
-    from .creation_live_authority import install_creation_live_authority_routes
-    from .creation_live_community import install_creation_live_community_route
+    from .creation_live import CreationLiveMiddleware
+    from .creation_live_routes import build_creation_live_router
 
-    has_base = any(
-        getattr(route, "path", None) == _CREATION_LIVE_SENTINEL
+    app.router.routes[:] = [
+        route
         for route in app.router.routes
-    )
-    if not has_base:
-        app.include_router(creation_live_router)
+        if not str(getattr(route, "path", "")).startswith(_CREATION_LIVE_PREFIX)
+    ]
+    app.include_router(build_creation_live_router())
 
-    # These installers surgically replace only the consequential compatibility routes they own;
-    # all other Chat 7 routes remain intact. Repeated calls are idempotent per target application.
-    install_creation_live_authority_routes(app)
-    install_creation_live_community_route(app)
-
-    required = {
-        ("/creation-live/capabilities", ("GET",)),
-        ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/attach", ("POST",)),
-        ("/creation-live/projects/{project_name}/markers", ("POST",)),
-        ("/creation-live/projects/{project_name}/returns", ("POST",)),
-        ("/creation-live/projects/{project_name}/community", ("GET",)),
-    }
     mounted = {
         signature
         for route in app.router.routes
         if (signature := _http_signature(route)) is not None
     }
-    missing = sorted(required - mounted)
+    missing = sorted(_CREATION_LIVE_REQUIRED - mounted)
     if missing:
         raise RuntimeError(f"Chat 7 creation-live route composition failed: missing {missing!r}")
 
@@ -244,17 +228,7 @@ def _ensure_creation_live_routes(app: Any) -> None:
 
 
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
-    """Remove unreachable exact duplicate HTTP routes and harden schema identity.
-
-    Starlette/FastAPI dispatches routes in registration order, so when the same exact path and
-    HTTP-method set is registered twice, every later copy is unreachable. Preserve the first
-    authoritative route exactly as runtime dispatch already does and remove only later exact
-    copies. Mounts, websocket routes, and different method sets are untouched.
-
-    The canonical composition point also installs Chat 7 before signatures are reconciled. After
-    runtime duplicates are removed, repair route-level schema collisions and install a canonical
-    OpenAPI wrapper that also handles per-method collisions.
-    """
+    """Remove unreachable exact duplicate HTTP routes and harden schema identity."""
     _ensure_creation_live_routes(app)
 
     seen: set[tuple[str, tuple[str, ...]]] = set()
