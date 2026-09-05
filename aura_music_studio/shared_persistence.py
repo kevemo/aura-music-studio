@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
@@ -20,7 +21,28 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _validate_json_value(value: Any, *, path: str = "$") -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"non-finite number is not valid JSON at {path}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_value(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"JSON object key must be a string at {path}")
+            _validate_json_value(item, path=f"{path}.{key}")
+        return
+    raise TypeError(f"unsupported non-JSON value at {path}: {type(value).__name__}")
+
+
 def _canonical_json(payload: Any) -> str:
+    _validate_json_value(payload)
     return json.dumps(
         payload,
         sort_keys=True,
