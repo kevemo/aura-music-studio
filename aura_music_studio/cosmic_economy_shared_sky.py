@@ -9,6 +9,7 @@ from .cosmic_economy_integrations import (
     configure_economy_integrations,
     runtime_integrations,
 )
+from .route_integrity import register_route_composition_hook
 
 
 _INTEGRATION_STATUS: dict[str, Any] = {
@@ -91,3 +92,46 @@ def chat5_shared_sky_status() -> dict[str, Any]:
     status = dict(_INTEGRATION_STATUS)
     status["runtime_adapter"] = type(current).__name__
     return status
+
+
+def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
+    path = getattr(route, "path", None)
+    methods = getattr(route, "methods", None)
+    if not isinstance(path, str) or not methods:
+        return None
+    return path, tuple(sorted(str(method).upper() for method in methods))
+
+
+def _restore_chat5_economy_routes(app: Any) -> None:
+    """Reassert Chat 5 route ownership after the production overlay graph is composed.
+
+    The package API mounts these routers normally. Some full-site overlay installers rebuild route
+    collections during production composition, so this final hook removes any conflicting exact
+    path+method copies and appends the canonical Chat 5 APIRoutes once. This deliberately includes
+    the legacy Creation Coin compatibility URLs so they cannot fall back to the older credit-wallet
+    checkout implementation.
+    """
+
+    from .cosmic_economy_api import router as economy_router
+    from .cosmic_economy_legacy_bridge import router as legacy_router
+    from .cosmic_economy_owner_api import router as owner_router
+
+    source_routers = (economy_router, legacy_router, owner_router)
+    claimed = {
+        signature
+        for source_router in source_routers
+        for source_route in source_router.routes
+        if (signature := _http_signature(source_route)) is not None
+    }
+    if claimed:
+        app.router.routes[:] = [
+            route
+            for route in app.router.routes
+            if _http_signature(route) not in claimed
+        ]
+    for source_router in source_routers:
+        app.router.routes.extend(source_router.routes)
+    app.openapi_schema = None
+
+
+register_route_composition_hook("chat5_cosmic_economy", _restore_chat5_economy_routes)
