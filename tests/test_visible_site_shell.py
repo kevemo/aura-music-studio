@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import aura_music_studio.member_dashboard as dashboard
-from aura_music_studio.brand_migration import rebrand_text
+from aura_music_studio.brand_migration import BrandMigrationMiddleware, rebrand_text
 
 
 def test_public_home_presentation_migration_is_current_truthful_and_idempotent():
@@ -22,7 +22,7 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     current = rebrand_text(source)
     assert "href='/creative-house'>Creative House" in current
     assert "Creative DNA + renderer bridge connected" in current
-    assert "Aura Core 0.20 connected" in current
+    assert "Rhian Core 0.20 connected" in current
     assert "Creative DNA project layer connected" in current
     assert "<h3>Basic</h3>" in current
     assert "href='/signup?plan=base'>Choose Basic" in current
@@ -30,13 +30,29 @@ def test_public_home_presentation_migration_is_current_truthful_and_idempotent()
     assert "built around Creative DNA continuity" in current
     assert "external generation backends remain deployment-configurable" in current
     assert "data-pfh-aura-core='0.20'" in current
+    assert "Rhiannon Intelligence Systems" in current
+    assert "Rhian Intelligence" in current
+    assert "Rhian Today & Tasks" in current
     assert "Host runtime connected · final rig pending" in current
     assert "External AI models, speech services, renderers, OAuth services and the final 3D rig have separate runtime/configuration states" in current
     assert "Workspace architecture staged" not in current
     assert "Unified project layer in build" not in current
+    assert "Aura Core" not in current
 
     again = rebrand_text(current)
     assert again.count("data-pfh-aura-core='0.20'") == 1
+
+
+def test_rhiannon_identity_replaces_legacy_aura_display_copy_without_touching_internal_paths():
+    source = "Powered by Elevate Souls Productions & Aura AI Systems | Aura Core | Aura Today | /aura-intelligence | aura_task_id"
+    current = rebrand_text(source)
+    assert "Rhiannon Intelligence Systems" in current
+    assert "Rhian Core" in current
+    assert "Rhian Today" in current
+    assert "Aura AI Systems" not in current
+    assert "Aura Core" not in current
+    assert "/aura-intelligence" in current
+    assert "aura_task_id" in current
 
 
 def _client(monkeypatch, membership):
@@ -51,21 +67,23 @@ def _client(monkeypatch, membership):
     monkeypatch.setattr(dashboard.esp, "membership", lambda _user_id: membership)
     app = FastAPI()
     app.include_router(dashboard.router)
+    app.add_middleware(BrandMigrationMiddleware)
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(monkeypatch):
+def test_regular_member_dashboard_surfaces_rhian_core_but_not_esp_social_tools(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
-    assert "Aura Core 0.20" in text
-    assert "Aura Today" in text
+    assert "Rhian Core 0.20" in text
+    assert "Rhian Today" in text
     assert "Voice Conversation" in text
     assert "Artifacts" in text
     assert "Tasks &amp; Briefings" in text
     assert "Connected Workspace" in text
     assert "Verified Workflows" in text
-    assert "Open Aura Intelligence" in text
+    assert "Open Rhian Intelligence" in text
+    assert "Aura Core" not in text
     assert "social-management systems, niche training and creator/agent operations live only inside the separately owner-approved ESP Hub" in text
     assert "ESP access is owner-approved only" in text
     assert "does not recruit creators from other networks" in text
