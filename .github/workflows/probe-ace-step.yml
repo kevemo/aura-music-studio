@@ -1,21 +1,18 @@
 name: Probe ACE-Step Space API
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'generated/**'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   probe:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Gradio client
         run: pip install --quiet --upgrade gradio_client
       - name: Inspect ACE-Step target endpoints
@@ -36,10 +33,10 @@ jobs:
                   print("OUTPUT_IDS", dep.get("outputs"))
                   print("OUTPUT_COUNT", len(dep.get("outputs", [])))
           PY
-      - name: Commit probe result
-        run: |
-          git config user.name "Aura Music Studio Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add generated/ace_api.txt
-          git commit -m "Write compact ACE-Step generation schema" || exit 0
-          git push
+      - name: Upload probe result for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ace-step-probe
+          path: generated/ace_api.txt
+          if-no-files-found: error
+          retention-days: 14
