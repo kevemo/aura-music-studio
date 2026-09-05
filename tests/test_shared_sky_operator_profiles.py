@@ -167,19 +167,27 @@ def test_other_integrity_conflict_is_safe_and_does_not_leak_sqlite_text():
     assert "secret-db-detail" not in str(raised.value.detail)
 
 
-def test_installer_is_idempotent_on_canonical_app():
-    from aura_music_studio.api import app
+def test_installer_is_idempotent_on_production_app():
+    from app import app
 
     expected = {
         "/shared-sky/studio/api/projects/{project_id}/operator-profiles",
         "/shared-sky/studio/api/projects/{project_id}/operator-profiles/{profile_id}",
         "/shared-sky/studio/api/projects/{project_id}/operator-profiles/{profile_id}/activate",
     }
-    before = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
+
+    def matching_paths():
+        return [
+            getattr(route, "path", "")
+            for route in app.router.routes
+            if "operator-profiles" in getattr(route, "path", "")
+        ]
+
+    before = matching_paths()
     install_shared_sky_operator_profiles(app)
-    after_once = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
+    after_once = matching_paths()
     install_shared_sky_operator_profiles(app)
-    after_twice = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
+    after_twice = matching_paths()
     assert after_twice == after_once
     assert len(after_twice) == 5
     assert expected.issubset(set(after_twice))
