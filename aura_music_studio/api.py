@@ -30,6 +30,7 @@ from .aura_live_show_control import router as aura_live_show_control_router
 from .aura_support_center import router as aura_support_center_router
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
 from .cosmic_economy_api import router as cosmic_economy_router
+from .cosmic_economy_legacy_bridge import router as cosmic_economy_legacy_router
 from .cosmic_economy_owner_api import router as cosmic_economy_owner_router
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
@@ -95,6 +96,7 @@ app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
 app.include_router(cosmic_economy_router)
+app.include_router(cosmic_economy_legacy_router)
 app.include_router(cosmic_economy_owner_router)
 app.include_router(owner_commerce_member_communications_router)
 app.include_router(esp_public_network_router)
