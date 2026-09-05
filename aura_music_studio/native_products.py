@@ -11,7 +11,9 @@ class BillingPeriod(StrEnum):
 
 
 AURA_OS_ENTITLEMENT = "aura_os"
+# Compatibility identifier only. Public security branding is the locked SLS name.
 AURA_SEC_ENTITLEMENT = "aura_sec"
+SLS_PUBLIC_NAME = "Elevate Souls Productions Secure Lattice System (SLS)"
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,8 @@ class NativeProduct:
         return data
 
 
+# Product ids and entitlement keys are intentionally retained for API/database compatibility.
+# Only public display names are migrated to the locked SLS brand.
 NATIVE_PRODUCTS: dict[str, NativeProduct] = {
     "aura_os": NativeProduct(
         id="aura_os",
@@ -74,7 +78,7 @@ NATIVE_PRODUCTS: dict[str, NativeProduct] = {
     ),
     "aura_sec": NativeProduct(
         id="aura_sec",
-        name="Aura Sec",
+        name=SLS_PUBLIC_NAME,
         currency="GBP",
         monthly_price=Decimal("4.99"),
         annual_price=Decimal("34.99"),
@@ -83,7 +87,7 @@ NATIVE_PRODUCTS: dict[str, NativeProduct] = {
     ),
     "aura_os_sec_bundle": NativeProduct(
         id="aura_os_sec_bundle",
-        name="Aura OS + Aura Sec",
+        name=f"Aura OS + {SLS_PUBLIC_NAME}",
         currency="GBP",
         monthly_price=Decimal("7.99"),
         annual_price=Decimal("69.99"),
