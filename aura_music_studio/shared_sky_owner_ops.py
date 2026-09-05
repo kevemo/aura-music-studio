@@ -162,11 +162,12 @@ def install_shared_sky_owner_ops(app: Any) -> None:
 
 
 # ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Register the two owner-only handlers at import time to bypass late compatibility-router
-# snapshotting; both handlers retain their own owner-session gate and no secret-bearing data is
-# added to their responses.
+# here. Register owner operations and Chat 3's professional studio at import time to bypass late
+# compatibility-router snapshotting; every handler retains its own membership/owner gate.
 from .api import app as _canonical_app
+from .shared_sky_control_room import install_shared_sky_control_room
 
+install_shared_sky_control_room(_canonical_app)
 install_shared_sky_owner_ops(_canonical_app)
 
 
