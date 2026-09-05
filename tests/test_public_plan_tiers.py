@@ -28,18 +28,20 @@ def test_public_tier_names_match_current_spec_with_compatibility_id_preserved():
     assert rows[1]["monthly_price_usd"] == "4.99"
 
 
-def test_unlimited_pro_uses_canonical_native_aura_os_and_aura_sec_entitlements():
+def test_unlimited_pro_preserves_canonical_native_ids_but_sls_stays_separate():
     assert AURA_OS == AURA_OS_ENTITLEMENT == "aura_os"
     assert AURASEC == AURA_SEC_ENTITLEMENT == "aura_sec"
 
-    for entitlement in (AURA_OS, AURASEC):
-        assert entitlement not in PLANS["free"].features
-        assert entitlement not in PLANS["base"].features
-        assert entitlement in PLANS["pro"].features
+    assert AURA_OS not in PLANS["free"].features
+    assert AURA_OS not in PLANS["base"].features
+    assert AURA_OS in PLANS["pro"].features
+
+    for plan_id in ("free", "base", "pro"):
+        assert AURASEC not in PLANS[plan_id].features
 
     public_pro = next(row for row in public_plans() if row["id"] == "pro")
     assert AURA_OS_ENTITLEMENT in public_pro["features"]
-    assert AURA_SEC_ENTITLEMENT in public_pro["features"]
+    assert AURA_SEC_ENTITLEMENT not in public_pro["features"]
 
 
 def test_subscription_entitlements_do_not_contain_esp_or_social_access_roles():
