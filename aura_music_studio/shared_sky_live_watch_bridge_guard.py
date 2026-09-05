@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
@@ -86,6 +85,7 @@ def watch_page_bridge_guard(broadcast_id: str, request: Request):
     if hardened == html:
         return response
     headers = dict(response.headers)
+    headers.pop("content-length", None)
     headers["Cache-Control"] = "no-store"
     return HTMLResponse(
         hardened,
