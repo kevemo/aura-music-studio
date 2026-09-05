@@ -24,7 +24,7 @@ from .aura_chat_store import AuraChatStore
 from .aura_productivity_tools import source_markdown, source_records
 from .aura_reasoning_modes import detect_mode_command, get_reasoning_mode, mode_config, set_reasoning_mode
 
-router = APIRouter(tags=["Aura Realtime"])
+router = APIRouter(tags=["Rhian Realtime"])
 store = AuraChatStore()
 base_agent = AuraAgent(store=store)
 _thread_locks: dict[str, threading.Lock] = {}
@@ -192,7 +192,7 @@ def _build_generation(
     memories = store.memories(user_id, enabled_only=True, limit=50)
     system_parts = [core.AURA_CORE_SYSTEM, config.instruction]
     if requested_mode:
-        system_parts.append(f"The member just switched this conversation to Aura {active_mode.title()} mode. Acknowledge that briefly if relevant.")
+        system_parts.append(f"The member just switched this conversation to Rhian {active_mode.title()} mode. Acknowledge that briefly if relevant.")
     if summary:
         system_parts.append("Conversation summary from older turns:\n" + summary)
     memory_text = _memory_context(memories)
@@ -208,7 +208,7 @@ def _build_generation(
         system_parts.append(attach_text)
     if tool_results:
         system_parts.append(
-            "Aura tool results for the latest request. Treat these as the authoritative execution/retrieval record:\n"
+            "Rhian tool results for the latest request. Treat these as the authoritative execution/retrieval record:\n"
             + json.dumps(tool_results, ensure_ascii=False, default=str)[:65000]
         )
     if memory_saved:
@@ -221,7 +221,7 @@ def _build_generation(
 def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str]):
     lock = _lock(thread_id)
     if not lock.acquire(blocking=False):
-        yield _event("error", error="Aura is already generating a response in this conversation")
+        yield _event("error", error="Rhian is already generating a response in this conversation")
         return
     collected: list[str] = []
     saved = False
@@ -286,12 +286,12 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
                 yield _event("delta", text=fallback.text)
             except Exception as exc:
                 errors.append(f"fallback: {type(exc).__name__}: {exc}")
-                yield _event("error", error="No Aura reasoning model is reachable", detail=" | ".join(errors[-3:]))
+                yield _event("error", error="No Rhian reasoning model is reachable", detail=" | ".join(errors[-3:]))
                 return
 
         text_out = "".join(collected).strip()
         if not text_out:
-            yield _event("error", error="Aura produced an empty response")
+            yield _event("error", error="Rhian produced an empty response")
             return
         sources_block = source_markdown(tool_results)
         if sources_block:
@@ -324,7 +324,7 @@ def _stream_response(member, thread_id: str, text: str, attachment_ids: list[str
 def stream_message(thread_id: str, body: StreamMessageRequest, request: Request):
     member = _member(request)
     if not store.thread(member.user_id, thread_id):
-        raise HTTPException(404, "Aura conversation not found")
+        raise HTTPException(404, "Rhian conversation not found")
     return StreamingResponse(
         _stream_response(member, thread_id, body.message, body.attachment_ids),
         media_type="application/x-ndjson",

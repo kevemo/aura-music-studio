@@ -7,7 +7,6 @@ from aura_music_studio.aura_agent_core import AURA_CORE_SYSTEM
 from aura_music_studio.aura_chat_store import AuraChatStore
 from aura_music_studio.aura_context_extensions import _inject_messages, register_context_provider, unregister_context_provider
 from aura_music_studio.aura_profiles import AuraProfileStore
-from aura_music_studio.brand_migration import rebrand_text
 
 
 def _user(accounts: AccountStore, email: str, name: str) -> str:
@@ -70,11 +69,17 @@ def test_context_extension_is_appended_after_rebranded_aura_core_and_not_tool_pr
             {"role": "user", "content": "Help with my mix"},
         ]
         injected = _inject_messages(messages, "user-a", "thread-a")
-        current_core = rebrand_text(AURA_CORE_SYSTEM)
-        assert injected[0]["content"].startswith(current_core)
-        assert "Pulsar-Frequency House" not in injected[0]["content"]
-        assert "PRIVATE PROFILE FOR user-a/thread-a" in injected[0]["content"]
-        assert injected[0]["content"].index("PRIVATE PROFILE") > len(current_core) - 1
+        injected_text = str(injected[0]["content"])
+        public_core_prefix = (
+            "You are Rhian, the everyday assistant identity of Rhiannon Intelligence Systems, "
+            "and the general AI co-creator and operating intelligence inside "
+            "Elevate Souls Productions Content Creation Command Center"
+        )
+        assert injected_text.startswith(public_core_prefix)
+        assert "You are Aura" not in injected_text
+        assert "Pulsar-Frequency House" not in injected_text
+        assert "PRIVATE PROFILE FOR user-a/thread-a" in injected_text
+        assert injected_text.index("PRIVATE PROFILE") > injected_text.index(public_core_prefix)
         assert messages[0]["content"] == AURA_CORE_SYSTEM
 
         tool_prompt = [{"role": "system", "content": "You are Aura's private tool router."}]
