@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
+from aura_music_studio import voice_house_api
 from aura_music_studio.request_context import reset_current_user_id, set_current_user_id
 from aura_music_studio.rights import RightsLedger, VoiceProfile, authorize_voice_profile
 from aura_music_studio.song_dna_execution_overlay import router as studio_router
@@ -31,6 +32,23 @@ def test_challenge_created_profile_migrates_to_explicit_self_relationship_and_ti
     assert profile.subject_relationship == "self"
     assert profile.consent_recorded_at == profile.created_at
     assert profile.active is True
+
+
+def test_other_authorized_person_gets_distinct_owner_recording_challenge(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_house_api, "_project", lambda _name: tmp_path)
+    result = voice_house_api.create_voice_challenge("demo", "other_authorized_person")
+    assert result["subject_relationship"] == "other_authorized_person"
+    assert "other authorised voice owner" in result["instruction"].lower()
+    rows = voice_house_api._read_challenges(tmp_path)
+    stored = next(row for row in rows if row["id"] == result["challenge_id"])
+    assert stored["subject_relationship"] == "other_authorized_person"
+
+
+def test_voice_challenge_rejects_unknown_subject_relationship(tmp_path, monkeypatch):
+    monkeypatch.setattr(voice_house_api, "_project", lambda _name: tmp_path)
+    with pytest.raises(Exception) as exc:
+        voice_house_api.create_voice_challenge("demo", "public_celebrity")
+    assert getattr(exc.value, "status_code", None) == 400
 
 
 def test_authenticated_save_binds_profile_to_tenant_and_rejects_cross_tenant_write(tmp_path):
@@ -95,7 +113,7 @@ def test_reference_quality_gate_accepts_real_voice_band_audio_and_records_qualit
     assert scan["peak"] > 0.0
 
 
-def test_reference_quality_gate_rejects_too_short_and_silent_audio(tmp_path):
+def test_reference_quality_gate_rejects_too_short_silent_and_low_rate_audio(tmp_path):
     with pytest.raises(ValueError, match="at least 1 second"):
         analyze_voice_sample(_tone(tmp_path / "short.wav", seconds=0.25))
 
@@ -103,6 +121,9 @@ def test_reference_quality_gate_rejects_too_short_and_silent_audio(tmp_path):
     sf.write(silent, np.zeros(24000, dtype=np.float64), 24000, subtype="PCM_16")
     with pytest.raises(ValueError, match="effectively silent|insufficient detectable"):
         analyze_voice_sample(silent)
+
+    with pytest.raises(ValueError, match="at least 16 kHz"):
+        analyze_voice_sample(_tone(tmp_path / "low-rate.wav", sample_rate=8000))
 
 
 def test_voice_profile_version_rename_revoke_delete_lifecycle(tmp_path):
