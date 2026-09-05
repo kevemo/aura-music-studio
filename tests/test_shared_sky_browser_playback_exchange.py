@@ -7,6 +7,8 @@ import pytest
 from aura_music_studio.shared_sky_destination_adapters import CapabilityState
 from aura_music_studio.shared_sky_internal_media_api import (
     authorize_shared_sky_media,
+    clear_shared_sky_media_authorization,
+    router as media_router,
     shared_sky_media_asset,
 )
 from aura_music_studio.shared_sky_transport_browser_playback import TransportBrowserPlaybackMixin
@@ -77,6 +79,22 @@ def test_authorize_exchange_sets_secure_httponly_broadcast_scoped_cookie(monkeyp
     assert seen == {"token": "signed-token-value", "broadcast_id": "broadcast_cookie"}
 
 
+def test_cookie_clear_matches_secure_and_development_modes(monkeypatch):
+    monkeypatch.delenv("SHARED_SKY_ALLOW_INSECURE_PLAYBACK", raising=False)
+    secure = clear_shared_sky_media_authorization("broadcast_cookie")
+    secure_cookie = secure.headers["set-cookie"]
+    assert "Path=/shared-sky/media/broadcast_cookie/" in secure_cookie
+    assert "Secure" in secure_cookie
+    assert "Max-Age=0" in secure_cookie
+
+    monkeypatch.setenv("SHARED_SKY_ALLOW_INSECURE_PLAYBACK", "1")
+    insecure = clear_shared_sky_media_authorization("broadcast_cookie")
+    insecure_cookie = insecure.headers["set-cookie"]
+    assert "Path=/shared-sky/media/broadcast_cookie/" in insecure_cookie
+    assert "Secure" not in insecure_cookie
+    assert "Max-Age=0" in insecure_cookie
+
+
 def test_native_media_asset_accepts_scoped_cookie_and_rejects_wrong_broadcast(tmp_path, monkeypatch):
     from aura_music_studio import shared_sky_internal_media_api as module
 
@@ -135,3 +153,26 @@ def test_bearer_header_takes_precedence_over_cookie(monkeypatch, tmp_path):
     )
     assert Path(response.path).resolve() == target.resolve()
     assert seen == ["header-token"]
+
+
+def test_media_router_exposes_browser_authorization_exchange_before_asset_catchall():
+    routes = [
+        (getattr(route, "path", None), set(getattr(route, "methods", None) or set()))
+        for route in media_router.routes
+    ]
+    assert ("/shared-sky/media/{broadcast_id}/authorize", {"POST"}) in routes
+    assert ("/shared-sky/media/{broadcast_id}/authorize", {"DELETE"}) in routes
+    asset_index = next(
+        idx for idx, (path, methods) in enumerate(routes)
+        if path == "/shared-sky/media/{broadcast_id}/{asset_path:path}" and "GET" in methods
+    )
+    post_index = next(
+        idx for idx, (path, methods) in enumerate(routes)
+        if path == "/shared-sky/media/{broadcast_id}/authorize" and "POST" in methods
+    )
+    delete_index = next(
+        idx for idx, (path, methods) in enumerate(routes)
+        if path == "/shared-sky/media/{broadcast_id}/authorize" and "DELETE" in methods
+    )
+    assert post_index < asset_index
+    assert delete_index < asset_index
