@@ -9,9 +9,12 @@ Commercial/product entitlement and ESP organisational authority are independent.
 - Existing product access remains driven by `plans.py` / `Plan.has(...)` and active membership state.
 - Existing membership middleware remains in `access_control.py` unchanged.
 - ESP organisational role/action policy lives in `org_authority.py`.
-- A paid plan never grants Owner/Admin/Agent/Creator authority.
+- A paid plan never grants Owner/Admin/Agent/Creator/Moderator authority.
 - An ESP role never grants a paid plan feature.
 - Owner commercial overrides require explicit `OwnerOverrideEvidence` and an audit callback.
+- `Moderator` is an additive Owner-assigned permission, not a substitute for `Agent` and not a primary `esp_roles` value.
+- Non-Owner LIVE moderation requires both `Agent` and `Moderator`; Agent alone, Moderator alone, Creator + Moderator, or a paid plan alone all fail closed.
+- The shared Moderator permission is limited to muting a user, removing a comment, timing a user out, removing a viewer, escalating a report, and flagging a LIVE stream. Domain UI/workflow implementation remains with the owning moderation workstream.
 
 ## Canonical imports
 
@@ -25,9 +28,11 @@ from aura_music_studio.shared_contracts import (
     ProductEntitlement, ProjectIdentity, RequestIdentity, StreamingDestinationReference,
     UserIdentity, WorkspaceIdentity,
 )
-from aura_music_studio.org_authority import OrgAction, OrgAuthority, OrgRole, roles_from_account
+from aura_music_studio.org_authority import (
+    LIVE_MODERATION_ACTIONS, OrgAction, OrgAuthority, OrgRole, roles_from_account,
+)
 from aura_music_studio.authorization import (
-    AuthorizationContext, require_authorized_feature,
+    AuthorizationContext, require_authorized_feature, require_live_moderation_authority,
     require_org_authority, require_product_entitlement,
 )
 from aura_music_studio.capabilities import (
@@ -44,11 +49,21 @@ from aura_music_studio.api_errors import ApiError, ApiErrorCode
 
 Shared test objects are imported from `aura_music_studio.testing`. Fixtures identify themselves as test data and are never production provider evidence.
 
+## Organisational authority and Moderator grants
+
+`roles_from_account(...)` keeps the existing primary ESP role field intact. `esp_roles` continues to represent primary organisational roles such as Agent and Creator. `Moderator` is deliberately ignored if placed in that primary field and is only accepted from the separate server-authoritative `esp_permissions` or `esp_additional_roles` field.
+
+Use `require_live_moderation_authority(context, action)` for any shared LIVE moderation boundary. The helper accepts only `LIVE_MODERATION_ACTIONS` and delegates to the central `OrgAuthority` policy. Owners retain Owner authority; every non-Owner caller must have both `OrgRole.AGENT` and `OrgRole.MODERATOR`.
+
 ## Persistence
 
 `SharedPersistence.initialize()` applies additive schema version 1. It creates `shared_schema_migrations`, `shared_idempotency`, and `shared_event_outbox` without replacing existing domain tables.
 
 Use `SharedPersistence.transaction()` plus `enqueue_event(..., connection=connection)` when a domain mutation and consequential event must commit atomically. Reusing an idempotency key with a different canonical request hash is a conflict, never a replay.
+
+`canonical_request_hash(...)` accepts deterministic JSON values only. It sorts object keys, rejects non-JSON values instead of coercing them to strings, and rejects non-finite numbers. This prevents distinct requests from collapsing onto the same lossy string representation.
+
+`SharedPersistence(":memory:")` uses a per-instance shared-memory SQLite database anchored for the object's lifetime, so initialization, idempotency calls, and outbox calls can safely use separate connections. Call `close()` when an in-memory store is no longer needed.
 
 ## Capability truth
 
@@ -77,8 +92,9 @@ Pending entries use an unavailable fallback and never mimic success.
 1. Reuse existing durable string IDs; do not force a UUID migration.
 2. Validate untrusted cross-domain payloads with the Pydantic contracts.
 3. Keep roles, product entitlements, balances and provider capability server-authoritative.
-4. Reuse canonical shared status values instead of inventing duplicate strings.
-5. Put domain-specific data in versioned `EventEnvelope.payload`.
-6. Derive external-provider capability from server configuration and approval evidence.
-7. A UI label, feature branch or adapter is never provider-success evidence.
-8. When an owning workstream is merged, update `ROUTES` to its verified route path/state instead of leaving stale provisional discovery metadata.
+4. Treat Moderator as a separate Owner-assigned permission; never infer it from Agent, subscription tier, or client state.
+5. Reuse canonical shared status values instead of inventing duplicate strings.
+6. Put domain-specific data in versioned `EventEnvelope.payload`.
+7. Derive external-provider capability from server configuration and approval evidence.
+8. A UI label, feature branch or adapter is never provider-success evidence.
+9. When an owning workstream is merged, update `ROUTES` to its verified route path/state instead of leaving stale provisional discovery metadata.
