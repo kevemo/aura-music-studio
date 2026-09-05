@@ -43,20 +43,49 @@ Owns the durable financial schema and core transaction service:
 Owns integration hardening and compatibility seams:
 
 - `IntegratedCosmicEconomy`;
-- global idempotency ownership;
+- global purchase/Gift-send idempotency ownership;
 - durable finance request admission/rate limiting;
-- operational evidence for rejected financial actions;
+- replay-safe rate idempotency reservations;
+- non-financial operational evidence for rejected money actions;
 - extended purchase/reversal reconciliation;
 - `configure_economy_integrations(...)`;
 - `economy_service(...)`.
 
-`economy_service(...)` is the canonical service factory neighbouring chats should consume.
+### `aura_music_studio.cosmic_economy_command_idempotency`
+
+`CommandBoundCosmicEconomy` binds consequential non-purchase commands to an exact request fingerprint and result reference.
+
+Covered commands:
+
+- Owner Coin adjustment;
+- promotional Coin grant;
+- Gift reversal.
+
+A key reused with different user, amount, campaign, Gift, reason or reference is rejected with `IDEMPOTENCY_KEY_REUSED` rather than silently returning an unrelated financial result.
+
+### `aura_music_studio.cosmic_purchase_checkout`
+
+`CheckoutBoundCosmicEconomy` persists provider checkout identity:
+
+- internal purchase ID;
+- provider;
+- provider payment ID;
+- checkout URL;
+- checkout status.
+
+The same internal purchase reuses its stored provider checkout. A provider payment reference cannot be bound to two purchases.
 
 ### `aura_music_studio.cosmic_economy_personal_limits`
 
-`PersonalLimitCosmicEconomy` extends the canonical runtime with member-controlled lower spending caps. `economy_service(...)` returns this runtime class.
+`PersonalLimitCosmicEconomy` is the canonical runtime returned by `economy_service(...)`.
 
-Personal caps can only make the effective Gift-spend limit stricter. They cannot raise a configured platform hard limit.
+It adds:
+
+- member-controlled lower spending caps;
+- personal limit audit history;
+- atomic per-creator Gift-receiving controls.
+
+The runtime inheritance chain includes checkout binding, exact command idempotency and the base integration hardening, so normal API/internal consumers cannot bypass those safety layers by constructing the standard service.
 
 ### `aura_music_studio.cosmic_payments`
 
@@ -65,6 +94,8 @@ Provider-neutral payment boundary:
 - `CoinPaymentProvider` protocol;
 - `CoinCheckout` result;
 - `coin_payment_providers` explicit provider registry.
+
+`CoinPaymentProvider.create_checkout(...)` receives a server-generated idempotency key. A compliant real provider adapter must use the provider's official idempotency/retrieve-or-create mechanism so one internal purchase cannot create multiple chargeable payment intents.
 
 No provider is considered available until an official adapter is explicitly registered. Client redirects never credit Coins.
 
@@ -80,13 +111,13 @@ Audited Owner operations:
 - creator receipt holds/releases;
 - promotional Coin grants;
 - Coin-pack availability;
-- Gift availability;
+- Gift catalogue availability;
 - discrepancy review/resolution;
 - truthful finance/liability snapshot.
 
 ### `aura_music_studio.cosmic_economy_owner_api`
 
-Protected HTTP routes for Chat 9 Owner/Admin surfaces, including finance operational-event inspection.
+Protected HTTP routes for Chat 9 Owner/Admin surfaces, including finance operational-event inspection and per-creator Gift-receiving controls.
 
 ## Persistence and transaction model
 
@@ -98,13 +129,14 @@ Coin ledger UPDATE and DELETE operations are blocked by database triggers. Corre
 
 ## Important tables
 
-Core financial tables include:
+Core financial tables:
 
 - `coin_accounts`;
 - `coin_ledger_entries`;
 - `coin_packs`;
 - `coin_purchases`;
 - `payment_webhook_events`;
+- `coin_purchase_checkouts`;
 - `gift_definitions`;
 - `gift_transactions`;
 - `creator_gift_receipts`;
@@ -114,13 +146,15 @@ Core financial tables include:
 - `economy_reconciliation_discrepancies`;
 - `economy_outbox`.
 
-Integration/safety tables include:
+Safety/integration tables:
 
 - `economy_rate_events`;
 - `economy_rate_idempotency`;
 - `economy_operational_events`;
+- `economy_command_idempotency`;
 - `personal_spending_limits`;
-- `personal_spending_limit_changes`.
+- `personal_spending_limit_changes`;
+- `creator_gift_controls`.
 
 ## Coin ledger rules
 
@@ -152,22 +186,29 @@ Owner catalogue changes can disable/enable a stored pack version without rewriti
 
 Member route:
 
-- `GET /economy/coin-packs`
+- `GET /economy/coin-packs`.
 
-Owner routes include:
+Owner routes:
 
 - `POST /owner/economy/coin-packs`;
 - `POST /owner/economy/coin-packs/{pack_id}/versions/{version}/availability`.
 
 ## Payment/purchase contract
 
-Member purchase command:
+Member command:
 
 - `POST /economy/me/coin-purchases`;
-- required `Idempotency-Key` header;
-- request contains only authoritative pack/version selection and provider name;
-- server loads Coin quantity and fiat price from stored catalogue data;
-- response remains non-crediting until a verified provider event is accepted.
+- required `Idempotency-Key` header.
+
+Flow:
+
+1. server creates/replays the internal Coin purchase from authoritative pack/version data;
+2. server checks `coin_purchase_checkouts`;
+3. if checkout is already bound, it is returned without another provider call;
+4. otherwise provider `create_checkout(...)` is called with the internal purchase ID as provider idempotency key;
+5. provider payment ID + checkout URL are bound atomically to the purchase;
+6. this route still credits zero Coins;
+7. only a verified provider event may confirm and credit the purchase.
 
 Webhook:
 
@@ -177,7 +218,8 @@ Webhook:
 - forged/unverified events are rejected;
 - `confirmed` credits once;
 - `failed`/`cancelled` close a pending purchase without Coin credit;
-- refunds/chargebacks/dispute reversals use compensating accounting.
+- refunds/chargebacks/dispute reversals use compensating accounting;
+- persisted checkout status is synchronized from the resulting authoritative purchase state.
 
 Production state remains fail-closed while no real Coin payment provider adapter/credentials are registered.
 
@@ -189,13 +231,13 @@ Original first-party seed Gift:
 - version: `1`;
 - Coin cost: `10`.
 
-The catalogue stores original display/accessibility/asset metadata. Historical Gift transactions snapshot Gift version and Coin cost.
+Historical Gift transactions snapshot Gift version and Coin cost.
 
 Member route:
 
-- `GET /economy/gifts`
+- `GET /economy/gifts`.
 
-Owner routes include:
+Owner routes:
 
 - `POST /owner/economy/gift-catalogue`;
 - `POST /owner/economy/gift-catalogue/{gift_id}/versions/{version}/availability`.
@@ -218,8 +260,9 @@ The server validates:
 - correct recipient membership in that live context;
 - Gift ID/version availability;
 - region/policy eligibility through shared adapter;
-- spending policy;
+- platform spending policy;
 - member personal spending cap;
+- creator-specific Gift-receiving state;
 - risk decision;
 - sufficient available Coins;
 - server-side Coin cost;
@@ -235,11 +278,23 @@ A successful commit atomically links:
 
 A failed Gift transaction changes no financial balance.
 
+## Per-creator Gift receiving control
+
+Owner route:
+
+- `POST /owner/economy/creators/{creator_recipient_id}/gift-receiving`.
+
+State is stored in `creator_gift_controls`.
+
+A database trigger rejects insertion of a committed Gift transaction while that recipient is disabled. Because the trigger fires inside the same money-moving database transaction, any tentative ledger debit and creator receipt are rolled back with the Gift.
+
+Disabled recipients produce `CREATOR_GIFT_RECEIVING_DISABLED` and non-financial operational evidence rather than consuming sender Coins.
+
 ## Idempotency and request admission
 
-Coin purchases and Gift sends use global financial idempotency ownership. Cross-account reuse is rejected.
+Purchase and Gift-send keys have global account ownership. Cross-account reuse is rejected.
 
-Finance request admission is durable in the economy database rather than client/browser memory.
+Finance request admission is durable in the economy database.
 
 Configuration:
 
@@ -249,7 +304,9 @@ Configuration:
 
 Invalid limit configuration fails closed.
 
-`economy_rate_idempotency` reserves a request key in the same transaction as rate admission, so concurrent same-key retries consume one admission slot before the underlying financial transaction resolves.
+`economy_rate_idempotency` reserves a request key in the same transaction as rate admission, so concurrent same-key retries consume one admission slot.
+
+`economy_command_idempotency` separately binds Owner adjustments, promotional grants and Gift reversals to an exact request fingerprint/result.
 
 Chat 10 may add edge/distributed abuse controls. It must not remove this financial-service boundary.
 
@@ -288,7 +345,8 @@ Current event classes include:
 - `economy.insufficient_balance`;
 - `economy.risk_hold`;
 - `economy.risk_block`;
-- `economy.account_restriction_block`.
+- `economy.account_restriction_block`;
+- `economy.creator_receiving_block`.
 
 These records do not debit/credit Coins and do not expose provider secrets or internal fraud thresholds.
 
@@ -321,6 +379,8 @@ Owner statement route:
 
 Gift reversal creates linked compensation and creator-receipt reversal while preserving the original Gift and ledger debit.
 
+Gift reversal idempotency is bound to the exact Gift/reason/reference. A new key cannot re-reverse an already reversed Gift.
+
 Payment refunds/chargebacks preserve original purchase credit evidence and create explicit reversing accounting. If spend has already occurred, recovery debt is represented explicitly.
 
 No reversal path deletes committed financial history.
@@ -352,13 +412,7 @@ Owner route:
 
 - `POST /owner/economy/promotional-credits`.
 
-Grant requires:
-
-- canonical user ID;
-- integer Coin quantity;
-- campaign reference;
-- idempotency key;
-- Owner reason/audit evidence.
+Grant requires canonical user ID, integer Coin quantity, campaign reference, idempotency key and Owner reason/audit evidence.
 
 Promotional issuance remains separately visible in finance reporting.
 
@@ -402,7 +456,7 @@ The following remain null/unknown unless real configured accounting evidence exi
 
 Gross Coin sale data must not be presented as profit.
 
-## Realtime event contract — Chat 4 / Chat 3
+## Realtime event contract — Chats 3 and 4
 
 Committed Gift event:
 
@@ -412,36 +466,19 @@ Reversal event:
 
 - `shared_sky.gift.reversed`.
 
-Display-safe payload may contain:
+Display-safe payload may contain event/Gift transaction/live-session IDs, privacy-appropriate sender display reference, recipient creator ID, Gift ID/version/presentation metadata, quantity, optional Battle/round references, occurrence time, correlation ID and accessibility animation references.
 
-- event ID;
-- Gift transaction ID;
-- live session ID;
-- sender display reference subject to privacy policy;
-- recipient creator ID;
-- Gift ID/version/name metadata;
-- Coin cost/quantity required for Gift presentation;
-- optional Battle/round references;
-- occurred-at/correlation ID;
-- accessibility/animation references.
+Do not expose raw payment data, provider secrets, fraud scores or unapproved creator payout values.
 
-Do not expose raw payment information, provider secrets, fraud scores or unapproved creator payout values.
-
-Chat 4/3 must not infer financial success before the committed authoritative result/event.
+Chats 3/4 must not infer financial success before the committed authoritative result/event.
 
 ## Battle contract — Chat 6
 
-Chat 5 owns only financial commit/reversal truth.
+Chat 5 owns financial commit/reversal truth only.
 
 Chat 6 receives stable Gift transaction/event IDs plus optional Battle/session/round references.
 
-Chat 6 owns:
-
-- Battle eligibility under Battle rules;
-- score value;
-- team allocation;
-- round state;
-- reversal correction policy.
+Chat 6 owns Battle eligibility under Battle rules, score value, team allocation, round state and reversal correction policy.
 
 Chat 5 never mutates Battle score directly.
 
@@ -469,7 +506,7 @@ Consume committed/reversed Gift IDs and optional Battle references only.
 
 ### Chat 9
 
-Consume creator statements, member history, finance snapshot, operational events, risk queues, receipt controls, promotional grants, catalogue controls and reconciliation review APIs. Do not create duplicate finance truth.
+Consume creator statements, member history, finance snapshot, operational events, risk queues, creator receiving controls, receipt controls, promotional grants, catalogue controls and reconciliation review APIs. Do not create duplicate finance truth.
 
 ### Chat 10
 
@@ -477,7 +514,7 @@ Own production secret/config management, external queues/outbox delivery, distri
 
 ### Chat 11
 
-Verify migrations/schema, provider configuration, financial invariants, CI evidence, reconciliation and all release blockers before production enablement.
+Verify schema/migrations, provider configuration, financial invariants, CI evidence, reconciliation and release blockers before production enablement.
 
 ## Production blockers / intentional fail-closed state
 
