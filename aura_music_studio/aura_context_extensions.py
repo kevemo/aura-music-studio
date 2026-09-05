@@ -7,7 +7,7 @@ from typing import Callable
 from . import aura_agent_core as core
 from .aura_esp_tools import install_aura_esp_tools
 from .brand_migration import rebrand_text
-from .branding import AI_PRODUCER_NAME, PRODUCT_FULL_NAME
+from .branding import AI_PRODUCER_NAME, AI_SYSTEM_NAME, PRODUCT_FULL_NAME
 
 ContextProvider = Callable[[str, str], str | None]
 
@@ -71,7 +71,10 @@ def _inject_messages(messages: list[dict], user_id: str, thread_id: str) -> list
     branded_content = rebrand_text(content)
     branded_content = branded_content.replace(
         _CORE_IDENTITY_PREFIX,
-        f"You are {AI_PRODUCER_NAME}, the general AI co-creator and operating intelligence inside",
+        (
+            f"You are {AI_PRODUCER_NAME}, the everyday assistant identity of {AI_SYSTEM_NAME}, "
+            "and the general AI co-creator and operating intelligence inside"
+        ),
         1,
     )
     copied[0]["content"] = branded_content
