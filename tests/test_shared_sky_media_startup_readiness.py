@@ -38,12 +38,14 @@ class _FakeProcess:
         return self._returncode
 
 
-def _setup(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, *, recording_enabled: bool = False):
     monkeypatch.setenv("SHARED_SKY_PLAYBACK_BASE_URL", "https://sky.example/shared-sky/media")
     monkeypatch.setenv("SHARED_SKY_PLAYBACK_SIGNING_SECRET", "startup-readiness-secret")
     monkeypatch.setenv("SHARED_SKY_INGEST_BASE_URL", "rtmps://ingest.example.com/live")
     monkeypatch.setenv("SHARED_SKY_INTERNAL_MEDIA_ENABLED", "1")
     monkeypatch.setenv("SHARED_SKY_INTERNAL_MEDIA_ROOT", str(tmp_path / "media"))
+    if recording_enabled:
+        monkeypatch.setenv("SHARED_SKY_RECORDING_LOCAL_ROOT", str(tmp_path / "recordings"))
 
     accounts = AccountStore(tmp_path / "accounts.sqlite3")
     signup = accounts.signup(
@@ -77,7 +79,7 @@ def _setup(tmp_path, monkeypatch):
         source_id=source["id"],
         internal_playback=True,
         rendition_profile={"renditions": ["720p"]},
-        recording_enabled=False,
+        recording_enabled=recording_enabled,
         ingest_session_id=None,
     )
     monkeypatch.setattr(
@@ -89,7 +91,7 @@ def _setup(tmp_path, monkeypatch):
             ffmpeg_available=True,
             ffprobe_available=True,
             media_root=str(tmp_path / "media"),
-            recording_root_configured=False,
+            recording_root_configured=recording_enabled,
             active_jobs=0,
             runtime_mode="test-media",
         ),
@@ -129,6 +131,22 @@ def _install_managed_job(monkeypatch, tmp_path, broadcast_id: str, *, ready: boo
     return job_id, output
 
 
+def _install_external_worker_ack(monkeypatch, tmp_path, broadcast_id: str):
+    output = tmp_path / "worker" / broadcast_id / "720p" / "index.m3u8"
+    monkeypatch.setattr(
+        internal_media,
+        "start_hls",
+        lambda **kwargs: [{
+            "job_id": "external_worker_hls",
+            "broadcast_id": broadcast_id,
+            "kind": "hls",
+            "rendition": "720p",
+            "pid": 52001,
+            "output_path": str(output),
+        }],
+    )
+
+
 def test_internal_live_requires_nonempty_playlist_from_managed_media_process(tmp_path, monkeypatch):
     user, transport, broadcast = _setup(tmp_path, monkeypatch)
     job_id, output = _install_managed_job(
@@ -165,3 +183,30 @@ def test_managed_media_process_exit_before_playlist_fails_broadcast(tmp_path, mo
     assert row["reason_code"] == "internal_playback_process_exited_before_ready"
     with internal_media._lock:
         internal_media._jobs.pop(job_id, None)
+
+
+def test_media_filesystem_oserror_is_normalized_and_never_leaves_starting_state(tmp_path, monkeypatch):
+    user, transport, broadcast = _setup(tmp_path, monkeypatch)
+
+    def fail_hls(**kwargs):
+        raise OSError("simulated media root failure")
+
+    monkeypatch.setattr(internal_media, "start_hls", fail_hls)
+    with pytest.raises(Exception):
+        transport.start(user["id"], broadcast["id"], "startup-oserror-key")
+    assert transport.status(user["id"], broadcast["id"])["session"]["state"] == BroadcastState.FAILED
+
+
+def test_recording_process_oserror_degrades_live_instead_of_escaping_lifecycle(tmp_path, monkeypatch):
+    user, transport, broadcast = _setup(tmp_path, monkeypatch, recording_enabled=True)
+    _install_external_worker_ack(monkeypatch, tmp_path, broadcast["id"])
+
+    def fail_recording(**kwargs):
+        raise OSError("simulated recorder spawn failure")
+
+    monkeypatch.setattr(internal_media, "start_recording", fail_recording)
+    result = transport.start(user["id"], broadcast["id"], "recording-oserror-key")
+    assert result["internal_playback"] is True
+    assert result["partial"] is True
+    assert result["broadcast"]["session"]["state"] == BroadcastState.DEGRADED
+    assert {item["reason_code"] for item in result["failures"]} == {"recording_start_failed"}
