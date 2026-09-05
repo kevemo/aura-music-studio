@@ -14,6 +14,7 @@ from aura_music_studio.professional_editor_security_overlay import (
 from aura_music_studio.professional_image_compositor import _apply_effect
 from aura_music_studio.visual_effect_catalogue_hardening import (
     _VIDEO_COLOUR_IDS,
+    _validate_target_media,
     compile_effect_graph_hardened,
     install_visual_effect_catalogue_hardening,
     router as hardening_router,
@@ -104,6 +105,32 @@ def test_video_colour_catalogue_does_not_advertise_unexecuted_mix_or_keyframes()
             "video",
             keyframes={"value": [{"time": 0.0, "value": 0.1}]},
         )
+
+
+def test_target_media_contract_rejects_cross_media_item_and_track_ids():
+    state = {
+        "branch": {
+            "items": [
+                {"id": "image-1", "kind": "image_layer"},
+                {"id": "video-1", "kind": "video_clip"},
+            ],
+            "tracks": [
+                {"id": "image-track", "kind": "image"},
+                {"id": "video-track", "kind": "video"},
+            ],
+        }
+    }
+    image_spec = base.EFFECTS["image.filter.invert"]
+    video_spec = base.EFFECTS["video.color.exposure"]
+    assert _validate_target_media(state, "item", "image-1", image_spec)["kind"] == "image_layer"
+    assert _validate_target_media(state, "item", "video-1", video_spec)["kind"] == "video_clip"
+    assert _validate_target_media(state, "track", "image-track", image_spec)["kind"] == "image"
+    with pytest.raises(ValueError, match="requires a video_clip"):
+        _validate_target_media(state, "item", "image-1", video_spec)
+    with pytest.raises(ValueError, match="requires a image_layer"):
+        _validate_target_media(state, "item", "video-1", image_spec)
+    with pytest.raises(ValueError, match="requires a image"):
+        _validate_target_media(state, "track", "video-track", image_spec)
 
 
 def test_saved_system_rebuilds_untrusted_runtime_fields_from_catalogue(tmp_path, monkeypatch):
