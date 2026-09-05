@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .accounts import AccountStore
+from .audit import AuditLedger
 from .cosmic_economy import EconomyError
 from .cosmic_economy_integrations import economy_service
 from .cosmic_economy_owner_ops import EconomyOwnerOperations
@@ -52,6 +54,11 @@ class AvailabilityRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
 
+class CreatorGiftReceivingRequest(BaseModel):
+    enabled: bool
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class DiscrepancyResolutionRequest(BaseModel):
     resolution_note: str = Field(min_length=3, max_length=2000)
 
@@ -88,6 +95,35 @@ def creator_receipt_hold(receipt_id: str, payload: ReceiptHoldRequest, request: 
             reason=payload.reason,
             reference=payload.reference,
         )
+    except EconomyError as exc:
+        _raise(exc)
+
+
+@router.post("/creators/{creator_recipient_id}/gift-receiving")
+def creator_gift_receiving(
+    creator_recipient_id: str,
+    payload: CreatorGiftReceivingRequest,
+    request: Request,
+):
+    _owner(request)
+    try:
+        economy = economy_service()
+        result = economy.set_creator_gift_receiving(
+            creator_recipient_id,
+            enabled=payload.enabled,
+            actor="owner_session",
+            reason=payload.reason,
+        )
+        AuditLedger(AccountStore(economy.db_path)).append(
+            actor="owner_session",
+            action="cosmic_economy.creator_gift_receiving_changed",
+            details={
+                "creator_recipient_id": creator_recipient_id,
+                "receiving_enabled": payload.enabled,
+                "reason": payload.reason,
+            },
+        )
+        return result
     except EconomyError as exc:
         _raise(exc)
 
