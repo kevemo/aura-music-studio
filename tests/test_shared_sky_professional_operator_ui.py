@@ -1,0 +1,83 @@
+from __future__ import annotations
+
+from aura_music_studio import shared_sky_professional_canvas as canvas
+from aura_music_studio.shared_sky_professional_operator_ui import (
+    OPERATOR_HTML,
+    OPERATOR_JS,
+    enhanced_operator_html,
+    install_professional_operator_ui,
+)
+
+
+def _base(_project_id: str) -> str:
+    return (
+        "<html><head><style>.base{}</style></head><body>"
+        "<aside class='right panel'><section id='transportConsole'></section><h2>Inspector</h2></aside>"
+        "<script>const projectId='project-1';function keySafe(){return true};"
+        "function render(){};const state={session:{},project:{scenes:[]},selected:new Set()};"
+        "const $=()=>null,$$=()=>[];const api=async()=>({});function handle(){};"
+        "function assign(){};async function loadHistory(){}</script></body></html>"
+    )
+
+
+def test_operator_ui_injection_is_idempotent_and_follows_transport_console():
+    once = enhanced_operator_html("project-1", _base)
+    twice = enhanced_operator_html("project-1", lambda _project_id: once)
+    assert once == twice
+    assert once.count("id='operatorConsole'") == 1
+    assert once.index("id='transportConsole'") < once.index("id='operatorConsole'")
+    assert once.index("id='operatorConsole'") < once.index("<h2>Inspector</h2>")
+
+
+def test_operator_ui_loads_and_activates_only_server_profiles():
+    assert "/operator-profiles`" in OPERATOR_JS
+    assert "/activate`" in OPERATOR_JS
+    assert "operatorUI.profiles=d.profiles||[]" in OPERATOR_JS
+    assert "operatorUI.profiles.find(p=>p.is_active)" in OPERATOR_JS
+    assert "localStorage" not in OPERATOR_JS
+
+
+def test_custom_hotkeys_override_fixed_listener_without_double_fire():
+    assert "{capture:true}" in OPERATOR_JS
+    assert "stopImmediatePropagation" in OPERATOR_JS
+    assert "if(!keySafe(e)" in OPERATOR_JS
+    assert "eventShortcut(e)" in OPERATOR_JS
+
+
+def test_programme_commands_require_confirmation_from_custom_hotkey_and_macro():
+    assert "command==='cut'||command==='transition'" in OPERATOR_JS
+    assert "custom operator hotkey" in OPERATOR_JS
+    assert "macro.commands.some(c=>c==='cut'||c==='transition')" in OPERATOR_JS
+    assert "It will change Programme" in OPERATOR_JS
+
+
+def test_macro_execution_is_explicit_sequential_and_aborts_on_failure():
+    assert "data-operator-macro" in OPERATOR_JS
+    assert "for(const command of macro.commands)" in OPERATOR_JS
+    assert "await executeOperatorCommand(command)" in OPERATOR_JS
+    assert "catch{return;}" in OPERATOR_JS
+    for forbidden in ("transport_start", "recording_start", "participant_remove", "destination_retry"):
+        assert forbidden not in OPERATOR_JS
+
+
+def test_operator_commands_use_existing_versioned_studio_and_marker_routes():
+    for route in ("/cut", "/transition", "/transition/complete", "/undo", "/redo", "/preview", "/markers"):
+        assert route in OPERATOR_JS
+    assert "expected_version:state.session.version" in OPERATOR_JS
+    assert "expected_studio_version" not in OPERATOR_JS
+
+
+def test_installer_wraps_professional_renderer_once(monkeypatch):
+    monkeypatch.setattr(canvas, "professional_html", _base)
+    install_professional_operator_ui(object())
+    first = canvas.professional_html
+    install_professional_operator_ui(object())
+    second = canvas.professional_html
+    assert first is second
+    assert getattr(second, "_shared_sky_operator_ui", False) is True
+    assert second("project-1").count("id='operatorConsole'") == 1
+
+
+def test_operator_ui_explains_macro_authority_boundary():
+    assert "Transport, recording, participant and destination mutations are not valid macro commands" in OPERATOR_HTML
+    assert "Programme-changing macros confirm every run" in OPERATOR_HTML
