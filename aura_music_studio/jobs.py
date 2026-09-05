@@ -96,6 +96,15 @@ class StudioJobQueue:
             raise ValueError(f"Job payload exceeds the configured {limit}-byte admission limit")
         return encoded
 
+    @staticmethod
+    def _idempotent_row(con: sqlite3.Connection, user_id: str, job_type: str, idem: str):
+        return con.execute(
+            """SELECT * FROM studio_jobs
+               WHERE user_id=? AND job_type=? AND idempotency_key=?
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id, job_type, idem),
+        ).fetchone()
+
     def submit(
         self,
         user_id: str,
@@ -114,12 +123,7 @@ class StudioJobQueue:
 
         with self._connect() as con:
             if idem:
-                existing = con.execute(
-                    """SELECT * FROM studio_jobs
-                       WHERE user_id=? AND job_type=? AND idempotency_key=?
-                       ORDER BY created_at DESC LIMIT 1""",
-                    (user_id, job_type, idem),
-                ).fetchone()
+                existing = self._idempotent_row(con, user_id, job_type, idem)
                 if existing:
                     return dict(existing)
 
@@ -132,12 +136,25 @@ class StudioJobQueue:
             if existing:
                 return dict(existing)
 
-            con.execute(
-                """INSERT INTO studio_jobs
-                   (id,user_id,project_name,job_type,status,priority,created_at,payload_json,idempotency_key)
-                   VALUES (?,?,?,?, 'queued', ?, ?, ?, ?)""",
-                (job_id, user_id, project_name, job_type, int(priority), _now(), payload_json, idem),
-            )
+            try:
+                con.execute(
+                    """INSERT INTO studio_jobs
+                       (id,user_id,project_name,job_type,status,priority,created_at,payload_json,idempotency_key)
+                       VALUES (?,?,?,?, 'queued', ?, ?, ?, ?)""",
+                    (job_id, user_id, project_name, job_type, int(priority), _now(), payload_json, idem),
+                )
+            except sqlite3.IntegrityError:
+                # A concurrent request can pass the lookup above before another transaction commits.
+                # The partial unique index is the authoritative concurrency guard. Only convert a
+                # collision into success when the exact idempotency tuple now exists; otherwise the
+                # integrity error could represent an unrelated database invariant and must surface.
+                if not idem:
+                    raise
+                existing = self._idempotent_row(con, user_id, job_type, idem)
+                if existing:
+                    return dict(existing)
+                raise
+
             row = con.execute("SELECT * FROM studio_jobs WHERE id=?", (job_id,)).fetchone()
         return dict(row)
 
