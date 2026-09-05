@@ -4,9 +4,9 @@ Status: additive Chat 8 contract for `development/full-site-build`.
 
 ## Purpose
 
-Game Forge Visual Logic is a first-party browser node workbench backed by a closed compiler. It does not execute creator-authored JavaScript, Python, shader source or arbitrary expressions. A successful compile writes sanitized `BehaviorNodeDNA` rows into the canonical `GameWorldDNA`; the existing Aura World Logic runtime then executes those rows during private/public playtest builds.
+Game Forge Visual Logic is a first-party browser node workbench backed by a closed compiler. It does not execute creator-authored JavaScript, Python, shader source or arbitrary expressions. A successful compile writes sanitized `BehaviorNodeDNA` rows into the canonical `GameWorldDNA`; existing Game Forge runtime projections then execute only the operations they explicitly support.
 
-This is intentionally narrower than a general-purpose scripting language. Only behavior operations with a verified executable World Logic runtime are exposed.
+This is intentionally narrower than a general-purpose scripting language. A node is exposed only after an executable runtime path, sanitizer and automated tests are verified in the repository.
 
 ## Canonical implementation
 
@@ -18,10 +18,11 @@ Browser workbench:
 
 - `aura_music_studio.game_forge_visual_logic_portal`
 
-Existing runtime reused:
+Existing runtime and sanitizers reused:
 
 - `aura_music_studio.game_forge_world_logic`
-- `aura_music_studio.game_forge_world_logic_runtime`
+- `aura_music_studio.game_forge_gameplay`
+- `aura_music_studio.game_forge_runtime_state`
 - `aura_music_studio.game_forge_world.GameWorldDNA`
 - `aura_music_studio.game_forge_world.BehaviorNodeDNA`
 
@@ -35,7 +36,9 @@ Visual graph schema:
 
 Compiler:
 
-`aura_world_logic.v1`
+`aura_world_logic.v2`
+
+The v2 compiler extends the original closed World Logic compiler with gameplay operations already executed by the Aura3D runtime-state kernel. The graph persistence schema remains backward compatible.
 
 A graph records:
 
@@ -49,19 +52,27 @@ A graph records:
 - compiler/schema versions
 - created/updated timestamps
 
-Node authoring position is persisted for the visual workbench. Runtime behavior is not derived from arbitrary canvas geometry.
+Node authoring position is persisted for the visual workbench. Runtime behavior is never derived from arbitrary canvas geometry.
 
 ## Runtime-verified node operations
 
-The current executable allowlist is exactly:
+World Logic operations:
 
 - `follow_target`
 - `timer`
 - `door`
 
-These operations are already executed by both Aura2D/Aura3D World Logic layers.
+Aura3D gameplay operations, verified in `game_forge_runtime_state` through `gameplay_runtime_payload`:
 
-The broader `BehaviorOp` model is not automatically exposed as visual scripting. New node types must first have a reviewed executable browser-runtime implementation, sanitization contract and tests.
+- `collectible`
+- `damage`
+- `checkpoint`
+- `patrol`
+- `quest_trigger`
+
+The broader `BehaviorOp` model is not automatically exposed as visual scripting. New node types must first have a reviewed executable runtime implementation, sanitization contract and tests.
+
+The capability response separates `world_logic_ops` from `aura3d_gameplay_ops` so clients do not have to infer runtime support.
 
 ## Edge semantics
 
@@ -79,15 +90,23 @@ Rules:
 
 ## Sanitization
 
-Visual Logic deliberately reuses the existing World Logic runtime sanitizer. Only operation-specific safe fields survive persistence and compilation.
+Visual Logic reuses the sanitizer already trusted by each executable runtime path.
 
-Examples:
+World Logic examples:
 
 - `follow_target`: target, speed, stop distance
 - `timer`: seconds, repeat, event text
 - `door`: axis, distance, speed, trigger distance, auto-close, close delay
 
-Unknown fields such as script snippets or URLs are removed and are not persisted in the graph or compiled Behavior DNA.
+Aura3D gameplay examples:
+
+- `collectible`: bounded points, respawn flag, respawn seconds
+- `damage`: bounded amount, checkpoint-reset flag, cooldown seconds
+- `checkpoint`: bounded label
+- `patrol`: axis, distance, speed, ping-pong flag
+- `quest_trigger`: bounded event text, once flag
+
+Unknown fields such as script snippets, JavaScript text or URLs are removed and are not persisted in the graph or compiled Behavior DNA.
 
 Numeric values are clamped to the same bounded ranges used by the executable runtime.
 
@@ -100,6 +119,8 @@ Current requirements include:
 - follow targets must resolve to an existing World entity
 - `follow_target` requires kinematic or dynamic Physics DNA
 - `door` requires kinematic Physics DNA
+- `patrol` requires kinematic or dynamic Physics DNA
+- `collectible`, `damage`, `checkpoint` and `quest_trigger` require Physics DNA for collision behavior
 - core player/camera entities cannot be authored through this graph
 - entity behavior-count safety limits remain enforced
 
@@ -151,7 +172,8 @@ No filesystem path is accepted from the caller.
 
 Capability responses explicitly report:
 
-- supported runtime operations
+- all verified runtime operations
+- World Logic vs Aura3D gameplay operation groups
 - compile target `WorldEntityDNA.behaviors`
 - compile-order-only edge semantics
 - no arbitrary script source
@@ -167,11 +189,11 @@ Route:
 
 `GET /game-creation/visual-logic/{game_id}/{entity_id}`
 
-The workbench provides:
+The workbench exposes all eight currently verified operations and provides:
 
 - draggable node layout
-- typed node palette
-- operation-specific parameter controls
+- typed World Logic and Aura3D gameplay palettes
+- operation-specific bounded parameter controls
 - enable/disable state
 - visual compile-order links
 - link removal
@@ -180,6 +202,7 @@ The workbench provides:
 - graph deletion
 - direct Build & Play handoff
 - navigation back to Advanced World Logic
+- explicit Physics DNA guidance for collision and movable-node requirements
 
 It contains no arbitrary code editor and uses no external node-graph dependency.
 
@@ -191,13 +214,15 @@ Project context advertises:
 ## Tests
 
 - `tests/test_game_forge_visual_logic.py`
+- `tests/test_game_forge_visual_logic_gameplay_ops.py`
 - `tests/test_game_forge_visual_logic_portal.py`
 
 Coverage includes:
 
 - compilation into real World Logic Behavior DNA
-- exact runtime parameter sanitization
-- unknown script/URL field removal
+- compilation of all five gameplay operations into the production `gameplay_runtime_payload`
+- exact runtime parameter sanitization and bounds
+- unknown script/JavaScript/URL field removal
 - topological ordering
 - cycle/dangling-edge/path-like node ID rejection
 - stale revision conflicts
@@ -205,10 +230,10 @@ Coverage includes:
 - stale build/rating/public-state invalidation
 - preservation of non-graph behaviors
 - graph-owned deletion
-- truthful capability flags
+- truthful separated capability flags
 - release application route composition
-- workbench route composition
-- no `eval`/`new Function` workbench controls
+- complete eight-operation workbench palette
+- no `eval`/`new Function`/textarea code controls
 
 ## Extension rule
 
