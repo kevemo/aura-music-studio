@@ -58,36 +58,29 @@ def _route_signature(route: Any) -> tuple[str, tuple[str, ...]]:
 
 
 def install_shared_sky_live_community(app: Any) -> None:
-    """Mount Chat 4 viewer routes with optional-auth public-watch semantics.
+    """Mount viewer/community routes and bounded Chat 5 LIVE safety extensions.
 
     MembershipAccessMiddleware reads its module-level public route registry at request time, so
     registering these paths here allows anonymous discovery/watch while every state-changing
     community handler still performs its own canonical optional/required member resolution.
     StudioSecurityMiddleware and CrossSiteRequestGuardMiddleware remain in force globally.
 
-    Chat 2 owns the signed first-party HLS bootstrap, bearer minting, HttpOnly cookie and redirect.
-    Chat 4's Wave 4 Watch guard only corrects viewer capability handling for the token-free HLS
-    bootstrap; it does not create a second media authority.
-
-    Wave 6 makes the viewer page operational against already-merged neighbouring authorities. The
-    Watch page renders and submits LIVE Gifts only through Chat 5's canonical
-    ``/economy/me/gifts/send`` transaction route with a client-generated idempotency key. It polls
-    Chat 6's read-only Battle viewer projection for current scoreboard/timer state and never mutates
-    Battle lifecycle or scoring. The Wave 6 route delegates to the Wave 4 playback guard first, so
-    the secure cookie-bootstrap playback contract remains the only Watch playback path.
+    Chat 2's merged transport remains the canonical first-party HLS/control-plane implementation.
+    The Watch layer consumes that truth and does not manufacture media readiness. Gift sending is
+    delegated to the authoritative economy route; Battle viewer state is read-only here.
 
     LIVE moderation is an independent permission dimension. Owner and the LIVE creator retain their
     own authority; any other moderator must have both a current Owner-enabled global Moderator grant
     and an explicit assignment to that LIVE. Agent status by itself grants no moderation action.
 
-    The delegated Moderator action layer is intentionally narrower than Creator/Owner authority.
-    Delegated Moderators may remove comments, temporarily timeout/mute users, remove viewers,
-    approve/reject/remove Q&A, view the moderation queue, escalate reports and flag a stream for
-    review. Persistent creator blocks, room-wide chat configuration, poll creation and Q&A show
-    selection remain Creator/Owner controls.
+    Chat 5 also mounts a purpose-built emergency Programme source-hide command. It operates only on
+    the already-committed Studio Programme snapshot, commits through the canonical transport
+    adapter, never mutates a wallet/Battle score, and fails closed if transport rejects the change.
 
-    Neighbour integrations remain typed and fail closed: Chat 6 Battle display activates only from
-    its explicit viewer LIVE lookup, while Chat 5 remains the financial Gift authority.
+    Rhiannon LIVE Guardian is mounted as a read-only/advisory readiness surface that consumes the
+    existing moderation authority and never obtains independent moderation or provider-write power.
+    Auto Cue is a creator-private browser-local prompter: script text is never posted to or persisted
+    by Shared Skies.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -125,6 +118,14 @@ def install_shared_sky_live_community(app: Any) -> None:
             continue
         app.router.routes.append(route)
         existing.add(signature)
+
+    # Import lazily after the canonical application/control-room composition is available to avoid
+    # creating a second Studio authority or an import cycle during module construction.
+    from .shared_skies_emergency_programme import install_shared_skies_emergency_programme
+    from .shared_skies_live_assist import install_shared_skies_live_assist
+
+    install_shared_skies_emergency_programme(app)
+    install_shared_skies_live_assist(app)
 
 
 __all__ = ["install_shared_sky_live_community", "PUBLIC_LIVE_PREFIXES"]
