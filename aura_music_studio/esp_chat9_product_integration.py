@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-# Importing the hardening module installs the trusted-source guard before any workflow
-# endpoint is served. It does not add a second HTTP ingestion surface.
+# Importing the hardening modules installs the workflow guards before any endpoint is
+# served. They do not add duplicate HTTP ingestion or publishing surfaces.
 from . import esp_product_workflows_hardening as _product_workflow_hardening  # noqa: F401
+from . import esp_product_workflows_schedule_hardening as _schedule_hardening  # noqa: F401
 from .esp_product_workflows import router as product_workflows_router
 from .esp_product_workflows_portal import router as product_workflows_portal_router
 from .esp_support_conversations import router as support_conversations_router
