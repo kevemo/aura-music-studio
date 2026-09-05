@@ -12,16 +12,25 @@ from .creation_live_authority import (
     authoritative_return,
 )
 from .creation_live_community import authoritative_community_panel
+from .creation_live_transport_truth import (
+    authoritative_source_status,
+    install_creation_live_transport_truth,
+)
 
 
 _PREFIX = "/creation-live"
 _TAGS = ["Creation Studios Go Live & Create"]
 
+# Chat 7 hardening is installed before this module is imported by route_integrity. Apply the
+# transport-truth overlay after that hardening so the browser script keeps both lifecycle cleanup
+# and explicit registration/transport/Programme separation.
+install_creation_live_transport_truth()
+
 # path, endpoint, methods, include_in_schema
 _ROUTE_SPECS: tuple[tuple[str, Callable[..., Any], tuple[str, ...], bool], ...] = (
     ("/capabilities", cl.capabilities, ("GET",), True),
     ("/projects/{project_name}/sources", cl.sources, ("GET",), True),
-    ("/projects/{project_name}/sources/{source_adapter_id}", cl.source_status, ("GET",), True),
+    ("/projects/{project_name}/sources/{source_adapter_id}", authoritative_source_status, ("GET",), True),
     ("/projects/{project_name}/sources/{source_adapter_id}/media", cl.source_media, ("GET",), True),
     (
         "/projects/{project_name}/sources/{source_adapter_id}/attach",
