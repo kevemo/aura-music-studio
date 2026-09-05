@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from .owner_identity import owner_session_authorized
+from .shared_sky_live_bootstrap import install_shared_sky_live_community
 from .shared_sky_relay import relay
 from .shared_sky_streaming_studios import shared_sky
 from .shared_sky_worker import SharedSkyWorker, WorkerSettings
@@ -131,7 +132,14 @@ body{{margin:0;background:#07101d;color:#eef7ff;font-family:Inter,system-ui,sans
 
 
 def install_shared_sky_owner_ops(app: Any) -> None:
-    """Bind owner runtime handlers directly to the canonical FastAPI app once."""
+    """Bind owner runtime handlers directly to the canonical FastAPI app once.
+
+    The production application uses a compatibility router composition layer whose late
+    ``include_router`` calls are not guaranteed to flatten newly imported routes. Direct handler
+    registration preserves the same owner-authenticated functions while making reachability
+    deterministic. The signature guard keeps repeated imports idempotent.
+    """
+
     existing = {
         (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
         for route in app.router.routes
@@ -154,8 +162,10 @@ def install_shared_sky_owner_ops(app: Any) -> None:
         )
 
 
-# ``app.py`` imports the canonical app before importing this module, so the app is fully created
-# here. Install recovery versioning before the history-backed routes can mutate Studio state.
+# ``app.py`` imports the canonical app before importing this module, so the app is fully created.
+# Preserve the first-party viewer/community bootstrap merged from the neighbouring workstream and
+# install Chat 3 recovery/control-room surfaces on the same canonical application. Every handler
+# retains its own membership/owner gate; this module does not widen public or operator authority.
 from .api import app as _canonical_app
 from .shared_sky_control_room import install_shared_sky_control_room
 from .shared_sky_control_room_extensions import install_shared_sky_control_room_extensions
@@ -164,6 +174,7 @@ from .shared_sky_studio_history_graphics import install_shared_sky_studio_histor
 from .shared_sky_studio_recovery_hardening import install_history_recovery_versioning
 
 install_history_recovery_versioning()
+install_shared_sky_live_community(_canonical_app)
 install_shared_sky_control_room(_canonical_app)
 install_shared_sky_control_room_extensions(_canonical_app)
 install_shared_sky_professional_canvas(_canonical_app)
