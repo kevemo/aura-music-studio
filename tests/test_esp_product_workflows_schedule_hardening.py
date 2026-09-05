@@ -72,7 +72,7 @@ def test_scheduled_announcement_preserves_high_impact_confirmation(tmp_path):
         )
 
 
-def test_valid_scheduled_announcement_is_persisted(tmp_path):
+def test_valid_scheduled_announcement_is_normalized_and_persisted(tmp_path):
     owner, workflows = _store_with_owner(tmp_path)
     announcement = workflows.create_announcement(
         _scheduled(
@@ -82,5 +82,5 @@ def test_valid_scheduled_announcement_is_persisted(tmp_path):
         actor_user_id=owner["id"],
     )
     assert announcement["status"] == "scheduled"
-    assert announcement["publish_at"] == "2026-09-06T09:00:00+01:00"
-    assert announcement["expires_at"] == "2026-09-07T09:00:00+01:00"
+    assert announcement["publish_at"] == "2026-09-06T08:00:00+00:00"
+    assert announcement["expires_at"] == "2026-09-07T08:00:00+00:00"
