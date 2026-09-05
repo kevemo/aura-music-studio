@@ -29,6 +29,7 @@ from .game_forge_export_readiness import aura_web_export_readiness
 from .game_forge_live_integration import router as game_live_router
 from .game_forge_model_generation import router as game_model_generation_router
 from .game_forge_models import GameDNA
+from .game_forge_shared_sky_transport import router as game_shared_sky_transport_router
 from .game_forge_store import active_editable_games, list_games, load_game, save_game
 from .plans import GAME_CREATE, GAME_CREATE_UNLIMITED
 from .tenant_storage import project_path
@@ -36,6 +37,7 @@ from .tenant_storage import project_path
 router = APIRouter(tags=["Game Forge Creative Project Continuity"])
 router.include_router(game_live_router)
 router.include_router(game_model_generation_router)
+router.include_router(game_shared_sky_transport_router)
 
 _BINDING_KEY = "creative_project_name"
 
