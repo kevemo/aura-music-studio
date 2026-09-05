@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from aura_music_studio.operational_evidence import (
     load_restore_evidence,
@@ -55,7 +54,7 @@ def test_restore_evidence_fails_closed_when_missing_invalid_or_stale(tmp_path):
     assert loaded["state"] == "unverified"
 
 
-def test_runtime_storage_probe_is_non_destructive_and_checks_sqlite_integrity(tmp_path):
+def test_runtime_storage_probe_is_bounded_non_destructive_connectivity_only(tmp_path):
     db = tmp_path / "data" / "studio.sqlite3"
     db.parent.mkdir(parents=True)
     con = sqlite3.connect(db)
@@ -78,7 +77,8 @@ def test_runtime_storage_probe_is_non_destructive_and_checks_sqlite_integrity(tm
     )
     assert result["verified"] is True
     assert result["database"]["state"] == "healthy"
-    assert result["database"]["integrity"] == "ok"
+    assert result["database"]["connectivity_check"] == "ok"
+    assert result["database"]["full_integrity_check_performed"] is False
     assert result["project_storage"]["state"] == "healthy"
     assert result["backup_storage"]["state"] == "healthy"
     assert result["external_provider_probes_performed"] is False
