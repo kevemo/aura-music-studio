@@ -200,3 +200,22 @@ def test_workspace_preview_replaces_old_capture_and_observes_track_end():
     assert "if(state.previewStream){state.previewStream.getTracks().forEach(t=>t.stop())" in cl.LIVE_UI_SCRIPT
     assert "state.previewStream===previewStream" in cl.LIVE_UI_SCRIPT
     assert "Workspace preview ended. It is no longer available for attachment." in cl.LIVE_UI_SCRIPT
+
+
+def test_transport_preflight_blockers_are_visible_without_claiming_programme():
+    script = cl.LIVE_UI_SCRIPT
+    assert "transport_preflight" in script
+    assert "blocking_errors" in script
+    assert "Source registered, but transport is not ready" in script
+    assert "Transport preflight is ready" in script
+    assert "Programme remains NOT CONFIRMED ON AIR" in script
+    assert "No LIVE or ON-AIR success is being claimed" in script
+
+
+def test_merged_chat4_community_ui_is_installed_by_production_hardening():
+    script = cl.LIVE_UI_SCRIPT
+    assert cl.creation_live_community_ui_installed is True
+    assert "Shared Sky community" in script
+    assert "Community is display-only here" in script
+    assert "body.textContent" in script
+    assert "/creation-live/projects/${encodeURIComponent(pid)}/community" in script
