@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from .cosmic_economy import EconomyError, _iso
@@ -112,7 +113,7 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
         ).fetchone()
         if not personal:
             return
-        totals = self._spend_totals_locked(con, account_id, __import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+        totals = self._spend_totals_locked(con, account_id, datetime.now(timezone.utc))
         for period in ("daily", "weekly", "monthly"):
             hard = personal[f"{period}_hard_limit"]
             if hard is not None and totals[period] + new_cost > int(hard):
