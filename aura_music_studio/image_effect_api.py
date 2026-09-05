@@ -16,6 +16,7 @@ from .aura_image_effect_system import (
     save_reusable_image_effect_system,
 )
 from .executable_image_effects import ImageEffectGraph
+from .route_integrity import register_route_composition_hook
 from .tenant_storage import project_path, projects_root
 
 router = APIRouter(tags=["image-effects"])
@@ -139,6 +140,35 @@ def save_image_effect_preset(preset_name: str, request: SaveImageEffectPresetReq
 @router.get("/image-effects/presets/{preset_name}")
 def get_image_effect_preset(preset_name: str) -> dict[str, Any]:
     return _safe_kernel_call(load_reusable_image_effect_system, _preset_directory(), preset_name)
+
+
+def _install_image_effect_routes(app: Any) -> None:
+    """Install the bounded image-effect surface at final canonical route composition.
+
+    FastAPI snapshots APIRouter contents when a parent router is mounted. This repository also
+    performs late route composition for large production domains, so relying only on nested
+    engineering-router inclusion can leave newly-added routes absent from the canonical app.
+    Reusing the original route objects here preserves request models, endpoint functions and
+    middleware while the final integrity pass removes any exact duplicates.
+    """
+
+    existing = {
+        (str(getattr(route, "path", "")), tuple(sorted(str(method).upper() for method in (getattr(route, "methods", set()) or set()))))
+        for route in app.router.routes
+    }
+    for route in router.routes:
+        signature = (
+            str(getattr(route, "path", "")),
+            tuple(sorted(str(method).upper() for method in (getattr(route, "methods", set()) or set()))),
+        )
+        if signature not in existing:
+            app.router.routes.append(route)
+            existing.add(signature)
+
+    app.state.image_effect_routes_installed = True
+
+
+register_route_composition_hook("image_effect_routes", _install_image_effect_routes)
 
 
 __all__ = ["router"]
