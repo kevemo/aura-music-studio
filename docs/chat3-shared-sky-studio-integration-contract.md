@@ -5,20 +5,32 @@ Status: Chat 3 production-control-room implementation on top of the current `dev
 ## Runtime modules and routes
 
 - `aura_music_studio.shared_sky_control_room`
-  - `StudioRepository`: Chat 3 persistence extension using the same SQLite database path as `SharedSkyStore`.
-  - `StudioService`: Preview/Programme, scene-copy/reorder, transform/audio autosave and safe snapshot orchestration.
-  - `SharedSkyTransportCompatibilityAdapter`: narrow Chat 2 boundary; live programme mutation fails closed until Chat 2 supplies an authoritative commit method.
-  - `install_shared_sky_control_room(app)`: idempotent production route mounting helper.
+  - `StudioRepository`: durable Studio session, recovery-version and Brand Kit persistence using the same SQLite database path as `SharedSkyStore`.
+  - `StudioService`: Preview/Programme state machine, safe Programme snapshots, source/audio normalization and Chat 2 transport compatibility.
+  - `SharedSkyTransportCompatibilityAdapter`: narrow Chat 2 boundary; live Programme mutation fails closed until Chat 2 supplies an authoritative commit method.
 - `aura_music_studio.shared_sky_control_room_extensions`
   - original scene-template library and atomic instantiation.
-  - Shared Sky audio presets limited to processing fields that have a real implementation path.
+  - Shared Sky audio presets limited to processing fields with a real implementation path.
   - non-destructive media cue/playback settings.
   - Chat 2 scheduling facade, recording start/stop compatibility adapter and combined studio preflight.
   - Chat 6 read-only participant/green-room compatibility adapter.
   - advisory-only Aura production diagnostics derived from current studio/transport state.
-  - `install_shared_sky_control_room_extensions(app)`: idempotent production route mounting helper.
+- `aura_music_studio.shared_sky_professional_canvas`
+  - desktop-first professional Preview/Programme UI.
+  - browser camera/microphone/screen attachment, explicit reconnect and track cleanup.
+  - pointer move/resize/rotate, safe guides, zoom, multi-select, align/distribute, numeric transforms and real renderer-backed effect controls.
+  - focus-safe operator hotkeys and real-signal browser audio meters.
+- `aura_music_studio.shared_sky_studio_history_graphics`
+  - atomic Preview graph transactions and bounded server-side Undo/Redo.
+  - stable scene/source ID restoration.
+  - scene lock, notes and folder/group metadata.
+  - tracked scene/source create/delete/duplicate/reorder/transform operations.
+  - typed original Shared Sky lower-third/title/subtitle/social/banner/sponsor/custom-text graphics with sanitized style schemas.
 - Existing Chat 2 source of truth: `aura_music_studio.shared_sky_streaming_studios.shared_sky`.
-- Operator page: `GET /shared-sky/studio?project_id=<id>&profile_key=landscape-1080`.
+
+Operator pages:
+- `GET /shared-sky/studio?project_id=<id>&profile_key=landscape-1080`
+- `GET /shared-sky/studio/professional?project_id=<id>&profile_key=landscape-1080`
 
 Session API:
 - `POST /shared-sky/studio/api/sessions`
@@ -31,12 +43,27 @@ Session API:
 - `GET /shared-sky/studio/api/sessions/{session_id}/preflight`
 - `GET /shared-sky/studio/api/sessions/{session_id}/aura/diagnostics`
 
-Scene/source production operations:
+Atomic history/scene/source API:
+- `GET /shared-sky/studio/api/sessions/{session_id}/history`
+- `POST /shared-sky/studio/api/sessions/{session_id}/undo`
+- `POST /shared-sky/studio/api/sessions/{session_id}/redo`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/batch-transform`
+- `POST /shared-sky/studio/api/sessions/{session_id}/sources/tracked`
+- `POST /shared-sky/studio/api/sessions/{session_id}/sources/batch-delete`
+- `POST /shared-sky/studio/api/sessions/{session_id}/scenes/tracked`
+- `POST /shared-sky/studio/api/sessions/{session_id}/scenes/{scene_id}/duplicate-tracked`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/scenes/{scene_id}/tracked`
+- `DELETE /shared-sky/studio/api/sessions/{session_id}/scenes/{scene_id}/tracked`
+- `POST /shared-sky/studio/api/sessions/{session_id}/scenes/reorder-tracked`
+- `POST /shared-sky/studio/api/sessions/{session_id}/graphics`
+
+Compatibility scene/source production operations retained for neighbouring callers:
 - `POST /shared-sky/studio/api/scenes/{scene_id}/duplicate`
 - `POST /shared-sky/studio/api/projects/{project_id}/scenes/reorder`
 - `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/transform`
 - `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/audio`
 - `PATCH /shared-sky/studio/api/sessions/{session_id}/sources/{source_id}/cue`
+- `PATCH /shared-sky/studio/api/sessions/{session_id}/profile`
 - `GET /shared-sky/studio/api/templates`
 - `POST /shared-sky/studio/api/projects/{project_id}/templates/instantiate`
 - `GET /shared-sky/studio/api/audio/presets`
@@ -60,7 +87,7 @@ All routes retain `require_esp_hub_member` as the request-level membership gate.
 
 ## Persistence and migrations
 
-`StudioRepository` creates additive, idempotent tables in the canonical Shared Sky database:
+`StudioRepository` and `HistoryRepository` create additive, idempotent tables in the canonical Shared Sky database:
 
 - `shared_sky_studio_sessions`
   - stable `id`, `user_id`, `project_id`, optional `broadcast_id`
@@ -72,36 +99,64 @@ All routes retain `require_esp_hub_member` as the request-level membership gate.
   - last authoritative transport result
   - optimistic `version`
 - `shared_sky_studio_versions`
-  - bounded (latest 50) version snapshots for recovery/conflict diagnostics
+  - bounded latest recovery snapshots for session conflict/recovery diagnostics.
 - `shared_sky_brand_kits`
-  - project/user ownership
-  - asset references only; no raw destination credentials or provider secrets
-  - optimistic version
+  - project/user ownership, asset references only and optimistic version.
+- `shared_sky_scene_metadata`
+  - scene lock, operator notes and folder/group metadata without changing Chat 2's canonical scene identity.
+- `shared_sky_studio_history`
+  - bounded latest 100 atomic Preview-graph actions.
+  - before/after snapshots, action key and undone state.
+  - new edits after Undo discard the redo branch.
 
-No `localStorage` value is authoritative. Browser state is a rendering/cache concern only. `programme_snapshot_json` is deliberately a deep scene/source snapshot so later Preview edits cannot silently alter Programme.
+No `localStorage` value is authoritative. Browser state is rendering/cache state only. `programme_snapshot_json` is deliberately a deep scene/source snapshot so later Preview edits, Undo/Redo, scene deletion or source restoration cannot silently rewrite the last committed Programme pixels.
+
+## Undo/Redo and atomic editor contract
+
+The professional canvas sends one `batch-transform` request for a multi-source drag, resize, rotate, align, distribute or keyboard-nudge gesture. The transaction validates the optimistic Studio version and every selected source before committing any source update.
+
+Undo/Redo restores the canonical Preview scene/source graph with the same stable IDs rather than creating replacement identities. A restored camera/microphone/screen source returns as a detached browser-capture source and must explicitly reacquire browser permission; a `MediaStream` is never serialized into history.
+
+Undo/Redo does not restore or mutate `programme_snapshot_json`. Programme changes still require CUT or TRANSITION through the authoritative transport boundary. Undo/Redo and editor mutation are rejected while a transition is in progress.
+
+Scene deletion keeps at least one scene, rejects locked scenes, and requires explicit confirmation when deleting the editable scene identity corresponding to the current Programme snapshot. The Programme snapshot remains preserved after that confirmed deletion.
 
 ## Production profiles
 
 Canonical Chat 3 profile keys currently implemented:
-
 - `landscape-1080` — 1920×1080 / 16:9
 - `portrait-1080` — 1080×1920 / 9:16
 - `square-1080` — 1080×1080 / 1:1
 
-Chat 2 remains authoritative for whether a destination supports a profile. Chat 3 must not infer provider capability from this registry alone.
+Chat 2 remains authoritative for whether a destination supports a profile. Chat 3 never infers provider capability from this registry alone.
 
 ## Scene/source snapshot contract
 
-Programme snapshot schema version 1 contains `schema_version`, `captured_at`, a production `profile`, a stable scene identity/configuration, and the ordered source graph. Each source keeps the canonical Chat 2 source identity. Chat 3 normalizes production-only configuration before Programme commit:
+Programme snapshot schema version 1 contains `schema_version`, `captured_at`, a production `profile`, stable scene identity/configuration and the ordered source graph. Each source keeps the canonical Shared Sky source identity. Chat 3 normalizes production-only configuration before Programme commit:
 
-- `config.transform`: normalized x/y/width/height/rotation/opacity/crop values
-- `config.effects`: brightness/contrast/saturation/hue/blur/rounded bounds
-- `config.audio`: mute/gain/pan/delay/monitor/high-pass/compressor/limiter for relevant audio-bearing types
-- `config.playback`: cue/trim/loop/volume/scene-enter/scene-exit settings for media sources
-- `config.privacy`: must resolve to a Programme-safe state for visible sources
-- browser sources: HTTP(S) only, no embedded credentials, no loopback/private/local host
+- `config.transform`: x/y/width/height/rotation/opacity/crop.
+- `config.effects`: brightness/contrast/saturation/hue/blur/rounded bounds.
+- `config.audio`: mute/gain/pan/delay/monitor/high-pass/compressor/limiter for relevant audio-bearing types.
+- `config.playback`: cue/trim/loop/volume/scene-enter/scene-exit settings for media sources.
+- `config.privacy`: must resolve to a Programme-safe state for visible sources.
+- browser sources: HTTP(S) only, no embedded credentials, loopback/private/local host.
 
-Any recursively detected provider secret key (`stream_key`, OAuth/access/refresh tokens, credentials, passwords, private keys, client secrets, etc.) rejects persistence or Programme snapshot creation.
+Any recursively detected provider secret key (`stream_key`, OAuth/access/refresh tokens, credentials, passwords, private keys, client secrets, etc.) rejects Studio, history, Brand Kit or Programme snapshot persistence.
+
+## Original graphics contract
+
+The atomic graphics endpoint creates canonical Shared Sky `text` sources rather than a separate graphics database. Current real renderer-backed graphic kinds are:
+- Lower Third
+- Title
+- Subtitle
+- Social Handle
+- Banner
+- Sponsor Card
+- Custom Text
+
+The style schema bounds font size, weight, alignment, text/background hex colours, background opacity, padding and corner radius. Arbitrary CSS is not accepted. The professional DOM compositor renders these typed fields and escapes user text. These are original Shared Sky structures; no competitor artwork or proprietary scene package is included.
+
+QR generation, animated tickers and externally data-driven graphics remain separate follow-up capabilities until a real safe renderer/data-binding path is implemented.
 
 ## Scene template contract
 
@@ -115,29 +170,45 @@ Capture/guest/media template slots are created hidden until the operator attache
 
 ## Preview / Programme state machine
 
-1. Editing/selecting Preview increments the studio optimistic version and does not alter Programme.
+1. Editing/selecting Preview increments the Studio optimistic version and does not alter Programme.
 2. CUT captures the current Preview graph into an immutable snapshot, requests an authoritative transport commit, then writes Programme only if accepted.
-3. TRANSITION first enters `in_progress` with a unique transition token and target snapshot. A second transition is rejected with 409.
-4. Completion requires the same token and version. Transport rejection aborts the transition and leaves the previous Programme snapshot unchanged.
-5. Reduced-motion mode drives transition duration to zero while preserving explicit state/commit semantics.
-6. A stale tab/operator using an old version receives 409; it cannot overwrite newer studio state.
-7. Media cue edits update Preview/source configuration and explicitly leave the committed Programme snapshot unchanged until the next explicit take.
+3. TRANSITION enters `in_progress` with a unique token and target snapshot; a second transition is rejected with 409.
+4. Completion requires the same token and version. Transport rejection aborts the transition and leaves previous Programme unchanged.
+5. Reduced-motion mode drives motion duration to zero while preserving explicit state/commit semantics.
+6. Stale tabs/operators receive 409 and cannot overwrite newer Studio state.
+7. Media cue edits and history-managed Preview edits explicitly leave committed Programme unchanged until the next explicit take.
+
+## Professional browser compositor actually implemented
+
+The professional page is desktop-first and uses a DOM compositor backed by persisted normalized transforms. Programme renders from the saved Programme snapshot; Preview renders the editable graph.
+
+Implemented operator controls include pointer move/resize/rotate, Shift rotation snapping, multi-select, alignment/distribution, keyboard nudging, numeric transform fields, safe/title-safe/centre guides, zoom and 16:9/9:16/1:1 profile reflow. Rotation/drag selection chrome never exists in the Programme snapshot.
+
+Browser capture uses `getUserMedia` and `getDisplayMedia`. Tracks are stopped when a source is removed, a device/capture track ends, history removes the source, or the page exits. Recovered capture sources require explicit reconnect.
+
+CSS-backed effects actually rendered by this control room are brightness, contrast, saturation, hue rotation, blur, rounded masking, opacity and transforms. Unbacked effects are not advertised by the professional surface.
+
+Hotkeys are ignored while focus is in input/textarea/select/contenteditable controls. Current professional bindings include Alt+C CUT, Ctrl+Enter TRANSITION, Ctrl/Cmd+Z Undo, Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y Redo, and arrow-key nudging.
+
+## Browser audio behaviour actually implemented
+
+The deterministic audio utility computes RMS/peak/dBFS/clipping from real supplied samples. Browser runtime meters use a real `AudioContext`/`AnalyserNode` path only after a real `MediaStream` is attached; otherwise the UI reports signal unavailable.
+
+The broader Studio audio configuration supports gain, pan, sync delay, monitor state, high-pass, compressor and limiter. Local monitoring remains off by default. More advanced processing is not presented as implemented unless a real processing path exists.
 
 ## Chat 2 handoff
 
-Current adapter import: `SharedSkyTransportCompatibilityAdapter`.
-
-Chat 2 may add this method to its canonical store/service without changing Chat 3 call sites:
+Chat 2 may add this canonical method without changing Chat 3 call sites:
 
 ```python
 def set_programme_snapshot(user_id: str, broadcast_id: str, snapshot: dict, *, correlation_id: str) -> dict:
-    # Required result keys: accepted: bool, state: str, optional reason: str
+    # Required: accepted: bool, state: str; optional reason: str
     ...
 ```
 
-When a broadcast is `live` or `starting` and that method is absent, Chat 3 returns a real 503 and does not claim Programme switched. Draft/offline studio work remains available.
+When a broadcast is `live` or `starting` and this method is absent, Chat 3 returns 503 and does not claim Programme switched. Offline/draft production remains usable.
 
-Recording compatibility methods expected from Chat 2:
+Recording methods expected from Chat 2:
 
 ```python
 def recording_status(user_id: str, broadcast_id: str) -> dict: ...
@@ -145,73 +216,60 @@ def start_recording(user_id: str, broadcast_id: str) -> dict: ...
 def stop_recording(user_id: str, broadcast_id: str) -> dict: ...
 ```
 
-Until present, Chat 3 reports recording unsupported and start/stop returns 503. It never displays or returns a fabricated Recording state.
-
-Scheduling execution remains the existing Chat 2 `shared_sky_schedules` path. Chat 3's schedule endpoint calls `SharedSkyStore.create_schedule`; cancellation calls `SharedSkyStore.delete_schedule`. It does not create a second scheduler. Scheduled times are required to include an explicit timezone.
+Until present, recording reports unsupported and start/stop returns a real unavailable/503 path. Scheduling continues through Chat 2's existing `shared_sky_schedules` execution path; Chat 3 does not create a second scheduler.
 
 ## Chat 4 handoff — viewer/community overlays
 
-Chat 3 owns presentation only. Safe binding kind values are `chat`, `poll`, `qa`, `captions`, and `custom_text`. Chat 4 supplies authoritative event/state feeds. Binding payloads must be secret-free IDs/configuration; no community ledger is persisted here.
+Chat 3 owns presentation only. Safe binding kinds include `chat`, `poll`, `qa`, `captions` and `custom_text`. Chat 4 supplies authoritative event/state feeds. No community ledger is persisted here.
 
 ## Chat 5 handoff — Gifts/supporter presentation
 
-Safe display-only binding kinds are `gift_goal` and `supporter`. Chat 3 does not debit Cosmic Creation Coins, derive balances, calculate creator liabilities, or persist financial truth. Chat 5 event/goal IDs are rendered as external authoritative state.
+Display-only bindings include `gift_goal` and `supporter`. Chat 3 does not debit Cosmic Creation Coins, derive balances, calculate creator liabilities or persist financial truth.
 
 ## Chat 6 handoff — participants/Battles
 
-Chat 3 exposes deterministic normalized tile geometry via `participant_layout(layout_key, count, profile_key)` for one through eight supplied participants. Layout keys currently include Solo, Side-by-Side/Interview, Grid, Speaker Focus hook, Host + Guests, Picture-in-Picture hook, Vertical Stack and Battle Teams hook.
-
-The read-only `ParticipantCompatibilityAdapter` looks for this future provider method:
+Chat 3 exposes deterministic one-to-eight tile geometry and a read-only `ParticipantCompatibilityAdapter`. The future provider method is:
 
 ```python
 def studio_participants(user_id: str, broadcast_id: str) -> list[dict]: ...
 ```
 
-Each row is validated into `ParticipantState` with explicit `participant_id`, `display_name`, `stage`, `connection_state`, camera/microphone state, connection quality and role. A participant may be `connected` while still `green_room`; connection never implies Programme. Until the method lands the API reports `supported=false` rather than producing fake guests.
-
-Participant identity/order/stage/Battle score/lifecycle remain Chat 6/shared participant authority.
+Rows carry explicit participant identity, display name, stage, connection state, camera/microphone state, connection quality and role. `connected` never implies `on_programme`. Battle scoring/lifecycle remains Chat 6 authority.
 
 ## Chat 7 handoff — Music/Video/Image sources
 
-Provide a canonical Shared Sky source object owned by the current user/project with a stable `id`, `source_type`, `name`, `config`, visibility/lock/z-order and safe provenance/privacy metadata. Private editor panels/tokens must never be represented as a browser source. Chat 3 only snapshots the safe programme source.
+Provide canonical Shared Sky sources owned by the current user/project with stable IDs, source type, config, visibility/lock/z-order and safe provenance/privacy metadata. Private editor panels/tokens must never be represented as programme browser sources.
 
 ## Chat 8 handoff — Game Forge sources
 
-Same source contract as Chat 7. Gameplay/editor/playtest capture adapters own media acquisition. Chat 3 owns scene placement/composition only.
+Same source contract as Chat 7. Gameplay/editor/playtest acquisition remains Chat 8; Chat 3 owns placement/composition only.
 
 ## Chat 9 handoff — Creator surfaces
 
-Chat 9 may read studio project/session history using creator-authorised workflows. Programme mutations must still flow through Chat 3 endpoints with the current optimistic version and normal server permission checks.
+Chat 9 may read authorised Studio project/session/history status. Programme mutations still flow through Chat 3's versioned server endpoints.
 
 ## Chat 10 handoff — observability/security/performance
 
-Chat 10 should instrument `studio_cut`, `studio_transition`, `studio_schedule_created`, `studio_schedule_cancelled`, `studio_recording_start` and `studio_recording_stop` Shared Sky events and correlation IDs where provided; transition/transport rejection reason codes; browser Web Audio/device failures; 409 stale-version frequency; canvas/effect pressure metrics when measurable; and source cleanup/leaked-media-track diagnostics. No numeric performance value should be synthesized when no browser metric exists.
+Instrument `studio_cut`, `studio_transition`, `studio_undo`, `studio_redo`, scheduling and recording events; correlation/rejection reason codes; stale-version 409 frequency; browser capture/Web Audio failures; and measurable source/effect/resource-pressure/cleanup telemetry. Never synthesize numeric performance data.
 
 ## Chat 11 release handoff
 
-Release acceptance should verify production route reachability, additive database migration, truthful Chat 2 live-commit/recording capability, CI/security/self-host smoke status, no provider credentials in Studio/Brand Kit snapshots, that Preview editing cannot mutate the last Programme snapshot, template rollback, timezone-aware scheduling and green-room-vs-Programme participant separation.
+Verify production route reachability, additive DB migration, stable-ID Undo/Redo, Programme isolation through history operations, source secret rejection, typed graphic sanitization, browser capture cleanup, truthful Chat 2 live/recording capability, template rollback, timezone scheduling, participant staging separation and the latest CI/Security/self-host evidence.
 
 ## Aura production assistance
 
-`GET /shared-sky/studio/api/sessions/{session_id}/aura/diagnostics` is advisory only. It derives recommendations from the current Preview source graph, committed Programme state and transport capability. It may identify an empty scene, no committed Programme scene, missing live-commit capability, absence of an audio-bearing source or unattached template slots. It performs no authoritative action and returns `authoritative_actions_performed=false`.
-
-## Browser audio/canvas behaviour actually implemented
-
-The current operator page uses a DOM compositor backed by persisted normalized transforms. Programme renders from the saved Programme snapshot, while Preview renders the current scene graph. CSS-backed effects represented in the renderer have real paths for brightness, contrast, saturation, hue, blur and rounded masking; unbacked effects are not advertised by this control-room surface.
-
-The audio utility computes RMS/peak/dBFS/clipping from real supplied samples. Browser runtime meter attachment uses `AudioContext`, `MediaStreamAudioSourceNode`, a high-pass `BiquadFilterNode`, `DynamicsCompressorNode`, `GainNode`, and `AnalyserNode`. Meters start explicitly unavailable and only animate after a real `MediaStream` is attached. Local monitoring is off by default.
-
-Hotkeys are ignored while focus is in input/textarea/select/contenteditable controls. Current bindings are Alt+C for CUT and Ctrl+Enter for TRANSITION. Alt+B does not silently take an emergency scene; it reports that a configured BRB scene is required.
+`GET /shared-sky/studio/api/sessions/{session_id}/aura/diagnostics` is advisory only. It derives recommendations from current Preview, Programme and transport state. It performs no authoritative action and returns `authoritative_actions_performed=false`.
 
 ## Known compatibility gaps after current Chat 3 units
 
-- Chat 2 authoritative live Programme registration method has not landed in the current integration branch.
-- Chat 2 authoritative recording start/stop/status contract has not landed in the current integration branch.
-- Chat 6 green-room/participant media authority has not landed in the current integration branch; the read-only fail-closed adapter is ready.
-- Full drag/resize/rotate pointer compositor, multi-select/snapping, source grouping/alignment and touch gestures are not yet implemented; normalized transform persistence and numeric accessible controls are.
-- Full integrated source/device picker and capture attachment workflow remains to be built into the main control-room page.
-- Media cue configuration is durable and Preview-safe, but a provider/backend playout adapter is still required for authoritative remote pre-recorded execution.
-- Guest invite creation/moderation controls await the shared participant authority; Chat 3 must not duplicate it.
-- Advanced audio processing not already represented by a real Web Audio/config path remains intentionally absent.
-- Full graphics authoring for QR/tickers/data-driven overlays and animation authoring remains follow-up work; typed external widget bindings are already isolated from authoritative community/financial state.
-- The Aura diagnostics endpoint is advisory; no autonomous consequential action path is enabled.
+- Chat 2 authoritative live Programme registration/commit has not landed on the audited integration baseline.
+- Chat 2 authoritative recording start/stop/status has not landed on the audited integration baseline.
+- Chat 6 real green-room/participant media authority has not landed; the fail-closed read-only adapter is ready.
+- Media cue configuration is durable and Preview-safe, but authoritative remote pre-recorded playout remains a Chat 2 transport/worker dependency.
+- Guest invite creation, participant mute/remove and moderation-facing production actions await the shared participant authority and must not be duplicated here.
+- Full Brand Kit integration with canonical media-library type/size/licence validation remains deeper follow-up work; current kits use bounded asset references and project ownership.
+- Advanced bus routing, PFL/solo, noise gate, parametric EQ, de-esser and similar processing remain absent unless/until a tested Web Audio/backend path is implemented.
+- QR generation, animated ticker/data feeds and richer graphics animation authoring remain follow-up work.
+- Configurable hotkey profiles and deterministic multi-action macros remain follow-up work; current hotkeys are fixed and focus-safe.
+- Chat 10 device/resource pressure telemetry and browser-matrix E2E/accessibility scanning remain release-hardening dependencies.
+- Aura remains advisory; no autonomous consequential programme, participant, destination or recording action path is enabled.
