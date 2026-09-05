@@ -49,18 +49,19 @@ def _resolver(user: dict, *, purchased=(), enforced: dict | None = None):
     return resolver, native, subscriptions
 
 
-def test_unlimited_pro_grants_both_native_entitlements_without_fabricating_device_authority():
+def test_unlimited_pro_grants_aura_os_but_not_sls_without_standalone_entitlement():
     resolver, native, subscriptions = _resolver(
         {"id": "user-1", "status": "active", "plan_id": "pro"}
     )
 
     access = resolver.resolve("user-1")
 
-    assert access.entitlements == {AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT}
-    assert access.membership_entitlements == {AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT}
+    assert access.entitlements == {AURA_OS_ENTITLEMENT}
+    assert access.membership_entitlements == {AURA_OS_ENTITLEMENT}
     assert access.purchased_entitlements == frozenset()
     assert access.sources_for(AURA_OS_ENTITLEMENT) == ("membership:pro",)
-    assert access.sources_for(AURA_SEC_ENTITLEMENT) == ("membership:pro",)
+    assert access.sources_for(AURA_SEC_ENTITLEMENT) == ()
+    assert access.has(AURA_SEC_ENTITLEMENT) is False
     assert subscriptions.calls == ["user-1"]
     assert native.calls == ["user-1"]
 
@@ -69,7 +70,7 @@ def test_unlimited_pro_grants_both_native_entitlements_without_fabricating_devic
     assert public["device_limit"] is None
 
 
-def test_verified_native_purchase_can_grant_aura_sec_to_member_without_granting_aura_os():
+def test_verified_native_purchase_can_grant_sls_to_member_without_granting_aura_os():
     resolver, _, _ = _resolver(
         {"id": "user-2", "status": "active", "plan_id": "base"},
         purchased={AURA_SEC_ENTITLEMENT},
@@ -84,7 +85,7 @@ def test_verified_native_purchase_can_grant_aura_sec_to_member_without_granting_
     assert access.sources_for(AURA_SEC_ENTITLEMENT) == ("native_purchase",)
 
 
-def test_bundle_or_standalone_purchase_and_pro_membership_sources_remain_distinguishable():
+def test_pro_membership_and_standalone_sls_sources_remain_separate():
     resolver, _, _ = _resolver(
         {"id": "user-3", "status": "active", "plan_id": "pro"},
         purchased={AURA_SEC_ENTITLEMENT},
@@ -94,7 +95,7 @@ def test_bundle_or_standalone_purchase_and_pro_membership_sources_remain_disting
 
     assert access.entitlements == {AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT}
     assert access.sources_for(AURA_OS_ENTITLEMENT) == ("membership:pro",)
-    assert access.sources_for(AURA_SEC_ENTITLEMENT) == ("membership:pro", "native_purchase")
+    assert access.sources_for(AURA_SEC_ENTITLEMENT) == ("native_purchase",)
 
 
 def test_subscription_expiry_enforcement_removes_pro_grant_but_keeps_verified_native_purchase():
