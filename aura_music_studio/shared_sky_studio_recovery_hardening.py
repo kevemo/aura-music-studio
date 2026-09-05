@@ -4,6 +4,7 @@ import json
 import sqlite3
 from typing import Any, Callable
 
+from .shared_sky_control_room import PROFILE_REGISTRY
 from .shared_sky_studio_history_graphics import HistoryRepository
 
 _PATCH_MARKER = "_shared_sky_recovery_versioning_installed"
@@ -26,6 +27,7 @@ def _public_session_state(row: sqlite3.Row) -> dict[str, Any]:
     item["transition"] = _loads(item.pop("transition_json", "{}"), {})
     item["autosave_state"] = _loads(item.pop("autosave_state_json", "{}"), {})
     item["last_transport_state"] = _loads(item.pop("last_transport_state_json", "{}"), {})
+    item["profile"] = PROFILE_REGISTRY.get(str(item.get("profile_key") or ""), {})
     item.pop("created_at", None)
     item.pop("updated_at", None)
     return item
@@ -94,6 +96,4 @@ def install_history_recovery_versioning() -> None:
     HistoryRepository._bump = versioned_bump
 
 
-__all__ = [
-    "install_history_recovery_versioning",
-]
+__all__ = ["install_history_recovery_versioning"]
