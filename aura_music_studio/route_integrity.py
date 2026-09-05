@@ -188,6 +188,10 @@ def _ensure_creation_live_routes(app: Any) -> None:
 
     install_creation_live_hardening()
 
+    from .creation_live_authority import install_creation_live_authority_routes
+
+    install_creation_live_authority_routes(app)
+
     from .creation_live import CreationLiveMiddleware, install_creation_live, router as creation_live_router
 
     install_creation_live(app)
