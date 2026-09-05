@@ -77,8 +77,6 @@ def _safe_reactions(value: Any) -> dict[str, int]:
 def _display_state(value: Any, *, unavailable_reason: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {"available": False, "reason": unavailable_reason}
-    # Chat 4 owns these display adapters. Keep their structured display state, but never add
-    # financial or Battle mutations here.
     return dict(value)
 
 
@@ -193,7 +191,11 @@ def authoritative_community_panel(project_name: str, request: Request):
 
 
 def install_creation_live_community_route(app: Any) -> None:
-    """Replace the old Chat 7 compatibility GET with the merged Chat 4-backed read surface."""
+    """Replace the old compatibility GET and install its read-only creator-side UI."""
+    from .creation_live_ui_community import install_creation_live_community_ui
+
+    install_creation_live_community_ui()
+
     kept = []
     found = False
     for route in app.router.routes:
