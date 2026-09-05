@@ -122,22 +122,26 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
 
 
 def probe_runtime_storage(environ: Mapping[str, str] | None = None) -> dict:
-    """Perform bounded, non-destructive probes of the local durable-state dependencies."""
+    """Perform bounded, non-destructive connectivity probes of local durable-state dependencies.
+
+    Health/readiness is intentionally cheap. Full SQLite integrity verification belongs in the
+    isolated restore drill, not in an HTTP health endpoint or every metrics scrape.
+    """
     env = environ or os.environ
     db = Path(str(env.get("LSS_DB_PATH") or "data/live_sound_studio.sqlite3")).expanduser().resolve()
     projects = Path(str(env.get("AURA_PROJECTS_ROOT") or "projects")).expanduser().resolve()
     backups = Path(str(env.get("LSS_BACKUP_DIR") or "backups")).expanduser().resolve()
 
     db_state = "unavailable"
-    db_integrity = None
+    db_connectivity = None
     db_error = None
     if db.is_file():
         try:
             con = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)
             try:
-                row = con.execute("PRAGMA quick_check").fetchone()
-                db_integrity = str(row[0]).lower() if row else None
-                db_state = "healthy" if db_integrity == "ok" else "degraded"
+                row = con.execute("SELECT 1").fetchone()
+                db_connectivity = "ok" if row and row[0] == 1 else "failed"
+                db_state = "healthy" if db_connectivity == "ok" else "degraded"
             finally:
                 con.close()
         except sqlite3.Error as exc:
@@ -155,7 +159,8 @@ def probe_runtime_storage(environ: Mapping[str, str] | None = None) -> dict:
         "verified": critical_ok,
         "database": {
             "state": db_state,
-            "integrity": db_integrity,
+            "connectivity_check": db_connectivity,
+            "full_integrity_check_performed": False,
             "error_code": db_error,
         },
         "project_storage": {"state": project_state},
