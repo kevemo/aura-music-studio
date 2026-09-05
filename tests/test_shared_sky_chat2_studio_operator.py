@@ -45,6 +45,7 @@ class FakeBase:
 class FakeBridge:
     def __init__(self):
         self.preflight_calls = 0
+        self.preflight_result = {"ready": True, "blocking_errors": []}
 
     def status(self, user_id: str, broadcast_id: str):
         return {"state": "configuring", "programme_source_bound": True, "authoritative": True}
@@ -53,7 +54,7 @@ class FakeBridge:
         self.preflight_calls += 1
         return {
             "binding": {"configured": True},
-            "preflight": {"ready": True, "blocking_errors": []},
+            "preflight": dict(self.preflight_result),
             "authoritative": True,
         }
 
@@ -139,6 +140,28 @@ def test_start_runs_canonical_preflight_then_idempotent_transport(environment):
     assert transport.calls == [("start", "b1", "start-key-0001")]
     assert result["broadcast"]["session"]["state"] == "live"
     assert base.events[-1][1] == "studio_transport_start"
+
+
+def test_failed_preflight_preserves_authoritative_blockers_and_does_not_start(environment):
+    _repo, _base, bridge, transport = environment
+    bridge.preflight_result = {
+        "ready": False,
+        "blocking_errors": [
+            {"code": "internal_playback_unconfigured", "message": "Playback origin is missing"}
+        ],
+        "warnings": [],
+    }
+    with pytest.raises(mod.HTTPException) as caught:
+        mod.start_transport(
+            "sess",
+            mod.TransportActionRequest(expected_studio_version=4, idempotency_key="start-key-0003"),
+            None,
+        )
+    assert caught.value.status_code == 409
+    assert caught.value.detail["code"] == "preflight_blocked"
+    assert caught.value.detail["ready"] is False
+    assert caught.value.detail["blocking_errors"][0]["code"] == "internal_playback_unconfigured"
+    assert transport.calls == []
 
 
 def test_stop_and_retry_preserve_client_idempotency_key(environment):
