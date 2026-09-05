@@ -18,6 +18,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _reason(value: str) -> str:
+    clean = " ".join(str(value or "").split()).strip()
+    if len(clean) < 3:
+        raise ValueError("A moderation permission reason of at least 3 characters is required")
+    return clean[:500]
+
+
 class ModeratorPermissionRequest(BaseModel):
     enabled: bool
     reason: str = Field(min_length=3, max_length=500)
@@ -83,18 +90,22 @@ class ModeratorPermissionService:
                 """
             )
 
-    def _user_exists(self, user_id: str) -> bool:
+    def _user_status(self, user_id: str) -> str | None:
         with self.community._connect() as con:
-            return bool(con.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone())
+            row = con.execute("SELECT status FROM users WHERE id=?", (user_id,)).fetchone()
+        return str(row["status"]) if row else None
 
     def is_enabled(self, user_id: str) -> bool:
         self.ensure_schema()
         with self.community._connect() as con:
             row = con.execute(
-                "SELECT enabled FROM shared_sky_moderator_permissions WHERE user_id=?",
+                """SELECT p.enabled,u.status
+                   FROM shared_sky_moderator_permissions p
+                   JOIN users u ON u.id=p.user_id
+                   WHERE p.user_id=?""",
                 (user_id,),
             ).fetchone()
-        return bool(row and row["enabled"])
+        return bool(row and row["enabled"] and str(row["status"]) == "active")
 
     def is_live_assigned(self, broadcast_id: str, user_id: str) -> bool:
         with self.community._connect() as con:
@@ -107,8 +118,12 @@ class ModeratorPermissionService:
 
     def set_permission(self, user_id: str, enabled: bool, *, actor_user_id: str, reason: str) -> dict:
         self.ensure_schema()
-        if not self._user_exists(user_id):
+        clean_reason = _reason(reason)
+        status = self._user_status(user_id)
+        if status is None:
             raise KeyError(user_id)
+        if enabled and status != "active":
+            raise PermissionError("Only an active account can receive Moderator permission")
         now = _now()
         with self.community._connect() as con:
             con.isolation_level = None
@@ -125,7 +140,7 @@ class ModeratorPermissionService:
                    ON CONFLICT(user_id) DO UPDATE SET
                      enabled=excluded.enabled,granted_by=excluded.granted_by,
                      reason=excluded.reason,updated_at=excluded.updated_at""",
-                (user_id, int(enabled), actor_user_id, reason.strip(), created_at, now),
+                (user_id, int(enabled), actor_user_id, clean_reason, created_at, now),
             )
             # Revocation also removes every session assignment. The runtime guard would already
             # deny stale rows, but deleting them prevents surprise reactivation on a later grant.
@@ -134,7 +149,7 @@ class ModeratorPermissionService:
             con.execute(
                 """INSERT INTO shared_sky_moderator_permission_audit
                    (id,user_id,enabled,actor_user_id,reason,created_at) VALUES(?,?,?,?,?,?)""",
-                (uuid4().hex, user_id, int(enabled), actor_user_id, reason.strip(), now),
+                (uuid4().hex, user_id, int(enabled), actor_user_id, clean_reason, now),
             )
             con.execute("COMMIT")
         return self.permission(user_id)
@@ -143,28 +158,37 @@ class ModeratorPermissionService:
         self.ensure_schema()
         with self.community._connect() as con:
             row = con.execute(
-                "SELECT * FROM shared_sky_moderator_permissions WHERE user_id=?",
+                """SELECT p.*,u.status AS account_status
+                   FROM shared_sky_moderator_permissions p
+                   JOIN users u ON u.id=p.user_id
+                   WHERE p.user_id=?""",
                 (user_id,),
             ).fetchone()
         if not row:
-            return {"user_id": user_id, "enabled": False, "configured": False}
+            return {"user_id": user_id, "enabled": False, "configured": False, "effective": False}
         item = dict(row)
-        item["enabled"] = bool(item["enabled"])
+        configured_enabled = bool(item["enabled"])
+        item["enabled"] = configured_enabled
         item["configured"] = True
+        item["effective"] = bool(configured_enabled and item["account_status"] == "active")
         return item
 
     def list_permissions(self, *, enabled_only: bool = False) -> list[dict]:
         self.ensure_schema()
-        sql = "SELECT * FROM shared_sky_moderator_permissions"
+        sql = (
+            "SELECT p.*,u.status AS account_status FROM shared_sky_moderator_permissions p "
+            "JOIN users u ON u.id=p.user_id"
+        )
         if enabled_only:
-            sql += " WHERE enabled=1"
-        sql += " ORDER BY updated_at DESC,user_id"
+            sql += " WHERE p.enabled=1 AND u.status='active'"
+        sql += " ORDER BY p.updated_at DESC,p.user_id"
         with self.community._connect() as con:
             rows = con.execute(sql).fetchall()
         result = []
         for row in rows:
             item = dict(row)
             item["enabled"] = bool(item["enabled"])
+            item["effective"] = bool(item["enabled"] and item["account_status"] == "active")
             result.append(item)
         return result
 
@@ -179,10 +203,11 @@ class ModeratorPermissionService:
         reason: str,
     ) -> dict:
         self.ensure_schema()
+        clean_reason = _reason(reason)
         broadcast = self.community._broadcast(broadcast_id)
         if not owner and str(broadcast["user_id"]) != actor_user_id:
             raise PermissionError("Only the LIVE creator or an Owner can assign LIVE moderators")
-        if not self._user_exists(user_id):
+        if self._user_status(user_id) is None:
             raise KeyError(user_id)
         now = _now()
         with self.community._connect() as con:
@@ -190,13 +215,16 @@ class ModeratorPermissionService:
             con.execute("BEGIN IMMEDIATE")
             if assigned:
                 permission = con.execute(
-                    "SELECT enabled FROM shared_sky_moderator_permissions WHERE user_id=?",
+                    """SELECT p.enabled,u.status
+                       FROM shared_sky_moderator_permissions p
+                       JOIN users u ON u.id=p.user_id
+                       WHERE p.user_id=?""",
                     (user_id,),
                 ).fetchone()
-                if not permission or not bool(permission["enabled"]):
+                if not permission or not bool(permission["enabled"]) or str(permission["status"]) != "active":
                     con.execute("ROLLBACK")
                     raise PermissionError(
-                        "Owner-enabled Moderator permission is required before LIVE assignment"
+                        "Active Owner-enabled Moderator permission is required before LIVE assignment"
                     )
                 con.execute(
                     """INSERT INTO shared_sky_live_moderators(broadcast_id,user_id,granted_by,created_at)
@@ -213,7 +241,7 @@ class ModeratorPermissionService:
                 """INSERT INTO shared_sky_live_moderator_assignment_audit
                    (id,broadcast_id,user_id,assigned,actor_user_id,reason,created_at)
                    VALUES(?,?,?,?,?,?,?)""",
-                (uuid4().hex, broadcast_id, user_id, int(assigned), actor_user_id, reason.strip(), now),
+                (uuid4().hex, broadcast_id, user_id, int(assigned), actor_user_id, clean_reason, now),
             )
             con.execute("COMMIT")
         return {
@@ -231,8 +259,9 @@ class ModeratorPermissionService:
         with self.community._connect() as con:
             rows = con.execute(
                 """SELECT m.broadcast_id,m.user_id,m.granted_by,m.created_at,
-                          COALESCE(p.enabled,0) AS global_enabled
+                          COALESCE(p.enabled,0) AS global_enabled,u.status AS account_status
                    FROM shared_sky_live_moderators m
+                   JOIN users u ON u.id=m.user_id
                    LEFT JOIN shared_sky_moderator_permissions p ON p.user_id=m.user_id
                    WHERE m.broadcast_id=? ORDER BY m.created_at,m.user_id""",
                 (broadcast_id,),
@@ -241,7 +270,7 @@ class ModeratorPermissionService:
             {
                 **dict(row),
                 "global_enabled": bool(row["global_enabled"]),
-                "effective": bool(row["global_enabled"]),
+                "effective": bool(row["global_enabled"] and row["account_status"] == "active"),
             }
             for row in rows
         ]
@@ -307,6 +336,8 @@ def owner_set_moderator_permission(user_id: str, body: ModeratorPermissionReques
         )
     except KeyError as exc:
         raise HTTPException(404, "User not found") from exc
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(403 if isinstance(exc, PermissionError) else 400, str(exc)) from exc
 
 
 @router.get("/shared-sky/live/api/watch/{broadcast_id}/moderators")
@@ -344,8 +375,8 @@ def set_live_moderator(
         )
     except KeyError as exc:
         raise HTTPException(404, "User or Shared Sky LIVE not found") from exc
-    except PermissionError as exc:
-        raise HTTPException(403, str(exc)) from exc
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(403 if isinstance(exc, PermissionError) else 400, str(exc)) from exc
 
 
 __all__ = [
