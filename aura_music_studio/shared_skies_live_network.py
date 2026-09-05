@@ -223,12 +223,12 @@ def live_now_page():
     payload = live_now_api(50)
     cards = "".join(
         "<article class='live-card'>"
-        f"<div class='thumb'>{'<img src=' + repr(row['thumbnail_url']) + ' alt=\"\">' if row['thumbnail_url'] else '<span>LIVE</span>'}</div>"
-        f"<h3>{escape(row['title'])}</h3>"
-        f"<p>{escape(row['creative_surface'].replace('-', ' ').title())} · {row['viewer_count']} watching</p>"
-        f"<p>❤️ {row['like_count']} · ↗ {row['share_count']} · ✨ {row['gift_coins']} coins</p>"
-        f"<a href='/live/{escape(row['id'])}'>Watch LIVE</a>"
-        "</article>"
+        + (f"<div class='thumb'><img src='{escape(row['thumbnail_url'], quote=True)}' alt=''></div>" if row["thumbnail_url"] else "<div class='thumb'><span>LIVE</span></div>")
+        + f"<h3>{escape(row['title'])}</h3>"
+        + f"<p>{escape(row['creative_surface'].replace('-', ' ').title())} · {row['viewer_count']} watching</p>"
+        + f"<p>❤️ {row['like_count']} · ↗ {row['share_count']} · ✨ {row['gift_coins']} coins</p>"
+        + f"<a href='/live/{escape(row['id'], quote=True)}'>Watch LIVE</a>"
+        + "</article>"
         for row in payload["live"]
     ) or "<div class='empty'>Nobody is live right now. Start creating and be the first.</div>"
     return HTMLResponse(
