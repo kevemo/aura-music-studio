@@ -45,6 +45,10 @@ PUBLIC_EXACT = {
 }
 PUBLIC_PREFIXES = (
     "/auth/", "/admin/", "/owner", "/privacy/", "/brand/", "/node-coordinator/",
+    # Shared Sky public Creator identity is an explicit read-only allow-listed route family.
+    # The endpoint itself exposes only public profile fields and returns 404 for inactive,
+    # revoked, non-Creator or non-discoverable accounts.
+    "/shared-sky/public/",
     # Browser/link sources in TikTok LIVE Studio and OBS do not share the member's site session.
     # These routes are public only at the middleware layer; every request is authenticated by a
     # high-entropy, rotatable source token stored only as a SHA-256 digest server-side.

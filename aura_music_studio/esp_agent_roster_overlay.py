@@ -93,10 +93,11 @@ def level_up_with_agent_roster(request: Request):
     performance_link = "<a class='btn primary' href='/command-center/agent/performance'>Agent Performance &amp; Compensation</a>"
     academy_link = "<a class='btn primary' href='/command-center/agent/recruitment-academy'>Recruitment Academy</a>"
     discovery_link = "<a class='btn primary' href='/command-center/agent/discovery'>Creator Discovery</a>"
+    crm_link = "<a class='btn primary' href='/command-center/agent/leads'>Recruitment Lead CRM</a>"
     if marker in html and "/command-center/agent/roster" not in html:
         html = html.replace(
             marker,
-            marker + roster_link + health_link + support_link + operations_link + backstage_link + vision_link + development_link + report_link + performance_link + academy_link + discovery_link,
+            marker + roster_link + health_link + support_link + operations_link + backstage_link + vision_link + development_link + report_link + performance_link + academy_link + discovery_link + crm_link,
             1,
         )
     else:
@@ -138,6 +139,10 @@ def level_up_with_agent_roster(request: Request):
             html = html.replace(backstage_link, backstage_link + discovery_link, 1)
         elif operations_link in html and "/command-center/agent/discovery" not in html:
             html = html.replace(operations_link, operations_link + discovery_link, 1)
+        if discovery_link in html and "/command-center/agent/leads" not in html:
+            html = html.replace(discovery_link, discovery_link + crm_link, 1)
+        elif academy_link in html and "/command-center/agent/leads" not in html:
+            html = html.replace(academy_link, academy_link + crm_link, 1)
 
     roster_partial = (
         "<div class='topline'><span>Agent OS</span><b class='partial'>Partially Built</b></div>"

@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, Response
 from .aura_os_contract import router as aura_os_router
 from .esp_brand_revenue_os import router as brand_revenue_os_router
 from .esp_broadcast_tech import router as broadcast_tech_router
+from .esp_chat9_product_integration import router as chat9_product_router
 from .esp_collaborations import router as collaborations_router
 from .esp_commercial_growth import router as commercial_growth_router
 from .esp_creator_data_import_overlay import router as creator_data_import_router
@@ -44,6 +45,7 @@ router.include_router(shop_automation_router)
 router.include_router(role_dashboard_router)
 router.include_router(owner_operations_intelligence_router)
 router.include_router(owner_focus_router)
+router.include_router(chat9_product_router)
 router.include_router(creator_plan_router)
 router.include_router(live_show_planner_router)
 router.include_router(niche_discovery_router)
@@ -102,6 +104,8 @@ def level_up_with_creator_plan(request: Request):
         "<a class='btn primary' href='/shared-sky'>Shared Sky Streaming Studios</a>",
         "<a class='btn primary' href='/command-center/dashboard'>Creator / Agent Dashboard</a>",
         "<a class='btn primary' href='/command-center/member-hub'>ESP Member Hub</a>",
+        "<a class='btn primary' href='/command-center/onboarding'>Creator Onboarding &amp; Public Profile</a>",
+        "<a class='btn primary' href='/command-center/training'>Training Academy</a>",
         "<a class='btn' href='/command-center/library'>Academy &amp; Resources</a>",
         "<a class='btn' href='/command-center/incentives'>Incentives</a>",
         "<a class='btn' href='/command-center/collaborations'>Collaborations</a>",
