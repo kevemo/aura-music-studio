@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fastapi import FastAPI
+
 from aura_music_studio import shared_sky_professional_canvas as canvas
 from aura_music_studio.shared_sky_professional_operator_ui import (
     OPERATOR_HTML,
@@ -12,11 +14,14 @@ from aura_music_studio.shared_sky_professional_operator_ui import (
 def _base(_project_id: str) -> str:
     return (
         "<html><head><style>.base{}</style></head><body>"
+        "<div class='row'><button id='addBanner'>Banner</button></div>"
         "<aside class='right panel'><section id='transportConsole'></section><h2>Inspector</h2></aside>"
         "<script>const projectId='project-1';function keySafe(){return true};"
-        "function render(){};const state={session:{},project:{scenes:[]},selected:new Set()};"
+        "function render(){};function graphicMedia(){return ''};function rgba(){return ''};"
+        "const state={session:{},project:{scenes:[]},selected:new Set(),transport:{}};"
         "const $=()=>null,$$=()=>[];const api=async()=>({});function handle(){};"
-        "function assign(){};async function loadHistory(){}</script></body></html>"
+        "function assign(){};async function loadHistory(){};async function refreshProject(){};"
+        "</script></body></html>"
     )
 
 
@@ -67,15 +72,19 @@ def test_operator_commands_use_existing_versioned_studio_and_marker_routes():
     assert "expected_studio_version" not in OPERATOR_JS
 
 
-def test_installer_wraps_professional_renderer_once(monkeypatch):
+def test_composed_installer_wraps_professional_renderer_once(monkeypatch):
     monkeypatch.setattr(canvas, "professional_html", _base)
-    install_professional_operator_ui(object())
+    app = FastAPI()
+    install_professional_operator_ui(app)
     first = canvas.professional_html
-    install_professional_operator_ui(object())
+    install_professional_operator_ui(app)
     second = canvas.professional_html
     assert first is second
     assert getattr(second, "_shared_sky_operator_ui", False) is True
-    assert second("project-1").count("id='operatorConsole'") == 1
+    assert getattr(second, "_shared_sky_motion_graphics_ui", False) is True
+    page = second("project-1")
+    assert page.count("id='operatorConsole'") == 1
+    assert page.count("id='addTicker'") == 1
 
 
 def test_operator_ui_explains_macro_authority_boundary():
