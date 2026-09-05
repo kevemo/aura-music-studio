@@ -4,11 +4,11 @@ from __future__ import annotations
 
 The base workflow already requires explicit confirmation for scheduled/published
 announcements. This layer closes the remaining scheduling ambiguity by requiring a
-real, timezone-aware publication timestamp for scheduled records and by preventing
-an expiry timestamp from preceding (or equalling) publication.
+real, timezone-aware publication timestamp, normalizing scheduled timestamps to UTC
+for deterministic SQLite comparisons, and preventing expiry at/before publication.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from . import esp_product_workflows as base
 
@@ -28,6 +28,10 @@ def _parse_aware_timestamp(value: str | None, *, field: str) -> datetime:
     return parsed
 
 
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
+
+
 def _secured_create_announcement(
     self: base.Chat9WorkflowStore,
     payload: base.AnnouncementCreate,
@@ -36,10 +40,12 @@ def _secured_create_announcement(
 ) -> dict:
     if payload.status == "scheduled":
         publish_at = _parse_aware_timestamp(payload.publish_at, field="publish_at")
+        payload.publish_at = _utc_iso(publish_at)
         if payload.expires_at:
             expires_at = _parse_aware_timestamp(payload.expires_at, field="expires_at")
             if expires_at <= publish_at:
                 raise ValueError("expires_at must be later than publish_at")
+            payload.expires_at = _utc_iso(expires_at)
     return _original_create_announcement(self, payload, actor_user_id=actor_user_id)
 
 
