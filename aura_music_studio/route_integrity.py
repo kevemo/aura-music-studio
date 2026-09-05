@@ -7,7 +7,6 @@ from typing import Any
 
 
 _SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
-_CREATION_LIVE_PREFIX = "/creation-live"
 _CREATION_LIVE_SENTINEL = "/creation-live/capabilities"
 
 
@@ -157,9 +156,14 @@ def _install_openapi_integrity(app: Any) -> None:
         if app.openapi_schema is not None:
             return app.openapi_schema
 
+        # Re-run route-level repair at schema time in case a compatibility installer added a
+        # legitimate route after the initial composition pass.
         late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
         with warnings.catch_warnings():
+            # FastAPI emits this warning before callers can inspect/repair its completed schema.
+            # Suppress only this exact generator warning inside the canonical boundary; every
+            # collision is then repaired and audited immediately below. Other warnings remain.
             warnings.filterwarnings(
                 "ignore",
                 message=r"^Duplicate Operation ID .*",
@@ -184,38 +188,48 @@ def _install_openapi_integrity(app: Any) -> None:
 
 
 def _ensure_creation_live_routes(app: Any) -> None:
-    """Compose Chat 7 deterministically for this app without relying on global installer markers.
+    """Mount Chat 7 on each target app without draining shared module-level routers.
 
-    ``deduplicate_http_routes`` is used by more than one FastAPI instance during the full test and
-    production bootstrap lifecycle.  Module-level routers are immutable templates; this function
-    rebuilds only the Chat 7 namespace on the target app each time, then mounts authoritative
-    overrides before the base router so dispatch cannot inherit stale state from another app.
+    The repository creates more than one FastAPI instance during validation.  Clearing the whole
+    ``/creation-live`` namespace made later app instances depend on mutable global router state.
+    Instead, keep any valid base routes already mounted, add the base router only when its sentinel
+    is absent, then let the authority/community installers replace only the exact routes they own.
     """
     from .creation_live_hardening import install_creation_live_hardening
 
     install_creation_live_hardening()
 
     from .creation_live import CreationLiveMiddleware, router as creation_live_router
-    from .creation_live_authority import router as creation_live_authority_router
-    from .creation_live_community import router as creation_live_community_router
+    from .creation_live_authority import install_creation_live_authority_routes
+    from .creation_live_community import install_creation_live_community_route
 
-    # Chat 7 owns /creation-live. Recompose that namespace from immutable module routers so a
-    # previous app/test cannot drain, shadow or otherwise influence a fresh application's routes.
-    app.router.routes[:] = [
-        route
+    has_base = any(
+        getattr(route, "path", None) == _CREATION_LIVE_SENTINEL
         for route in app.router.routes
-        if not str(getattr(route, "path", "")).startswith(_CREATION_LIVE_PREFIX)
-    ]
+    )
+    if not has_base:
+        app.include_router(creation_live_router)
 
-    # Override routes are intentionally mounted first; the general duplicate pass below keeps
-    # these authoritative handlers and drops the older compatibility copies from the base router.
-    app.include_router(creation_live_authority_router)
-    app.include_router(creation_live_community_router)
-    app.include_router(creation_live_router)
+    # These installers surgically replace only the consequential compatibility routes they own;
+    # all other Chat 7 routes remain intact. Repeated calls are idempotent per target application.
+    install_creation_live_authority_routes(app)
+    install_creation_live_community_route(app)
 
-    has_route = any(getattr(route, "path", None) == _CREATION_LIVE_SENTINEL for route in app.router.routes)
-    if not has_route:
-        raise RuntimeError("Chat 7 creation-live route composition failed")
+    required = {
+        ("/creation-live/capabilities", ("GET",)),
+        ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/attach", ("POST",)),
+        ("/creation-live/projects/{project_name}/markers", ("POST",)),
+        ("/creation-live/projects/{project_name}/returns", ("POST",)),
+        ("/creation-live/projects/{project_name}/community", ("GET",)),
+    }
+    mounted = {
+        signature
+        for route in app.router.routes
+        if (signature := _http_signature(route)) is not None
+    }
+    missing = sorted(required - mounted)
+    if missing:
+        raise RuntimeError(f"Chat 7 creation-live route composition failed: missing {missing!r}")
 
     middleware_present = any(
         getattr(middleware, "cls", None) is CreationLiveMiddleware
@@ -232,9 +246,14 @@ def _ensure_creation_live_routes(app: Any) -> None:
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     """Remove unreachable exact duplicate HTTP routes and harden schema identity.
 
-    The canonical composition point also installs the additive Chat 7 creation-live router and
-    middleware before signatures are reconciled. This preserves the repository's one FastAPI app,
-    avoids a second creative/live application, and keeps the installer idempotent.
+    Starlette/FastAPI dispatches routes in registration order, so when the same exact path and
+    HTTP-method set is registered twice, every later copy is unreachable. Preserve the first
+    authoritative route exactly as runtime dispatch already does and remove only later exact
+    copies. Mounts, websocket routes, and different method sets are untouched.
+
+    The canonical composition point also installs Chat 7 before signatures are reconciled. After
+    runtime duplicates are removed, repair route-level schema collisions and install a canonical
+    OpenAPI wrapper that also handles per-method collisions.
     """
     _ensure_creation_live_routes(app)
 
@@ -276,3 +295,10 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     }
     _install_openapi_integrity(app)
     return removed
+
+
+__all__ = [
+    "deduplicate_http_routes",
+    "duplicate_http_signatures",
+    "ensure_unique_operation_ids",
+]
