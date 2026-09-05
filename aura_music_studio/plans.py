@@ -158,8 +158,9 @@ GAME_PLAYTEST = "game_playtest"
 GAME_CREATE = "game_create"
 GAME_CREATE_UNLIMITED = "game_create_unlimited"
 
-# Command Center memberships and standalone native products share one canonical entitlement
-# vocabulary so a subscription grant cannot diverge from the native-device authorization layer.
+# Command Center memberships and standalone native products share stable internal
+# entitlement identifiers for compatibility. This does not mean every native product is
+# bundled into a membership: SLS is deliberately licensed separately.
 AURA_OS = AURA_OS_ENTITLEMENT
 AURASEC = AURA_SEC_ENTITLEMENT
 
@@ -233,7 +234,6 @@ PRO_FEATURES = BASE_FEATURES | frozenset({
     PRIORITY_QUEUE,
     GAME_CREATE_UNLIMITED,
     AURA_OS,
-    AURASEC,
 })
 
 
@@ -279,15 +279,16 @@ PLANS: dict[str, Plan] = {
         annual_price=Decimal("99.00"),
         currency="GBP",
         description=(
-            "£9.99/month or £99/year Unlimited Pro tier with the highest enabled creative access, Aura OS Assistant/Overlay "
-            "and Aura Sec included. Normal use is effectively unlimited subject to fair-use, infrastructure, provider-capacity, "
-            "rate-control, anti-abuse and safety safeguards. Includes the complete enabled production stack: expanded instrument/"
-            "performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, owner-approved "
-            "native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, take lanes, "
-            "automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/remixes/repaint, "
-            "Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, video/music sync, "
-            "enabled export formats, and unlimited active Game Forge project workspaces. Eligible song/game publishing remains subject "
-            "to marketplace entitlement, rights and governance gates."
+            "£9.99/month or £99/year Unlimited Pro tier with the highest enabled creative access and Aura OS Assistant/Overlay. "
+            "Elevate Souls Productions Secure Lattice System (SLS) native/device licensing is separate and is not granted by "
+            "Command Center membership. Normal creative use is effectively unlimited subject to fair-use, infrastructure, "
+            "provider-capacity, rate-control, anti-abuse and safety safeguards. Includes the complete enabled production stack: "
+            "expanded instrument/performance types, editable multitrack build-around production, full FX banks, Aura AI FX Designer, "
+            "owner-approved native plugin racks, advanced/custom Aura Tune, detailed splitter/stem downloads, visual multitrack DAW, "
+            "take lanes, automation and deep revision history, advanced/reference/album mastering, Sample Lab, Style DNA, covers/"
+            "remixes/repaint, Harmony Architect, consent-approved voice duplication, neural amp processing, immersive spatial audio, "
+            "video/music sync, enabled export formats, and unlimited active Game Forge project workspaces. Eligible song/game "
+            "publishing remains subject to marketplace entitlement, rights and governance gates."
         ),
         confirmed_songs_per_day=None,
         regeneration_until_confirmed=True,

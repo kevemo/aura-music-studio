@@ -11,13 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
-import requests
+from .web_transport import explicit_proxy_get, no_env_session, pinned_get, validate_proxy_url
 
 
 DEFAULT_TIMEOUT = 25
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
 MAX_REDIRECTS = 5
-USER_AGENT = "ESP-Live-Sound-Studio-Aura/0.7 (+https://github.com/kevemo/aura-music-studio)"
+USER_AGENT = "ESP-Command-Center-Aura/1.0"
 
 
 @dataclass
@@ -32,10 +32,15 @@ class WebResult:
 class AuraWebGateway:
     """Controlled outbound Internet access for Aura.
 
-    Direct member-requested fetches are HTTPS-first, cached, rate-limited and protected
-    against SSRF, including DNS names that resolve to private/local addresses. Search may
-    use an explicitly configured self-hosted SearXNG service on the Studio's private network;
-    that exception applies only to the exact configured search service, never arbitrary URLs.
+    Direct public fetches resolve and validate every target, then connect to one of those exact
+    validated numeric addresses while retaining the original hostname for TLS and HTTP Host.
+    This closes the validation-to-connect DNS-rebinding window. An explicitly configured egress
+    proxy is a separate trust boundary: target-DNS enforcement may be delegated only when the
+    operator explicitly enables that trust. Ambient HTTP(S)_PROXY variables are never authority.
+
+    Search may use an explicitly configured self-hosted SearXNG service on the Command Center's
+    private network. That exception applies only to the exact configured search service, never to
+    arbitrary member-requested URLs.
     """
 
     def __init__(self, cache_dir: str | Path | None = None):
@@ -46,14 +51,18 @@ class AuraWebGateway:
         self.min_interval = float(os.getenv("AURA_WEB_MIN_INTERVAL", "0.5"))
         self.cache_ttl = int(os.getenv("AURA_WEB_CACHE_TTL", "3600"))
         self.searxng_url = (os.getenv("AURA_SEARXNG_URL") or "").rstrip("/")
+        self.egress_proxy = validate_proxy_url(os.getenv("AURA_WEB_EGRESS_PROXY") or "")
+        self.trust_egress_proxy_dns = (os.getenv("AURA_WEB_TRUST_EGRESS_PROXY_DNS") or "false").lower() in {
+            "1", "true", "yes", "on"
+        }
         self.cache_dir = Path(cache_dir or os.getenv("AURA_WEB_CACHE_DIR", "data/web_cache"))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._last_request = 0.0
 
         blocked = os.getenv("AURA_WEB_BLOCKED_DOMAINS", "localhost,127.0.0.1,0.0.0.0,::1")
-        self.blocked_domains = {x.strip().lower() for x in blocked.split(",") if x.strip()}
+        self.blocked_domains = {x.strip().lower().rstrip(".") for x in blocked.split(",") if x.strip()}
         allowed = os.getenv("AURA_WEB_ALLOWED_DOMAINS", "")
-        self.allowed_domains = {x.strip().lower() for x in allowed.split(",") if x.strip()}
+        self.allowed_domains = {x.strip().lower().rstrip(".") for x in allowed.split(",") if x.strip()}
 
     @staticmethod
     def _is_public_ip(value: str) -> bool:
@@ -70,44 +79,73 @@ class AuraWebGateway:
             or ip.is_unspecified
         )
 
+    @staticmethod
+    def _port(parsed) -> int:
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError as exc:
+            raise ValueError("URL port is invalid") from exc
+        if not 1 <= port <= 65535:
+            raise ValueError("URL port is invalid")
+        return port
+
     def _is_configured_search_url(self, url: str) -> bool:
         if not self.searxng_url:
             return False
         base = urlparse(self.searxng_url)
         current = urlparse(url)
+        try:
+            base_port = self._port(base)
+            current_port = self._port(current)
+        except ValueError:
+            return False
         return (
             current.scheme == base.scheme
-            and (current.hostname or "").lower() == (base.hostname or "").lower()
-            and (current.port or (443 if current.scheme == "https" else 80))
-            == (base.port or (443 if base.scheme == "https" else 80))
+            and (current.hostname or "").lower().rstrip(".") == (base.hostname or "").lower().rstrip(".")
+            and current_port == base_port
         )
 
-    def _validate_url(self, url: str, *, allow_configured_search: bool = False) -> None:
+    def _resolve_public_addresses(self, host: str, port: int) -> tuple[str, ...]:
+        try:
+            infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ValueError(f"Unable to resolve web host: {host}") from exc
+        addresses = tuple(dict.fromkeys(info[4][0] for info in infos if info and info[4]))
+        if not addresses:
+            raise ValueError(f"Unable to resolve web host: {host}")
+        if any(not self._is_public_ip(address) for address in addresses):
+            raise PermissionError("Resolved private/local network addresses are blocked")
+        return addresses
+
+    def _validate_url(
+        self,
+        url: str,
+        *,
+        allow_configured_search: bool = False,
+    ) -> tuple[str, ...] | None:
         if not self.enabled:
             raise PermissionError("Aura web access is disabled")
         parsed = urlparse(url)
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("Web URLs may not contain embedded credentials")
         internal_search = allow_configured_search and self._is_configured_search_url(url)
         permitted_schemes = {"https", "http"} if self.allow_http or internal_search else {"https"}
         if parsed.scheme not in permitted_schemes:
             raise ValueError("Only approved HTTP(S) web access is supported")
-        host = (parsed.hostname or "").lower()
+        host = (parsed.hostname or "").lower().rstrip(".")
         if not host:
             raise ValueError("URL has no hostname")
+        port = self._port(parsed)
 
-        if not internal_search:
-            if host in self.blocked_domains or any(host.endswith("." + x) for x in self.blocked_domains):
-                raise PermissionError("Local/private host access is blocked by the Aura Web Gateway")
-            if self.allowed_domains and host not in self.allowed_domains and not any(
-                host.endswith("." + x) for x in self.allowed_domains
-            ):
-                raise PermissionError("Domain is not in AURA_WEB_ALLOWED_DOMAINS")
-            try:
-                infos = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
-            except socket.gaierror as exc:
-                raise ValueError(f"Unable to resolve web host: {host}") from exc
-            addresses = {info[4][0] for info in infos if info and info[4]}
-            if not addresses or any(not self._is_public_ip(address) for address in addresses):
-                raise PermissionError("Resolved private/local network addresses are blocked")
+        if internal_search:
+            return None
+        if host in self.blocked_domains or any(host.endswith("." + x) for x in self.blocked_domains):
+            raise PermissionError("Local/private host access is blocked by the Aura Web Gateway")
+        if self.allowed_domains and host not in self.allowed_domains and not any(
+            host.endswith("." + x) for x in self.allowed_domains
+        ):
+            raise PermissionError("Domain is not in AURA_WEB_ALLOWED_DOMAINS")
+        return self._resolve_public_addresses(host, port)
 
     @staticmethod
     def _cache_key(url: str) -> str:
@@ -158,21 +196,40 @@ class AuraWebGateway:
             time.sleep(self.min_interval - elapsed)
         self._last_request = time.time()
 
-    def _request_with_safe_redirects(self, url: str) -> requests.Response:
+    @staticmethod
+    def _public_headers() -> dict[str, str]:
+        return {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,text/plain,application/json;q=0.9,*/*;q=0.5",
+        }
+
+    def _public_get(self, url: str, addresses: tuple[str, ...]):
+        if self.egress_proxy:
+            if not self.trust_egress_proxy_dns:
+                raise PermissionError(
+                    "AURA_WEB_EGRESS_PROXY is configured but target-DNS enforcement has not been explicitly delegated"
+                )
+            return explicit_proxy_get(
+                url,
+                proxy_url=self.egress_proxy,
+                headers=self._public_headers(),
+                timeout=self.timeout,
+            )
+        return pinned_get(
+            url,
+            addresses=addresses,
+            headers=self._public_headers(),
+            timeout=self.timeout,
+        )
+
+    def _request_with_safe_redirects(self, url: str):
         current = url
         for _ in range(MAX_REDIRECTS + 1):
-            self._validate_url(current)
+            addresses = self._validate_url(current)
+            if not addresses:
+                raise PermissionError("Public fetch did not produce a validated address set")
             self._throttle()
-            response = requests.get(
-                current,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "text/html,text/plain,application/json;q=0.9,*/*;q=0.5",
-                },
-                timeout=self.timeout,
-                stream=True,
-                allow_redirects=False,
-            )
+            response = self._public_get(current, addresses)
             if response.status_code in {301, 302, 303, 307, 308}:
                 location = response.headers.get("location")
                 response.close()
@@ -184,6 +241,8 @@ class AuraWebGateway:
         raise ValueError("Web request exceeded maximum redirects")
 
     def fetch_text(self, url: str, *, use_cache: bool = True) -> WebResult:
+        # Validate policy before a cache read so a later allow/block-list change applies to cached
+        # material too. A live request validates again immediately before selecting its pinned IP.
         self._validate_url(url)
         if use_cache:
             cached = self._read_cache(url)
@@ -222,28 +281,27 @@ class AuraWebGateway:
             raise ValueError("Search query is empty")
         if not self.searxng_url:
             raise RuntimeError(
-                "No search backend configured. Set AURA_SEARXNG_URL to the Studio's SearXNG service. "
+                "No search backend configured. Set AURA_SEARXNG_URL to the Command Center's SearXNG service. "
                 "Aura can still fetch known public HTTPS URLs directly without search."
             )
         endpoint = f"{self.searxng_url}/search"
         self._validate_url(endpoint, allow_configured_search=True)
         self._throttle()
-        response = requests.get(
-            endpoint,
-            params={"q": query, "format": "json", "language": "all", "safesearch": 1},
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
-            timeout=self.timeout,
-            allow_redirects=False,
-        )
-        response.raise_for_status()
-        payload = response.json()
+        with no_env_session() as session:
+            response = session.get(
+                endpoint,
+                params={"q": query, "format": "json", "language": "all", "safesearch": 1},
+                headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+                timeout=self.timeout,
+                allow_redirects=False,
+            )
+            response.raise_for_status()
+            payload = response.json()
         results: list[dict] = []
         for item in payload.get("results", [])[: max(1, min(int(limit), 25))]:
             result_url = item.get("url")
             if not result_url:
                 continue
-            # Search results can point anywhere on the public web, so validate before returning
-            # a result that Aura may subsequently fetch.
             try:
                 self._validate_url(result_url)
             except Exception:
@@ -259,16 +317,24 @@ class AuraWebGateway:
         return results
 
     def diagnostics(self) -> dict:
+        if self.egress_proxy:
+            rebinding = "delegated_to_explicit_egress_proxy" if self.trust_egress_proxy_dns else "proxy_untrusted_fail_closed"
+        else:
+            rebinding = "direct_validated_ip_pinning"
         return {
             "enabled": self.enabled,
             "direct_https_fetch": True,
             "allow_http_for_public_fetch": self.allow_http,
             "private_network_fetch_blocked": True,
             "dns_private_ip_blocking": True,
+            "dns_rebinding_protection": rebinding,
+            "direct_connection_pins_validated_ip": not bool(self.egress_proxy),
+            "ambient_proxy_environment_ignored": True,
+            "explicit_egress_proxy_configured": bool(self.egress_proxy),
+            "explicit_egress_proxy_dns_trust_enabled": bool(self.egress_proxy and self.trust_egress_proxy_dns),
             "safe_redirect_validation": True,
             "self_hosted_search_configured": bool(self.searxng_url),
             "searxng_url": self.searxng_url or None,
-            "cache_dir": str(self.cache_dir),
             "cache_ttl_seconds": self.cache_ttl,
             "max_response_bytes": self.max_bytes,
             "host_must_allow_outbound_egress": True,

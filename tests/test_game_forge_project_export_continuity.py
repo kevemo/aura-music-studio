@@ -30,7 +30,11 @@ def test_export_readiness_delegates_to_real_export_admission_without_creating_pa
 
     assert calls == [(game.id, "aura_web")]
     assert payload["ready"] is True
-    assert payload["production_ready_target"] is True
+    assert payload["package_ready_target"] is True
+    assert payload["package_ready"] is True
+    assert payload["production_ready_target"] is False
+    assert payload["production_release_ready"] is False
+    assert payload["release_blockers"] == ["publisher_authenticity_not_verified"]
     assert payload["content_hash"] == "a" * 64
     assert payload["export_studio_url"] == f"/game-creation/export/{game.id}"
     assert payload["side_effect_free_check"] is True
@@ -47,9 +51,14 @@ def test_export_readiness_surfaces_authoritative_blocker_without_side_effects(mo
     payload = readiness.aura_web_export_readiness(game)
 
     assert payload["ready"] is False
+    assert payload["package_ready_target"] is True
+    assert payload["package_ready"] is False
     assert "missing or stale" in payload["reason"]
     assert payload["content_hash"] is None
-    assert payload["production_ready_target"] is True
+    assert payload["production_ready_target"] is False
+    assert payload["production_release_ready"] is False
+    assert "package_preflight_failed" in payload["release_blockers"]
+    assert "publisher_authenticity_not_verified" in payload["release_blockers"]
 
 
 def test_project_game_payload_carries_export_readiness_from_single_authority(monkeypatch):

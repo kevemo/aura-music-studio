@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from html import escape
-from io import BytesIO
 from pathlib import Path
 from typing import Literal
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
@@ -33,10 +33,41 @@ router = APIRouter(tags=["Aura Game Export"])
 AURA_WEB_EXPORT_VERSION = AURA_WEB_PACKAGE_SCHEMA_VERSION
 ExportTarget = Literal["aura_web", "phaser4", "playcanvas", "babylon", "godot"]
 
+
+def _bounded_env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"Invalid {name} configuration") from exc
+    if value < minimum or value > maximum:
+        raise RuntimeError(f"Invalid {name} configuration")
+    return value
+
+
+# Export generation runs inside the application process. Bound aggregate source media before
+# any payload bytes are loaded or compressed so a valid-but-huge project cannot exhaust a worker.
+_MAX_EXPORT_MEDIA_BYTES = _bounded_env_int(
+    "GAME_FORGE_EXPORT_MAX_MEDIA_BYTES",
+    256 * 1024 * 1024,
+    minimum=1024 * 1024,
+    maximum=2 * 1024 * 1024 * 1024,
+)
+_MAX_EXPORT_ASSETS = _bounded_env_int(
+    "GAME_FORGE_EXPORT_MAX_ASSETS",
+    500,
+    minimum=1,
+    maximum=1000,
+)
+
 _EXPORT_CAPABILITIES: dict[str, dict] = {
     "aura_web": {
         "label": "Aura Web PWA Package",
-        "production_ready": True,
+        "package_ready": True,
+        "production_ready": False,
+        "production_release_ready": False,
         "executable_export": True,
         "format": "deterministic_pwa_zip_v3_verified",
         "runtime": "existing reviewed Aura playtest runtime in a sandboxed installable shell",
@@ -46,34 +77,48 @@ _EXPORT_CAPABILITIES: dict[str, dict] = {
         "package_integrity": "sha256_all_payload_members",
         "download_reverification": True,
         "publisher_authenticity": "external_signing_gate",
+        "publisher_authenticity_verified": False,
+        "release_blockers": ["publisher_authenticity_not_verified"],
+        "reason": (
+            "Aura Web package generation and package-integrity verification are available, but production release readiness "
+            "remains false until independently trusted publisher signing evidence is verified."
+        ),
     },
     "phaser4": {
         "label": "Phaser 4 adapter",
+        "package_ready": False,
         "production_ready": False,
+        "production_release_ready": False,
         "executable_export": False,
         "format": "planned",
         "reason": "The Phaser adapter is still planned and is not presented as generated executable code.",
     },
     "playcanvas": {
         "label": "PlayCanvas adapter",
+        "package_ready": False,
         "production_ready": False,
+        "production_release_ready": False,
         "executable_export": False,
         "format": "planned",
         "reason": "The PlayCanvas adapter is still planned and is not presented as generated executable code.",
     },
     "babylon": {
         "label": "Babylon.js adapter",
+        "package_ready": False,
         "production_ready": False,
+        "production_release_ready": False,
         "executable_export": False,
         "format": "planned",
-        "reason": "The Babylon.js adapter is still planned and is not presented as generated executable code.",
+        "reason": "The Babylon adapter is still planned and is not presented as generated executable code.",
     },
     "godot": {
         "label": "Godot adapter",
+        "package_ready": False,
         "production_ready": False,
+        "production_release_ready": False,
         "executable_export": False,
         "format": "planned",
-        "reason": "The Godot adapter is still planned and is not presented as generated executable code.",
+        "reason": "The production Godot adapter is still planned; the separate Godot source preview remains non-production.",
     },
 }
 
@@ -126,27 +171,58 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_archive_name(name: str) -> str:
+    clean = str(name or "").replace("\\", "/").lstrip("/")
+    if not clean or ".." in Path(clean).parts:
+        raise ValueError("Unsafe export archive path")
+    return clean
+
+
 def _zip_info(name: str) -> ZipInfo:
     # Fixed archive metadata plus deterministic manifest data makes identical builds reproducible.
-    info = ZipInfo(filename=name, date_time=(1980, 1, 1, 0, 0, 0))
+    info = ZipInfo(filename=_safe_archive_name(name), date_time=(1980, 1, 1, 0, 0, 0))
     info.compress_type = ZIP_DEFLATED
     info.external_attr = 0o644 << 16
     return info
 
 
 def _write_zip_entry(zf: ZipFile, name: str, data: bytes) -> None:
-    clean = str(name or "").replace("\\", "/").lstrip("/")
-    if not clean or ".." in Path(clean).parts:
-        raise ValueError("Unsafe export archive path")
-    zf.writestr(_zip_info(clean), data)
+    zf.writestr(_zip_info(name), data)
+
+
+def _write_zip_file(zf: ZipFile, name: str, path: Path, *, expected_size: int) -> None:
+    if expected_size < 0 or expected_size > _MAX_EXPORT_MEDIA_BYTES:
+        raise ValueError("Game export media file exceeds the configured export boundary")
+    if not path.is_file() or path.stat().st_size != expected_size:
+        raise ValueError("Game export media changed before archive construction")
+    with path.open("rb") as source, zf.open(_zip_info(name), "w") as target:
+        copied = 0
+        while True:
+            chunk = source.read(1024 * 1024)
+            if not chunk:
+                break
+            copied += len(chunk)
+            if copied > expected_size:
+                raise ValueError("Game export media expanded beyond its verified size")
+            target.write(chunk)
+    if copied != expected_size:
+        raise ValueError("Game export media size changed during archive construction")
 
 
 def _validate_exportable(game: GameDNA, target: ExportTarget) -> str:
     capability = _EXPORT_CAPABILITIES[target]
-    if not capability["production_ready"]:
-        raise ValueError(str(capability.get("reason") or "Requested export adapter is not production ready"))
+    if not capability.get("package_ready"):
+        raise ValueError(str(capability.get("reason") or "Requested export adapter is not package ready"))
     if target != "aura_web":
-        raise ValueError("Only the Aura Web export is production ready")
+        raise ValueError("Only the Aura Web package exporter is currently available")
     if not game.rights_confirmed or not str(game.rights_attestation or "").strip():
         raise ValueError("Confirm the project's creation/usage rights before export")
     current_hash = game_integrity_hash(game)
@@ -254,37 +330,61 @@ self.addEventListener('fetch',event=>{{if(event.request.method!=='GET')return;co
     return script.encode("utf-8")
 
 
-def _package_integrity(entries: dict[str, bytes]) -> dict:
+def _package_integrity(entries: dict[str, bytes], media_entries: list[dict] | tuple[dict, ...] = ()) -> dict:
+    files = [
+        {
+            "path": name,
+            "sha256": _sha256_bytes(data),
+            "byte_size": len(data),
+        }
+        for name, data in sorted(entries.items())
+    ]
+    files.extend(
+        {
+            "path": str(row["media_url"]),
+            "sha256": str(row["sha256"]),
+            "byte_size": int(row["byte_size"]),
+        }
+        for row in sorted(media_entries, key=lambda item: str(item["media_url"]))
+    )
     return {
         "algorithm": "sha256",
         "coverage": "all_archive_members_except_manifest.json",
-        "files": [
-            {
-                "path": name,
-                "sha256": _sha256_bytes(data),
-                "byte_size": len(data),
-            }
-            for name, data in sorted(entries.items())
-        ],
+        "files": files,
         "publisher_authenticity_verified": False,
         "publisher_authenticity_gate": "independently trusted release signing",
     }
 
 
-def create_aura_web_export(game: GameDNA) -> dict:
-    content_hash = _validate_exportable(game, "aura_web")
-    html = private_play_html(game).encode("utf-8")
-    assets = runtime_asset_manifest(game.id)
+def _verified_export_assets(game_id: str) -> tuple[list[dict], list[tuple[str, Path, int]], int]:
+    assets = runtime_asset_manifest(game_id)
+    if len(assets) > _MAX_EXPORT_ASSETS:
+        raise ValueError(f"Game export exceeds the {_MAX_EXPORT_ASSETS} asset package limit")
+
+    declared_total = 0
+    for row in assets:
+        size = row.get("byte_size")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ValueError("Game export asset contains an invalid byte size")
+        declared_total += size
+        if declared_total > _MAX_EXPORT_MEDIA_BYTES:
+            raise ValueError(
+                f"Game export media exceeds the {_MAX_EXPORT_MEDIA_BYTES} byte aggregate limit"
+            )
+
     media_entries: list[dict] = []
-    media_bytes: list[tuple[str, bytes]] = []
+    media_sources: list[tuple[str, Path, int]] = []
     for row in assets:
         media_url = str(row.get("media_url") or "")
         if not media_url.startswith("media/"):
             raise ValueError("Runtime media URL escaped the same-origin export contract")
         filename = media_url.split("/", 1)[1]
-        path, record = private_runtime_asset_path(game.id, filename)
-        data = path.read_bytes()
-        if len(data) != int(row.get("byte_size") or -1) or _sha256_bytes(data) != str(row.get("sha256") or ""):
+        path, record = private_runtime_asset_path(game_id, filename)
+        expected_size = int(row["byte_size"])
+        if (
+            path.stat().st_size != expected_size
+            or _sha256_file(path) != str(row.get("sha256") or "")
+        ):
             raise ValueError(f"Game asset '{record.label}' failed export integrity verification")
         media_entries.append(
             {
@@ -295,10 +395,17 @@ def create_aura_web_export(game: GameDNA) -> dict:
                 "media_url": media_url,
                 "mime_type": row["mime_type"],
                 "sha256": row["sha256"],
-                "byte_size": row["byte_size"],
+                "byte_size": expected_size,
             }
         )
-        media_bytes.append((media_url, data))
+        media_sources.append((media_url, path, expected_size))
+    return media_entries, media_sources, declared_total
+
+
+def create_aura_web_export(game: GameDNA) -> dict:
+    content_hash = _validate_exportable(game, "aura_web")
+    html = private_play_html(game).encode("utf-8")
+    media_entries, media_sources, media_total_bytes = _verified_export_assets(game.id)
 
     brand_art = _brand_art_bytes()
     export_seed = f"aura_web:v{AURA_WEB_EXPORT_VERSION}:{game.id}:{content_hash}".encode("utf-8")
@@ -308,13 +415,11 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "index.html": _pwa_index(game),
         "play.html": html,
         "manifest.webmanifest": _pwa_manifest(game, brand_art),
-        "service-worker.js": _service_worker(content_hash, [name for name, _ in media_bytes]),
+        "service-worker.js": _service_worker(content_hash, [name for name, _path, _size in media_sources]),
         "brand-icon.webp": brand_art,
     }
-    for name, data in media_bytes:
-        if name in package_entries:
-            raise ValueError("Game export media path collides with a core package file")
-        package_entries[name] = data
+    if any(name in package_entries for name, _path, _size in media_sources):
+        raise ValueError("Game export media path collides with a core package file")
 
     manifest = {
         "schema_version": AURA_WEB_EXPORT_VERSION,
@@ -333,7 +438,19 @@ def create_aura_web_export(game: GameDNA) -> dict:
             "content_hash": content_hash,
         },
         "assets": media_entries,
-        "package_integrity": _package_integrity(package_entries),
+        "package_integrity": _package_integrity(package_entries, media_entries),
+        "resource_limits": {
+            "max_media_bytes": _MAX_EXPORT_MEDIA_BYTES,
+            "max_assets": _MAX_EXPORT_ASSETS,
+            "media_bytes": media_total_bytes,
+            "disk_backed_archive_construction": True,
+        },
+        "release_readiness": {
+            "package_ready": True,
+            "production_release_ready": False,
+            "publisher_authenticity_verified": False,
+            "blockers": ["publisher_authenticity_not_verified"],
+        },
         "pwa": {
             "installable_shell": True,
             "offline_core_cache": True,
@@ -365,19 +482,17 @@ def create_aura_web_export(game: GameDNA) -> dict:
     }
     manifest_bytes = (json.dumps(manifest, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
-    buffer = BytesIO()
-    with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=9) as zf:
-        for name in ("index.html", "play.html", "manifest.webmanifest", "service-worker.js", "brand-icon.webp"):
-            _write_zip_entry(zf, name, package_entries[name])
-        _write_zip_entry(zf, "manifest.json", manifest_bytes)
-        for name in sorted(entry for entry in package_entries if entry.startswith("media/")):
-            _write_zip_entry(zf, name, package_entries[name])
-
-    payload = buffer.getvalue()
     target = _export_path(game.id, export_id)
     tmp = target.with_suffix(".zip.tmp")
-    tmp.write_bytes(payload)
+    tmp.unlink(missing_ok=True)
     try:
+        with ZipFile(tmp, "w", compression=ZIP_DEFLATED, compresslevel=9) as zf:
+            for name in ("index.html", "play.html", "manifest.webmanifest", "service-worker.js", "brand-icon.webp"):
+                _write_zip_entry(zf, name, package_entries[name])
+            _write_zip_entry(zf, "manifest.json", manifest_bytes)
+            for name, path, size in sorted(media_sources, key=lambda item: item[0]):
+                _write_zip_file(zf, name, path, expected_size=size)
+
         verification = verify_aura_web_export(
             tmp,
             expected_export_id=export_id,
@@ -392,13 +507,18 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "export_id": export_id,
         "target": "aura_web",
         "filename": target.name,
-        "byte_size": len(payload),
-        "sha256": _sha256_bytes(payload),
+        "byte_size": target.stat().st_size,
+        "sha256": _sha256_file(target),
         "content_hash": content_hash,
         "runtime": game.latest_build.runtime,
         "asset_count": len(media_entries),
+        "media_bytes": media_total_bytes,
+        "media_byte_limit": _MAX_EXPORT_MEDIA_BYTES,
         "download_url": f"/api/game-forge/games/{game.id}/exports/{export_id}/download",
-        "production_ready": True,
+        "package_ready": True,
+        "production_ready": False,
+        "production_release_ready": False,
+        "release_blockers": ["publisher_authenticity_not_verified"],
         "pwa_installable": True,
         "offline_core_cache": True,
         "verified_media_cache": "same_origin_on_demand",
@@ -410,6 +530,7 @@ def create_aura_web_export(game: GameDNA) -> dict:
         "creator_private_paths_included": False,
         "server_secrets_included": False,
         "llm_generated_executable_code_included": False,
+        "disk_backed_archive_construction": True,
     }
 
 
@@ -425,7 +546,9 @@ def export_capabilities() -> dict:
     return {
         "targets": _EXPORT_CAPABILITIES,
         "engine_registry": engines,
-        "production_ready_targets": ["aura_web"],
+        "package_ready_targets": ["aura_web"],
+        "production_ready_targets": [],
+        "production_release_ready_targets": [],
         "external_adapters_claimed_ready": False,
     }
 
@@ -479,6 +602,7 @@ def download_game_export(game_id: str, export_id: str, request: Request):
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
             "X-Robots-Tag": "noindex, nofollow",
+            "X-Game-Forge-Production-Release-Ready": "false",
         },
     )
 

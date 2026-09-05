@@ -1,16 +1,10 @@
 name: Render ACE-Step Backing Track
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/render_ace.py'
-      - 'scripts/make_score_guide.py'
-      - '.github/workflows/render-ace-step.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   render:
@@ -18,7 +12,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install dependencies
         run: |
@@ -85,16 +79,16 @@ jobs:
           echo "full_render=${{ steps.full_render.outcome }}" >> generated/render_status.txt
           date -u +'%Y-%m-%dT%H:%M:%SZ' >> generated/render_status.txt
 
-      - name: Remove large temporary guides before commit
+      - name: Remove large temporary guides before upload
         if: always()
         run: |
           rm -f generated/full_score_guide.wav generated/validation_source.wav
 
-      - name: Commit neural outputs and logs
+      - name: Upload neural outputs and logs for review
         if: always()
-        run: |
-          git config user.name "Aura Music Studio Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add generated/
-          git commit -m "Render Aura score-driven neural backing track" || exit 0
-          git push
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ace-step-render-diagnostic
+          path: generated/
+          if-no-files-found: warn
+          retention-days: 14

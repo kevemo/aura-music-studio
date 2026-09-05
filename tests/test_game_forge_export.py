@@ -78,17 +78,28 @@ def _copy_package(source: Path, target: Path, *, replace: dict[str, bytes] | Non
                 dst.writestr(duplicate, b"duplicate payload")
 
 
-def test_external_adapters_are_truthfully_not_production_ready():
+def test_export_capabilities_distinguish_package_from_production_release_readiness():
     caps = exports.export_capabilities()
-    assert caps["production_ready_targets"] == ["aura_web"]
+    assert caps["package_ready_targets"] == ["aura_web"]
+    assert caps["production_ready_targets"] == []
+    assert caps["production_release_ready_targets"] == []
     assert caps["external_adapters_claimed_ready"] is False
-    assert caps["targets"]["aura_web"]["installable_pwa"] is True
-    assert caps["targets"]["aura_web"]["offline_core"] is True
-    assert caps["targets"]["aura_web"]["format"] == "deterministic_pwa_zip_v3_verified"
-    assert caps["targets"]["aura_web"]["package_integrity"] == "sha256_all_payload_members"
-    assert caps["targets"]["aura_web"]["download_reverification"] is True
-    assert caps["targets"]["aura_web"]["publisher_authenticity"] == "external_signing_gate"
+
+    aura_web = caps["targets"]["aura_web"]
+    assert aura_web["package_ready"] is True
+    assert aura_web["production_ready"] is False
+    assert aura_web["production_release_ready"] is False
+    assert aura_web["installable_pwa"] is True
+    assert aura_web["offline_core"] is True
+    assert aura_web["format"] == "deterministic_pwa_zip_v3_verified"
+    assert aura_web["package_integrity"] == "sha256_all_payload_members"
+    assert aura_web["download_reverification"] is True
+    assert aura_web["publisher_authenticity"] == "external_signing_gate"
+    assert aura_web["publisher_authenticity_verified"] is False
+    assert aura_web["release_blockers"] == ["publisher_authenticity_not_verified"]
+
     for target in ("phaser4", "playcanvas", "babylon", "godot"):
+        assert caps["targets"][target]["package_ready"] is False
         assert caps["targets"][target]["production_ready"] is False
         assert caps["targets"][target]["executable_export"] is False
         with pytest.raises(ValueError, match="planned"):
@@ -134,6 +145,35 @@ def test_webp_dimensions_are_derived_from_packaged_artwork():
     assert exports._webp_size(b"not-webp") is None
 
 
+def test_export_rejects_aggregate_media_before_archive_construction(tmp_path: Path, monkeypatch):
+    game, media = _configured_export(tmp_path, monkeypatch)
+    monkeypatch.setattr(exports, "_MAX_EXPORT_MEDIA_BYTES", media.stat().st_size - 1)
+
+    with pytest.raises(ValueError, match="aggregate limit"):
+        exports.create_aura_web_export(game)
+
+    assert not list(tmp_path.glob("*.zip.tmp"))
+
+
+def test_export_rejects_asset_count_over_package_limit(tmp_path: Path, monkeypatch):
+    game, media = _configured_export(tmp_path, monkeypatch)
+    row = {
+        "id": "asset_test",
+        "kind": "audio",
+        "label": "Test ambience",
+        "role": "ambient",
+        "media_url": "media/asset_test.wav",
+        "mime_type": "audio/wav",
+        "sha256": exports._sha256_file(media),
+        "byte_size": media.stat().st_size,
+    }
+    monkeypatch.setattr(exports, "_MAX_EXPORT_ASSETS", 1)
+    monkeypatch.setattr(exports, "runtime_asset_manifest", lambda _game_id: [row, {**row, "id": "asset_two", "media_url": "media/asset_two.wav"}])
+
+    with pytest.raises(ValueError, match="asset package limit"):
+        exports.create_aura_web_export(game)
+
+
 def test_same_build_and_media_produce_identical_installable_verified_export_bytes(tmp_path: Path, monkeypatch):
     game, media = _configured_export(tmp_path, monkeypatch)
 
@@ -153,6 +193,12 @@ def test_same_build_and_media_produce_identical_installable_verified_export_byte
     assert first["package_verified_file_count"] == 6
     assert first["download_reverification"] is True
     assert first["publisher_authenticity_verified"] is False
+    assert first["package_ready"] is True
+    assert first["production_ready"] is False
+    assert first["production_release_ready"] is False
+    assert first["release_blockers"] == ["publisher_authenticity_not_verified"]
+    assert first["disk_backed_archive_construction"] is True
+    assert first["media_bytes"] == media.stat().st_size
 
     path = tmp_path / first["filename"]
     verification = verify_aura_web_export(
@@ -192,6 +238,11 @@ def test_same_build_and_media_produce_identical_installable_verified_export_byte
         assert manifest["package_integrity"]["algorithm"] == "sha256"
         assert manifest["package_integrity"]["coverage"] == "all_archive_members_except_manifest.json"
         assert {row["path"] for row in manifest["package_integrity"]["files"]} == set(zf.namelist()) - {"manifest.json"}
+        assert manifest["release_readiness"]["package_ready"] is True
+        assert manifest["release_readiness"]["production_release_ready"] is False
+        assert manifest["release_readiness"]["blockers"] == ["publisher_authenticity_not_verified"]
+        assert manifest["resource_limits"]["disk_backed_archive_construction"] is True
+        assert manifest["resource_limits"]["media_bytes"] == media.stat().st_size
         assert "rights confirmed" not in json.dumps(manifest)
 
         webmanifest = json.loads(zf.read("manifest.webmanifest"))

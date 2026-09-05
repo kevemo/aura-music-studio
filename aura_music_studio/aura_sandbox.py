@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
-from urllib.parse import urlparse
+from urllib.parse import urlsplit
 
 import requests
 from fastapi import APIRouter, HTTPException, Request
@@ -13,6 +14,62 @@ from .aura_runtime_context import current_turn
 
 router = APIRouter(tags=["Aura Sandbox"])
 _INSTALLED = False
+
+_DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+_MIN_MAX_RESPONSE_BYTES = 4096
+_MAX_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+
+
+def _bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = (os.getenv(name) or str(default)).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{name} must be an integer") from exc
+    return max(minimum, min(value, maximum))
+
+
+def _valid_sandbox_base_url(value: str) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    if parsed.query or parsed.fragment:
+        return False
+    return True
+
+
+def _read_bounded_json(response, *, max_bytes: int) -> dict:
+    content_length = (response.headers or {}).get("Content-Length") if hasattr(response, "headers") else None
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                raise RuntimeError("Aura sandbox response exceeded the configured transport limit")
+        except ValueError:
+            pass
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=64 * 1024):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > max_bytes:
+            raise RuntimeError("Aura sandbox response exceeded the configured transport limit")
+        chunks.append(chunk)
+    try:
+        payload = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Aura sandbox returned an invalid JSON response") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Aura sandbox returned an invalid response object")
+    return payload
 
 
 class AuraSandboxClient:
@@ -26,16 +83,19 @@ class AuraSandboxClient:
     def __init__(self):
         self.base_url = (os.getenv("AURA_SANDBOX_URL") or "").strip().rstrip("/")
         self.token = (os.getenv("AURA_SANDBOX_TOKEN") or "").strip()
-        self.timeout = max(5, min(int(os.getenv("AURA_SANDBOX_TIMEOUT_SECONDS", "60")), 300))
-        self.max_code_chars = max(1000, min(int(os.getenv("AURA_SANDBOX_MAX_CODE_CHARS", "100000")), 500000))
-        self.max_output_chars = max(1000, min(int(os.getenv("AURA_SANDBOX_MAX_OUTPUT_CHARS", "100000")), 500000))
+        self.timeout = _bounded_int("AURA_SANDBOX_TIMEOUT_SECONDS", 60, 5, 300)
+        self.max_code_chars = _bounded_int("AURA_SANDBOX_MAX_CODE_CHARS", 100000, 1000, 500000)
+        self.max_output_chars = _bounded_int("AURA_SANDBOX_MAX_OUTPUT_CHARS", 100000, 1000, 500000)
+        self.max_response_bytes = _bounded_int(
+            "AURA_SANDBOX_MAX_RESPONSE_BYTES",
+            _DEFAULT_MAX_RESPONSE_BYTES,
+            _MIN_MAX_RESPONSE_BYTES,
+            _MAX_MAX_RESPONSE_BYTES,
+        )
 
     @property
     def configured(self) -> bool:
-        if not self.base_url:
-            return False
-        parsed = urlparse(self.base_url)
-        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
+        return _valid_sandbox_base_url(self.base_url)
 
     def diagnostics(self) -> dict:
         return {
@@ -45,36 +105,57 @@ class AuraSandboxClient:
             "timeout_seconds": self.timeout,
             "max_code_chars": self.max_code_chars,
             "max_output_chars": self.max_output_chars,
+            "max_response_bytes": self.max_response_bytes,
+            "network_requested": False,
+            "redirects_allowed": False,
         }
 
     def run(self, *, code: str, language: str) -> dict:
         if not self.configured:
-            raise RuntimeError("Aura code execution is not configured. Connect an isolated AURA_SANDBOX_URL; code will not run on the web host.")
+            raise RuntimeError(
+                "Aura code execution is not configured. Connect a valid isolated AURA_SANDBOX_URL; code will not run on the web host."
+            )
         clean_code = str(code or "")
         if not clean_code.strip():
             raise ValueError("The selected code Artifact is empty")
         if len(clean_code) > self.max_code_chars:
             raise ValueError("Code Artifact exceeds the configured sandbox input limit")
         lang = (language or "text").strip().lower()[:80]
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        response = requests.post(
-            f"{self.base_url}/v1/execute",
-            headers=headers,
-            json={
-                "language": lang,
-                "code": clean_code,
-                "timeout_seconds": self.timeout,
-                "network": False,
-                "filesystem": "ephemeral",
-            },
-            timeout=self.timeout + 10,
-        )
-        response.raise_for_status()
-        data = response.json()
-        stdout = str(data.get("stdout") or "")[: self.max_output_chars]
-        stderr = str(data.get("stderr") or "")[: self.max_output_chars]
+
+        response = None
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/execute",
+                headers=headers,
+                json={
+                    "language": lang,
+                    "code": clean_code,
+                    "timeout_seconds": self.timeout,
+                    "network": False,
+                    "filesystem": "ephemeral",
+                },
+                timeout=(5, self.timeout + 10),
+                allow_redirects=False,
+                stream=True,
+            )
+            status_code = int(getattr(response, "status_code", 0) or 0)
+            if 300 <= status_code < 400:
+                raise RuntimeError("Aura sandbox redirect refused")
+            response.raise_for_status()
+            data = _read_bounded_json(response, max_bytes=self.max_response_bytes)
+        finally:
+            if response is not None:
+                close = getattr(response, "close", None)
+                if callable(close):
+                    close()
+
+        stdout_raw = str(data.get("stdout") or "")
+        stderr_raw = str(data.get("stderr") or "")
+        stdout = stdout_raw[: self.max_output_chars]
+        stderr = stderr_raw[: self.max_output_chars]
         return {
             "completed": bool(data.get("completed", True)),
             "exit_code": data.get("exit_code"),
@@ -85,7 +166,7 @@ class AuraSandboxClient:
             "host_execution": False,
             "network_requested": False,
             "filesystem": "ephemeral",
-            "output_truncated": len(str(data.get("stdout") or "")) > len(stdout) or len(str(data.get("stderr") or "")) > len(stderr),
+            "output_truncated": len(stdout_raw) > len(stdout) or len(stderr_raw) > len(stderr),
         }
 
 

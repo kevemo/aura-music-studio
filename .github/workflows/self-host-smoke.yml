@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Prepare test configuration
         run: cp .env.example .env
@@ -82,6 +82,7 @@ jobs:
               '/health/live': {'get'},
               '/health/ready': {'get'},
               '/billing/stripe/checkout/marketplace': {'post'},
+              # Legacy URL retained strictly as the compatibility route for the public SLS surface.
               '/aura-sec/overview': {'get'},
           }
           paths = schema.get('paths', {})
@@ -94,8 +95,28 @@ jobs:
           if missing:
               raise SystemExit('Unified production route surface missing: ' + ', '.join(missing))
 
-          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes including Aura Sec")
+          print(f"PASS: production entrypoint exposed {len(paths)} OpenAPI paths with required release routes including the SLS compatibility route")
           PY
+
+      - name: Bounded loopback load admission smoke
+        run: >-
+          python -m aura_music_studio.load_probe
+          http://127.0.0.1:8000/health/live
+          --requests 120
+          --concurrency 10
+          --timeout 3
+          --minimum-success-ratio 1.0
+          --maximum-p95-ms 1500
+          --output /tmp/chat10-load-smoke.json
+
+      - name: Upload bounded load evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: chat10-bounded-load-smoke
+          path: /tmp/chat10-load-smoke.json
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Capture self-host logs on failure
         if: failure()

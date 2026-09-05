@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.jobs import StudioJobQueue
@@ -40,6 +43,55 @@ def test_queue_deduplicates_active_project_job(tmp_path):
     assert queue.summary()["counts"]["queued"] == 1
 
 
+def test_stable_idempotency_key_returns_original_job_even_after_completion(tmp_path):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "idem@example.com")
+    queue = StudioJobQueue(store)
+    first = queue.submit(user, "song", job_type="editor_render", idempotency_key="render-request-1")
+    claimed = queue.claim_next("worker")
+    assert claimed and claimed["id"] == first["id"]
+    queue.complete(first["id"], {"ok": True})
+
+    repeated = queue.submit(user, "song", job_type="editor_render", idempotency_key="render-request-1")
+    assert repeated["id"] == first["id"]
+    assert repeated["status"] == "completed"
+
+
+def test_concurrent_idempotent_submissions_return_one_job(tmp_path):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "parallel-idem@example.com")
+    queue = StudioJobQueue(store)
+
+    def submit_once(_: int) -> str:
+        return queue.submit(
+            user,
+            "same-song",
+            job_type="editor_render",
+            idempotency_key="same-render-request",
+        )["id"]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        job_ids = list(pool.map(submit_once, range(32)))
+
+    assert len(set(job_ids)) == 1
+    with queue._connect() as con:
+        count = con.execute(
+            """SELECT COUNT(*) FROM studio_jobs
+               WHERE user_id=? AND job_type=? AND idempotency_key=?""",
+            (user, "editor_render", "same-render-request"),
+        ).fetchone()[0]
+    assert count == 1
+
+
+def test_job_payload_admission_is_bounded(tmp_path, monkeypatch):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "payload@example.com")
+    queue = StudioJobQueue(store)
+    monkeypatch.setenv("LSS_JOB_MAX_PAYLOAD_BYTES", "1024")
+    with pytest.raises(ValueError, match="admission limit"):
+        queue.submit(user, "song", payload={"prompt": "x" * 5000})
+
+
 def test_stale_running_job_is_requeued(tmp_path):
     store = AccountStore(tmp_path / "studio.sqlite3")
     user = _member(store, "stale@example.com")
@@ -57,6 +109,47 @@ def test_stale_running_job_is_requeued(tmp_path):
     recovered = queue.get(job["id"])
     assert recovered["status"] == "queued"
     assert recovered["worker_id"] is None
+
+
+def test_exhausted_stale_job_dead_letters_and_replay_requires_idempotency_verification(tmp_path):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "dlq@example.com")
+    queue = StudioJobQueue(store)
+    job = queue.submit(user, "song", priority=20)
+    claimed = queue.claim_next("dead-worker")
+    assert claimed and claimed["status"] == "running"
+
+    old = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+    with queue._connect() as con:
+        con.execute("UPDATE studio_jobs SET started_at=?, attempts=3 WHERE id=?", (old, job["id"]))
+
+    assert queue.requeue_stale(stale_after_seconds=60, max_attempts=3) == 1
+    dead = queue.get(job["id"])
+    assert dead["status"] == "dead_letter"
+    assert dead["dead_lettered_at"]
+    assert queue.summary()["dead_letter_supported"] is True
+
+    assert queue.retry_dead_letter(job["id"]) is False
+    assert queue.get(job["id"])["status"] == "dead_letter"
+    assert queue.retry_dead_letter(job["id"], idempotency_verified=True) is True
+    assert queue.get(job["id"])["status"] == "queued"
+
+
+def test_dead_letter_can_be_resolved_with_reason_without_replay(tmp_path):
+    store = AccountStore(tmp_path / "studio.sqlite3")
+    user = _member(store, "resolve@example.com")
+    queue = StudioJobQueue(store)
+    job = queue.submit(user, "song")
+    queue.claim_next("dead-worker")
+    old = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+    with queue._connect() as con:
+        con.execute("UPDATE studio_jobs SET started_at=?, attempts=3 WHERE id=?", (old, job["id"]))
+    queue.requeue_stale(stale_after_seconds=60, max_attempts=3)
+
+    assert queue.resolve_dead_letter(job["id"], reason="Permanent validation failure; do not replay") is True
+    resolved = queue.get(job["id"])
+    assert resolved["status"] == "resolved"
+    assert "do not replay" in resolved["error"]
 
 
 def test_provenance_hashes_outputs_and_can_sign(tmp_path, monkeypatch):

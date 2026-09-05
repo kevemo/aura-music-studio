@@ -9,7 +9,11 @@ from .native_products import AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT
 from .plans import get_plan
 from .subscriptions import SubscriptionLedger
 
-_NATIVE_ENTITLEMENTS = frozenset({AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT})
+# Aura OS may be supplied by Command Center membership where the plan contract says so.
+# The Secure Lattice System is a separately licensed native/device security product and
+# must never be manufactured from a Command Center membership feature flag.
+_MEMBERSHIP_NATIVE_ENTITLEMENTS = frozenset({AURA_OS_ENTITLEMENT})
+_PURCHASABLE_NATIVE_ENTITLEMENTS = frozenset({AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT})
 
 
 class NativeEntitlementSource(Protocol):
@@ -22,7 +26,7 @@ class EffectiveNativeAccess:
 
     This snapshot intentionally carries no device limit, trust state, signing authority,
     heartbeat proof, command capability or re-authentication result. Those remain separate
-    Aura Sec native-security boundaries.
+    Elevate Souls Productions Secure Lattice System (SLS) native-security boundaries.
     """
 
     user_id: str
@@ -62,11 +66,13 @@ class EffectiveNativeAccess:
 
 
 class NativeAccessResolver:
-    """Unify active Command Center and verified native-product commercial grants.
+    """Resolve Command Center Aura OS access plus verified native-product purchases.
 
-    Subscription expiry is enforced before plan features are considered. Verified native
-    purchases remain lifecycle-aware through ``NativeEntitlementLedger.active_entitlements``.
-    The resolver does not mutate either billing system and cannot create a native licence.
+    Subscription expiry is enforced before plan features are considered. Membership can
+    contribute Aura OS only; SLS commercial access is intentionally purchase/licence only.
+    Verified native purchases remain lifecycle-aware through
+    ``NativeEntitlementLedger.active_entitlements``. The resolver does not mutate either
+    billing system and cannot create a native licence, device trust or protection state.
     """
 
     def __init__(
@@ -95,12 +101,14 @@ class NativeAccessResolver:
             except ValueError:
                 plan = get_plan("free")
                 plan_id = plan.id
-            membership_entitlements = frozenset(plan.features & _NATIVE_ENTITLEMENTS)
+            membership_entitlements = frozenset(
+                plan.features & _MEMBERSHIP_NATIVE_ENTITLEMENTS
+            )
 
         purchased = frozenset(
             entitlement
             for entitlement in self.native_entitlements.active_entitlements(str(enforced["id"]))
-            if entitlement in _NATIVE_ENTITLEMENTS
+            if entitlement in _PURCHASABLE_NATIVE_ENTITLEMENTS
         )
 
         return EffectiveNativeAccess(

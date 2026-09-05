@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +10,7 @@ from pathlib import Path
 
 import requests
 
+from .command_templates import render_command_argv
 from .producer import ProducerPlan, llm_plan
 
 
@@ -39,10 +39,8 @@ class AuraSpeechService:
 
     @staticmethod
     def _run_template(template: str, values: dict[str, str]) -> subprocess.CompletedProcess:
-        rendered = template
-        for key, value in values.items():
-            rendered = rendered.replace("{" + key + "}", shlex.quote(value))
-        return subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
+        argv = render_command_argv(template, values)
+        return subprocess.run(argv, check=True, capture_output=True, text=True)
 
     @staticmethod
     def _prepare_audio(source: Path, work_dir: Path) -> Path:

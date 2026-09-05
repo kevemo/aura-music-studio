@@ -17,7 +17,7 @@ def test_stripe_readiness_requires_pro_annual_price_id():
     env = _stripe_env()
     env.pop("STRIPE_PRO_ANNUAL_PRICE_ID")
 
-    ok, messages, details = _stripe_readiness(env, production=True, staging=False)
+    ok, messages, details = _stripe_readiness(env, production=True, nonproduction=False)
 
     assert ok is False
     assert details["subscription_price_ids_configured"] is False
@@ -28,7 +28,7 @@ def test_stripe_readiness_requires_pro_annual_price_id():
 def test_stripe_readiness_accepts_complete_monthly_and_pro_annual_configuration():
     env = _stripe_env()
 
-    ok, messages, details = _stripe_readiness(env, production=True, staging=False)
+    ok, messages, details = _stripe_readiness(env, production=True, nonproduction=False)
 
     assert ok is True
     assert messages == []

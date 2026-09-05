@@ -137,9 +137,11 @@ The cross-studio five-per-day admission counter is **server-authoritative, imple
 ### Unlimited Pro — £9.99/month
 
 - highest normal enabled creative access;
-- Elevate Souls Productions Secure Lattice System (SLS) entitlement included with the subscription;
+- Aura OS access where the current plan contract permits it;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
+
+Command Center membership, including Unlimited Pro, does **not** by itself grant an Elevate Souls Productions Secure Lattice System (SLS) native/device licence, device count, protection entitlement or native command authority. SLS licensing remains a separate server-authoritative commercial entitlement unless a later authoritative commercial specification explicitly changes that rule.
 
 Safety, privacy, consent and transparency protections are never paywalled.
 
@@ -226,7 +228,7 @@ Feature work should use focused branches and pull requests. A change is not cons
 
 A production release requires, at minimum, no unresolved P0 issues, an acceptable P1 disposition, complete regression on the release candidate, verified payment/email/provider paths, security and privacy review, production monitoring, backup/restore proof, incident/rollback procedures, capacity testing, authoritative commercial configuration and current public documentation.
 
-Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a real restore drill, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
+Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a verified restore drill from an actual production backup/snapshot, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
 
 The main Command Center and the SLS full native commercial product may reach different release stages and must not be conflated.
 

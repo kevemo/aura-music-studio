@@ -1,5 +1,5 @@
 {
-    # ESP Live Sound Studio owns the application and data. Caddy is used only as the local
+    # Elevate Souls Productions owns the application and data. Caddy is used only as the local
     # reverse proxy/TLS terminator. With a real hostname it obtains and renews HTTPS
     # certificates automatically; direct-IP fallback can use http://:80.
     admin off
@@ -15,12 +15,23 @@
         Referrer-Policy "strict-origin-when-cross-origin"
     }
 
+    # Coarse edge ceiling. Feature-specific upload limits and the 1 MB default webhook
+    # admission boundary remain authoritative and may be lower than this value.
     request_body {
         max_size 300MB
     }
 
     reverse_proxy live-sound-studio:8000 {
-        health_uri /health
+        # Caddy overwrites this internal header before proxying. The application accepts
+        # X-Forwarded-For / X-Forwarded-Proto only when this high-entropy shared value matches,
+        # so arbitrary clients and other containers cannot manufacture authoritative identity.
+        # The placeholder default keeps config validation syntactically deterministic; production
+        # Compose requires a real value and the application fails closed if it is absent/weak.
+        header_up X-ESP-Proxy-Auth "{$LSS_TRUSTED_PROXY_TOKEN:__proxy_token_missing__}"
+
+        # Use bounded serving readiness, not the legacy process/capability endpoint. A live
+        # process with unavailable required storage must not remain eligible for proxy traffic.
+        health_uri /health/ready
         health_interval 30s
         health_timeout 5s
     }

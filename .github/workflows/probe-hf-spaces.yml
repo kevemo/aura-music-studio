@@ -1,21 +1,17 @@
 name: Probe Alternate ACE-Step Spaces
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/probe-hf-spaces.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: pip install --quiet --upgrade gradio_client
       - name: Probe endpoint schemas
         run: |
@@ -33,10 +29,10 @@ jobs:
               except Exception as e:
                   print('ERROR',type(e).__name__,str(e))
           PY
-      - name: Commit
-        run: |
-          git config user.name "Aura Music Studio Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add generated/hf_spaces/endpoints.txt
-          git commit -m "Probe alternate ACE-Step Spaces" || exit 0
-          git push
+      - name: Upload probe result for review
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: alternate-ace-step-space-probe
+          path: generated/hf_spaces/endpoints.txt
+          if-no-files-found: error
+          retention-days: 14

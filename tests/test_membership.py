@@ -47,7 +47,7 @@ def test_plan_progression():
     assert APPROVED_VOICE_DUPLICATION in pro.features
     assert AURASEC not in free.features
     assert AURASEC not in base.features
-    assert AURASEC in pro.features
+    assert AURASEC not in pro.features
     assert base.confirmed_songs_per_day == 1
     assert pro.confirmed_songs_per_day is None
 
@@ -75,7 +75,7 @@ def test_public_membership_pricing_contract():
     assert pro.monthly_price == Decimal("9.99")
     assert pro.monthly_price_minor == 999
     assert pro.display_price == "£9.99"
-    assert AURASEC in pro.public_dict()["features"]
+    assert AURASEC not in pro.public_dict()["features"]
 
 
 def test_free_activates_after_owner_approval(tmp_path):

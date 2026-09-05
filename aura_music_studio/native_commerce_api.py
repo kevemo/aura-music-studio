@@ -16,7 +16,14 @@ from .native_paypal import (
     NativePayPalPaymentVerifier,
 )
 from .native_paypal_lifecycle import NativePayPalLifecycleVerifier
-from .native_products import BillingPeriod, get_native_product, public_native_products
+from .native_products import (
+    AURA_OS_ENTITLEMENT,
+    AURA_SEC_ENTITLEMENT,
+    SLS_PUBLIC_NAME,
+    BillingPeriod,
+    get_native_product,
+    public_native_products,
+)
 
 router = APIRouter()
 
@@ -85,6 +92,16 @@ def _duplicate_event(exc: ValueError) -> bool:
     return "already been processed" in message
 
 
+def _public_entitlement_label(entitlement: str) -> str:
+    """Project compatibility entitlement keys into locked public product labels."""
+    value = str(entitlement or "").strip()
+    if value == AURA_SEC_ENTITLEMENT:
+        return SLS_PUBLIC_NAME
+    if value == AURA_OS_ENTITLEMENT:
+        return "Aura OS"
+    return value.replace("_", " ").title()
+
+
 def _native_product_snapshot(member: dict) -> dict:
     access = native_access.resolve(str(member["id"]))
     access_public = access.public_dict()
@@ -128,6 +145,7 @@ def _native_product_snapshot(member: dict) -> dict:
             "automatic_renewal_enabled": False,
             "entitlement_activates_only_after_verified_provider_webhook": True,
             "native_device_authority_granted_by_payment": False,
+            "sls_native_licensing_separate_from_command_center_membership": True,
         },
     }
 
@@ -141,6 +159,7 @@ def native_products_pricing():
         "products": public_native_products(),
         "checkout_type": "paypal_invoice",
         "automatic_renewal_enabled": False,
+        "sls_native_licensing_separate_from_command_center_membership": True,
     }
 
 
@@ -167,11 +186,11 @@ def native_products_account_page(request: Request):
         currency = escape(str(product["currency"]))
         monthly = escape(str(product["monthly_price"]))
         annual = escape(str(product["annual_price"]))
-        entitlements = ", ".join(str(item).replace("_", " ").title() for item in product["entitlements"])
+        entitlements = ", ".join(_public_entitlement_label(str(item)) for item in product["entitlements"])
         if product["fully_active"]:
             action_html = "<div class='active'>Already active on this account</div>"
         elif not product["account_checkout_available"]:
-            overlap = ", ".join(str(item).replace("_", " ").title() for item in product["active_entitlements"])
+            overlap = ", ".join(_public_entitlement_label(str(item)) for item in product["active_entitlements"])
             action_html = (
                 "<div class='held'>Part of this bundle is already active ("
                 + escape(overlap)
@@ -211,15 +230,16 @@ def native_products_account_page(request: Request):
     cards = "".join(product_card(product) for product in snapshot["products"])
     sources = access.get("sources") or {}
     source_rows = "".join(
-        f"<li><b>{escape(str(entitlement).replace('_',' ').title())}</b>: {escape(', '.join(values))}</li>"
+        f"<li><b>{escape(_public_entitlement_label(str(entitlement)))}</b>: {escape(', '.join(values))}</li>"
         for entitlement, values in sorted(sources.items())
-    ) or "<li>No active Aura OS/Aura Sec commercial entitlement is recorded.</li>"
+    ) or f"<li>No active Aura OS or {escape(SLS_PUBLIC_NAME)} commercial entitlement is recorded.</li>"
     email = escape(str(snapshot["account"]["email"]))
+    sls_name = escape(SLS_PUBLIC_NAME)
 
     html = f"""<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='robots' content='noindex,nofollow'><title>Native Products</title><style>
 :root{{--bg:#060811;--panel:#101522;--line:#ffffff1f;--gold:#f3c770;--cyan:#58e8ff;--good:#79dfa6;--muted:#bec5d7}}*{{box-sizing:border-box}}body{{margin:0;background:radial-gradient(circle at 12% 0,#2b1746,transparent 32%),radial-gradient(circle at 88% 0,#123d54,transparent 28%),var(--bg);color:#fff;font-family:Inter,system-ui,sans-serif}}a{{color:inherit;text-decoration:none}}.wrap{{width:min(1180px,calc(100% - 28px));margin:auto;padding:26px 0 60px}}.top{{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap}}.btn,button{{border:1px solid var(--line);border-radius:11px;padding:10px 13px;background:#ffffff0a;color:#fff;font-weight:850;cursor:pointer}}.eyebrow{{color:var(--gold);text-transform:uppercase;letter-spacing:.14em;font-size:.71rem;font-weight:900}}h1{{font-size:clamp(2.7rem,7vw,5.6rem);line-height:.95;margin:.16em 0}}.muted,.product p,.small{{color:var(--muted);line-height:1.55}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}}.product,.status{{border:1px solid var(--line);border-radius:20px;background:#101522e8;padding:19px}}.prices{{display:flex;gap:18px;flex-wrap:wrap;margin:15px 0}}.prices b{{font-size:1.45rem}}.prices small{{font-size:.72rem;color:var(--muted)}}.actions{{display:grid;gap:8px}}.founding{{border-color:#f3c77088;background:#f3c77018}}.active{{padding:11px;border:1px solid #79dfa666;background:#79dfa611;border-radius:10px;color:var(--good);font-weight:850}}.held{{padding:11px;border:1px solid #f3c77066;background:#f3c77010;border-radius:10px;color:#ffe3a6;font-size:.85rem;line-height:1.45}}#result{{margin-top:16px;min-height:22px}}@media(max-width:850px){{.grid{{grid-template-columns:1fr}}}}</style></head><body><main class='wrap'>
-<header class='top'><div><div class='eyebrow'>Pulsar-Frequency House · Native products</div><b>Aura OS + Aura Sec</b></div><div><a class='btn' href='/dashboard'>← Dashboard</a> <a class='btn' href='/aura-sec'>Aura Sec</a></div></header>
-<section style='padding:46px 0 14px'><div class='eyebrow'>Canonical account commerce</div><h1>Your native access</h1><p class='muted'>Prices below come directly from the platform's canonical native-product catalogue. Unlimited Pro can already include Aura OS and Aura Sec; verified standalone purchases are combined with membership access without granting browser or device authority.</p></section>
+<header class='top'><div><div class='eyebrow'>Elevate Souls Productions · Native products</div><b>Aura OS + {sls_name}</b></div><div><a class='btn' href='/dashboard'>← Dashboard</a> <a class='btn' href='/aura-sec'>SLS Security Center</a></div></header>
+<section style='padding:46px 0 14px'><div class='eyebrow'>Canonical account commerce</div><h1>Your native access</h1><p class='muted'>Prices below come directly from the platform's canonical native-product catalogue. Unlimited Pro may provide Aura OS under the Command Center plan contract. {sls_name} native/device licensing is separate and activates only from verified standalone native billing/licensing evidence; neither membership nor payment alone grants browser or device authority.</p></section>
 <section class='status'><div class='eyebrow'>Current commercial entitlement sources</div><ul>{source_rows}</ul><p class='muted'>Billing email: {email}. Device trust, command signing, heartbeat proof and native privileged actions remain separate security controls.</p></section>
 <section class='grid'>{cards}</section><div id='result' class='muted'></div>
 <section class='status' style='margin-top:18px'><div class='eyebrow'>Payment truth</div><p class='muted'>The current PayPal integration sends a verified invoice to your billing email. Access activates only after an authenticated PayPal payment webhook is independently reconciled to the canonical invoice. This invoice flow does not claim automatic renewal; recurring collection requires the separate provider subscription layer.</p></section>

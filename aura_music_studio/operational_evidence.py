@@ -36,11 +36,17 @@ def _parse_time(value: object) -> datetime | None:
 
 
 def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 30) -> dict:
-    """Load secret-free restore evidence without treating the document as authority by itself."""
+    """Load secret-free restore evidence and distinguish mechanism proof from release proof.
+
+    A deterministic synthetic drill may prove that backup/restore machinery works, but it is not
+    sufficient production-recovery evidence. Release-grade verification additionally requires an
+    actual production backup/snapshot and explicit application-level validation of restored state.
+    """
     if not path:
         return {
             "configured": False,
             "verified": False,
+            "mechanism_verified": False,
             "state": "not_configured",
             "reason": "No restore evidence path is configured.",
         }
@@ -50,6 +56,7 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
         return {
             "configured": True,
             "verified": False,
+            "mechanism_verified": False,
             "state": "missing",
             "reason": "Configured restore evidence file does not exist.",
         }
@@ -60,6 +67,7 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
         return {
             "configured": True,
             "verified": False,
+            "mechanism_verified": False,
             "state": "invalid",
             "reason": "Restore evidence is unreadable or invalid JSON.",
         }
@@ -68,6 +76,7 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
         return {
             "configured": True,
             "verified": False,
+            "mechanism_verified": False,
             "state": "invalid",
             "reason": "Restore evidence schema is unsupported.",
         }
@@ -77,18 +86,25 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
     result = str(payload.get("result") or "").strip().lower()
     integrity = str(payload.get("database_integrity") or "").strip().lower()
     application_check = bool(payload.get("application_data_check"))
+    validation_source = str(payload.get("application_validation_source") or "").strip().lower()
     hashes_verified = bool(payload.get("backup_hashes_verified"))
+    production_backup_used = bool(payload.get("production_backup_used", False))
     now = _now()
     age_hours = ((now - executed_at).total_seconds() / 3600) if executed_at else None
     fresh = age_hours is not None and 0 <= age_hours <= max(1, int(max_age_hours))
     environment_ok = environment in _ALLOWED_RESTORE_ENVIRONMENTS
-    verified = bool(
+    mechanism_verified = bool(
         result == "verified"
         and integrity == "ok"
         and application_check
         and hashes_verified
         and fresh
         and environment_ok
+    )
+    verified = bool(
+        mechanism_verified
+        and production_backup_used
+        and validation_source == "explicit_validator"
     )
 
     reason = None
@@ -100,20 +116,32 @@ def load_restore_evidence(path: str | Path | None, *, max_age_hours: int = 24 * 
         reason = "Restore evidence must come from an isolated test, CI, integration, staging or recovery environment."
     elif result != "verified" or integrity != "ok" or not application_check or not hashes_verified:
         reason = "Restore evidence does not prove a complete verified drill."
+    elif not production_backup_used:
+        reason = "Restore mechanism is verified, but no actual production backup or snapshot was restored."
+    elif validation_source != "explicit_validator":
+        reason = "Production restore evidence lacks explicit application-level validation."
+
+    if verified:
+        state = "verified"
+    elif mechanism_verified:
+        state = "mechanism_verified"
+    else:
+        state = "unverified"
 
     return {
         "configured": True,
         "verified": verified,
-        "state": "verified" if verified else "unverified",
+        "mechanism_verified": mechanism_verified,
+        "state": state,
         "environment": environment or None,
         "executed_at": executed_at.isoformat() if executed_at else None,
         "age_hours": round(age_hours, 3) if age_hours is not None else None,
         "duration_seconds": payload.get("duration_seconds"),
         "database_integrity": integrity or None,
         "application_data_check": application_check,
-        "application_validation_source": payload.get("application_validation_source"),
+        "application_validation_source": validation_source or None,
         "backup_hashes_verified": hashes_verified,
-        "production_backup_used": bool(payload.get("production_backup_used", False)),
+        "production_backup_used": production_backup_used,
         "reason": reason,
     }
 
@@ -236,7 +264,7 @@ def run_restore_drill(
         ).is_file()
 
     duration = time.monotonic() - started
-    verified = bool(
+    mechanism_verified = bool(
         restored.get("restored")
         and inspected.get("hashes_verified")
         and integrity == "ok"
@@ -245,7 +273,7 @@ def run_restore_drill(
     return {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
         "kind": "restore_drill",
-        "result": "verified" if verified else "failed",
+        "result": "verified" if mechanism_verified else "failed",
         "environment": environment,
         "executed_at": _iso(),
         "duration_seconds": round(duration, 3),
