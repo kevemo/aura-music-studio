@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import HTTPException
 from pydantic import ValidationError
 
 from aura_music_studio.shared_sky_operator_profiles import (
@@ -167,10 +167,20 @@ def test_other_integrity_conflict_is_safe_and_does_not_leak_sqlite_text():
     assert "secret-db-detail" not in str(raised.value.detail)
 
 
-def test_installer_is_idempotent():
-    app = FastAPI()
+def test_installer_is_idempotent_on_canonical_app():
+    from aura_music_studio.api import app
+
+    expected = {
+        "/shared-sky/studio/api/projects/{project_id}/operator-profiles",
+        "/shared-sky/studio/api/projects/{project_id}/operator-profiles/{profile_id}",
+        "/shared-sky/studio/api/projects/{project_id}/operator-profiles/{profile_id}/activate",
+    }
+    before = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
     install_shared_sky_operator_profiles(app)
-    count = len([r for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")])
+    after_once = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
     install_shared_sky_operator_profiles(app)
-    assert len([r for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]) == count
-    assert count == 5
+    after_twice = [r.path for r in app.router.routes if "operator-profiles" in getattr(r, "path", "")]
+    assert after_twice == after_once
+    assert len(after_twice) == 5
+    assert expected.issubset(set(after_twice))
+    assert set(before).issubset(set(after_twice))
