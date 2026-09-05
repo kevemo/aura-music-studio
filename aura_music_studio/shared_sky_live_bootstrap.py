@@ -9,14 +9,33 @@ from .shared_sky_live_controls import router as live_controls_router
 
 PUBLIC_LIVE_PREFIXES = ("/watch/", "/shared-sky/live/api/")
 
+# The production application has a late compatibility-composition layer. Keep immutable snapshots
+# of the Chat 4 APIRoutes before any application consumes/includes the source routers. This makes
+# repeated installation and isolated-app tests deterministic even if a framework/composition step
+# later mutates or replaces a router's live ``routes`` collection.
+_LIVE_COMMUNITY_ROUTES = tuple(live_community_router.routes)
+_LIVE_CONTROL_ROUTES = tuple(live_controls_router.routes)
+
+
+def _route_signature(route: Any) -> tuple[str, tuple[str, ...]]:
+    return (
+        str(getattr(route, "path", "")),
+        tuple(sorted(getattr(route, "methods", set()) or set())),
+    )
+
 
 def install_shared_sky_live_community(app: Any) -> None:
-    """Mount Chat 4 viewer routes and preserve optional-auth public-watch semantics.
+    """Mount Chat 4 viewer routes with optional-auth public-watch semantics.
 
     MembershipAccessMiddleware reads its module-level public route registry at request time, so
     registering these paths here allows anonymous discovery/watch while every state-changing
     community handler still performs its own canonical optional/required member resolution.
     StudioSecurityMiddleware and CrossSiteRequestGuardMiddleware remain in force globally.
+
+    Routes are appended from import-time immutable APIRoute snapshots rather than relying on a
+    late ``include_router`` flattening pass. The repository already uses direct canonical-app route
+    binding for late Shared Sky modules; this keeps Chat 4 registration idempotent and deterministic
+    for both the production application and isolated FastAPI test applications.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -26,27 +45,13 @@ def install_shared_sky_live_community(app: Any) -> None:
             prefixes += (prefix,)
     access_control.PUBLIC_PREFIXES = prefixes
 
-    existing = {
-        (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
-        for route in app.router.routes
-    }
-    for candidate in (live_community_router, live_controls_router):
-        candidate_routes = list(candidate.routes)
-        if not all(
-            (
-                getattr(route, "path", ""),
-                tuple(sorted(getattr(route, "methods", set()) or set())),
-            ) in existing
-            for route in candidate_routes
-        ):
-            app.include_router(candidate)
-            existing.update(
-                (
-                    getattr(route, "path", ""),
-                    tuple(sorted(getattr(route, "methods", set()) or set())),
-                )
-                for route in candidate_routes
-            )
+    existing = {_route_signature(route) for route in app.router.routes}
+    for route in (*_LIVE_COMMUNITY_ROUTES, *_LIVE_CONTROL_ROUTES):
+        signature = _route_signature(route)
+        if signature in existing:
+            continue
+        app.router.routes.append(route)
+        existing.add(signature)
 
 
 __all__ = ["install_shared_sky_live_community", "PUBLIC_LIVE_PREFIXES"]
