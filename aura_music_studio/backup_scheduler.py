@@ -32,10 +32,11 @@ def _now() -> str:
 
 
 class BackupScheduler:
-    """Owner-controlled local backup rotation with no cloud dependency.
+    """Owner-controlled encrypted Recovery Vault backup rotation.
 
-    Non-secret scheduling options can be changed live in the ESP owner dashboard. Environment values
-    remain the startup fallback until an owner explicitly saves a runtime override in SQLite.
+    Non-secret scheduling options can be changed live in the owner dashboard. Sensitive
+    scheduled backups fail closed unless a public ``age`` recipient is configured in the
+    deployment secret boundary; the private decryption identity is never stored here.
     """
 
     def __init__(self):
@@ -50,6 +51,19 @@ class BackupScheduler:
             "auto_backup_enabled",
             _truthy_value(os.getenv("LSS_AUTO_BACKUP_ENABLED"), False),
         ))
+
+    @property
+    def encryption_recipient(self) -> str | None:
+        value = (os.getenv("LSS_BACKUP_AGE_RECIPIENT") or "").strip()
+        return value or None
+
+    @property
+    def encryption_ready(self) -> bool:
+        return self.encryption_recipient is not None
+
+    @property
+    def operational(self) -> bool:
+        return self.enabled and self.encryption_ready
 
     @property
     def interval_hours(self) -> int:
@@ -86,11 +100,14 @@ class BackupScheduler:
     def configuration(self) -> dict:
         return {
             "enabled": self.enabled,
+            "operational": self.operational,
             "interval_hours": self.interval_hours,
             "retention_count": self.keep,
             "include_outputs": self.include_outputs,
             "include_work": self.include_work,
-            "encrypted_when_recipient_configured": bool((os.getenv("LSS_BACKUP_AGE_RECIPIENT") or "").strip()),
+            "encryption_required": True,
+            "encryption_ready": self.encryption_ready,
+            "encrypted_when_recipient_configured": self.encryption_ready,
         }
 
     def _read_status(self) -> dict:
@@ -130,7 +147,7 @@ class BackupScheduler:
         return removed
 
     def due(self, now: datetime | None = None) -> bool:
-        if not self.enabled:
+        if not self.operational:
             return False
         status = self._read_status()
         marker = status.get("last_attempt_at") or status.get("last_success_at")
@@ -145,6 +162,15 @@ class BackupScheduler:
         return (now or _now_dt()) >= previous + timedelta(seconds=self.interval_seconds)
 
     def run_once(self, *, force: bool = False) -> dict:
+        recipient = self.encryption_recipient
+        if not recipient:
+            summary = {
+                "ran": False,
+                "ok": False,
+                "reason": "automatic backup encryption recipient is not configured",
+            }
+            self._status(last_failure_at=_now(), last_result=summary)
+            return summary
         if not self.enabled and not force:
             result = {"ran": False, "reason": "automatic backups disabled"}
             self._status(last_result=result)
@@ -163,14 +189,17 @@ class BackupScheduler:
                 output=output,
                 include_outputs=self.include_outputs,
                 include_work=self.include_work,
-                age_recipient=(os.getenv("LSS_BACKUP_AGE_RECIPIENT") or "").strip() or None,
+                age_recipient=recipient,
                 keep_plain_when_encrypted=False,
             )
+            if not result.get("encrypted_backup") or result.get("backup"):
+                raise RuntimeError("Recovery Vault backup did not finish in encrypted-only state")
             removed = self.prune()
             summary = {
                 "ran": True,
                 "ok": True,
-                "backup": Path(str(result.get("encrypted_backup") or result.get("backup"))).name,
+                "backup": Path(str(result["encrypted_backup"])).name,
+                "encrypted": True,
                 "bytes": result.get("bytes"),
                 "removed_by_retention": removed,
                 "project_file_count": result.get("manifest", {}).get("project_file_count"),
@@ -179,6 +208,7 @@ class BackupScheduler:
             return summary
         except Exception as exc:
             output.unlink(missing_ok=True)
+            output.with_suffix(output.suffix + ".age").unlink(missing_ok=True)
             summary = {"ran": True, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
             self._status(last_failure_at=_now(), last_attempt_at=attempt_at, last_result=summary)
             return summary
@@ -187,8 +217,16 @@ class BackupScheduler:
         # Polling a small local settings table once per minute keeps owner changes live without restarting Docker.
         while True:
             try:
-                if self.enabled and self.due():
+                if self.operational and self.due():
                     self.run_once()
+                elif self.enabled and not self.encryption_ready:
+                    self._status(
+                        last_result={
+                            "ran": False,
+                            "ok": False,
+                            "reason": "automatic backup encryption recipient is not configured",
+                        }
+                    )
                 else:
                     self._status(last_result=self._read_status().get("last_result", {"ran": False, "reason": "waiting"}))
             except Exception as exc:
