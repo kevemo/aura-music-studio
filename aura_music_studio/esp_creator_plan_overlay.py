@@ -40,9 +40,8 @@ def level_up_with_creator_plan(request: Request):
     support_link = "<a class='btn' href='/command-center/support'>Support &amp; Evidence</a>"
     broadcast_link = "<a class='btn' href='/command-center/broadcast-tech'>Broadcast &amp; Tech Desk</a>"
     media_link = "<a class='btn' href='/command-center/social/media-library'>Social Media Library</a>"
-    agent_leads_link = "<a class='btn' href='/command-center/agent/leads'>Agent Lead CRM</a>"
     if progress_link in html and "/command-center/my-plan" not in html:
-        html = html.replace(progress_link, onboarding_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + agent_leads_link + progress_link, 1)
+        html = html.replace(progress_link, onboarding_link + my_plan_link + reviews_link + support_link + broadcast_link + media_link + progress_link, 1)
     else:
         if progress_link in html and "/command-center/onboarding" not in html:
             html = html.replace(progress_link, onboarding_link + progress_link, 1)
@@ -54,8 +53,6 @@ def level_up_with_creator_plan(request: Request):
             html = html.replace(progress_link, broadcast_link + progress_link, 1)
         if progress_link in html and "/command-center/social/media-library" not in html:
             html = html.replace(progress_link, media_link + progress_link, 1)
-        if progress_link in html and "/command-center/agent/leads" not in html:
-            html = html.replace(progress_link, agent_leads_link + progress_link, 1)
 
     designed = (
         "<div class='topline'><span>Creator OS</span><b class='planned'>Designed</b></div>"
