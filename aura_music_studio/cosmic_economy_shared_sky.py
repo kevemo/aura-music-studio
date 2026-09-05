@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any
 
 from .cosmic_economy import LiveGiftContext
@@ -14,10 +15,25 @@ _INTEGRATION_STATUS: dict[str, Any] = {
     "state": "pending",
     "reason": "shared_sky_live_adapter_not_available",
 }
+_BIND_LOCK = RLock()
+
+
+def _registered_status(adapter: object, *, source: str | None = None) -> dict[str, Any]:
+    adapter_name = type(adapter).__name__
+    return {
+        "state": "registered",
+        "source": source or adapter_name,
+        "adapter": adapter_name,
+        "runtime_adapter": adapter_name,
+    }
 
 
 def configure_chat5_shared_sky() -> dict[str, Any]:
-    """Bind Chat 5 to Chat 4's authoritative live-session adapter when merged.
+    """Bind Chat 5 to the authoritative Shared Sky live-session adapter when merged.
+
+    The operation is intentionally idempotent and safe to retry after the full application import
+    graph has completed. This avoids permanently degrading the economy if an early module import
+    reaches the integration boundary before Shared Sky has finished initialising.
 
     The adapter owns only broadcast/live-recipient truth. Age/region eligibility, Coin pricing,
     spending, risk, payout and Battle scoring remain separate controls. Missing or broken Shared
@@ -25,36 +41,53 @@ def configure_chat5_shared_sky() -> dict[str, Any]:
     """
 
     global _INTEGRATION_STATUS
-    try:
-        from . import shared_sky_live_community as live
-        from .shared_sky_live_integrations import SharedSkyGiftLiveSessionDirectory
+    with _BIND_LOCK:
+        current = runtime_integrations.live_sessions
+        if not isinstance(current, UnavailableLiveSessionDirectory):
+            _INTEGRATION_STATUS = _registered_status(current)
+            return dict(_INTEGRATION_STATUS)
 
-        adapter = SharedSkyGiftLiveSessionDirectory(LiveGiftContext, live.community)
-        configure_economy_integrations(live_sessions=adapter)
-        _INTEGRATION_STATUS = {
-            "state": "registered",
-            "source": "aura_music_studio.shared_sky_live_community.community",
-            "adapter": "SharedSkyGiftLiveSessionDirectory",
-        }
-    except (ImportError, ModuleNotFoundError):
-        if not isinstance(runtime_integrations.live_sessions, UnavailableLiveSessionDirectory):
-            _INTEGRATION_STATUS = {
-                "state": "registered",
-                "source": type(runtime_integrations.live_sessions).__name__,
-                "adapter": type(runtime_integrations.live_sessions).__name__,
-            }
-        else:
-            _INTEGRATION_STATUS = {
-                "state": "pending",
-                "reason": "shared_sky_live_adapter_not_available",
-            }
-    except Exception as exc:
-        _INTEGRATION_STATUS = {
-            "state": "degraded",
-            "reason": str(getattr(exc, "code", type(exc).__name__))[:120],
-        }
-    return dict(_INTEGRATION_STATUS)
+        try:
+            from . import shared_sky_live_community as live
+            from .shared_sky_live_integrations import SharedSkyGiftLiveSessionDirectory
+
+            adapter = SharedSkyGiftLiveSessionDirectory(LiveGiftContext, live.community)
+            configure_economy_integrations(live_sessions=adapter)
+            _INTEGRATION_STATUS = _registered_status(
+                adapter,
+                source="aura_music_studio.shared_sky_live_community.community",
+            )
+        except (ImportError, ModuleNotFoundError):
+            current = runtime_integrations.live_sessions
+            if not isinstance(current, UnavailableLiveSessionDirectory):
+                _INTEGRATION_STATUS = _registered_status(current)
+            else:
+                _INTEGRATION_STATUS = {
+                    "state": "pending",
+                    "reason": "shared_sky_live_adapter_not_available",
+                    "runtime_adapter": type(current).__name__,
+                }
+        except Exception as exc:
+            current = runtime_integrations.live_sessions
+            if not isinstance(current, UnavailableLiveSessionDirectory):
+                _INTEGRATION_STATUS = _registered_status(current)
+            else:
+                _INTEGRATION_STATUS = {
+                    "state": "degraded",
+                    "reason": str(getattr(exc, "code", type(exc).__name__))[:120],
+                    "runtime_adapter": type(current).__name__,
+                }
+        return dict(_INTEGRATION_STATUS)
 
 
 def chat5_shared_sky_status() -> dict[str, Any]:
-    return dict(_INTEGRATION_STATUS)
+    """Return live integration truth, retrying only while the canonical seam is unavailable."""
+
+    current = runtime_integrations.live_sessions
+    if isinstance(current, UnavailableLiveSessionDirectory):
+        return configure_chat5_shared_sky()
+    if _INTEGRATION_STATUS.get("state") != "registered":
+        return configure_chat5_shared_sky()
+    status = dict(_INTEGRATION_STATUS)
+    status["runtime_adapter"] = type(current).__name__
+    return status
