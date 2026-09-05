@@ -394,7 +394,11 @@ class EconomyIntegrationRegistry:
             self.risk = risk
 
     def build(self, db_path: str | Path | None = None) -> IntegratedCosmicEconomy:
-        return IntegratedCosmicEconomy(
+        # Lazy import avoids a module cycle while making personal limits part of the canonical
+        # runtime service used by API and neighbouring chats.
+        from .cosmic_economy_personal_limits import PersonalLimitCosmicEconomy
+
+        return PersonalLimitCosmicEconomy(
             db_path,
             live_sessions=self.live_sessions,
             eligibility=self.eligibility,
