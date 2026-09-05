@@ -12,7 +12,15 @@ from .cosmic_economy_shared_sky import chat5_shared_sky_status, configure_chat5_
 from .cosmic_payments import coin_payment_providers
 
 router = APIRouter(tags=["Cosmic Creation Coin Compatibility"])
+# Best-effort early bind for direct package use. A startup retry below runs after the complete
+# production import graph has settled, so an import-order race cannot permanently disable LIVE
+# recipient validation. The integration itself remains fail-closed when Shared Sky is absent.
 _SHARED_SKY_BOOTSTRAP = configure_chat5_shared_sky()
+
+
+@router.on_event("startup")
+def _retry_shared_sky_binding_after_application_composition() -> None:
+    configure_chat5_shared_sky()
 
 
 def _member_user_id(request: Request) -> str:
