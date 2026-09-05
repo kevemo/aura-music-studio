@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from fastapi import FastAPI
 from pydantic import ValidationError
 
 from aura_music_studio import shared_sky_motion_graphics as motion
@@ -111,14 +110,22 @@ def test_motion_graphics_reject_arbitrary_binding_and_bad_colour():
         )
 
 
-def test_motion_route_installer_is_idempotent():
-    app = FastAPI()
+def test_motion_route_installer_is_idempotent_on_canonical_app():
+    from aura_music_studio.api import app
+
+    expected = {
+        "/shared-sky/studio/api/sessions/{session_id}/graphics/ticker",
+        "/shared-sky/studio/api/sessions/{session_id}/graphics/countdown",
+    }
+    before = [r.path for r in app.router.routes if r.path in expected]
     motion.install_shared_sky_motion_graphics(app)
-    before = [r.path for r in app.router.routes if "/graphics/" in getattr(r, "path", "")]
+    after_once = [r.path for r in app.router.routes if r.path in expected]
     motion.install_shared_sky_motion_graphics(app)
-    after = [r.path for r in app.router.routes if "/graphics/" in getattr(r, "path", "")]
-    assert before == after
-    assert len(after) == 2
+    after_twice = [r.path for r in app.router.routes if r.path in expected]
+    assert set(after_once) == expected
+    assert after_twice == after_once
+    assert len(after_twice) == 2
+    assert set(before).issubset(expected)
 
 
 def _base(_project_id: str) -> str:
