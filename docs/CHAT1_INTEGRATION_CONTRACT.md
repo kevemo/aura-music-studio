@@ -40,7 +40,10 @@ from aura_music_studio.capabilities import (
     ProviderCapabilityState, derive_provider_capability,
 )
 from aura_music_studio.events import EventEnvelope, OutboxPublisher
-from aura_music_studio.shared_persistence import SharedPersistence, canonical_request_hash
+from aura_music_studio.shared_persistence import (
+    IdempotencyConflictError, IdempotencyLeaseLostError,
+    SharedPersistence, canonical_request_hash,
+)
 from aura_music_studio.shared_audit import AuditWriter
 from aura_music_studio.runtime_config import ProviderRuntimeConfig, provider_config_from_env
 from aura_music_studio.feature_routes import FeatureRoute, RouteRegistry, ROUTES
@@ -61,7 +64,13 @@ Use `require_live_moderation_authority(context, action)` for any shared LIVE mod
 
 Use `SharedPersistence.transaction()` plus `enqueue_event(..., connection=connection)` when a domain mutation and consequential event must commit atomically. Reusing an idempotency key with a different canonical request hash is a conflict, never a replay.
 
-`canonical_request_hash(...)` accepts deterministic JSON values only. It sorts object keys, rejects non-JSON values instead of coercing them to strings, and rejects non-finite numbers. This prevents distinct requests from collapsing onto the same lossy string representation.
+`canonical_request_hash(...)` accepts deterministic JSON values only. It sorts object keys, rejects non-JSON values instead of coercing them to strings, and rejects non-finite numbers. Completed replay bodies are held to the same strict JSON boundary; arbitrary Python objects are never silently stringified into replay state.
+
+An idempotency claim is an ownership lease identified by its server-issued/request correlation ID. Pass the same `correlation_id` used by `claim_idempotency(...)` to `complete_idempotency(...)`. A worker that no longer owns an in-progress claim receives `IdempotencyLeaseLostError` and cannot overwrite the replacement worker's result. Once a valid worker completes the claim, the first completed replay result is immutable; later completion calls are no-ops.
+
+Unfinished claims remain fail-closed by default. `reclaim_stale_after=None` preserves the existing `IN_PROGRESS` state indefinitely. A domain may opt into crash recovery only with a trusted server-side positive `datetime.timedelta`. Recovery is allowed only for the same canonical request hash and only after the persisted timezone-aware `updated_at` is at least that old. Reclaiming changes the lease owner to the new `correlation_id`. A different request hash always remains an `IdempotencyConflictError`, and completed claims are replayed rather than reclaimed regardless of age. Do not expose the recovery timeout as a client-controlled request parameter.
+
+Stale recovery uses the existing schema-v1 `correlation_id` and `updated_at` columns under the existing `BEGIN IMMEDIATE` transaction, so no schema migration is required for this recovery contract.
 
 `SharedPersistence(":memory:")` uses a per-instance shared-memory SQLite database anchored for the object's lifetime, so initialization, idempotency calls, and outbox calls can safely use separate connections. Call `close()` when an in-memory store is no longer needed.
 
@@ -98,3 +107,4 @@ Pending entries use an unavailable fallback and never mimic success.
 7. Derive external-provider capability from server configuration and approval evidence.
 8. A UI label, feature branch or adapter is never provider-success evidence.
 9. When an owning workstream is merged, update `ROUTES` to its verified route path/state instead of leaving stale provisional discovery metadata.
+10. Treat idempotency recovery thresholds as trusted server policy and always complete a claim with the same correlation ID that currently owns it.

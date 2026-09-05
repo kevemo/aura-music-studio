@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from hashlib import sha256
 import json
@@ -58,6 +58,15 @@ def canonical_request_hash(payload: Any) -> str:
     return sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
+def _parse_aware_iso(value: str, *, field: str) -> datetime:
+    """Parse persisted ISO timestamps without silently accepting naive values."""
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must contain a timezone-aware ISO timestamp")
+    return parsed.astimezone(timezone.utc)
+
+
 class IdempotencyDisposition(str, Enum):
     NEW = "new"
     REPLAY = "replay"
@@ -66,6 +75,10 @@ class IdempotencyDisposition(str, Enum):
 
 class IdempotencyConflictError(RuntimeError):
     pass
+
+
+class IdempotencyLeaseLostError(RuntimeError):
+    """Raised when a worker no longer owns an in-progress idempotency claim."""
 
 
 class SharedPersistence:
@@ -174,8 +187,23 @@ class SharedPersistence:
         idempotency_key: str,
         request_hash: str,
         correlation_id: str,
+        reclaim_stale_after: timedelta | None = None,
     ) -> tuple[IdempotencyDisposition, dict[str, Any] | None]:
-        now = utc_now_iso()
+        """Claim a key, optionally recovering a same-request stale worker lease.
+
+        ``reclaim_stale_after`` is a trusted server policy. ``None`` keeps the
+        fail-closed default: an unfinished claim remains in progress forever
+        until an operator/domain policy explicitly opts into stale recovery.
+        """
+
+        if reclaim_stale_after is not None:
+            if not isinstance(reclaim_stale_after, timedelta):
+                raise TypeError("reclaim_stale_after must be a datetime.timedelta")
+            if reclaim_stale_after <= timedelta(0):
+                raise ValueError("reclaim_stale_after must be greater than zero")
+
+        now_datetime = datetime.now(timezone.utc)
+        now = now_datetime.isoformat()
         with self.transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM shared_idempotency WHERE idempotency_key = ?",
@@ -203,6 +231,22 @@ class SharedPersistence:
                     "body": response,
                     "correlation_id": row["correlation_id"],
                 }
+            if reclaim_stale_after is not None:
+                updated_at = _parse_aware_iso(
+                    row["updated_at"],
+                    field="shared_idempotency.updated_at",
+                )
+                if now_datetime - updated_at >= reclaim_stale_after:
+                    connection.execute(
+                        """
+                        UPDATE shared_idempotency
+                        SET correlation_id=?, response_status=NULL, response_json=NULL,
+                            updated_at=?
+                        WHERE idempotency_key=? AND state='in_progress'
+                        """,
+                        (correlation_id, now, idempotency_key),
+                    )
+                    return IdempotencyDisposition.NEW, None
             return IdempotencyDisposition.IN_PROGRESS, None
 
     def complete_idempotency(
@@ -210,12 +254,19 @@ class SharedPersistence:
         *,
         idempotency_key: str,
         request_hash: str,
+        correlation_id: str,
         response_status: int,
         response_body: Any,
     ) -> None:
+        """Complete a claim only while ``correlation_id`` still owns its lease."""
+
         with self.transaction() as connection:
             row = connection.execute(
-                "SELECT request_hash FROM shared_idempotency WHERE idempotency_key = ?",
+                """
+                SELECT request_hash, correlation_id, state
+                FROM shared_idempotency
+                WHERE idempotency_key = ?
+                """,
                 (idempotency_key,),
             ).fetchone()
             if row is None:
@@ -224,25 +275,36 @@ class SharedPersistence:
                 raise IdempotencyConflictError(
                     "idempotency key was already used for a different request"
                 )
-            connection.execute(
+            # Completion is itself idempotent. Once the first valid owner stores
+            # the replay result, later workers must never replace that result.
+            if row["state"] == "completed":
+                return
+            if row["correlation_id"] != correlation_id:
+                raise IdempotencyLeaseLostError(
+                    "idempotency claim was reclaimed by another worker"
+                )
+
+            # Replay state is part of the shared contract too. Reject arbitrary
+            # Python objects rather than silently stringifying them into a response.
+            response_json = _canonical_json(response_body)
+            cursor = connection.execute(
                 """
                 UPDATE shared_idempotency
                 SET state='completed', response_status=?, response_json=?, updated_at=?
-                WHERE idempotency_key=?
+                WHERE idempotency_key=? AND state='in_progress' AND correlation_id=?
                 """,
                 (
                     int(response_status),
-                    json.dumps(
-                        response_body,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        allow_nan=False,
-                        default=str,
-                    ),
+                    response_json,
                     utc_now_iso(),
                     idempotency_key,
+                    correlation_id,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise IdempotencyLeaseLostError(
+                    "idempotency claim is no longer owned by this worker"
+                )
 
     def enqueue_event(
         self,
