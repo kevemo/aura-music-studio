@@ -62,6 +62,38 @@ def test_rhiannon_identity_replaces_legacy_public_copy_but_preserves_internal_ro
     assert "AURA_INTELLIGENCE_PROVIDER" in current
 
 
+def test_rhiannon_migration_covers_legacy_assistant_facing_site_labels():
+    source = (
+        "Aura AI Producer | Aura Producer | Aura production queue | Aura Internet | Spoken Aura | "
+        "Aura Tune | Aura Artifacts | Aura artifacts | Aura Profile | Aura · Default profile | "
+        "Aura attachment not found | Aura lyrics | Aura creates original lyrics | let Aura draft | "
+        "let Aura build | Prepare with Aura | Open an Aura conversation first. | "
+        "Aura chat is not ready. | Aura, give me my daily briefing | Ask Aura | Talk to Aura"
+    )
+    current = rebrand_text(source)
+    assert "Rhian AI Producer" in current
+    assert "Rhian Producer" in current
+    assert "Rhian production queue" in current
+    assert "Rhian Internet" in current
+    assert "Spoken Rhian" in current
+    assert "Rhian Tune" in current
+    assert "Rhian Artifacts" in current
+    assert "Rhian artifacts" in current
+    assert "Rhian Profile" in current
+    assert "Rhian · Default profile" in current
+    assert "Rhian attachment not found" in current
+    assert "Rhian lyrics" in current
+    assert "Rhian creates original lyrics" in current
+    assert "let Rhian draft" in current
+    assert "let Rhian build" in current
+    assert "Prepare with Rhian" in current
+    assert "Open a Rhian conversation first." in current
+    assert "Rhian chat is not ready." in current
+    assert "Rhian, give me my daily briefing" in current
+    assert "Ask Rhian" in current
+    assert "Talk to Rhian" in current
+
+
 def _client(monkeypatch, membership):
     user = {
         "id": "member-visible-shell",
