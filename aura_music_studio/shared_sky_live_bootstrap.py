@@ -7,13 +7,14 @@ from .shared_sky_live_browser_playback import harden_browser_playback_integratio
 from .shared_sky_live_community import router as live_community_router
 from .shared_sky_live_controls import router as live_controls_router
 from .shared_sky_live_events import router as live_events_router
+from .shared_sky_live_events_ui import router as live_events_ui_router
 from .shared_sky_live_integrations import (
     configure_neighbor_live_integrations,
     router as live_integrations_router,
 )
 
 
-PUBLIC_LIVE_PREFIXES = ("/watch/", "/shared-sky/live/api/")
+PUBLIC_LIVE_PREFIXES = ("/watch/", "/live-events/", "/shared-sky/live/api/")
 
 # The production application has a late compatibility-composition layer. Keep immutable snapshots
 # of the Chat 4 APIRoutes before any application consumes/includes the source routers. This makes
@@ -22,6 +23,7 @@ PUBLIC_LIVE_PREFIXES = ("/watch/", "/shared-sky/live/api/")
 _LIVE_COMMUNITY_ROUTES = tuple(live_community_router.routes)
 _LIVE_CONTROL_ROUTES = tuple(live_controls_router.routes)
 _LIVE_EVENT_ROUTES = tuple(live_events_router.routes)
+_LIVE_EVENT_UI_ROUTES = tuple(live_events_ui_router.routes)
 _LIVE_INTEGRATION_ROUTES = tuple(live_integrations_router.routes)
 
 
@@ -53,10 +55,13 @@ def install_shared_sky_live_community(app: Any) -> None:
 
     Upcoming-event routes expose only creator-published schedule sidecars. The underlying private
     `shared_sky_schedules` table is never made public by membership-middleware configuration alone;
-    publication/access checks remain server authoritative inside the event handlers.
+    publication/access checks remain server authoritative inside the event handlers. The public
+    `/live-events` viewer surface uses the same access decisions and never reads private schedules
+    directly.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
+    access_control.PUBLIC_EXACT.add("/live-events")
     prefixes = tuple(access_control.PUBLIC_PREFIXES)
     for prefix in PUBLIC_LIVE_PREFIXES:
         if prefix not in prefixes:
@@ -71,6 +76,7 @@ def install_shared_sky_live_community(app: Any) -> None:
         *_LIVE_COMMUNITY_ROUTES,
         *_LIVE_CONTROL_ROUTES,
         *_LIVE_EVENT_ROUTES,
+        *_LIVE_EVENT_UI_ROUTES,
         *_LIVE_INTEGRATION_ROUTES,
     ):
         signature = _route_signature(route)
