@@ -31,7 +31,8 @@ def _descriptor(source_id: str, *, rights_state: str = "ready") -> cl.CreationLi
     )
 
 
-def test_existing_source_is_revoked_when_fresh_discovery_becomes_rights_blocked(tmp_path):
+def test_existing_source_is_revoked_when_fresh_discovery_becomes_rights_blocked(monkeypatch, tmp_path):
+    monkeypatch.setattr(cl.shared_sky, "broadcast", lambda user_id, broadcast_id: {"id": broadcast_id, "state": "live"})
     store = cl.CreationLiveStore(tmp_path / "live.sqlite3")
     initial = _descriptor("cls_rights_change")
     store.upsert_discovered("creator-a", initial, "artwork", "output/art.png")
