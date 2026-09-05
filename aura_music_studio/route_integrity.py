@@ -7,6 +7,7 @@ from typing import Any
 
 
 _SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
+_CREATION_LIVE_SENTINEL = "/creation-live/capabilities"
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
@@ -181,6 +182,31 @@ def _install_openapi_integrity(app: Any) -> None:
     app.state.route_integrity_openapi_installed = True
 
 
+def _ensure_creation_live_routes(app: Any) -> None:
+    """Install Chat 7 routes/middleware and recover from stale installer markers.
+
+    Route presence is the durable source of truth. This avoids skipping the router when an app
+    state marker was copied/set before the routes themselves were mounted, while still preventing
+    duplicate route or middleware registration on repeated reconciliation calls.
+    """
+    from .creation_live import CreationLiveMiddleware, install_creation_live, router as creation_live_router
+
+    install_creation_live(app)
+
+    has_route = any(getattr(route, "path", None) == _CREATION_LIVE_SENTINEL for route in app.router.routes)
+    if not has_route:
+        app.include_router(creation_live_router)
+
+    middleware_present = any(
+        getattr(middleware, "cls", None) is CreationLiveMiddleware
+        for middleware in getattr(app, "user_middleware", [])
+    )
+    if not middleware_present:
+        app.add_middleware(CreationLiveMiddleware)
+
+    app.state.creation_live_installed = True
+
+
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     """Remove unreachable exact duplicate HTTP routes and harden schema identity.
 
@@ -188,9 +214,7 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     middleware before signatures are reconciled. This preserves the repository's one FastAPI app,
     avoids a second creative/live application, and keeps the installer idempotent.
     """
-    from .creation_live import install_creation_live
-
-    install_creation_live(app)
+    _ensure_creation_live_routes(app)
 
     seen: set[tuple[str, tuple[str, ...]]] = set()
     kept: list[Any] = []
