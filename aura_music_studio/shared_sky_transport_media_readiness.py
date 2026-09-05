@@ -25,7 +25,14 @@ class TransportMediaStartupReadinessMixin:
         return max(2.0, min(30.0, value))
 
     def _start_internal_delivery(self, user_id: str, broadcast: dict, session: dict) -> bool:
-        started = super()._start_internal_delivery(user_id, broadcast, session)
+        try:
+            started = super()._start_internal_delivery(user_id, broadcast, session)
+        except SharedSkyInternalMediaError:
+            raise
+        except OSError as exc:
+            raise SharedSkyInternalMediaError(
+                "Shared Sky internal media runtime could not create or start its local media resources"
+            ) from exc
         if not started:
             return False
 
@@ -63,7 +70,11 @@ class TransportMediaStartupReadinessMixin:
                     deadline = 0.0
                     break
                 output = Path(str(row.get("output_path") or ""))
-                if not output.exists() or not output.is_file() or output.stat().st_size <= 0:
+                try:
+                    output_ready = output.exists() and output.is_file() and output.stat().st_size > 0
+                except OSError:
+                    output_ready = False
+                if not output_ready:
                     all_ready = False
             if all_ready:
                 self.emit(broadcast["id"], "internal_playback_ready", "playlist_ready")
