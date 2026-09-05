@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from .cosmic_economy import EconomyError, _iso
 from .cosmic_economy_integrations import IntegratedCosmicEconomy
@@ -13,14 +15,26 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
     def _init_schema(self) -> None:
         super()._init_schema()
         with self._connect() as con:
-            con.execute(
-                """CREATE TABLE IF NOT EXISTS personal_spending_limits (
+            con.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS personal_spending_limits (
                     user_id TEXT PRIMARY KEY,
                     daily_hard_limit INTEGER,
                     weekly_hard_limit INTEGER,
                     monthly_hard_limit INTEGER,
                     updated_at TEXT NOT NULL
-                )"""
+                );
+
+                CREATE TABLE IF NOT EXISTS personal_spending_limit_changes (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    previous_json TEXT NOT NULL,
+                    new_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_personal_spending_limit_changes_user_time
+                    ON personal_spending_limit_changes(user_id, created_at DESC);
+                """
             )
 
     @staticmethod
@@ -49,6 +63,7 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
         for value in values.values():
             self._validate_personal_limit(value)
 
+        correlation_id = uuid4().hex
         with self._connect() as con:
             self._begin(con)
             platform = con.execute(
@@ -73,6 +88,11 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
                                 "requested_personal_limit_coins": value,
                             },
                         )
+            previous = con.execute(
+                "SELECT * FROM personal_spending_limits WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            now = _iso()
             con.execute(
                 """INSERT INTO personal_spending_limits
                    (user_id,daily_hard_limit,weekly_hard_limit,monthly_hard_limit,updated_at)
@@ -87,13 +107,36 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
                     daily_hard_limit,
                     weekly_hard_limit,
                     monthly_hard_limit,
-                    _iso(),
+                    now,
                 ),
             )
             row = con.execute(
                 "SELECT * FROM personal_spending_limits WHERE user_id=?",
                 (user_id,),
             ).fetchone()
+            con.execute(
+                """INSERT INTO personal_spending_limit_changes
+                   (id,user_id,previous_json,new_json,created_at) VALUES (?,?,?,?,?)""",
+                (
+                    uuid4().hex,
+                    user_id,
+                    json.dumps(dict(previous) if previous else {}, sort_keys=True),
+                    json.dumps(dict(row), sort_keys=True),
+                    now,
+                ),
+            )
+            self._enqueue_locked(
+                con,
+                "economy.personal_spending_limits_changed",
+                "coin_account",
+                user_id,
+                {
+                    "daily_hard_limit": daily_hard_limit,
+                    "weekly_hard_limit": weekly_hard_limit,
+                    "monthly_hard_limit": monthly_hard_limit,
+                },
+                correlation_id=correlation_id,
+            )
             con.commit()
         return dict(row)
 
@@ -104,6 +147,22 @@ class PersonalLimitCosmicEconomy(IntegratedCosmicEconomy):
                 (user_id,),
             ).fetchone()
         return dict(row) if row else None
+
+    def personal_spending_limit_history(self, user_id: str, *, limit: int = 100) -> list[dict[str, Any]]:
+        limit = max(1, min(int(limit), 500))
+        with self._connect() as con:
+            rows = con.execute(
+                """SELECT * FROM personal_spending_limit_changes
+                   WHERE user_id=? ORDER BY created_at DESC LIMIT ?""",
+                (user_id, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["previous"] = json.loads(item.pop("previous_json"))
+            item["new"] = json.loads(item.pop("new_json"))
+            result.append(item)
+        return result
 
     def _check_spending_locked(self, con, user_id: str, account_id: str, new_cost: int) -> None:
         super()._check_spending_locked(con, user_id, account_id, new_cost)
