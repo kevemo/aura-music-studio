@@ -44,18 +44,20 @@ def render_command_argv(template: str, values: Mapping[str, object]) -> list[str
                 "use a reviewed wrapper executable instead"
             )
 
-    rendered: list[str] = []
     string_values = {str(key): str(value) for key, value in values.items()}
+    rendered: list[str] = []
     for token in tokens:
+        placeholders = sorted(set(_PLACEHOLDER.findall(token)))
+        unsupported = [name for name in placeholders if name not in string_values]
+        if unsupported:
+            raise ValueError(
+                "Configured command template contains unsupported placeholders: "
+                + ", ".join(unsupported)
+            )
+
         current = token
         for key, value in string_values.items():
             current = current.replace("{" + key + "}", value)
-        unresolved = sorted(set(_PLACEHOLDER.findall(current)))
-        if unresolved:
-            raise ValueError(
-                "Configured command template contains unsupported placeholders: "
-                + ", ".join(unresolved)
-            )
         if "\x00" in current:
             raise ValueError("Configured command argument contains a NUL byte")
         rendered.append(current)
