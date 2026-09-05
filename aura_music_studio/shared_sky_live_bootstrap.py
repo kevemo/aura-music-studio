@@ -17,6 +17,10 @@ from .shared_sky_live_integrations import (
     configure_neighbor_live_integrations,
     router as live_integrations_router,
 )
+from .shared_sky_live_moderator_permissions import (
+    install_shared_sky_moderator_permissions,
+    router as live_moderator_permissions_router,
+)
 from .shared_sky_live_watch_bridge_guard import router as live_watch_bridge_guard_router
 from .shared_sky_live_watch_ui_v2 import router as live_watch_v2_router
 from .shared_sky_transport_browser_bridge import install_chat2_browser_playback_bridge
@@ -36,6 +40,7 @@ _LIVE_EVENT_ROUTES = tuple(live_events_router.routes)
 _LIVE_EVENT_UI_ROUTES = tuple(live_events_ui_router.routes)
 _LIVE_INTEGRATION_ROUTES = tuple(live_integrations_router.routes)
 _LIVE_BATTLE_BRIDGE_ROUTES = tuple(live_battle_bridge_router.routes)
+_LIVE_MODERATOR_PERMISSION_ROUTES = tuple(live_moderator_permissions_router.routes)
 
 
 def _route_signature(route: Any) -> tuple[str, tuple[str, ...]]:
@@ -71,6 +76,10 @@ def install_shared_sky_live_community(app: Any) -> None:
     fail-closed until Chat 6 publishes an explicit ``viewer_live_battle(live_session_id)`` lookup;
     Chat 4 never discovers Battles by reading Chat 6 private tables.
 
+    LIVE moderation is an independent permission dimension. Owner and the LIVE creator retain their
+    own authority; any other moderator must have both a current Owner-enabled global Moderator grant
+    and an explicit assignment to that LIVE. Agent status by itself grants no moderation action.
+
     Chat 4 Wave 3 installs additive durability hardening before requests are served. LIVE follower
     notifications are retry-safe and poll votes have one serialized receipt per poll/viewer.
 
@@ -90,6 +99,7 @@ def install_shared_sky_live_community(app: Any) -> None:
     harden_browser_playback_integration()
     install_chat2_browser_playback_bridge()
     install_chat6_battle_viewer_bridge()
+    install_shared_sky_moderator_permissions()
     install_live_community_hardening()
 
     existing = {_route_signature(route) for route in app.router.routes}
@@ -102,6 +112,7 @@ def install_shared_sky_live_community(app: Any) -> None:
         *_LIVE_EVENT_UI_ROUTES,
         *_LIVE_INTEGRATION_ROUTES,
         *_LIVE_BATTLE_BRIDGE_ROUTES,
+        *_LIVE_MODERATOR_PERMISSION_ROUTES,
     ):
         signature = _route_signature(route)
         if signature in existing:
