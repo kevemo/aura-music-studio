@@ -4,6 +4,7 @@ import pytest
 
 from aura_music_studio.native_access import NativeAccessResolver
 from aura_music_studio.native_products import AURA_OS_ENTITLEMENT, AURA_SEC_ENTITLEMENT
+from aura_music_studio.plans import get_plan, public_plans
 
 
 class _Accounts:
@@ -47,6 +48,17 @@ def _resolver(user: dict, *, purchased=(), enforced: dict | None = None):
         subscriptions=subscriptions,
     )
     return resolver, native, subscriptions
+
+
+def test_unlimited_pro_catalogue_does_not_advertise_or_grant_sls_membership_entitlement():
+    pro = get_plan("pro")
+    public = {plan["id"]: plan for plan in public_plans()}["pro"]
+
+    assert AURA_OS_ENTITLEMENT in pro.features
+    assert AURA_SEC_ENTITLEMENT not in pro.features
+    assert AURA_SEC_ENTITLEMENT not in public["features"]
+    assert "Secure Lattice System" in public["description"]
+    assert "licensing is separate" in public["description"]
 
 
 def test_unlimited_pro_grants_aura_os_but_not_sls_without_standalone_entitlement():
