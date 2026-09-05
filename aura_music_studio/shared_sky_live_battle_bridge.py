@@ -16,8 +16,8 @@ class Chat6BattleDisplayAdapter:
     """Read-only projection of Chat 6 viewer-safe Battle state.
 
     The adapter is deliberately unable to discover Battles through private Chat 6 tables. It only
-    activates when Chat 6 publishes ``viewer_live_battle(live_session_id)`` as an explicit viewer
-    compatibility seam.
+    activates when Chat 6 publishes an explicit ``viewer_live_battle(live_session_id)`` viewer
+    compatibility seam, either at module level or on the canonical Battle store.
     """
 
     def __init__(self, viewer_live_battle: Any):
@@ -75,8 +75,7 @@ def install_chat6_battle_viewer_bridge() -> dict[str, Any]:
 
     try:
         battle_api = importlib.import_module(f"{__package__}.shared_sky_battle_api")
-        viewer_live_battle = getattr(battle_api, "viewer_live_battle")
-    except (ModuleNotFoundError, AttributeError):
+    except ModuleNotFoundError:
         return {
             "state": "pending",
             "reason": "chat6_viewer_live_battle_lookup_unavailable",
@@ -86,11 +85,24 @@ def install_chat6_battle_viewer_bridge() -> dict[str, Any]:
             "state": "degraded",
             "reason": "chat6_battle_module_unavailable",
         }
+
+    viewer_live_battle = getattr(battle_api, "viewer_live_battle", None)
+    source = "shared_sky_battle_api.viewer_live_battle"
+    if not callable(viewer_live_battle):
+        battle_store = getattr(battle_api, "battle_store", None)
+        viewer_live_battle = getattr(battle_store, "viewer_live_battle", None)
+        source = "shared_sky_battle_api.battle_store.viewer_live_battle"
+    if not callable(viewer_live_battle):
+        return {
+            "state": "pending",
+            "reason": "chat6_viewer_live_battle_lookup_unavailable",
+        }
+
     try:
         live.register_battle_display_adapter(Chat6BattleDisplayAdapter(viewer_live_battle))
         return {
             "state": "registered",
-            "source": "shared_sky_battle_api.viewer_live_battle",
+            "source": source,
             "authority": "chat6_read_only",
         }
     except Exception:
