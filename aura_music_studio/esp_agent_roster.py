@@ -23,7 +23,7 @@ def _now() -> str:
 
 def _require_agent(request: Request):
     member, membership = require_esp_hub_member(request)
-    role = "owner" if membership.get("status") == "owner" else (membership.get("roles") or "").lower()
+    role = "owner" if membership.get("status") == "owner" else (membership.get("roles") or "").strip().lower()
     if role not in {"agent", "both", "owner"}:
         raise HTTPException(403, "ESP Agent access is required")
     return member, membership
@@ -72,10 +72,64 @@ class AgentRosterStore:
                     ON esp_agent_followups(agent_user_id,status,due_at);
                 CREATE INDEX IF NOT EXISTS idx_agent_followups_creator
                     ON esp_agent_followups(creator_user_id,status);
+
+                -- Assignment rows are durable audit records, but their active state must never
+                -- outlive the current server-authoritative ESP role/status on either side.
+                -- These triggers make that invariant apply to every assignment consumer, not
+                -- just this roster service.
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_creator_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('creator','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE creator_user_id=NEW.user_id
+                       AND status='active';
+                END;
+
+                CREATE TRIGGER IF NOT EXISTS trg_esp_assignments_revoke_agent_ineligible
+                AFTER UPDATE OF status, roles ON esp_memberships
+                WHEN NEW.status != 'owner'
+                 AND (
+                    NEW.status != 'active'
+                    OR lower(trim(COALESCE(NEW.roles,''))) NOT IN ('agent','both')
+                 )
+                BEGIN
+                    UPDATE esp_agent_creator_assignments
+                       SET status='revoked',
+                           revoked_by='system:esp-role-boundary',
+                           revoked_at=NEW.updated_at
+                     WHERE agent_user_id=NEW.user_id
+                       AND status='active';
+                END;
                 """
             )
 
+    def _membership_allows(self, user_id: str, allowed_roles: set[str]) -> bool:
+        membership = self.esp.membership(user_id)
+        if not membership:
+            return False
+        status = str(membership.get("status") or "").strip().lower()
+        if status == "owner":
+            return True
+        if status != "active":
+            return False
+        role = str(membership.get("roles") or "").strip().lower()
+        return role in allowed_roles
+
     def _active_assignment(self, agent_user_id: str, creator_user_id: str) -> bool:
+        # Assignment rows are durable audit records. They are not sufficient authorization on
+        # their own: both parties must still hold the required current ESP roles.
+        if not self._membership_allows(agent_user_id, {"agent", "both"}):
+            return False
+        if not self._membership_allows(creator_user_id, {"creator", "both"}):
+            return False
         with self._connect() as con:
             row = con.execute(
                 """SELECT 1 FROM esp_agent_creator_assignments
@@ -112,14 +166,20 @@ class AgentRosterStore:
     def complete_followup(self, agent_user_id: str, followup_id: str) -> None:
         with self._connect() as con:
             row = con.execute(
-                "SELECT id FROM esp_agent_followups WHERE id=? AND agent_user_id=? AND status='open'",
+                """SELECT id,creator_user_id FROM esp_agent_followups
+                   WHERE id=? AND agent_user_id=? AND status='open'""",
                 (followup_id, agent_user_id),
             ).fetchone()
             if not row:
                 raise KeyError(followup_id)
+            creator_user_id = row["creator_user_id"]
+        if not self._active_assignment(agent_user_id, creator_user_id):
+            raise PermissionError("Creator is not actively assigned to this agent")
+        with self._connect() as con:
             con.execute(
-                "UPDATE esp_agent_followups SET status='done',completed_at=? WHERE id=?",
-                (_now(), followup_id),
+                """UPDATE esp_agent_followups SET status='done',completed_at=?
+                   WHERE id=? AND agent_user_id=? AND status='open'""",
+                (_now(), followup_id, agent_user_id),
             )
 
     def followups(self, agent_user_id: str, creator_user_id: str | None = None) -> list[dict]:
@@ -160,11 +220,17 @@ class AgentRosterStore:
         }
 
     def roster(self, agent_user_id: str) -> list[dict]:
+        if not self._membership_allows(agent_user_id, {"agent", "both"}):
+            return []
         rows = self.assignments.for_agent(agent_user_id)
         result: list[dict] = []
         with self._connect() as con:
             for row in rows:
                 creator_id = row["creator_user_id"]
+                # The assignment table is retained for audit, but a current Creator/Both role
+                # is required before any creator data is surfaced to the Agent workspace.
+                if not self._membership_allows(creator_id, {"creator", "both"}):
+                    continue
                 training = self.esp.progress(creator_id)
                 avg_training = round(sum(training.values()) / len(training), 1) if training else 0.0
                 progress = self.progress.summary(creator_id)
@@ -218,6 +284,8 @@ def complete_agent_followup(followup_id: str, request: Request):
     member, _membership = _require_agent(request)
     try:
         rosters.complete_followup(member.user_id, followup_id)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(404, "Follow-up not found") from exc
     return {"completed": True, "followup_id": followup_id}

@@ -1,0 +1,84 @@
+services:
+  live-sound-studio:
+    environment:
+      AURA_INTELLIGENCE_PROVIDER: openai_compatible
+      AURA_LLM_BASE_URL: http://aura-llm:8000
+      AURA_LLM_API_KEY: ${AURA_LLM_INTERNAL_API_KEY:?AURA_LLM_INTERNAL_API_KEY is required}
+      AURA_LLM_MODEL: ${AURA_SELFHOST_LLM_SERVED_NAME:-aura-reasoning}
+      AURA_INTELLIGENCE_MODEL: ${AURA_SELFHOST_LLM_SERVED_NAME:-aura-reasoning}
+    networks:
+      - default
+      - aura_inference
+    depends_on:
+      aura-llm:
+        condition: service_healthy
+
+  aura-worker:
+    environment:
+      AURA_INTELLIGENCE_PROVIDER: openai_compatible
+      AURA_LLM_BASE_URL: http://aura-llm:8000
+      AURA_LLM_API_KEY: ${AURA_LLM_INTERNAL_API_KEY:?AURA_LLM_INTERNAL_API_KEY is required}
+      AURA_LLM_MODEL: ${AURA_SELFHOST_LLM_SERVED_NAME:-aura-reasoning}
+      AURA_INTELLIGENCE_MODEL: ${AURA_SELFHOST_LLM_SERVED_NAME:-aura-reasoning}
+    networks:
+      - default
+      - aura_inference
+    depends_on:
+      aura-llm:
+        condition: service_healthy
+
+  aura-llm:
+    image: ${AURA_VLLM_IMAGE:?AURA_VLLM_IMAGE must be an ESP-approved immutable digest}
+    pull_policy: always
+    container_name: elevate-souls-aura-inference
+    restart: unless-stopped
+    user: "2000:0"
+    gpus: all
+    shm_size: ${AURA_VLLM_SHM_SIZE:-16gb}
+    environment:
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      CUDA_VISIBLE_DEVICES: ${AURA_LLM_CUDA_VISIBLE_DEVICES:-1}
+      HF_HOME: /home/vllm/.cache/huggingface
+    command:
+      - --model
+      - /models/aura
+      - --served-model-name
+      - ${AURA_SELFHOST_LLM_SERVED_NAME:-aura-reasoning}
+      - --api-key
+      - ${AURA_LLM_INTERNAL_API_KEY:?AURA_LLM_INTERNAL_API_KEY is required}
+      - --tensor-parallel-size
+      - ${AURA_LLM_TENSOR_PARALLEL_SIZE:-1}
+      - --gpu-memory-utilization
+      - ${AURA_LLM_GPU_MEMORY_UTILIZATION:-0.90}
+      - --max-model-len
+      - ${AURA_LLM_MAX_MODEL_LEN:-65536}
+      - --no-enable-log-requests
+      - --disable-uvicorn-access-log
+      - --fail-on-environ-validation
+    expose:
+      - "8000"
+    volumes:
+      - ${AURA_SELFHOST_LLM_MODEL_DIR:?AURA_SELFHOST_LLM_MODEL_DIR is required}:/models/aura:ro
+      - aura_vllm_cache:/home/vllm/.cache/vllm
+      - aura_vllm_hf_cache:/home/vllm/.cache/huggingface
+    networks:
+      - aura_inference
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 20s
+      timeout: 10s
+      retries: 30
+      start_period: 300s
+    # Deliberately no host port and no default network. vLLM documents that --api-key
+    # does not protect every endpoint, so network isolation is the primary boundary.
+
+networks:
+  aura_inference:
+    internal: true
+    name: elevate-souls-aura-inference
+
+volumes:
+  aura_vllm_cache:
+  aura_vllm_hf_cache:

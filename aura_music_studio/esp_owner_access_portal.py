@@ -9,13 +9,33 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from .esp_level_up import EspAgentAssignmentStore
 from .esp_social_access_control import EspSocialAccessControlStore
 from .owner_auth import owner_authorized
+from .owner_dashboard_preferences_portal import router as owner_dashboard_preferences_router
 from .owner_identity import owner_actor, owner_theme, request_owner_persona
 from .owner_user_control import OwnerUserControl
 
 router = APIRouter()
+# This composite router is mounted before the legacy owner-control router in app.py,
+# so the personalized dashboard can safely overlay /owner/dashboard without changing
+# authentication/session code or the high-conflict application router.
+router.include_router(owner_dashboard_preferences_router)
 control = OwnerUserControl()
 assignments = EspAgentAssignmentStore(control.esp)
 social_controls = EspSocialAccessControlStore(control.esp)
+
+_ASSIGNMENT_AUDIT_ACTIONS = {
+    "esp_agent_creator_assigned",
+    "esp_agent_creator_revoked",
+}
+_ASSIGNMENT_AUDIT_FIELDS = (
+    "id",
+    "agent_user_id",
+    "creator_user_id",
+    "status",
+    "assigned_by",
+    "assigned_at",
+    "revoked_by",
+    "revoked_at",
+)
 
 
 def _go(message: str = "") -> RedirectResponse:
@@ -33,6 +53,59 @@ def _role(row: dict) -> str:
     if row.get("esp_status") == "active":
         return row.get("esp_roles") or "regular"
     return "regular"
+
+
+def _assignment_snapshot(agent_user_id: str, creator_user_id: str) -> dict:
+    """Return a minimal relationship snapshot suitable for owner audit evidence.
+
+    The free-text assignment note is deliberately excluded from centralized audit storage;
+    the audit metadata records only whether a note existed.
+    """
+    with assignments._connect() as con:
+        row = con.execute(
+            """SELECT id,agent_user_id,creator_user_id,status,assigned_by,assigned_at,revoked_by,revoked_at,note
+               FROM esp_agent_creator_assignments WHERE agent_user_id=? AND creator_user_id=?""",
+            (agent_user_id, creator_user_id),
+        ).fetchone()
+    if not row:
+        return {}
+    item = dict(row)
+    snapshot = {field: item.get(field) for field in _ASSIGNMENT_AUDIT_FIELDS}
+    snapshot["note_present"] = bool(str(item.get("note") or "").strip())
+    return snapshot
+
+
+def _record_assignment_audit(
+    *,
+    action: str,
+    actor: str,
+    agent_user_id: str,
+    creator_user_id: str,
+    before: dict,
+    after: dict,
+) -> None:
+    if action not in _ASSIGNMENT_AUDIT_ACTIONS:
+        raise ValueError("Unsupported ESP assignment audit action")
+    assignment_id = (after or before).get("id")
+    note_present = bool((after or before).get("note_present"))
+    clean_before = {key: value for key, value in before.items() if key != "note_present"}
+    clean_after = {key: value for key, value in after.items() if key != "note_present"}
+    with control._connect() as con:
+        control._audit(
+            con,
+            action=action,
+            target_user_id=creator_user_id,
+            before=clean_before,
+            after=clean_after,
+            metadata={
+                "relationship": "agent_creator",
+                "agent_user_id": agent_user_id,
+                "assignment_id": assignment_id,
+                "note_present": note_present,
+                "subscription_changed": False,
+            },
+            actor=actor,
+        )
 
 
 @router.get("/owner/esp-access", response_class=HTMLResponse, include_in_schema=False)
@@ -139,7 +212,18 @@ def assign_creator(
     if not _authorized(request):
         return RedirectResponse("/owner", status_code=303)
     try:
-        assignments.assign(agent_user_id, creator_user_id, actor=owner_actor("ESP Owner"), note=note)
+        actor = owner_actor("ESP Owner")
+        before = _assignment_snapshot(agent_user_id, creator_user_id)
+        assignments.assign(agent_user_id, creator_user_id, actor=actor, note=note)
+        after = _assignment_snapshot(agent_user_id, creator_user_id)
+        _record_assignment_audit(
+            action="esp_agent_creator_assigned",
+            actor=actor,
+            agent_user_id=agent_user_id,
+            creator_user_id=creator_user_id,
+            before=before,
+            after=after,
+        )
         return _go("Creator assigned to ESP Agent.")
     except ValueError as exc:
         return _go(str(exc))
@@ -154,7 +238,18 @@ def revoke_assignment(
     if not _authorized(request):
         return RedirectResponse("/owner", status_code=303)
     try:
-        assignments.revoke(agent_user_id, creator_user_id, actor=owner_actor("ESP Owner"))
+        actor = owner_actor("ESP Owner")
+        before = _assignment_snapshot(agent_user_id, creator_user_id)
+        assignments.revoke(agent_user_id, creator_user_id, actor=actor)
+        after = _assignment_snapshot(agent_user_id, creator_user_id)
+        _record_assignment_audit(
+            action="esp_agent_creator_revoked",
+            actor=actor,
+            agent_user_id=agent_user_id,
+            creator_user_id=creator_user_id,
+            before=before,
+            after=after,
+        )
         return _go("Agent→Creator assignment revoked.")
     except ValueError as exc:
         return _go(str(exc))

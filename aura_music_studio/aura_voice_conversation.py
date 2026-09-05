@@ -5,7 +5,12 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .aura_realtime_voice import router as realtime_voice_router
+from .aura_realtime_voice_ui import router as realtime_voice_ui_router
+
 router = APIRouter(include_in_schema=False)
+router.include_router(realtime_voice_router)
+router.include_router(realtime_voice_ui_router)
 
 VOICE_SCRIPT = r"""
 (()=>{
@@ -15,6 +20,7 @@ VOICE_SCRIPT = r"""
 
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
   function hostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
+  function hostPerformance(detail={}){try{window.AuraHost?.performance?.speechFrame(detail)}catch(_){}}
   function button(){return document.getElementById('auraHandsFree')}
   function setButton(){const b=button();if(!b)return;b.textContent=enabled?'■ Stop Aura Voice':'◉ Aura Voice';b.style.borderColor=enabled?'#73e2aa66':''}
   function cleanupCapture(){
@@ -23,7 +29,7 @@ VOICE_SCRIPT = r"""
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
     if(audioCtx){try{audioCtx.close()}catch(_){}}audioCtx=null;analyser=null;media=null;
   }
-  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
+  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle'});cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
 
   function rmsLevel(){
     if(!analyser)return 0;const data=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(data);let total=0;
@@ -53,10 +59,14 @@ VOICE_SCRIPT = r"""
     if(!message){return listen()}
     try{
       hostState('speaking',{message_id:message.id});
+      // The generic TTS endpoint currently returns audio only. Tell the avatar the truthful
+      // speech lifecycle, but do not invent phoneme or viseme timestamps that the provider
+      // did not supply. A timing-capable provider can dispatch aura:speech-frame separately.
+      hostPerformance({speaking:true,source:'tts_lifecycle',message_id:message.id});
       activeAudio=new Audio(`${api}/threads/${encodeURIComponent(current)}/messages/${encodeURIComponent(message.id)}/speech`);
       await new Promise((resolve,reject)=>{activeAudio.onended=resolve;activeAudio.onerror=()=>reject(new Error('Aura speech output is unavailable'));activeAudio.play().catch(reject)});
-      activeAudio=null;if(enabled)await listen();else hostState('idle');
-    }catch(error){activeAudio=null;hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
+      activeAudio=null;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle',message_id:message.id});if(enabled)await listen();else hostState('idle');
+    }catch(error){activeAudio=null;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle',message_id:message.id});hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
   }
 
   async function listen(){
@@ -103,7 +113,7 @@ VOICE_SCRIPT = r"""
     const b=document.createElement('button');b.id='auraHandsFree';b.className='btn';b.textContent='◉ Aura Voice';b.title='Hands-free listen → Aura response → spoken reply loop';b.onclick=startVoice;foot.prepend(b);
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&enabled)stopVoice()});
-  window.addEventListener('beforeunload',()=>{enabled=false;cleanupCapture()});
+  window.addEventListener('beforeunload',()=>{enabled=false;hostPerformance({speaking:false,viseme:'sil',source:'tts_lifecycle'});cleanupCapture()});
 })();
 """
 
@@ -114,7 +124,7 @@ def voice_conversation_script():
 
 
 class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
-    """Inject the hands-free voice layer only into Aura's signed-in HTML workspace."""
+    """Inject the standard fallback and Realtime WebRTC voice layers into Aura's signed-in workspace."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -130,9 +140,13 @@ class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        fallback_marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
+        realtime_marker = "<script src='/aura-intelligence/realtime-voice.js'></script>"
+        markers = fallback_marker + realtime_marker
+        if fallback_marker not in text:
+            text = text.replace("</body>", markers + "</body>")
+        elif realtime_marker not in text:
+            text = text.replace(fallback_marker, markers)
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]

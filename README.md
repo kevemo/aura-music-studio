@@ -19,6 +19,7 @@ Aura AI is the intelligence and orchestration layer across the Command Center. A
 - **Endorsement:** Powered by Aura AI
 - **Company:** Elevate Souls Productions LCN LLC & LTD
 - **Tagline:** Elevate Your Soul Through Purposeful Media
+- **Security system:** Elevate Souls Productions Secure Lattice System (**SLS**)
 
 Older names such as **Pulsar-Frequency House**, **Cosmic Creative Studios**, **Cosmic Creation Studios**, **4Infinity Creative Studios** and **The Live Sound Studio** are legacy branding only and must not be presented as the current product identity.
 
@@ -125,7 +126,7 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 - limited eligible creation/editing;
 - Cosmic Creation Coins may be used for eligible additional operations where configured.
 
-### Tier 2 — £5.99/month
+### Basic — £4.99/month
 
 - increased creative access;
 - up to **5 eligible creations/edits per day** across the configured shared Music, Video and Game admission boundary;
@@ -133,9 +134,10 @@ Aura provides first-line feature/product guidance and support-ticket workflows. 
 
 The cross-studio five-per-day admission counter is **server-authoritative, implemented and regression-tested**, including shared daily usage across eligible studio operations. Clients cannot override the server meter. Production launch still requires the authoritative plan/catalogue configuration and operational monitoring to match the approved commercial policy.
 
-### Tier 3 — Unlimited Pro — £14.99/month
+### Unlimited Pro — £9.99/month
 
 - highest normal enabled creative access;
+- Elevate Souls Productions Secure Lattice System (SLS) entitlement included with the subscription;
 - effectively unlimited normal use subject to fair-use, infrastructure, provider-capacity, rate-control, anti-abuse, safety and legal safeguards;
 - eligible song/game publishing subject to the shared marketplace, rights and production-provider gates.
 
@@ -143,11 +145,13 @@ Safety, privacy, consent and transparency protections are never paywalled.
 
 ## Cosmic Creation Coins
 
-Authoritative public Coin packs are:
+The locked baseline is **1,000 Cosmic Creation Coins = £5**, therefore **£0.005 per Coin**. Any discounted bulk or promotional pack must be explicitly configured and clearly displayed as such rather than silently changing the baseline rate.
 
-- **1,000 Cosmic Creation Coins — £5**
-- **2,500 Cosmic Creation Coins — £10**
-- **6,000 Cosmic Creation Coins — £20**
+Current configured public packs documented by the repository are:
+
+- **1,000 Cosmic Creation Coins — £5** — baseline pack;
+- **2,500 Cosmic Creation Coins — £10** — discounted bulk pack;
+- **6,000 Cosmic Creation Coins — £20** — discounted bulk pack.
 
 Coin pricing, balances, debits, fulfilment, refunds and reversals remain server-authoritative and ledger-backed. Live launch additionally requires verified provider configuration and operational reconciliation; client-side success can never mint value by itself.
 
@@ -164,19 +168,21 @@ Eligible content explicitly created/published by Mary or Kev under Owner/Admin i
 
 The integration branch contains server-authoritative marketplace orders, provider-bound checkout validation, provider fee evidence, 50/50 creator-versus-ESP and explicit owner-catalogue settlement policy, refunds/reversals, payout reconciliation foundations, buyer purchase history, seller earnings/reversal/net reporting and account-scoped read surfaces. These transaction/accounting paths are code-complete and regression-tested within the repository boundary. **Production financial readiness is still evidence-gated** by real live payment credentials/webhook delivery, end-to-end real-money payment/refund/payout certification, tax/accounting review and independent bank/Open-Banking reconciliation evidence. Provider payout status alone is not represented as bank-statement proof.
 
+The marketplace revenue split is a marketplace rule only. It does **not** define or imply a LIVE Gift creator payout percentage.
+
 ## Privacy, safeguarding, consent and governance
 
 The platform contains technical governance foundations for tenant/project isolation, role separation, privacy access/portability, deletion/retention, consent evidence, voice/digital-likeness boundaries, copyright/IP provenance, safety reporting/appeals, data minimisation, audit evidence, prompt-injection/connector security and human review for consequential matters.
 
-## Aura Sec
+## Elevate Souls Productions Secure Lattice System (SLS)
 
-**Aura Sec** is a separate security product inside the wider Elevate Souls Productions ecosystem.
+The **Elevate Souls Productions Secure Lattice System (SLS)** is the locked public/formal name for the security system inside the wider Elevate Souls Productions ecosystem. Legacy internal identifiers may retain earlier names only where compatibility requires them; they must not be presented as the current public product name.
 
 The repository includes substantial web/control-plane and bounded native-execution architecture for device state, command contracts, device proof, release trust, artifact verification, recovery/threat/vulnerability state and security administration. These controls are tested as software boundaries and must fail closed when production trust evidence is absent.
 
 A public commercial native-security release still requires real platform-native packaged clients, production signing/notarisation, approved device identity/attestation transport, secure updater/rollback distribution, production threat-intelligence operations, privacy/uninstall/performance validation and independent penetration/malware/phishing/ransomware benchmarking. Test verifiers, test keys and repository code are not represented as those external production attestations.
 
-Aura Sec native commercial readiness is tracked separately from the main Command Center web release.
+SLS native commercial readiness is tracked separately from the main Command Center web release.
 
 ## Security and architecture principles
 
@@ -191,7 +197,7 @@ Aura Sec native commercial readiness is tracked separately from the main Command
 - secrets are not exposed client-side;
 - public responses must not expose host filesystem paths;
 - expensive operations use background-job patterns where appropriate;
-- Aura Sec privileged actions use typed allowlisted commands rather than arbitrary shell/script execution;
+- SLS privileged actions use typed allowlisted commands rather than arbitrary shell/script execution;
 - canonical CI rejects concrete production-code placeholder implementations before the regression suite runs.
 
 ## Self-hosting and production control plane
@@ -222,7 +228,7 @@ A production release requires, at minimum, no unresolved P0 issues, an acceptabl
 
 Repository tests can prove code contracts but cannot manufacture GitHub branch protection, production secrets, provider approvals, real-money settlement, bank statements, platform signing/notarisation, a real restore drill, independent penetration testing or production operations evidence. Those are external release gates and remain fail-closed until verified.
 
-The main Command Center and the Aura Sec full native commercial product may reach different release stages and must not be conflated.
+The main Command Center and the SLS full native commercial product may reach different release stages and must not be conflated.
 
 ## Final product identity
 

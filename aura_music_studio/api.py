@@ -2,24 +2,47 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from . import __version__
 from .access_control import MembershipAccessMiddleware
+from .account_recovery import router as account_recovery_router
 from .admin_portal import router as admin_portal_router
-from .assets import AssetLibrary
+from .assets import AUDIO_EXTS, AssetLibrary
+from .aura_live_guardian import router as aura_live_guardian_router
+from .aura_live_guardian_policy_ui import router as aura_live_guardian_policy_router
+from .aura_live_overlay_advanced import router as aura_live_overlay_advanced_router
+from .aura_live_overlay_engine import router as aura_live_overlay_engine_router
+from .aura_live_overlay_interactives import router as aura_live_overlay_interactives_router
+from .aura_live_overlay_orchestration import router as aura_live_overlay_orchestration_router
+from .aura_live_overlay_pro_source import router as aura_live_overlay_pro_source_router
+from .aura_live_overlay_studio import router as aura_live_overlay_studio_router
+from .aura_live_post_show_report import router as aura_live_post_show_report_router
+from .aura_live_trend_coach import router as aura_live_trend_coach_router
+from .aura_live_prompter import router as aura_live_prompter_router
+from .aura_live_run_engine import router as aura_live_run_engine_router
+from .aura_live_runtime_intelligence import router as aura_live_runtime_intelligence_router
+from .aura_live_show_control import router as aura_live_show_control_router
+from .aura_support_center import router as aura_support_center_router
 from .branding import PRODUCT_FULL_NAME, PRODUCT_NAME, TAGLINE
+from .cosmic_economy_api import router as cosmic_economy_router
+from .cosmic_economy_legacy_bridge import router as cosmic_economy_legacy_router
+from .cosmic_economy_owner_api import router as cosmic_economy_owner_router
 from .creation import CreateSongRequest, build_song_project
 from .doctor import system_report
 from .engine_manager import EngineManager
 from .engineering_api import router as engineering_router
+from .esp_public_network import router as esp_public_network_router
 from .job_api import router as job_api_router
 from .mastering import master, translation_report
 from .membership_api import router as membership_router
 from .mixer import render_session
+from .owner_commerce_member_communications import router as owner_commerce_member_communications_router
+from .owner_feature_workshop import router as owner_feature_workshop_router
 from .pipeline import AuraPipeline
 from .producer import llm_plan
 from .revisions import create_revision
@@ -34,9 +57,16 @@ from .studio_portal import router as studio_portal_router
 from .styles import StyleBlend, build_style_dna, style_prompt
 from .tenant_storage import list_project_dirs, project_path, projects_root
 from .transcription import audio_to_midi
+from .upload_security import (
+    UploadTooLargeError,
+    asset_upload_limit,
+    safe_upload_filename,
+    save_bounded_upload,
+    voice_upload_limit,
+)
 from .voice import create_voice_profile
 from .web_api import router as web_api_router
-from .web_portal import router as web_portal_router
+from .web_portal import billing_history_json, billing_history_page, router as web_portal_router
 
 app = FastAPI(
     title=f"{PRODUCT_NAME} API",
@@ -48,10 +78,45 @@ app = FastAPI(
 app.add_middleware(MembershipAccessMiddleware)
 app.add_middleware(StudioSecurityMiddleware)
 app.include_router(web_portal_router)
+# Keep the customer billing-history endpoints deterministic on the canonical application even
+# when another importer has already snapshotted the shared web router. The handlers retain their
+# own server-session/account scoping; this only guarantees production reachability.
+_mounted_paths = {getattr(route, "path", None) for route in app.routes}
+if "/auth/me/billing-history" not in _mounted_paths:
+    app.add_api_route("/auth/me/billing-history", billing_history_json, methods=["GET"])
+if "/auth/billing-history" not in _mounted_paths:
+    app.add_api_route(
+        "/auth/billing-history",
+        billing_history_page,
+        methods=["GET"],
+        response_class=HTMLResponse,
+    )
 app.include_router(studio_portal_router)
 app.include_router(speech_portal_router)
 app.include_router(admin_portal_router)
 app.include_router(membership_router)
+app.include_router(cosmic_economy_router)
+app.include_router(cosmic_economy_legacy_router)
+app.include_router(cosmic_economy_owner_router)
+app.include_router(owner_commerce_member_communications_router)
+app.include_router(esp_public_network_router)
+app.include_router(aura_support_center_router)
+app.include_router(owner_feature_workshop_router)
+app.include_router(aura_live_overlay_studio_router)
+app.include_router(aura_live_overlay_advanced_router)
+app.include_router(aura_live_overlay_pro_source_router)
+app.include_router(aura_live_overlay_engine_router)
+app.include_router(aura_live_overlay_interactives_router)
+app.include_router(aura_live_overlay_orchestration_router)
+app.include_router(aura_live_post_show_report_router)
+app.include_router(aura_live_trend_coach_router)
+app.include_router(aura_live_prompter_router)
+app.include_router(aura_live_run_engine_router)
+app.include_router(aura_live_runtime_intelligence_router)
+app.include_router(aura_live_show_control_router)
+app.include_router(aura_live_guardian_router)
+app.include_router(aura_live_guardian_policy_router)
+app.include_router(account_recovery_router)
 app.include_router(engineering_router)
 app.include_router(speech_api_router)
 app.include_router(web_api_router)
@@ -73,6 +138,31 @@ def _project(name: str) -> Path:
 
 def _session_path(project: Path) -> Path:
     return project / "aura_session.json"
+
+
+def _upload_limit(factory) -> int:
+    try:
+        return int(factory())
+    except ValueError as exc:
+        raise HTTPException(503, "Upload security policy is unavailable") from exc
+
+
+def _upload_name(filename: str | None, *, default: str) -> str:
+    try:
+        return safe_upload_filename(filename, default=default)
+    except ValueError as exc:
+        raise HTTPException(400, "Upload filename is invalid") from exc
+
+
+async def _save_member_upload(upload: UploadFile, destination: Path, *, max_bytes: int, label: str) -> None:
+    try:
+        await save_bounded_upload(upload, destination, max_bytes=max_bytes)
+    except UploadTooLargeError as exc:
+        raise HTTPException(413, f"{label} exceeds the configured size limit") from exc
+    except ValueError as exc:
+        if str(exc) == "Upload is empty":
+            raise HTTPException(400, f"{label} is empty") from exc
+        raise
 
 
 @app.get("/health")
@@ -113,6 +203,7 @@ def health():
         "security_headers": True,
         "cookie_write_origin_protection": True,
         "auth_rate_limiting": True,
+        "bounded_legacy_uploads": True,
         "api_version": __version__,
     }
 
@@ -142,7 +233,9 @@ def list_projects():
 @app.post("/songs")
 def create_song(request: CreateSongRequest):
     project = build_song_project(request, projects_root())
-    return {"project": project.name, "path": str(project)}
+    # Keep the legacy `path` response key for compatibility, but expose only the logical
+    # tenant-scoped project reference. Public API responses must never reveal host paths.
+    return {"project": project.name, "path": project.name}
 
 
 @app.post("/projects/{project_name}/producer")
@@ -222,22 +315,28 @@ async def upload_asset(
     tags: str = Form(""),
 ):
     project = _project(project_name)
+    safe_name = _upload_name(file.filename, default="upload.bin")
+    if AssetLibrary.detect_kind(Path(safe_name)) == "unsupported":
+        raise HTTPException(400, "Unsupported asset type")
     incoming = project / "input" / "uploads"
-    incoming.mkdir(parents=True, exist_ok=True)
-    safe_name = Path(file.filename or "upload.bin").name
-    tmp = incoming / safe_name
-    with tmp.open("wb") as f:
-        while chunk := await file.read(1024 * 1024):
-            f.write(chunk)
-    record = AssetLibrary(project).ingest(
+    tmp = incoming / f"{uuid4().hex}_{safe_name}"
+    await _save_member_upload(
+        file,
         tmp,
-        kind=kind,
-        rights_basis=rights_basis,
-        attestation=attestation,
-        tags=[x.strip() for x in (tags or "").split(",") if x.strip()],
+        max_bytes=_upload_limit(asset_upload_limit),
+        label="Asset upload",
     )
-    tmp.unlink(missing_ok=True)
-    return record.model_dump()
+    try:
+        record = AssetLibrary(project).ingest(
+            tmp,
+            kind=kind,
+            rights_basis=rights_basis,
+            attestation=attestation,
+            tags=[x.strip() for x in (tags or "").split(",") if x.strip()],
+        )
+        return record.model_dump()
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 @app.get("/projects/{project_name}/assets")
@@ -345,19 +444,28 @@ async def new_voice_profile(
     reference: UploadFile = File(...),
 ):
     project = _project(project_name)
+    safe_name = _upload_name(reference.filename, default="voice.wav")
+    if Path(safe_name).suffix.lower() not in AUDIO_EXTS:
+        raise HTTPException(400, "Voice reference must use a supported audio file type")
     voice_dir = project / "input" / "voice_profiles"
-    voice_dir.mkdir(parents=True, exist_ok=True)
-    target = voice_dir / Path(reference.filename or "voice.wav").name
-    with target.open("wb") as f:
-        while chunk := await reference.read(1024 * 1024):
-            f.write(chunk)
-    profile = create_voice_profile(
-        RightsLedger(project / ".aura_rights"),
-        name=name,
-        owner_label=owner_label,
-        reference_files=[target],
-        consent_statement=consent_statement,
+    target = voice_dir / f"{uuid4().hex}_{safe_name}"
+    await _save_member_upload(
+        reference,
+        target,
+        max_bytes=_upload_limit(voice_upload_limit),
+        label="Voice reference",
     )
+    try:
+        profile = create_voice_profile(
+            RightsLedger(project / ".aura_rights"),
+            name=name,
+            owner_label=owner_label,
+            reference_files=[target],
+            consent_statement=consent_statement,
+        )
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     return profile.model_dump()
 
 

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 import pytest
 
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.plans import (
     APPROVED_VOICE_DUPLICATION,
+    AURASEC,
     FULL_TRACK,
     SAMPLE_LAB,
     STEM_SPLITTER,
@@ -43,8 +45,37 @@ def test_plan_progression():
     assert SAMPLE_LAB in pro.features
     assert APPROVED_VOICE_DUPLICATION not in base.features
     assert APPROVED_VOICE_DUPLICATION in pro.features
+    assert AURASEC not in free.features
+    assert AURASEC not in base.features
+    assert AURASEC in pro.features
     assert base.confirmed_songs_per_day == 1
     assert pro.confirmed_songs_per_day is None
+
+
+def test_public_membership_pricing_contract():
+    free = get_plan("free")
+    basic = get_plan("base")
+    pro = get_plan("pro")
+
+    assert free.monthly_price == Decimal("0.00")
+    assert free.monthly_price_minor == 0
+    assert free.display_price == "Free"
+
+    # Keep the persisted identifier stable while exposing the approved customer-facing tier.
+    assert basic.id == "base"
+    assert basic.name == "Basic"
+    assert basic.currency == "GBP"
+    assert basic.monthly_price == Decimal("4.99")
+    assert basic.monthly_price_minor == 499
+    assert basic.display_price == "£4.99"
+
+    assert pro.id == "pro"
+    assert pro.name == "Unlimited Pro"
+    assert pro.currency == "GBP"
+    assert pro.monthly_price == Decimal("9.99")
+    assert pro.monthly_price_minor == 999
+    assert pro.display_price == "£9.99"
+    assert AURASEC in pro.public_dict()["features"]
 
 
 def test_free_activates_after_owner_approval(tmp_path):
@@ -86,7 +117,7 @@ def test_paid_plan_cannot_activate_before_esp_approval(tmp_path):
         ledger.verify_payment(signup.user_id, "pro", "PAYPAL-TEST")
 
 
-def test_verified_payment_creates_and_extends_monthly_period(tmp_path):
+def test_verified_payment_creates_current_term_and_schedules_prepaid_renewal(tmp_path):
     store = AccountStore(tmp_path / "accounts.sqlite3")
     signup = store.signup("renew@example.com", "Renewing Member", "very-secure-password", "pro")
     store.decide_membership(signup.approval_token, "approve", "ESP Test Owner")
@@ -95,8 +126,15 @@ def test_verified_payment_creates_and_extends_monthly_period(tmp_path):
     first = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-ONE")
     first_end = datetime.fromisoformat(first["subscription"]["period_end"])
     second = ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")
-    second_end = datetime.fromisoformat(second["subscription"]["period_end"])
-    assert second_end > first_end
+
+    # A second verified payment is a separately paid future term. Do not mutate the current
+    # entitlement early: preserving the boundary makes refunds and cancellation reversible.
+    assert datetime.fromisoformat(second["subscription"]["period_end"]) == first_end
+    transition = second["scheduled_transition"]
+    assert transition["target_plan_id"] == "pro"
+    assert transition["target_billing_period"] == "monthly"
+    assert datetime.fromisoformat(transition["effective_at"]) == first_end
+    assert datetime.fromisoformat(transition["period_end"]) > first_end
 
     with pytest.raises(ValueError):
         ledger.verify_payment(signup.user_id, "pro", "PAYPAL-MONTH-TWO")

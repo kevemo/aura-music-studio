@@ -497,6 +497,72 @@ def creative_render_status(project_name: str, directive_id: str, request: Reques
     }
 
 
+@router.post("/projects/{project_name}/directives/{directive_id}/cancel-render")
+def cancel_creative_render(project_name: str, directive_id: str, request: Request):
+    member = _member(request)
+    store = _store(project_name)
+    manifest = _manifest(store)
+    directive = _directive(manifest, directive_id)
+    if directive.target_kind not in {"image", "video"}:
+        raise HTTPException(400, "This directive is not assigned to an image/video renderer")
+    render_meta = directive.metadata.get("creative_renderer")
+    if not isinstance(render_meta, dict) or not render_meta.get("prompt_id"):
+        raise HTTPException(409, "This directive has not been submitted to a creative renderer")
+    if directive.status not in {"queued", "running"}:
+        raise HTTPException(409, f"Creative render cannot be cancelled from status: {directive.status}")
+
+    renderer = renderer_for(directive.target_kind)
+    prompt_id = str(render_meta["prompt_id"])
+    revision = _snapshot(member, store, label="Before cancelling creative render", reason="creative_render_cancel")
+    try:
+        cancellation = renderer.cancel(prompt_id)
+    except Exception as exc:
+        raise HTTPException(502, f"Creative renderer cancellation failed: {type(exc).__name__}: {exc}") from exc
+
+    if cancellation.state == "not_queued":
+        try:
+            history = renderer.history(prompt_id)
+            outputs = renderer.collect_outputs(history, prompt_id)
+            status, error = _execution_state(history, prompt_id, outputs)
+        except Exception as exc:
+            raise HTTPException(502, f"Unable to reconcile creative renderer state: {type(exc).__name__}: {exc}") from exc
+        if status in {"completed", "failed"}:
+            metadata = {"creative_renderer": {**render_meta, "output_count": len(outputs)}}
+            if error:
+                metadata["creative_renderer"]["error"] = error
+            manifest = store.update_directive(directive.id, status=status, metadata=metadata)
+            directive = _directive(manifest, directive.id)
+            return {
+                "directive": directive.model_dump(mode="json"),
+                "cancellation": cancellation.model_dump(mode="json"),
+                "revision_snapshot": revision,
+                "note": (
+                    "The render had already completed before cancellation; its outputs remain available."
+                    if status == "completed"
+                    else "The renderer had already failed before cancellation."
+                ),
+            }
+
+    manifest = store.update_directive(
+        directive.id,
+        status="ready_for_renderer",
+        metadata={
+            "creative_renderer": {
+                **render_meta,
+                "cancelled": True,
+                "cancellation_state": cancellation.state,
+            }
+        },
+    )
+    directive = _directive(manifest, directive.id)
+    return {
+        "directive": directive.model_dump(mode="json"),
+        "cancellation": cancellation.model_dump(mode="json"),
+        "revision_snapshot": revision,
+        "note": "Creative render cancelled safely. The Aura directive is ready to revise or render again.",
+    }
+
+
 @router.post("/projects/{project_name}/directives/{directive_id}/sync-outputs")
 def sync_creative_outputs(project_name: str, directive_id: str, request: Request):
     member = _member(request)

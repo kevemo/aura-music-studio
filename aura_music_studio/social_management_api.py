@@ -1,13 +1,31 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from .content_safety import enforce_creation_policy, public_policy_summary
 from .esp_niche import require_esp_social_member
-from .esp_social_oauth import router as social_oauth_router
+from .esp_social_facebook_oauth import (
+    facebook_oauth_callback,
+    facebook_oauth_capability,
+    facebook_oauth_disconnect,
+    facebook_oauth_start,
+)
+from .esp_social_oauth import (
+    oauth_callback,
+    oauth_disconnect,
+    oauth_providers,
+    oauth_start,
+)
 from .esp_social_publish_queue_routes import router as publish_queue_router
 from .esp_social_secret_refs import valid_social_token_ref
+from .esp_social_threads_oauth import (
+    threads_oauth_callback,
+    threads_oauth_capability,
+    threads_oauth_disconnect,
+    threads_oauth_start,
+)
 from .social_management import (
     BrandPersona,
     ContentStatus,
@@ -381,4 +399,75 @@ def register_connection_state(
 
 # Nested private routes inherit /command-center/api/social and the same server-side ESP gates.
 router.include_router(publish_queue_router)
-router.include_router(social_oauth_router)
+
+# Register provider-specific OAuth endpoints directly on the canonical Social router. FastAPI
+# copies child-router routes at include time, so OAuth routes that must precede a generic wildcard
+# are kept here explicitly. Every endpoint still independently rechecks the ESP membership gate.
+router.add_api_route(
+    "/oauth/facebook/capability",
+    facebook_oauth_capability,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/oauth/facebook/start",
+    facebook_oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/facebook/callback",
+    facebook_oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/facebook/disconnect",
+    facebook_oauth_disconnect,
+    methods=["POST"],
+)
+router.add_api_route(
+    "/oauth/threads/capability",
+    threads_oauth_capability,
+    methods=["GET"],
+)
+router.add_api_route(
+    "/oauth/threads/start",
+    threads_oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/threads/callback",
+    threads_oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/threads/disconnect",
+    threads_oauth_disconnect,
+    methods=["POST"],
+)
+
+# Register the existing TikTok/Instagram/YouTube OAuth endpoints directly as well. Keep every
+# provider-specific route above these wildcards so an exact provider flow can never be shadowed.
+router.add_api_route("/oauth/providers", oauth_providers, methods=["GET"])
+router.add_api_route(
+    "/oauth/{provider}/start",
+    oauth_start,
+    methods=["GET"],
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/{provider}/callback",
+    oauth_callback,
+    methods=["GET"],
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+router.add_api_route(
+    "/oauth/{provider}/disconnect",
+    oauth_disconnect,
+    methods=["POST"],
+)

@@ -1,0 +1,56 @@
+name: aura-command-center-staging
+
+services:
+  live-sound-studio:
+    environment:
+      AURA_DEPLOYMENT_ENV: staging
+      LSS_PAYMENT_PROVIDER: paypal
+      LSS_PAYMENT_MODE: verified_paypal_invoice
+      LSS_PAYPAL_ENVIRONMENT: sandbox
+      AURA_SOCIAL_PUBLISH_WORKER_ENABLED: "false"
+      AURA_WEB_ALLOW_HTTP: "false"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=4)"]
+      interval: 20s
+      timeout: 6s
+      retries: 5
+      start_period: 30s
+
+  aura-worker:
+    environment:
+      AURA_DEPLOYMENT_ENV: staging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  aura-task-worker:
+    environment:
+      AURA_DEPLOYMENT_ENV: staging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  esp-social-publish-worker:
+    environment:
+      AURA_DEPLOYMENT_ENV: staging
+      AURA_SOCIAL_PUBLISH_WORKER_ENABLED: "false"
+
+  aura-backup-scheduler:
+    environment:
+      AURA_DEPLOYMENT_ENV: staging

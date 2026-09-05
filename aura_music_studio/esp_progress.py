@@ -11,7 +11,7 @@ from uuid import uuid4
 from .esp_command_center import EspStore, esp
 from .esp_niche import EspNicheStore, niche_definition
 
-_ALLOWED_EXTENSIONS = {".csv", ".json", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
+_ALLOWED_EXTENSIONS = {".csv", ".json", ".xlsx", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
@@ -206,7 +206,7 @@ def save_progress_upload(user_id: str, filename: str, content: bytes) -> tuple[s
     safe = _safe_filename(filename)
     suffix = Path(safe).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
-        raise ValueError("Upload must be CSV, JSON, TXT, PDF, PNG, JPG/JPEG or WEBP")
+        raise ValueError("Upload must be CSV, JSON, XLSX, TXT, PDF, PNG, JPG/JPEG or WEBP")
     if len(content) > _MAX_UPLOAD_BYTES:
         raise ValueError("Progress upload must be 10 MB or smaller")
     root = Path(os.getenv("ESP_PROGRESS_ROOT", "data/esp_progress")).resolve() / user_id
