@@ -142,8 +142,6 @@ class ModeratorPermissionService:
                      reason=excluded.reason,updated_at=excluded.updated_at""",
                 (user_id, int(enabled), actor_user_id, clean_reason, created_at, now),
             )
-            # Revocation also removes every session assignment. The runtime guard would already
-            # deny stale rows, but deleting them prevents surprise reactivation on a later grant.
             if not enabled:
                 con.execute("DELETE FROM shared_sky_live_moderators WHERE user_id=?", (user_id,))
             con.execute(
@@ -285,10 +283,7 @@ def _strict_moderator_allowed(self: Any, broadcast_id: str, user_id: str | None,
     if str(broadcast["user_id"]) == user_id:
         return True
     permissions = ModeratorPermissionService(self)
-    return bool(
-        permissions.is_enabled(user_id)
-        and permissions.is_live_assigned(broadcast_id, user_id)
-    )
+    return bool(permissions.is_enabled(user_id) and permissions.is_live_assigned(broadcast_id, user_id))
 
 
 _INSTALLED = False
@@ -311,6 +306,13 @@ def _owner_actor(request: Request) -> str:
 def _member_actor(request: Request) -> str:
     member = live.require_member(request)
     return str(member.user_id)
+
+
+def _assignment_actor(request: Request) -> tuple[str, bool]:
+    owner = owner_session_authorized(request)
+    if owner:
+        return _owner_actor(request), True
+    return _member_actor(request), False
 
 
 @router.get("/owner/shared-sky/live/api/moderator-permissions")
@@ -342,12 +344,12 @@ def owner_set_moderator_permission(user_id: str, body: ModeratorPermissionReques
 
 @router.get("/shared-sky/live/api/watch/{broadcast_id}/moderators")
 def list_live_moderators(broadcast_id: str, request: Request):
-    actor_user_id = _member_actor(request)
+    actor_user_id, owner = _assignment_actor(request)
     try:
         rows = ModeratorPermissionService(live.community).list_live_assignments(
             broadcast_id,
             actor_user_id=actor_user_id,
-            owner=owner_session_authorized(request),
+            owner=owner,
         )
     except KeyError as exc:
         raise HTTPException(404, "Shared Sky LIVE not found") from exc
@@ -363,14 +365,14 @@ def set_live_moderator(
     body: LiveModeratorAssignmentRequest,
     request: Request,
 ):
-    actor_user_id = _member_actor(request)
+    actor_user_id, owner = _assignment_actor(request)
     try:
         return ModeratorPermissionService(live.community).set_live_assignment(
             broadcast_id,
             user_id,
             body.assigned,
             actor_user_id=actor_user_id,
-            owner=owner_session_authorized(request),
+            owner=owner,
             reason=body.reason,
         )
     except KeyError as exc:
