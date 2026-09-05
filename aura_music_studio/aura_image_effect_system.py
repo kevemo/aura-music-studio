@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -20,8 +19,8 @@ _SAFE_PRESET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 _PERCENT = re.compile(r"(?<!\d)(\d{1,3})(?:\s*%)")
 _NUMBER = re.compile(r"(?<![\d.])(\d+(?:\.\d+)?)(?![\d.])")
 
-# This composer is intentionally closed. Natural-language text may only select one of the
-# executable Pillow transforms already enforced by executable_image_effects.py.
+# Natural-language text may only select one of the executable local Pillow transforms already
+# enforced by executable_image_effects.py. It cannot introduce code, URLs, plugins or commands.
 _ALIASES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("brightness", ("brightness", "brighten", "brighter", "darken", "darker")),
     ("contrast", ("contrast",)),
@@ -48,7 +47,7 @@ def _bounded_prompt(prompt: str) -> str:
 
 
 def _sentences(prompt: str) -> list[str]:
-    return [part.strip() for part in re.split(r"[;,]|\bthen\b|\band\s+then\b", prompt, flags=re.IGNORECASE) if part.strip()]
+    return [part.strip() for part in re.split(r"[;,]|\band\s+then\b|\bthen\b", prompt, flags=re.IGNORECASE) if part.strip()]
 
 
 def _contains_alias(text: str, alias: str) -> bool:
@@ -103,12 +102,7 @@ def _node(kind: str, text: str) -> ImageEffectNode:
 
 
 def compose_image_effect_system(prompt: str, *, name: str = "Aura Image FX") -> dict[str, Any]:
-    """Convert bounded natural-language image instructions into an executable typed graph.
-
-    The parser never emits code, URLs, plugins, commands or arbitrary effect identifiers. A
-    prompt must map entirely to the fixed ImageEffectKind runtime or it fails closed.
-    """
-
+    """Convert bounded natural-language image instructions into an executable typed graph."""
     clean = _bounded_prompt(prompt)
     nodes: list[ImageEffectNode] = []
     unsupported: list[str] = []
@@ -168,7 +162,6 @@ def save_reusable_image_effect_system(
     expected_fingerprint: str,
 ) -> dict[str, Any]:
     """Persist a reusable graph only when it matches the exact previewed fingerprint."""
-
     clean_name = str(preset_name or "").strip()
     if not _SAFE_PRESET_NAME.fullmatch(clean_name):
         raise ValueError("Preset name contains unsupported characters")
@@ -179,7 +172,7 @@ def save_reusable_image_effect_system(
         raise ValueError("Expected fingerprint must be a SHA-256 hex digest")
     if current.casefold() != expected:
         raise RuntimeError("Image effect graph changed after preview; preview the current graph again before save")
-    target = save_image_effect_preset(directory, clean_name, spec)
+    save_image_effect_preset(directory, clean_name, spec)
     return {
         "saved": True,
         "preset_name": clean_name,
@@ -189,7 +182,6 @@ def save_reusable_image_effect_system(
         "marketplace_published": False,
         "sale_enabled": False,
         "source_media_mutated": False,
-        "_target": target,
     }
 
 
