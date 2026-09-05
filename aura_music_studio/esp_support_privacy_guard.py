@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from .esp_support_casework import SupportCaseworkStore
 from .esp_support_center import SupportCaseStore
 
 _INSTALLED = False
 _ORIGINAL_GET = SupportCaseStore.get
+_ORIGINAL_CASEWORK_PROJECT = SupportCaseworkStore.project
 _INTERNAL_ACTIVITY_ACTIONS = {
     "owner_case_updated",
     "support_case_claimed",
@@ -14,14 +16,7 @@ _INTERNAL_ACTIVITY_ACTIONS = {
 
 
 def install_support_activity_privacy_guard() -> None:
-    """Keep legacy Creator support projections least-privilege.
-
-    Agent/Owner workflow modules historically write internal triage events into the shared
-    ``esp_support_activity`` ledger. The canonical case store also returned that ledger to the
-    case owner. This compatibility guard preserves the one canonical store while filtering
-    staff-only workflow events from non-owner projections. Staff/Owner calls using ``owner=True``
-    remain unchanged.
-    """
+    """Keep legacy and casework Creator support projections least-privilege."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -47,7 +42,23 @@ def install_support_activity_privacy_guard() -> None:
         item["internal_workflow_visible"] = False
         return item
 
+    def privacy_safe_casework_project(
+        self: SupportCaseworkStore,
+        case_id: str,
+        actor_user_id: str,
+    ) -> dict:
+        item = _ORIGINAL_CASEWORK_PROJECT(self, case_id, actor_user_id)
+        if item.get("view") != "creator":
+            return item
+        safe = dict(item)
+        case = dict(safe.get("case") or {})
+        case.pop("assigned_owner", None)
+        safe["case"] = case
+        safe["internal_workflow_visible"] = False
+        return safe
+
     SupportCaseStore.get = privacy_safe_get
+    SupportCaseworkStore.project = privacy_safe_casework_project
     _INSTALLED = True
 
 
