@@ -70,7 +70,7 @@ def _install_routes_once(routes) -> None:
 
 
 def install_professional_editor_patch_guard() -> None:
-    """Install guarded editor mutation, direct render/export and queued render surfaces."""
+    """Install guarded editor mutation, render/export, jobs and bounded visual effects."""
     guarded_routes = list(router.routes)
     for guarded in reversed(guarded_routes):
         signature = (getattr(guarded, "path", None), frozenset(getattr(guarded, "methods", set())))
@@ -84,9 +84,19 @@ def install_professional_editor_patch_guard() -> None:
 
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
+    from .visual_effect_catalogue import router as visual_effect_router
+    from .visual_effect_catalogue_hardening import (
+        install_visual_effect_catalogue_hardening,
+        router as visual_effect_hardening_router,
+    )
 
+    install_visual_effect_catalogue_hardening()
     _install_routes_once(render_router.routes)
     _install_routes_once(render_jobs_router.routes)
+    # Guarded duplicate signatures are intentionally installed first. The final route-integrity
+    # pass retains the hardened endpoint and removes the later legacy signature exactly once.
+    _install_routes_once(visual_effect_hardening_router.routes)
+    _install_routes_once(visual_effect_router.routes)
 
 
 __all__ = [
