@@ -73,6 +73,27 @@ def test_capability_registry_is_server_derived():
         registry.require_available("stream.youtube")
 
 
+def test_provider_state_distinguishes_unconfigured_disabled_and_missing_credentials():
+    unconfigured = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True, environ={},
+    ).capability_state()
+    assert unconfigured.status is CapabilityStatus.NOT_CONFIGURED
+
+    disabled = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True, environ={"YOUTUBE_ENABLED": "false"},
+    ).capability_state()
+    assert disabled.status is CapabilityStatus.DISABLED
+
+    missing_credentials = provider_config_from_env(
+        provider="youtube", capability_key="stream.youtube", credential_env="YOUTUBE_SECRET",
+        prefix="YOUTUBE", implemented=True,
+        environ={"YOUTUBE_ENABLED": "true", "YOUTUBE_FEATURE_FLAG": "true", "YOUTUBE_APPROVED": "true"},
+    ).capability_state()
+    assert missing_credentials.status is CapabilityStatus.CREDENTIALS_MISSING
+
+
 def test_runtime_config_never_exposes_secret():
     config = provider_config_from_env(provider="youtube", capability_key="stream.youtube",
                                       credential_env="YOUTUBE_SECRET", prefix="YOUTUBE", implemented=True,
