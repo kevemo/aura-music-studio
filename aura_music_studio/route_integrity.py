@@ -1,12 +1,60 @@
 from __future__ import annotations
 
 import warnings
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from hashlib import sha256
 from typing import Any
 
 
 _SCHEMA_METHODS = ("get", "put", "post", "delete", "options", "head", "patch", "trace")
+_ROUTE_COMPOSITION_HOOKS: dict[str, Callable[[Any], None]] = {}
+_CREATION_LIVE_PREFIX = "/creation-live"
+_CREATION_LIVE_REQUIRED = {
+    ("/creation-live/capabilities", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/media", ("GET",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/attach", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/transition", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/emergency-hide", ("POST",)),
+    ("/creation-live/projects/{project_name}/sources/{source_adapter_id}/detach", ("POST",)),
+    ("/creation-live/shared-sky/broadcasts", ("GET",)),
+    ("/creation-live/projects/{project_name}/markers", ("POST",)),
+    ("/creation-live/projects/{project_name}/returns", ("POST",)),
+    ("/creation-live/projects/{project_name}/community", ("GET",)),
+    ("/creation-live/projects/{project_name}/aura-assistance", ("GET",)),
+    ("/creation-live/ui.js", ("GET",)),
+}
+
+
+def register_route_composition_hook(name: str, hook: Callable[[Any], None]) -> None:
+    """Register an idempotent final-composition hook by stable name.
+
+    Large production surfaces compose routers in several phases. Domain packages that must
+    preserve authoritative route ownership after those phases can register a deterministic hook
+    here instead of depending on import order. Hooks run immediately before duplicate-route and
+    OpenAPI integrity enforcement.
+    """
+
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Route composition hook name is required")
+    if not callable(hook):
+        raise TypeError("Route composition hook must be callable")
+    existing = _ROUTE_COMPOSITION_HOOKS.get(clean_name)
+    if existing is not None and existing is not hook:
+        raise RuntimeError(f"Route composition hook already registered: {clean_name}")
+    _ROUTE_COMPOSITION_HOOKS[clean_name] = hook
+
+
+def run_route_composition_hooks(app: Any) -> list[str]:
+    """Run every registered final-composition hook in stable registration order."""
+
+    ran: list[str] = []
+    for name, hook in tuple(_ROUTE_COMPOSITION_HOOKS.items()):
+        hook(app)
+        ran.append(name)
+    return ran
 
 
 def _http_signature(route: Any) -> tuple[str, tuple[str, ...]] | None:
@@ -155,14 +203,9 @@ def _install_openapi_integrity(app: Any) -> None:
         if app.openapi_schema is not None:
             return app.openapi_schema
 
-        # Re-run route-level repair at schema time in case a compatibility installer added a
-        # legitimate route after the initial composition pass.
         late_route_repairs = ensure_unique_operation_ids(app.router.routes)
         app.openapi_schema = None
         with warnings.catch_warnings():
-            # FastAPI emits this warning before callers can inspect/repair its completed schema.
-            # Suppress only this exact generator warning inside the canonical boundary; every
-            # collision is then repaired and audited immediately below. Other warnings remain.
             warnings.filterwarnings(
                 "ignore",
                 message=r"^Duplicate Operation ID .*",
@@ -186,19 +229,56 @@ def _install_openapi_integrity(app: Any) -> None:
     app.state.route_integrity_openapi_installed = True
 
 
+def _ensure_creation_live_routes(app: Any) -> None:
+    """Install Chat 7 after overlays while preserving the canonical transport boundary."""
+    from .creation_live_hardening import install_creation_live_hardening
+
+    install_creation_live_hardening()
+
+    from .creation_live import CreationLiveMiddleware
+    from .creation_live_routes import install_creation_live_api_routes
+
+    app.router.routes[:] = [
+        route
+        for route in app.router.routes
+        if not (
+            str(getattr(route, "path", "")) == _CREATION_LIVE_PREFIX
+            or str(getattr(route, "path", "")).startswith(f"{_CREATION_LIVE_PREFIX}/")
+        )
+    ]
+    install_creation_live_api_routes(app)
+
+    mounted = {
+        signature
+        for route in app.router.routes
+        if (signature := _http_signature(route)) is not None
+    }
+    missing = sorted(_CREATION_LIVE_REQUIRED - mounted)
+    if missing:
+        raise RuntimeError(f"Chat 7 creation-live route composition failed: missing {missing!r}")
+
+    middleware_present = any(
+        getattr(middleware, "cls", None) is CreationLiveMiddleware
+        for middleware in getattr(app, "user_middleware", [])
+    )
+    if not middleware_present:
+        app.add_middleware(CreationLiveMiddleware)
+
+    app.state.creation_live_authority_routes_installed = True
+    app.state.creation_live_community_route_installed = True
+    app.state.creation_live_installed = True
+
+
 def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
-    """Remove unreachable exact duplicate HTTP routes and harden schema identity.
+    """Run final composition hooks, remove exact duplicates and harden schema identity.
 
-    Starlette/FastAPI dispatches routes in registration order, so when the same exact path and
-    HTTP-method set is registered twice, every later copy is unreachable. Preserve the first
-    authoritative route exactly as runtime dispatch already does and remove only later exact
-    copies. Mounts, websocket routes, and different method sets are untouched.
-
-    After runtime duplicates are removed, repair route-level schema collisions and install a
-    canonical OpenAPI wrapper that also handles per-method collisions. Runtime paths, methods,
-    endpoints, dependencies and dispatch precedence remain unchanged.
+    Chat 7 is installed first at this final integrity boundary so stale overlay routes under its
+    own prefix cannot become competing dispatch authorities. Registered domain hooks then run in
+    their existing stable order; duplicate and OpenAPI integrity enforcement follows unchanged.
     """
 
+    _ensure_creation_live_routes(app)
+    composition_hooks_run = run_route_composition_hooks(app)
     seen: set[tuple[str, tuple[str, ...]]] = set()
     kept: list[Any] = []
     removed: list[dict[str, Any]] = []
@@ -228,6 +308,7 @@ def deduplicate_http_routes(app: Any) -> list[dict[str, Any]]:
     operation_ids_repaired = ensure_unique_operation_ids(app.router.routes)
     app.openapi_schema = None
     app.state.route_integrity = {
+        "composition_hooks_run": composition_hooks_run,
         "duplicates_removed": len(removed),
         "removed": removed,
         "operation_id_collisions_repaired": len(operation_ids_repaired),
@@ -243,4 +324,6 @@ __all__ = [
     "deduplicate_http_routes",
     "duplicate_http_signatures",
     "ensure_unique_operation_ids",
+    "register_route_composition_hook",
+    "run_route_composition_hooks",
 ]
