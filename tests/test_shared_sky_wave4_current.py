@@ -7,6 +7,7 @@ from starlette.requests import Request
 import aura_music_studio.shared_sky_live_bootstrap as bootstrap
 import aura_music_studio.shared_sky_live_battle_bridge as battle_bridge
 import aura_music_studio.shared_sky_live_watch_bridge_guard as watch_guard
+import aura_music_studio.shared_sky_live_watch_engagement_wave6 as watch_engagement
 
 
 def _request(path: str = "/watch/live-1") -> Request:
@@ -77,7 +78,7 @@ def test_watch_guard_endpoint_delegates_to_wave2_and_hardens_only_success(monkey
     assert unavailable.body == b"not available"
 
 
-def test_bootstrap_mounts_one_canonical_watch_guard_route(monkeypatch):
+def test_bootstrap_mounts_one_canonical_watch_engagement_route_over_guard(monkeypatch):
     monkeypatch.setattr(bootstrap, "configure_neighbor_live_integrations", lambda: {})
     monkeypatch.setattr(bootstrap, "harden_browser_playback_integration", lambda: {})
     monkeypatch.setattr(bootstrap, "install_chat2_browser_playback_bridge", lambda: {})
@@ -93,7 +94,10 @@ def test_bootstrap_mounts_one_canonical_watch_guard_route(monkeypatch):
         and "GET" in (getattr(route, "methods", set()) or set())
     ]
     assert len(routes) == 1
-    assert routes[0].endpoint.__name__ == "watch_page_bridge_guard"
+    assert routes[0].endpoint.__name__ == "watch_page_engagement_wave6"
+    # Wave 6 remains a composition layer over the previously validated playback guard rather than
+    # replacing Chat 2/4 playback authorization with a second implementation.
+    assert watch_engagement.watch_page_bridge_guard is watch_guard.watch_page_bridge_guard
 
 
 def _battle_snapshot(live_session_id: str = "live-1") -> dict:
