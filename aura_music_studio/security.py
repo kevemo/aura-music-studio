@@ -38,6 +38,9 @@ SENSITIVE_ACCOUNT_PAGES = {
     "/auth/reset-password",
     "/auth/verify-email",
 }
+_DEFAULT_WEBHOOK_MAX_BYTES = 1_000_000
+_MIN_WEBHOOK_MAX_BYTES = 4096
+_HARD_WEBHOOK_MAX_BYTES = 8 * 1024 * 1024
 
 # Base API composition imports membership_api before this module, then mounts membership_router.
 # Attach account-security routes once here so every production entrypoint receives the same routes
@@ -155,6 +158,74 @@ def _safe_public_project_value(value, project_root: Path):
         return "[redacted-host-path]"
 
 
+def _is_webhook_post(request: Request) -> bool:
+    return request.method.upper() == "POST" and "webhook" in request.url.path.lower()
+
+
+def _webhook_max_bytes() -> int:
+    raw = (os.getenv("LSS_WEBHOOK_MAX_BYTES") or str(_DEFAULT_WEBHOOK_MAX_BYTES)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("LSS_WEBHOOK_MAX_BYTES must be an integer") from exc
+    if value < _MIN_WEBHOOK_MAX_BYTES or value > _HARD_WEBHOOK_MAX_BYTES:
+        raise ValueError(
+            f"LSS_WEBHOOK_MAX_BYTES must be between {_MIN_WEBHOOK_MAX_BYTES} and {_HARD_WEBHOOK_MAX_BYTES}"
+        )
+    return value
+
+
+def _webhook_request_admission(request: Request) -> JSONResponse | None:
+    """Reject unsafe webhook body shapes before any route buffers the raw signed payload.
+
+    Provider webhook bodies are small JSON documents and their signatures bind the exact raw
+    bytes. Requiring an explicit bounded Content-Length avoids unauthenticated chunked/unknown
+    bodies reaching ``request.body()`` and allocating unbounded memory. Content-Encoding is
+    refused so no downstream layer can turn a small compressed request into a large payload.
+    """
+    if not _is_webhook_post(request):
+        return None
+    try:
+        maximum = _webhook_max_bytes()
+    except ValueError:
+        return JSONResponse(
+            {"detail": "Webhook request-size security policy is unavailable"},
+            status_code=503,
+        )
+
+    content_encoding = (request.headers.get("content-encoding") or "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
+        return JSONResponse(
+            {"detail": "Compressed webhook request bodies are not accepted"},
+            status_code=415,
+        )
+
+    raw_length = (request.headers.get("content-length") or "").strip()
+    if not raw_length:
+        return JSONResponse(
+            {"detail": "Webhook requests require a bounded Content-Length"},
+            status_code=411,
+        )
+    try:
+        declared = int(raw_length)
+    except ValueError:
+        return JSONResponse(
+            {"detail": "Webhook Content-Length is invalid"},
+            status_code=400,
+        )
+    if declared < 0:
+        return JSONResponse(
+            {"detail": "Webhook Content-Length is invalid"},
+            status_code=400,
+        )
+    if declared > maximum:
+        return JSONResponse(
+            {"detail": "Webhook request body exceeds the configured limit"},
+            status_code=413,
+        )
+    return None
+
+
 async def _scrub_project_json_response(response, path: str):
     """Remove absolute host paths from member project JSON responses.
 
@@ -259,6 +330,11 @@ async def _inject_esp_brand(response, path: str):
 class StudioSecurityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+
+        webhook_rejection = _webhook_request_admission(request)
+        if webhook_rejection is not None:
+            return webhook_rejection
+
         if path in AUTH_RATE_PATHS and request.method == "POST":
             limit = int(os.getenv("LSS_AUTH_RATE_LIMIT", "12"))
             window = int(os.getenv("LSS_AUTH_RATE_WINDOW_SECONDS", "900"))
