@@ -5,6 +5,7 @@ from .shared_sky_transport_extensions import TransportExtensionsMixin
 from .shared_sky_transport_local_recording import TransportLocalRecordingMixin
 from .shared_sky_transport_media import TransportMediaMixin
 from .shared_sky_transport_media_lifecycle import TransportMediaLifecycleMixin
+from .shared_sky_transport_media_privacy import TransportMediaPrivacyMixin
 from .shared_sky_transport_models import (
     BroadcastState,
     DestinationState,
@@ -19,6 +20,7 @@ from .shared_sky_transport_support import TransportSupport
 
 
 class SharedSkyTransportStore(
+    TransportMediaPrivacyMixin,
     TransportMediaLifecycleMixin,
     TransportLocalRecordingMixin,
     TransportMediaMixin,
@@ -30,9 +32,10 @@ class SharedSkyTransportStore(
 ):
     """Canonical Shared Sky transport control-plane and first-party media service.
 
-    Media/recovery/compatibility mixins sit ahead of the core operations layer so runtime
-    delivery and cleanup can extend the durable transport contract without replacing its
-    tenant, identity, destination or persistence boundaries.
+    The privacy boundary is intentionally first in the cooperative MRO so member-facing
+    status responses cannot expose local filesystem roots added by lower media-runtime
+    layers. Media/recovery/compatibility mixins extend the durable transport contract
+    without replacing its tenant, identity, destination or persistence boundaries.
     """
 
 
