@@ -1,437 +1,495 @@
 # Chat 5 Cosmic Coins & LIVE Gifts Integration Contract
 
-## Purpose
+## Purpose and commercial lock
 
-This document is the integration contract for the server-authoritative Cosmic Creation Coin economy and first-party Shared Sky LIVE Gift transaction system implemented by Chat 5.
+This is the canonical integration contract for Chat 5's server-authoritative Cosmic Creation Coin economy and first-party Shared Sky LIVE Gift transaction system.
 
-The authoritative commercial baseline is **1,000 Cosmic Creation Coins = £5.00**, represented as 1,000 integer Coin units and 500 integer GBP minor units. Promotional or larger packs do not inherit an automatic discount; each version carries its own server-authoritative Coin quantity, fiat minor-unit price and currency.
+Commercial baseline:
 
-The existing creator marketplace 50/50 revenue split is **not** a LIVE Gift payout rule. No LIVE Gift creator percentage, Coin-to-cash ratio or cash-out formula is configured by this workstream.
+- 1,000 Cosmic Creation Coins = £5.00;
+- 1,000 integer Coin units;
+- 500 integer GBP minor units;
+- promotional/larger packs use only their explicitly stored server-side price/version;
+- no automatic bulk discount exists;
+- the creator marketplace 50/50 split is not a LIVE Gift payout policy;
+- no LIVE Gift creator percentage, Coin-to-cash ratio or cash-out formula is configured by Chat 5.
+
+A committed Gift receipt is not automatically cash, cleared creator earnings, recognised ESP revenue or a paid balance.
 
 ## Canonical modules
 
-- `aura_music_studio.cosmic_economy`
-  - durable schema and transaction service;
-  - append-only Coin ledger;
-  - Coin packs and purchases;
-  - payment-event application;
-  - Gift catalogue and send/reversal transactions;
-  - creator Gift receipts;
-  - spending controls;
-  - outbox events;
-  - reconciliation.
-- `aura_music_studio.cosmic_economy_integrations`
-  - `IntegratedCosmicEconomy` is the canonical runtime class;
-  - `configure_economy_integrations(...)` is the compatibility seam for canonical live-session, eligibility and risk adapters;
-  - `economy_service(...)` builds the runtime service used by HTTP routes.
-- `aura_music_studio.cosmic_payments`
-  - `CoinPaymentProvider` protocol;
-  - `CoinCheckout` result;
-  - `coin_payment_providers` explicit provider registry.
-- `aura_music_studio.cosmic_economy_api`
-  - authenticated member routes and Owner routes.
-- `aura_music_studio.cosmic_economy_owner_ops`
-  - `EconomyOwnerOperations` for risk review, creator-receipt holds/releases, discrepancy queues and truthful finance/liability snapshots.
+### `aura_music_studio.cosmic_economy`
 
-The production FastAPI application registers `cosmic_economy_router` in `aura_music_studio.api`.
+Owns the durable financial schema and core transaction service:
+
+- Coin accounts;
+- append-only Coin ledger;
+- Coin pack catalogue;
+- pending Coin purchases;
+- verified payment-event application;
+- Gift catalogue;
+- atomic Gift send;
+- Gift reversal;
+- creator Gift receipts;
+- platform/Owner spending policy;
+- payout-policy interface;
+- durable outbox;
+- transaction history;
+- creator statements;
+- core reconciliation.
+
+### `aura_music_studio.cosmic_economy_integrations`
+
+Owns integration hardening and compatibility seams:
+
+- `IntegratedCosmicEconomy`;
+- global idempotency ownership;
+- durable finance request admission/rate limiting;
+- operational evidence for rejected financial actions;
+- extended purchase/reversal reconciliation;
+- `configure_economy_integrations(...)`;
+- `economy_service(...)`.
+
+`economy_service(...)` is the canonical service factory neighbouring chats should consume.
+
+### `aura_music_studio.cosmic_economy_personal_limits`
+
+`PersonalLimitCosmicEconomy` extends the canonical runtime with member-controlled lower spending caps. `economy_service(...)` returns this runtime class.
+
+Personal caps can only make the effective Gift-spend limit stricter. They cannot raise a configured platform hard limit.
+
+### `aura_music_studio.cosmic_payments`
+
+Provider-neutral payment boundary:
+
+- `CoinPaymentProvider` protocol;
+- `CoinCheckout` result;
+- `coin_payment_providers` explicit provider registry.
+
+No provider is considered available until an official adapter is explicitly registered. Client redirects never credit Coins.
+
+### `aura_music_studio.cosmic_economy_api`
+
+Authenticated member, payment-webhook and core Owner routes.
+
+### `aura_music_studio.cosmic_economy_owner_ops`
+
+Audited Owner operations:
+
+- risk review;
+- creator receipt holds/releases;
+- promotional Coin grants;
+- Coin-pack availability;
+- Gift availability;
+- discrepancy review/resolution;
+- truthful finance/liability snapshot.
+
+### `aura_music_studio.cosmic_economy_owner_api`
+
+Protected HTTP routes for Chat 9 Owner/Admin surfaces, including finance operational-event inspection.
 
 ## Persistence and transaction model
 
-The implementation reuses the repository's existing `LSS_DB_PATH` SQLite database and WAL conventions. Consequential money-moving operations run inside `BEGIN IMMEDIATE` transactions. The append-only Coin ledger is the financial source of truth. `coin_accounts.available_balance` and `coin_accounts.recovery_debt` are transactional materialisations used for fast admission checks and must reconcile to the ledger.
+Chat 5 reuses `LSS_DB_PATH` and the repository SQLite/WAL conventions.
 
-Ordinary spending cannot create a negative available balance. A verified refund or chargeback can create explicit `recovery_debt` when the original purchased Coins have already been spent. Later credits pay recovery debt before becoming newly available Coins.
+Consequential financial writes use `BEGIN IMMEDIATE` transaction serialization. The append-only ledger is the source of financial truth. Materialised balances exist for fast admission but must reconcile to ledger state.
 
-### Tables
+Coin ledger UPDATE and DELETE operations are blocked by database triggers. Corrections use compensating entries.
 
-- `coin_accounts`
-- `coin_ledger_entries`
-- `coin_packs`
-- `coin_purchases`
-- `payment_webhook_events`
-- `gift_definitions`
-- `gift_transactions`
-- `creator_gift_receipts`
-- `gift_payout_policies`
-- `account_spending_limits`
-- `economy_feature_flags`
-- `economy_outbox`
-- `economy_risk_cases`
-- `economy_reconciliation_discrepancies`
+## Important tables
 
-`coin_ledger_entries` has database triggers that reject UPDATE and DELETE. Financial corrections use linked compensating entries.
+Core financial tables include:
 
-The runtime hardening layer requires purchase idempotency keys to be globally unique within the purchase command family and Gift-send idempotency keys to be globally unique within the Gift command family. A key already bound to another account is rejected with `IDEMPOTENCY_KEY_SCOPE_MISMATCH`. If legacy data already contains one key bound to multiple accounts, runtime initialization fails closed with `IDEMPOTENCY_MIGRATION_CONFLICT`; it does not rewrite financial history.
+- `coin_accounts`;
+- `coin_ledger_entries`;
+- `coin_packs`;
+- `coin_purchases`;
+- `payment_webhook_events`;
+- `gift_definitions`;
+- `gift_transactions`;
+- `creator_gift_receipts`;
+- `gift_payout_policies`;
+- `account_spending_limits`;
+- `economy_risk_cases`;
+- `economy_reconciliation_discrepancies`;
+- `economy_outbox`.
 
-## Ledger entry types
+Integration/safety tables include:
 
-Current controlled entry types include:
+- `economy_rate_events`;
+- `economy_rate_idempotency`;
+- `economy_operational_events`;
+- `personal_spending_limits`;
+- `personal_spending_limit_changes`.
 
-- `PURCHASE_CREDIT`
-- `PROMOTIONAL_CREDIT`
-- `OWNER_APPROVED_ADJUSTMENT_CREDIT`
-- `OWNER_APPROVED_ADJUSTMENT_DEBIT`
-- `GIFT_DEBIT`
-- `PURCHASE_REVERSAL_DEBIT`
-- `REFUND_DEBIT`
-- `CHARGEBACK_DEBIT`
-- `GIFT_REVERSAL_CREDIT`
+## Coin ledger rules
 
-No Coin expiry entry is created because no approved Coin-expiry policy is configured.
+Financial quantities are integers.
 
-## Baseline Coin pack
+Important entry types include:
 
-Seeded authoritative pack:
+- `PURCHASE_CREDIT`;
+- `PROMOTIONAL_CREDIT`;
+- `OWNER_APPROVED_ADJUSTMENT_CREDIT`;
+- `OWNER_APPROVED_ADJUSTMENT_DEBIT`;
+- `GIFT_DEBIT`;
+- purchase refund/chargeback compensation;
+- `GIFT_REVERSAL_CREDIT`.
 
-- `pack_id`: `cosmic-1000-gbp`
-- `version`: `1`
-- `coin_quantity`: `1000`
-- `fiat_amount_minor`: `500`
-- `fiat_currency`: `GBP`
-- `is_baseline`: true
+Ordinary Gift sends cannot take available Coins below zero. Chargebacks after spend create explicit recovery debt rather than erasing unrelated financial history.
 
-All Coin pack purchases copy the server-side pack version, Coin quantity, fiat minor-unit amount and currency into the purchase record. The client does not submit a trusted price.
+## Coin pack contract
 
-## Payment-provider boundary
+Canonical seed pack:
 
-`CoinPaymentProvider` must provide:
+- pack ID: `cosmic-1000-gbp`;
+- version: `1`;
+- Coin quantity: `1000`;
+- fiat amount minor: `500`;
+- fiat currency: `GBP`.
 
-```python
-create_checkout(
-    *,
-    purchase_id: str,
-    user_id: str,
-    fiat_amount_minor: int,
-    fiat_currency: str,
-    coin_quantity: int,
-) -> CoinCheckout
+Owner catalogue changes can disable/enable a stored pack version without rewriting its historical Coin quantity, fiat price or currency.
 
-verify_webhook(*, headers: Mapping[str, str], body: bytes) -> VerifiedPaymentEvent
-```
-
-The provider registry is intentionally empty by default. Therefore real Coin checkout returns `PAYMENT_PROVIDER_UNAVAILABLE` until a verified provider adapter is registered by deployment code.
-
-The existing manual subscription PayPal invoice/payment-link flow is not treated as proof of a Coin purchase and is not reused as the Coin webhook system.
-
-A purchase is created as `pending`; the checkout/browser return path never credits Coins. Only `apply_verified_payment_event(...)` with `verified=True` can create a `PURCHASE_CREDIT`.
-
-Public provider webhook route:
-
-- `POST /auth/economy/payment-webhooks/{provider_name}`
-
-The `/auth/` prefix is already outside member-session enforcement. The route itself remains fail-closed because it resolves an explicitly registered provider and delegates authenticity/signature verification to that provider adapter before applying any event.
-
-## Member HTTP routes
+Member route:
 
 - `GET /economy/coin-packs`
+
+Owner routes include:
+
+- `POST /owner/economy/coin-packs`;
+- `POST /owner/economy/coin-packs/{pack_id}/versions/{version}/availability`.
+
+## Payment/purchase contract
+
+Member purchase command:
+
+- `POST /economy/me/coin-purchases`;
+- required `Idempotency-Key` header;
+- request contains only authoritative pack/version selection and provider name;
+- server loads Coin quantity and fiat price from stored catalogue data;
+- response remains non-crediting until a verified provider event is accepted.
+
+Webhook:
+
+- `POST /auth/economy/payment-webhooks/{provider_name}`;
+- adapter must verify authenticity before returning `VerifiedPaymentEvent`;
+- duplicate provider events are idempotent;
+- forged/unverified events are rejected;
+- `confirmed` credits once;
+- `failed`/`cancelled` close a pending purchase without Coin credit;
+- refunds/chargebacks/dispute reversals use compensating accounting.
+
+Production state remains fail-closed while no real Coin payment provider adapter/credentials are registered.
+
+## Gift catalogue contract
+
+Original first-party seed Gift:
+
+- Gift ID: `starlight-spark`;
+- version: `1`;
+- Coin cost: `10`.
+
+The catalogue stores original display/accessibility/asset metadata. Historical Gift transactions snapshot Gift version and Coin cost.
+
+Member route:
+
 - `GET /economy/gifts`
-- `GET /economy/me/balance`
-- `GET /economy/me/history?limit=&offset=`
-- `GET /economy/me/spending`
-- `POST /economy/me/coin-purchases`
-  - requires `Idempotency-Key` header;
-  - returns a pending internal purchase plus provider checkout;
-  - returns `coins_credited: false` until verified provider event.
-- `POST /economy/me/gifts/send`
-  - requires `Idempotency-Key` header;
-  - sender identity comes only from `request.state.member.user_id`;
-  - client cannot select another wallet/user ID.
 
-Member balance/history routes are account-bound server-side, which prevents caller-controlled cross-account financial reads.
+Owner routes include:
 
-## Owner HTTP routes
+- `POST /owner/economy/gift-catalogue`;
+- `POST /owner/economy/gift-catalogue/{gift_id}/versions/{version}/availability`.
 
-All current `/owner/economy/...` routes require canonical `owner_authorized(request)`.
+Availability changes do not rewrite historical Gift price/version evidence.
 
-- `GET /owner/economy/reconciliation`
-- `GET /owner/economy/creator-statements/{creator_recipient_id}`
-- `GET /owner/economy/outbox`
-- `POST /owner/economy/accounts/{user_id}/freeze`
-- `POST /owner/economy/adjustments`
-- `POST /owner/economy/spending-limits`
-- `POST /owner/economy/feature-flags/{flag_name}`
-- `POST /owner/economy/gift-catalogue`
-- `POST /owner/economy/coin-packs`
-- `POST /owner/economy/gifts/{gift_transaction_id}/reverse`
+## Gift send contract
 
-Consequential current Owner routes also write the repository's existing hash-chained `AuditLedger`.
+Member command:
 
-Additional backend operations consumed by future Chat 9 Owner/Admin surfaces are available through:
+- `POST /economy/me/gifts/send`;
+- required `Idempotency-Key` header.
 
-```python
-from aura_music_studio.cosmic_economy_owner_ops import EconomyOwnerOperations
+The server validates:
 
-ops = EconomyOwnerOperations(economy_service())
-ops.list_risk_cases(...)
-ops.review_risk_case(...)
-ops.set_creator_receipt_hold(...)
-ops.list_reconciliation_discrepancies(...)
-ops.finance_snapshot()
-```
-
-`finance_snapshot()` deliberately returns `None` for recognised ESP revenue, processor fees, tax and profit unless real accounting/provider evidence exists. It also returns no creator payable fiat amount when no payout policy is active.
-
-## Gift catalogue
-
-Seeded original first-party Gift fixture:
-
-- `gift_id`: `starlight-spark`
-- `version`: `1`
-- `display_name`: `Starlight Spark`
-- `coin_cost`: `10`
-
-This is an original Shared Sky Gift definition and is not copied from a competitor. Owners can publish new immutable Gift versions. Historical Gift transactions snapshot `gift_id`, `gift_version`, `unit_coin_cost`, quantity and total Coin cost; old transactions are never repriced from the current catalogue.
-
-Presentation fields support asset reference, reduced-motion/static fallback reference and sound reference. Chat 4/3 owns the actual viewer/studio presentation.
-
-## Gift-send command
-
-Canonical runtime call:
-
-```python
-result = economy_service().send_gift(
-    sender_user_id=canonical_user_id,
-    recipient_creator_id=canonical_creator_id,
-    live_session_id=canonical_live_session_id,
-    gift_id=gift_id,
-    gift_version=gift_version,
-    quantity=quantity,
-    idempotency_key=idempotency_key,
-    battle_id=optional_battle_id,
-    battle_round_id=optional_round_id,
-)
-```
-
-Before commit it checks:
-
-- canonical age/region/feature eligibility adapter;
-- authoritative Shared Sky live-session/recipient adapter;
-- account active state;
-- Gift version availability;
-- emergency feature flags;
-- server Gift cost;
-- hard spending limits;
+- authenticated canonical sender;
+- sender Coin-account status;
+- canonical eligibility adapter;
+- authoritative live-session context;
+- correct recipient membership in that live context;
+- Gift ID/version availability;
+- region/policy eligibility through shared adapter;
+- spending policy;
+- member personal spending cap;
 - risk decision;
-- sufficient available balance;
-- idempotency scope and request fingerprint.
+- sufficient available Coins;
+- server-side Coin cost;
+- emergency feature flags;
+- optional Battle/session/round reference consistency.
 
-One successful database transaction creates/links:
+A successful commit atomically links:
 
-1. `GIFT_DEBIT` ledger entry;
-2. `gift_transactions` committed row;
-3. `creator_gift_receipts` pending row;
-4. `economy_outbox` committed Gift event.
+- `GIFT_DEBIT` ledger entry;
+- `gift_transactions` row;
+- `creator_gift_receipts` row;
+- `economy_outbox` committed-Gift event.
 
-A retry with the same account/key/fingerprint returns the original transaction. A changed request rejects the key. Another account attempting to reuse the key is rejected.
+A failed Gift transaction changes no financial balance.
 
-## Eligibility/live compatibility interfaces
+## Idempotency and request admission
 
-Until canonical Chat 1/2 contracts are merged, Chat 5 uses narrow Protocols and fails closed by default.
+Coin purchases and Gift sends use global financial idempotency ownership. Cross-account reuse is rejected.
 
-```python
-from aura_music_studio.cosmic_economy_integrations import configure_economy_integrations
+Finance request admission is durable in the economy database rather than client/browser memory.
 
-configure_economy_integrations(
-    live_sessions=my_live_session_directory,
-    eligibility=my_age_region_policy,
-    risk=my_risk_adapter,
-)
-```
+Configuration:
 
-### `LiveSessionDirectory`
+- `LSS_ECONOMY_RATE_WINDOW_SECONDS` — default `60`;
+- `LSS_COIN_PURCHASE_RATE_LIMIT` — default `8` per account/window;
+- `LSS_GIFT_SEND_RATE_LIMIT` — default `120` per account/window.
 
-```python
-gift_context(
-    *, live_session_id: str, recipient_creator_id: str
-) -> LiveGiftContext
-```
+Invalid limit configuration fails closed.
 
-`LiveGiftContext` carries authoritative session ID, recipient creator ID, `active`, `gift_eligible`, `recipient_eligible`, and optional Battle/round references.
+`economy_rate_idempotency` reserves a request key in the same transaction as rate admission, so concurrent same-key retries consume one admission slot before the underlying financial transaction resolves.
 
-Default: `UnavailableLiveSessionDirectory`, which raises `LIVE_VALIDATION_UNAVAILABLE` and changes no financial state.
-
-### `EconomyEligibilityDirectory`
-
-```python
-check(
-    *,
-    feature: str,
-    user_id: str | None = None,
-    creator_recipient_id: str | None = None,
-    live_session_id: str | None = None,
-) -> EligibilityDecision
-```
-
-Expected feature keys currently include `coin_purchase`, `gift_send` and `gift_receive`.
-
-Default: `UnavailableEconomyEligibilityDirectory`, which fails closed with `ELIGIBILITY_POLICY_UNAVAILABLE`. The current implementation does not invent one global age threshold.
-
-### `GiftRiskEvaluator`
-
-```python
-evaluate(
-    *,
-    sender_user_id: str,
-    recipient_creator_id: str,
-    live_session_id: str,
-    total_coin_cost: int,
-) -> RiskDecision
-```
-
-Supported decisions are `allow`, `monitor`, `hold`, `block`. Baseline behavior blocks only exact canonical-identity self-gifting; Chat 10/canonical security systems can add device/payment/account-takeover and collusion signals behind the same interface without exposing thresholds to clients.
+Chat 10 may add edge/distributed abuse controls. It must not remove this financial-service boundary.
 
 ## Spending controls
 
-`account_spending_limits` supports integer-Coin daily/weekly/monthly hard limits and warning thresholds. Gift sends are denied before commit when the new total would exceed a hard limit. Warnings are represented separately from hard limits.
+Platform/Owner policy is stored in `account_spending_limits` and supports daily/weekly/monthly hard limits and warning thresholds.
 
-No dark-pattern purchase escalation is implemented.
+Member personal limits are stored separately in `personal_spending_limits`.
 
-## Creator Gift receipts and payout boundary
+Member routes:
 
-`creator_gift_receipts` is separate from sender wallets and from marketplace accounting. Receipt states support pending/held/cleared/adjusted/reversed/paid data representation, but Chat 5 does not mark a Gift receipt paid merely because the Gift committed.
+- `GET /economy/me/spending`;
+- `PUT /economy/me/personal-spending-limits`.
 
-No default row is inserted into `gift_payout_policies`. Therefore:
+The spending response includes:
 
-- `active_payout_policy()` returns `None`;
-- creator statements return `payout_formula_configured: false`;
-- `payable_fiat_total_minor` is `None`;
-- receipt `payable_amount_minor` remains `NULL`;
-- no 50/50, 70/30, 80/20 or other creator share is assumed.
+- current spend totals;
+- platform limits/warnings;
+- personal limits;
+- effective hard limits;
+- remaining hard-limit allowance.
 
-A future payout implementation must attach a real versioned approved policy before setting payable/paid monetary fields.
+Effective hard limit = stricter non-null value of platform and personal cap.
 
-## Reversals, refunds and chargebacks
+Personal changes are recorded in `personal_spending_limit_changes` and emit `economy.personal_spending_limits_changed` outbox evidence.
 
-Committed ledger history is never deleted.
+## Finance operational evidence
 
-- provider refund -> `REFUND_DEBIT`;
-- provider chargeback -> `CHARGEBACK_DEBIT`;
-- won/reversed dispute -> new `PURCHASE_CREDIT` compensation;
-- Gift reversal -> `GIFT_REVERSAL_CREDIT` plus Gift/receipt reversal state.
+Rejected money actions may create non-financial evidence in `economy_operational_events`.
 
-If a purchase reversal exceeds currently available Coins, the account records explicit `recovery_debt`. Future credits service recovery debt before becoming available.
+Current event classes include:
 
-Current model does not claim exact FIFO/LIFO source-bucket attribution between every purchased Coin and every downstream Gift. A future payment-source attribution policy can be added without rewriting Gift history.
+- `economy.rate_limit_blocked`;
+- `economy.spending_limit_blocked`;
+- `economy.personal_spending_limit_blocked`;
+- `economy.insufficient_balance`;
+- `economy.risk_hold`;
+- `economy.risk_block`;
+- `economy.account_restriction_block`.
 
-## Realtime/outbox contract for Chat 4 and Chat 3
+These records do not debit/credit Coins and do not expose provider secrets or internal fraud thresholds.
 
-After, and only after, a Gift database transaction commits, `economy_outbox` contains event type:
+Owner inspection:
 
-- `shared_sky.gift.committed`
+- `GET /owner/economy/operational-events`.
 
-Safe payload fields include:
+## Creator receipt/liability contract
 
-- `event_id`;
-- `gift_transaction_id`;
-- `live_session_id`;
-- sender canonical user/display reference subject to the eventual privacy adapter;
-- `recipient_creator_id`;
-- Gift ID/version/display name/unit Coin cost;
-- safe asset and reduced-motion asset references;
-- quantity and total Coin cost;
-- Battle/round references when present;
-- occurrence time;
-- correlation ID.
+`creator_gift_receipts` is separate from sender Coin balances, marketplace accounting and ESP recognised revenue.
 
-It does not contain payment instrument data, provider webhook secrets, internal fraud scores or a fabricated creator payout value.
+Receipt states support:
 
-Chat 4 renders the committed viewer Gift activity. Chat 3 may use the same committed event for studio overlays. Neither surface should infer success from animation timing or optimistic client balance mutation.
+- pending;
+- held;
+- cleared;
+- adjusted;
+- reversed;
+- paid.
 
-The current module exposes `pending_outbox()` and `mark_outbox_published()`. A canonical Chat 1/10 outbox dispatcher must connect this durable queue to the repository's final realtime/event transport. Failure to display an event after financial commit must not silently undo the committed ledger transaction.
+`paid` must not be used without a real payout path/policy.
 
-## Battle contract for Chat 6
+No default payout policy is inserted. When none is configured, creator statements show that payout calculation is not configured and payable fiat remains null.
 
-Chat 5 emits financially committed/reversed Gift references. It does not mutate Battle score.
+Owner statement route:
 
-Committed event:
+- `GET /owner/economy/creator-statements/{creator_recipient_id}`.
 
-- `shared_sky.gift.committed`
+## Reversals and chargebacks
+
+Gift reversal creates linked compensation and creator-receipt reversal while preserving the original Gift and ledger debit.
+
+Payment refunds/chargebacks preserve original purchase credit evidence and create explicit reversing accounting. If spend has already occurred, recovery debt is represented explicitly.
+
+No reversal path deletes committed financial history.
+
+## Risk/review contract
+
+The risk adapter returns one of:
+
+- allow;
+- monitor;
+- hold;
+- block.
+
+Baseline deterministic protection blocks exact canonical-identity self-gifting. Rich linked-account/device/payment/collusion signals remain a Chat 10/shared-security integration.
+
+Owner review routes:
+
+- `GET /owner/economy/risk-cases`;
+- `POST /owner/economy/risk-cases/{case_id}/review`;
+- `POST /owner/economy/creator-receipts/{receipt_id}/hold`.
+
+A heuristic signal alone does not silently erase money or automatically impose an irreversible creator sanction.
+
+## Promotional Coins
+
+Promotional grants use `PROMOTIONAL_CREDIT`, not purchase credit.
+
+Owner route:
+
+- `POST /owner/economy/promotional-credits`.
+
+Grant requires:
+
+- canonical user ID;
+- integer Coin quantity;
+- campaign reference;
+- idempotency key;
+- Owner reason/audit evidence.
+
+Promotional issuance remains separately visible in finance reporting.
+
+## Reconciliation
+
+`economy_service().reconcile()` checks at minimum:
+
+- materialised account balance/recovery debt vs ledger derivation;
+- committed Gift vs `GIFT_DEBIT`;
+- committed Gift vs creator receipt;
+- confirmed purchase vs purchase credit;
+- refunded/charged-back purchase vs reversal entry;
+- reversed Gift vs reversal credit;
+- reversed Gift vs reversed creator receipt.
+
+Unknown mismatches are persisted in `economy_reconciliation_discrepancies`.
+
+Owner routes:
+
+- `GET /owner/economy/reconciliation`;
+- `GET /owner/economy/discrepancies`;
+- `POST /owner/economy/discrepancies/{discrepancy_id}/resolve`.
+
+Resolving a discrepancy records review state only. It does not auto-repair financial data. If the underlying mismatch still exists, the next reconciliation can surface it again.
+
+## Owner finance reporting
+
+Protected finance snapshot:
+
+- `GET /owner/economy/finance-snapshot`.
+
+It reports evidence-backed purchase, wallet, Gift, receipt, promotional issuance, risk and discrepancy state.
+
+The following remain null/unknown unless real configured accounting evidence exists:
+
+- recognised ESP revenue;
+- creator payable fiat when no payout policy exists;
+- processor fees;
+- tax;
+- profit.
+
+Gross Coin sale data must not be presented as profit.
+
+## Realtime event contract — Chat 4 / Chat 3
+
+Committed Gift event:
+
+- `shared_sky.gift.committed`.
 
 Reversal event:
 
-- `shared_sky.gift.reversed`
+- `shared_sky.gift.reversed`.
 
-Both contain stable `gift_transaction_id`, live-session reference, optional Battle/round reference, occurrence time and correlation ID. Chat 6 must deduplicate by the stable Gift transaction/event reference and applies its own Battle eligibility/scoring/correction rules.
+Display-safe payload may contain:
 
-No wagering, pooled betting, staking or random-prize gambling behavior exists in Chat 5.
+- event ID;
+- Gift transaction ID;
+- live session ID;
+- sender display reference subject to privacy policy;
+- recipient creator ID;
+- Gift ID/version/name metadata;
+- Coin cost/quantity required for Gift presentation;
+- optional Battle/round references;
+- occurred-at/correlation ID;
+- accessibility/animation references.
 
-## Statements/history contract for Chat 9
+Do not expose raw payment information, provider secrets, fraud scores or unapproved creator payout values.
 
-User Coin history:
+Chat 4/3 must not infer financial success before the committed authoritative result/event.
 
-```python
-economy_service().transaction_history(user_id, limit=100, offset=0)
-```
+## Battle contract — Chat 6
 
-Creator Gift-receipt statement:
+Chat 5 owns only financial commit/reversal truth.
 
-```python
-economy_service().creator_statement(creator_recipient_id, start_at=None, end_at=None)
-```
+Chat 6 receives stable Gift transaction/event IDs plus optional Battle/session/round references.
 
-Statements show Gift/Coins by state and do not fabricate a GBP/USD creator earnings amount when payout policy is absent.
+Chat 6 owns:
 
-## Reconciliation contract for Chat 10/11
+- Battle eligibility under Battle rules;
+- score value;
+- team allocation;
+- round state;
+- reversal correction policy.
 
-```python
-economy_service().reconcile()
-```
+Chat 5 never mutates Battle score directly.
 
-Current deterministic checks cover:
+## Integration seams
 
-- ledger net vs materialised wallet available/recovery-debt state;
-- Gift transaction vs referenced `GIFT_DEBIT` amount;
-- Gift transaction vs referenced creator receipt Coin value.
+Use:
 
-Mismatches are persisted to `economy_reconciliation_discrepancies`; unknown mismatches are not silently auto-repaired.
+`configure_economy_integrations(live_sessions=..., eligibility=..., risk=...)`
 
-Provider-vs-internal purchase reconciliation requires a real configured payment provider/adaptor capable of provider-side settlement retrieval. Until that exists, Chat 5 can reconcile verified provider events already received but cannot truthfully claim external settlement reconciliation.
+### Chat 1
 
-## Emergency controls
+Replace compatibility adapters with canonical shared IDs/event/audit/error contracts as they land.
 
-Seeded feature flags:
+### Chat 2
 
-- `coin_purchases_enabled = true`
-- `gift_sends_enabled = true`
-- `creator_receiving_enabled = true`
-- `creator_payout_enabled = false`
+Provide authoritative `LiveSessionDirectory.gift_context(...)` implementation.
 
-Money movement still fails closed where provider, live-session or eligibility dependencies are unconfigured. Owner routes can disable the purchase/Gift flags without erasing history.
+### Chat 4
 
-## Deterministic test fixtures
+Consume member balance, Gift catalogue, spending state, personal-cap surfaces, send-Gift command and committed/reversed realtime events.
 
-`tests/test_cosmic_economy.py` uses:
+### Chat 6
 
-- a deterministic allow-eligibility adapter;
-- a typed fake live-session directory;
-- fake verified provider events only;
-- temporary SQLite databases;
-- no real payment provider and no real charge.
+Consume committed/reversed Gift IDs and optional Battle references only.
 
-Coverage includes the canonical baseline, client-success non-crediting, forged/unverified event rejection, duplicate webhooks, cross-account idempotency rejection, concurrent overspend prevention, live/eligibility fail-closed behavior, exact self-gift block, hard spending limits, Gift version preservation, chargeback recovery debt, append-only reversals, no default creator payout formula, account freeze/kill switch and reconciliation invariants.
+### Chat 9
 
-## Legacy/migration policy
+Consume creator statements, member history, finance snapshot, operational events, risk queues, receipt controls, promotional grants, catalogue controls and reconciliation review APIs. Do not create duplicate finance truth.
 
-The current audited `main` branch did not contain a canonical production Coin ledger to migrate. Chat 5 therefore creates the new tables idempotently in the existing database and does not invent opening ledger entries for unknown balances.
+### Chat 10
 
-If a future deployment exposes legacy/demo balances without trustworthy transaction provenance:
+Own production secret/config management, external queues/outbox delivery, distributed edge abuse controls, advanced fraud signals, backup/DR, invariant alerts and infrastructure observability.
 
-1. do not copy the number into an authoritative wallet silently;
-2. identify whether it is demo/test or real customer state;
-3. create an explicit reviewed opening-balance/import record with provenance and correlation evidence if legally/accountingly justified;
-4. reconcile imported totals before enabling purchase/Gift sends;
-5. never destroy prior evidence to make totals appear correct.
+### Chat 11
 
-## Current production blockers / feature gates
+Verify migrations/schema, provider configuration, financial invariants, CI evidence, reconciliation and all release blockers before production enablement.
 
-The following are intentional blockers, not simulated success paths:
+## Production blockers / intentional fail-closed state
 
-1. **Payment provider credentials/adapter not configured.** `coin_payment_providers` is empty by default; real checkout/webhook verification is unavailable until an official provider integration is registered.
-2. **Canonical age/region eligibility policy not connected.** Purchases and Gift sends/receives fail closed rather than assuming a global rule.
-3. **Authoritative Shared Sky live-session adapter not connected on the audited `main` baseline.** Gift sends fail with `LIVE_VALIDATION_UNAVAILABLE` until Chat 2/shared contracts are wired.
-4. **No approved LIVE Gift creator payout policy.** Creator receipt accounting works, but payable fiat/cash-out remains disabled and `creator_payout_enabled` is false.
-5. **Canonical realtime outbox publisher is not yet connected.** Financial events are durably queued but need Chat 1/10 transport integration.
-6. **Advanced fraud/device/payment-risk signals are not connected.** The boundary and review case model exist; only exact canonical self-gifting is blocked by the baseline evaluator.
-7. **No external provider settlement reconciliation can be claimed before a real provider adapter exposes authoritative settlement/refund/dispute records.**
-8. **Final production enablement is intentionally withheld pending Chat 10 hardening and Chat 11 release acceptance.**
+Chat 5 is not authorised for final production enablement until all applicable blockers are resolved:
 
-These blockers must remain visible in release reporting. They must not be bypassed with fake payment success, fake live context, default payout percentages or client-side balances.
+1. real Coin payment-provider adapter and credentials are not configured;
+2. canonical age/region eligibility policy is not connected;
+3. authoritative Shared Sky live-session adapter is not connected;
+4. no approved LIVE Gift payout/cash-out formula exists;
+5. canonical realtime outbox dispatcher is not connected;
+6. advanced linked-account/device/payment/collusion/account-takeover risk signals are not connected;
+7. external provider settlement reconciliation cannot run without the real provider integration;
+8. final Chat 10 security/operations acceptance and Chat 11 release acceptance are outstanding.
+
+The correct behaviour while these dependencies are absent is fail-closed or feature-gated operation, never fake success.
