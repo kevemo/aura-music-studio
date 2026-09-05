@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 import sqlite3
 from typing import Any, Iterator
+from uuid import uuid4
 
 from .events import EventEnvelope
 
@@ -19,11 +21,41 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _validate_json_value(value: Any, *, path: str = "$") -> None:
+    if value is None or isinstance(value, (str, bool, int)):
+        return
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError(f"non-finite number is not valid JSON at {path}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_json_value(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError(f"JSON object key must be a string at {path}")
+            _validate_json_value(item, path=f"{path}.{key}")
+        return
+    raise TypeError(f"unsupported non-JSON value at {path}: {type(value).__name__}")
+
+
+def _canonical_json(payload: Any) -> str:
+    _validate_json_value(payload)
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
 def canonical_request_hash(payload: Any) -> str:
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
-    ).encode("utf-8")
-    return sha256(encoded).hexdigest()
+    """Hash only deterministic JSON request values; reject lossy coercion."""
+
+    return sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 class IdempotencyDisposition(str, Enum):
@@ -41,17 +73,50 @@ class SharedPersistence:
 
     def __init__(self, db_path: str | Path) -> None:
         self.db_path = str(db_path)
+        self._is_memory = self.db_path == ":memory:"
+        self._connect_target = self.db_path
+        self._connect_uri = False
+        self._memory_anchor: sqlite3.Connection | None = None
+        if self._is_memory:
+            self._connect_target = (
+                f"file:esp_shared_{uuid4().hex}?mode=memory&cache=shared"
+            )
+            self._connect_uri = True
+            # A shared in-memory SQLite database exists only while at least one
+            # connection remains open. Keep an anchor for this object's lifetime.
+            self._memory_anchor = self._new_connection()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+    def _new_connection(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self._connect_target,
+            timeout=30,
+            isolation_level=None,
+            uri=self._connect_uri,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
-        if self.db_path != ":memory:":
+        if not self._is_memory:
             connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
+    def _connect(self) -> sqlite3.Connection:
+        return self._new_connection()
+
+    def close(self) -> None:
+        anchor = self._memory_anchor
+        self._memory_anchor = None
+        if anchor is not None:
+            anchor.close()
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def initialize(self) -> None:
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS shared_schema_migrations (
@@ -87,6 +152,8 @@ class SharedPersistence:
                 "INSERT OR IGNORE INTO shared_schema_migrations(version, applied_at) VALUES (?, ?)",
                 (SCHEMA_VERSION, utc_now_iso()),
             )
+        finally:
+            connection.close()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -165,7 +232,13 @@ class SharedPersistence:
                 """,
                 (
                     int(response_status),
-                    json.dumps(response_body, sort_keys=True, separators=(",", ":"), default=str),
+                    json.dumps(
+                        response_body,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                        default=str,
+                    ),
                     utc_now_iso(),
                     idempotency_key,
                 ),
@@ -202,7 +275,8 @@ class SharedPersistence:
     def pending_outbox(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if limit < 1 or limit > 1000:
             raise ValueError("limit must be between 1 and 1000")
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             rows = connection.execute(
                 """
                 SELECT event_id, event_json, created_at
@@ -214,6 +288,8 @@ class SharedPersistence:
                 (limit,),
             ).fetchall()
             return [dict(row) for row in rows]
+        finally:
+            connection.close()
 
     def mark_outbox_published(self, event_id: str) -> None:
         with self.transaction() as connection:
