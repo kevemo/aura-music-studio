@@ -30,6 +30,7 @@ from .game_forge_live_integration import router as game_live_router
 from .game_forge_live_transport_guard import router as game_live_transport_guard_router
 from .game_forge_model_generation import router as game_model_generation_router
 from .game_forge_models import GameDNA
+from .game_forge_multiplayer import router as game_multiplayer_router
 from .game_forge_shared_sky_transport import router as game_shared_sky_transport_router
 from .game_forge_store import active_editable_games, list_games, load_game, save_game
 from .game_forge_visual_logic import router as game_visual_logic_router
@@ -43,6 +44,7 @@ router = APIRouter(tags=["Game Forge Creative Project Continuity"])
 router.include_router(game_live_transport_guard_router)
 router.include_router(game_live_router)
 router.include_router(game_model_generation_router)
+router.include_router(game_multiplayer_router)
 router.include_router(game_shared_sky_transport_router)
 router.include_router(game_visual_logic_router)
 router.include_router(game_visual_logic_portal_router)
@@ -95,6 +97,7 @@ def _binding_payload(game: GameDNA) -> dict:
         "legacy_unbound_compatibility": not bool(name),
         "single_project_workspace": bool(name),
         "go_live_create_url": f"/game-creation/live/{game.id}",
+        "multiplayer_capabilities_url": f"/api/game-forge/games/{game.id}/multiplayer/capability",
         "visual_logic_capabilities_url": f"/api/game-forge/games/{game.id}/visual-logic",
         "visual_logic_editor_url_template": f"/game-creation/visual-logic/{game.id}/{{entity_id}}",
     }
