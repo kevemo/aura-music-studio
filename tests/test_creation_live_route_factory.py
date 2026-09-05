@@ -36,16 +36,7 @@ def _signatures(app: FastAPI) -> set[tuple[str, tuple[str, ...]]]:
     return rows
 
 
-def test_route_composition_does_not_depend_on_mutable_module_router_lists(monkeypatch):
-    # Reproduce the production failure class directly: even if another application or test has
-    # drained the shared module routers, canonical composition must be rebuilt from endpoints.
-    monkeypatch.setattr(cl.router, "routes", [])
-    monkeypatch.setattr(authority.router, "routes", [])
-    monkeypatch.setattr(community.router, "routes", [])
-
-    app = FastAPI()
-    deduplicate_http_routes(app)
-
+def _assert_authority(app: FastAPI) -> None:
     assert _signatures(app) == EXPECTED
     assert duplicate_http_signatures(app.router.routes) == {}
     by_path = {getattr(route, "path", None): route for route in app.router.routes}
@@ -55,7 +46,35 @@ def test_route_composition_does_not_depend_on_mutable_module_router_lists(monkey
     assert by_path["/creation-live/projects/{project_name}/community"].endpoint is community.authoritative_community_panel
 
 
-def test_fresh_route_factory_is_idempotent_across_multiple_apps():
+def test_route_composition_does_not_depend_on_mutable_module_router_lists(monkeypatch):
+    monkeypatch.setattr(cl.router, "routes", [])
+    monkeypatch.setattr(authority.router, "routes", [])
+    monkeypatch.setattr(community.router, "routes", [])
+
+    app = FastAPI()
+    deduplicate_http_routes(app)
+    _assert_authority(app)
+
+
+def test_canonical_composition_does_not_depend_on_include_router(monkeypatch):
+    app = FastAPI()
+    calls: list[object] = []
+
+    def ignored_include_router(*args, **kwargs):
+        calls.append((args, kwargs))
+        return None
+
+    # The production overlay can snapshot late routers. Chat 7 therefore binds its canonical
+    # endpoint functions with app.add_api_route and must remain complete even if include_router is
+    # ineffective at this stage of composition.
+    monkeypatch.setattr(app, "include_router", ignored_include_router)
+    deduplicate_http_routes(app)
+
+    assert calls == []
+    _assert_authority(app)
+
+
+def test_direct_route_composition_is_idempotent_across_multiple_apps():
     first = FastAPI()
     second = FastAPI()
 
@@ -63,7 +82,5 @@ def test_fresh_route_factory_is_idempotent_across_multiple_apps():
     deduplicate_http_routes(first)
     deduplicate_http_routes(second)
 
-    assert _signatures(first) == EXPECTED
-    assert _signatures(second) == EXPECTED
-    assert duplicate_http_signatures(first.router.routes) == {}
-    assert duplicate_http_signatures(second.router.routes) == {}
+    _assert_authority(first)
+    _assert_authority(second)
