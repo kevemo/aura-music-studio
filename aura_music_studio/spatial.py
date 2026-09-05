@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+
+from .command_templates import render_command_argv
 
 
 class SpatialRenderer:
@@ -76,15 +77,13 @@ class SpatialRenderer:
         source = Path(source).resolve()
         output = Path(output).resolve()
         output.parent.mkdir(parents=True, exist_ok=True)
-        command = self.command
         values = {
             "input": str(source), "output": str(output), "mode": mode,
             "azimuth": str(float(azimuth_deg)), "elevation": str(float(elevation_deg)),
             "distance": str(float(distance_m)),
         }
-        for key, value in values.items():
-            command = command.replace("{" + key + "}", shlex.quote(value))
-        subprocess.run(command, shell=True, check=True)
+        argv = render_command_argv(self.command, values)
+        subprocess.run(argv, check=True)
         if not output.exists() or output.stat().st_size < 1024:
             raise RuntimeError("Spatial renderer did not create valid audio")
         return output, {"mode": mode, "engine": "configured_local_spatial_renderer", **values}
