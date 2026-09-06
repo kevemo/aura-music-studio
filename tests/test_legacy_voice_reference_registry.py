@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from aura_music_studio import legacy_voice_reference_registry as registry
-from aura_music_studio.song_dna_execution_overlay import router as studio_router
 
 
 def test_historical_rhiannon_reference_is_non_training_non_cloning_metadata():
@@ -39,7 +38,13 @@ def test_reference_endpoint_requires_existing_tenant_project_and_returns_referen
     assert payload["references"][0]["training_eligible"] is False
 
 
-def test_historical_reference_route_is_mounted_in_current_voice_overlay():
+def test_historical_reference_router_defines_route_once():
+    """Keep the unit assertion on the owning router to avoid suite-order coupling.
+
+    Production overlay composition is exercised independently by the self-host route-surface
+    smoke; this test proves the historical-reference service itself defines one deterministic
+    route without depending on other tests temporarily composing or mutating shared routers.
+    """
     expected = "/projects/{project_name}/voice-house/historical-references"
-    routes = [getattr(route, "path", "") for route in studio_router.routes]
-    assert expected in routes
+    routes = [getattr(route, "path", "") for route in registry.router.routes]
+    assert routes.count(expected) == 1
