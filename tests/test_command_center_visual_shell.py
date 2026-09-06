@@ -29,7 +29,9 @@ def _request(path: str = "/") -> Request:
     )
 
 
-def test_visual_assets_are_current_command_center_assets():
+def test_visual_assets_keep_compatibility_asset_paths():
+    # Static filenames/routes remain compatibility identifiers until a separately tested
+    # asset migration exists. Public copy comes from branding constants instead.
     assert COMMAND_CENTER_MARK_PATH.name == "elevate-souls-command-center-logo.svg"
     assert COMMAND_CENTER_ART_PATH.name == "elevate-souls-command-center-brand.webp"
     assert COMMAND_CENTER_MARK_PATH.exists()
@@ -39,27 +41,28 @@ def test_visual_assets_are_current_command_center_assets():
     assert branding.BRAND_ART_ROUTE == "/brand/command-center-art.webp"
 
 
-def test_theme_uses_command_center_assets_not_legacy_logo_url():
+def test_theme_uses_current_compatibility_assets_not_legacy_pulsar_logo_url():
     assert "/brand/command-center-mark.svg" in COMMAND_CENTER_THEME_CSS
     assert "/brand/esp-logo.webp" not in COMMAND_CENTER_THEME_CSS
     assert "--espcc-gold" in COMMAND_CENTER_THEME_CSS
     assert "prefers-reduced-motion" in COMMAND_CENTER_THEME_CSS
 
 
-def test_shell_injects_theme_identity_and_share_metadata_once():
+def test_shell_injects_shared_skies_identity_and_share_metadata_once():
     html = "<!doctype html><html><head><title>Workspace</title></head><body><main>Hi</main></body></html>"
     current = apply_visual_shell(html, _request("/workspace"))
     assert "data-esp-command-center-shell='1'" in current
     assert "href='/brand/theme.css'" in current
     assert "href='/favicon.webp'" in current
     assert "class='esp-command-center-shell'" in current
-    assert "Elevate Souls Productions Content Creation Command Center" in current
+    assert "Shared Skies Media" in current
+    assert "Elevate Souls Productions Content Creation Command Center" not in current
     assert "https://command.example/brand/command-center-art.webp" in current
     again = apply_visual_shell(current, _request("/workspace"))
     assert again == current
 
 
-def test_shell_appends_command_center_class_to_existing_body_classes_once():
+def test_shell_appends_compatibility_shell_class_to_existing_body_classes_once():
     html = '<!doctype html><html><head></head><body class="workspace compact"><main>Hi</main></body></html>'
     current = apply_visual_shell(html, _request("/workspace"))
     assert 'class="workspace compact esp-command-center-shell"' in current
@@ -77,12 +80,12 @@ def test_shell_handles_body_attributes_without_existing_class():
 def test_specific_legacy_presents_phrase_rewrites_cleanly():
     old = "Elevate Souls Productions Presents: The Live Sound Studio"
     current = rebrand_text(old)
-    assert current == "Elevate Souls Productions Content Creation Command Center"
+    assert current == "Shared Skies Media"
     assert "Presents:" not in current
     assert "Live Sound Studio" not in current
 
 
-def test_ci_workflow_uses_current_visible_brand_name():
+def test_ci_workflow_keeps_compatibility_workflow_name_until_separate_ci_migration():
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     assert workflow.startswith("name: Elevate Souls Command Center CI")
     assert "Install Command Center core + dev" in workflow
