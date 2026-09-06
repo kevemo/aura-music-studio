@@ -87,6 +87,7 @@ def install_professional_editor_patch_guard() -> None:
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
     from .professional_video_proxy import router as video_proxy_router
+    from .professional_video_proxy_hardening import install_professional_video_proxy_hardening
     from .tv_production import router as tv_production_router
     from .visual_effect_catalogue import router as visual_effect_router
     from .visual_effect_catalogue_hardening import (
@@ -98,6 +99,7 @@ def install_professional_editor_patch_guard() -> None:
     # repository-backed bounded processors in the canonical catalogue/compositor path.
     install_legacy_visual_effects()
     install_visual_effect_catalogue_hardening()
+    install_professional_video_proxy_hardening()
     _install_routes_once(render_router.routes)
     _install_routes_once(render_jobs_router.routes)
     # Editing proxies are preview-only project assets; final renderers retain the original item
