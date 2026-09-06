@@ -297,13 +297,13 @@ class LiveVoiceBindingService:
                     str(row["purpose"]),
                 )
                 projected.append(self._projection(row, currently_authorised=True, profile=profile))
-            except (FileNotFoundError, KeyError, PermissionError, StudioInvariantError, ValueError) as exc:
+            except (FileNotFoundError, KeyError, PermissionError, StudioInvariantError, ValueError):
                 projected.append(
                     self._projection(
                         row,
                         currently_authorised=False,
                         profile=None,
-                        reason=str(exc)[:240] or "Binding is no longer currently authorised",
+                        reason="Binding is no longer currently authorised by the current Chat 2 profile state",
                     )
                 )
         return projected
