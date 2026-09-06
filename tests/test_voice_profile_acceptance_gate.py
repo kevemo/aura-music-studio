@@ -5,13 +5,12 @@ import math
 import numpy as np
 import pytest
 import soundfile as sf
-from fastapi import FastAPI
 
 from aura_music_studio import voice_house_api
 from aura_music_studio.request_context import reset_current_user_id, set_current_user_id
 from aura_music_studio.rights import RightsLedger, VoiceProfile, authorize_voice_profile
-from aura_music_studio.song_dna_execution_overlay import router as studio_router
 from aura_music_studio.voice import analyze_voice_sample, create_voice_profile
+from aura_music_studio.voice_profile_lifecycle import router as voice_profile_lifecycle_router
 
 
 def _tone(path, *, seconds: float = 1.25, sample_rate: int = 24000, amplitude: float = 0.25):
@@ -203,12 +202,16 @@ def test_voice_profile_version_rename_revoke_delete_lifecycle(tmp_path):
         ledger.get_voice(profile.id)
 
 
-def test_voice_profile_lifecycle_routes_are_mounted_once():
-    app = FastAPI()
-    app.include_router(studio_router)
+def test_voice_profile_lifecycle_router_defines_each_operation_once():
+    """Assert the lifecycle router itself is deterministic.
+
+    The production overlay composition is independently exercised by the self-host route-surface
+    smoke. Keeping this unit assertion on the owning router avoids suite-order coupling when
+    application-level tests temporarily mutate/combine router objects during collection.
+    """
     routes = [
         (getattr(route, "path", ""), tuple(sorted(getattr(route, "methods", set()) or set())))
-        for route in app.routes
+        for route in voice_profile_lifecycle_router.routes
     ]
     expected = "/projects/{project_name}/voice-house/profiles/{profile_id}"
     assert routes.count((expected, ("GET",))) == 1
