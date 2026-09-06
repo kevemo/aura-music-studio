@@ -46,6 +46,17 @@ class CapabilityState(str, Enum):
     UNAVAILABLE = "unavailable"
 
 
+_VERIFIED_RUNTIME_STATES = frozenset(
+    {
+        CapabilityState.AVAILABLE,
+        CapabilityState.DEGRADED,
+        CapabilityState.LOADING,
+        CapabilityState.UNHEALTHY,
+        CapabilityState.UNAVAILABLE,
+    }
+)
+
+
 class VoiceProfileKind(str, Enum):
     RHIANNON_SYSTEM = "rhiannon_system"
     USER = "user"
@@ -75,6 +86,8 @@ class VoiceCapabilityDescriptor(BaseModel):
     self_hosted: bool = False
     consent_required: bool = False
     premium_entitlement_required: bool = False
+    health_evidence_verified: bool = False
+    health_evidence_source: str = Field(default="", max_length=120)
     detail: str = Field(default="", max_length=240)
 
 
@@ -184,6 +197,8 @@ def _descriptor(
     self_hosted: bool = False,
     consent_required: bool = False,
     premium: bool = False,
+    health_verified: bool = False,
+    health_source: str = "",
     detail: str,
 ) -> VoiceCapabilityDescriptor:
     return VoiceCapabilityDescriptor(
@@ -195,16 +210,63 @@ def _descriptor(
         self_hosted=self_hosted,
         consent_required=consent_required,
         premium_entitlement_required=premium,
+        health_evidence_verified=health_verified,
+        health_evidence_source=health_source,
         detail=detail,
     )
 
 
-def voice_capability_snapshot(diagnostics: Mapping[str, Any] | None = None) -> list[VoiceCapabilityDescriptor]:
-    """Return Chat 1's truthful provider-neutral view without claiming backend health.
+def _verified_synthesis_health(
+    diagnostics: Mapping[str, Any], *, configured: bool
+) -> tuple[CapabilityState, bool, str]:
+    """Consume only explicit server-side health evidence from the owning runtime.
 
-    Configuration is intentionally reported as CONFIGURED_UNVERIFIED until the owning
-    voice runtime supplies an authenticated health result. Chat 1 never infers clone,
-    singing, conversion or timing availability from installed packages alone.
+    Configuration is never promoted to readiness. A caller must supply the internal
+    ``tts_health_verified`` flag, a bounded state and a non-empty evidence source. Even
+    verified ``available`` evidence fails closed when no TTS runtime/provider is configured.
+    Unknown/malformed evidence is ignored rather than becoming capability authority.
+    """
+
+    if not bool(diagnostics.get("tts_health_verified")):
+        return (
+            CapabilityState.CONFIGURED_UNVERIFIED if configured else CapabilityState.UNAVAILABLE,
+            False,
+            "",
+        )
+
+    source = str(diagnostics.get("tts_health_source") or "").strip()[:120]
+    raw_state = str(diagnostics.get("tts_health_state") or "").strip().lower()
+    if not source:
+        return (
+            CapabilityState.CONFIGURED_UNVERIFIED if configured else CapabilityState.UNAVAILABLE,
+            False,
+            "",
+        )
+    try:
+        state = CapabilityState(raw_state)
+    except ValueError:
+        return (
+            CapabilityState.CONFIGURED_UNVERIFIED if configured else CapabilityState.UNAVAILABLE,
+            False,
+            "",
+        )
+    if state not in _VERIFIED_RUNTIME_STATES:
+        return (
+            CapabilityState.CONFIGURED_UNVERIFIED if configured else CapabilityState.UNAVAILABLE,
+            False,
+            "",
+        )
+    if not configured and state != CapabilityState.UNAVAILABLE:
+        return CapabilityState.UNAVAILABLE, True, source
+    return state, True, source
+
+
+def voice_capability_snapshot(diagnostics: Mapping[str, Any] | None = None) -> list[VoiceCapabilityDescriptor]:
+    """Return Chat 1's truthful provider-neutral voice capability projection.
+
+    Configuration alone remains CONFIGURED_UNVERIFIED. Runtime health is accepted only as
+    explicit server-side evidence from the owning voice/runtime layer; client state is never
+    consulted and malformed evidence fails closed.
     """
 
     diagnostics = diagnostics or {}
@@ -213,11 +275,16 @@ def voice_capability_snapshot(diagnostics: Mapping[str, Any] | None = None) -> l
         or diagnostics.get("piper_model_configured")
     )
     remote_tts = bool(diagnostics.get("tts_url_configured"))
-    synthesis_state = (
-        CapabilityState.CONFIGURED_UNVERIFIED
-        if local_tts or remote_tts
-        else CapabilityState.UNAVAILABLE
+    synthesis_state, health_verified, health_source = _verified_synthesis_health(
+        diagnostics, configured=bool(local_tts or remote_tts)
     )
+
+    if health_verified:
+        detail = f"Verified speech runtime health reports {synthesis_state.value}."
+    elif synthesis_state == CapabilityState.CONFIGURED_UNVERIFIED:
+        detail = "Speech runtime configuration exists but health has not been proven."
+    else:
+        detail = "No speech synthesis runtime is configured for this Chat 1 integration."
 
     return [
         _descriptor(
@@ -226,11 +293,9 @@ def voice_capability_snapshot(diagnostics: Mapping[str, Any] | None = None) -> l
             local=local_tts,
             remote=remote_tts,
             self_hosted=local_tts,
-            detail=(
-                "Speech runtime configuration exists but health has not been proven."
-                if synthesis_state == CapabilityState.CONFIGURED_UNVERIFIED
-                else "No speech synthesis runtime is configured for this Chat 1 integration."
-            ),
+            health_verified=health_verified,
+            health_source=health_source,
+            detail=detail,
         ),
         _descriptor(
             VoiceCapability.CLONED_SPEECH,
@@ -290,5 +355,7 @@ def public_voice_contract(diagnostics: Mapping[str, Any] | None = None) -> dict[
             "provider_secrets_exposed": False,
             "client_entitlement_authority": False,
             "microphone_audio_auto_enrolled_for_cloning": False,
+            "runtime_health_requires_server_evidence": True,
+            "configuration_implies_ready": False,
         },
     }
