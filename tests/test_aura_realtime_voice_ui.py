@@ -33,7 +33,7 @@ def test_realtime_voice_ui_preserves_standard_voice_fallback():
     script = REALTIME_VOICE_SCRIPT
     assert "legacyClick=b.onclick" in script
     assert "legacyClick.call(b)" in script
-    assert "Realtime voice is not configured on this host; using standard Aura Voice." in script
+    assert "Realtime voice is not configured on this host; using standard Rhiannon Voice." in script
     assert "RTCPeerConnection==='undefined'" in script
 
 
@@ -68,11 +68,13 @@ def test_voice_workspace_injects_fallback_before_realtime_layer():
     client = TestClient(app)
     response = client.get("/aura-intelligence")
     assert response.status_code == 200
+    turn_state = "<script src='/aura-intelligence/rhiannon-turn-state.js'></script>"
     fallback = "<script src='/aura-intelligence/voice-conversation.js'></script>"
     realtime = "<script src='/aura-intelligence/realtime-voice.js'></script>"
+    assert turn_state in response.text
     assert fallback in response.text
     assert realtime in response.text
-    assert response.text.index(fallback) < response.text.index(realtime)
+    assert response.text.index(turn_state) < response.text.index(fallback) < response.text.index(realtime)
 
 
 def test_voice_overlay_router_dispatches_realtime_ui_route():
