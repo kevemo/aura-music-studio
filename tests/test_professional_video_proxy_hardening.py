@@ -27,6 +27,17 @@ def test_proxy_root_symlink_escape_is_rejected(tmp_path: Path):
         ProfessionalVideoProxyService(project)
 
 
+def test_invalid_proxy_timeout_configuration_fails_closed(tmp_path: Path, monkeypatch):
+    project = (tmp_path / "project-timeout").resolve()
+    project.mkdir()
+    ProfessionalEditorStore(project).initialize("proxy-timeout-security")
+    monkeypatch.setenv("AURA_EDITOR_PROXY_TIMEOUT_SECONDS", "not-a-number")
+
+    install_professional_video_proxy_hardening()
+    with pytest.raises(VideoProxyError, match="timeout configuration is invalid"):
+        ProfessionalVideoProxyService(project)
+
+
 def test_proxy_hardening_installer_is_idempotent():
     install_professional_video_proxy_hardening()
     first = ProfessionalVideoProxyService.__init__
