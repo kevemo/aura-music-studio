@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, Response
 from .audio_fx_expansion import install_audio_fx_expansion
 from .audio_restoration_presets import install_audio_restoration_presets
 from .chord_detection import router as chord_detection_router
+from .chord_detection_portal import router as chord_detection_portal_router
 from .chord_intelligence import router as chord_intelligence_router
 from .chord_midi import router as chord_midi_router
 from .daw_fx_lab import router as daw_fx_lab_router
@@ -26,6 +27,7 @@ install_audio_restoration_presets()
 router = APIRouter()
 router.include_router(chord_intelligence_router)
 router.include_router(chord_detection_router)
+router.include_router(chord_detection_portal_router)
 router.include_router(chord_midi_router)
 router.include_router(daw_fx_lab_router)
 router.include_router(performance_generation_router)
