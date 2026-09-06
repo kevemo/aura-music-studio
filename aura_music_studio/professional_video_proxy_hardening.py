@@ -9,7 +9,10 @@ _INSTALLED = False
 
 
 def _hardened_init(self: ProfessionalVideoProxyService, project_dir: Path) -> None:
-    _ORIGINAL_INIT(self, project_dir)
+    try:
+        _ORIGINAL_INIT(self, project_dir)
+    except (TypeError, ValueError) as exc:
+        raise VideoProxyError("Video proxy timeout configuration is invalid") from exc
     project = Path(self.project_dir).resolve()
     proxy_root = Path(self.proxy_root).resolve()
     if project not in proxy_root.parents:
@@ -22,6 +25,7 @@ def install_professional_video_proxy_hardening() -> None:
     The underlying service already validates each item directory, temporary output and media
     resolution. This additional constructor boundary closes the remaining case where a pre-existing
     ``work`` or ``editor_proxies`` symlink could otherwise make the service's root itself external.
+    Invalid operator timeout configuration also fails closed behind a bounded public error.
     """
     global _INSTALLED
     if _INSTALLED:
