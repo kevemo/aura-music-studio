@@ -8,11 +8,13 @@ from starlette.responses import Response
 from .aura_realtime_voice import router as realtime_voice_router
 from .aura_realtime_voice_ui import router as realtime_voice_ui_router
 from .rhiannon_turn_state import router as rhiannon_turn_router
+from .rhiannon_voice_timing import router as rhiannon_timing_router
 
 router = APIRouter(include_in_schema=False)
 router.include_router(realtime_voice_router)
 router.include_router(realtime_voice_ui_router)
 router.include_router(rhiannon_turn_router)
+router.include_router(rhiannon_timing_router)
 
 VOICE_SCRIPT = r"""
 (()=>{
@@ -23,6 +25,7 @@ VOICE_SCRIPT = r"""
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
   function legacyHostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
   function turnHost(){return window.RhiannonTurnHost}
+  function timingHost(){return window.RhiannonTimingHost}
   function turnState(state,detail={}){
     const host=turnHost();if(host?.transition)return host.transition(state,detail);
     const fallback={idle:'idle',ready:'welcoming',listening:'listening',processing:'thinking',thinking:'thinking',responding:'thinking',speaking:'speaking',interrupted:'warning',awaiting_permission:'warning',degraded:'warning',error:'warning',recovery:'thinking'};
@@ -32,6 +35,7 @@ VOICE_SCRIPT = r"""
   function speechFrame(detail={}){const host=turnHost();if(host?.speechFrame)return host.speechFrame(detail);try{window.AuraHost?.performance?.speechFrame(detail)}catch(_){}return true}
   function finishSpeech(jobId,next='listening',detail={}){const host=turnHost();if(host?.finishSpeech)return host.finishSpeech(jobId,next,detail);try{window.AuraHost?.performance?.speechFrame({speaking:false,viseme:'sil',job_id:jobId})}catch(_){}turnState(next,detail);return true}
   function interruptTurn(reason='user_interruption',next='listening',detail={}){const host=turnHost();if(host?.interrupt)return host.interrupt(reason,next,detail);try{window.AuraHost?.performance?.speechFrame({speaking:false,viseme:'sil'})}catch(_){}turnState('interrupted',{...detail,reason});if(next)turnState(next,{...detail,reason:`${reason}:resume`});return null}
+  function stopTiming(reason){try{return timingHost()?.stop?.(reason)}catch(_){return false}}
   function button(){return document.getElementById('auraHandsFree')}
   function setButton(){const b=button();if(!b)return;b.textContent=(activeAudio||activeSpeechJob)?'■ Interrupt Rhiannon':(enabled?'■ Stop Rhiannon Voice':'◉ Rhiannon Voice');b.style.borderColor=enabled?'#73e2aa66':''}
   function cleanupCapture(){
@@ -43,6 +47,7 @@ VOICE_SCRIPT = r"""
   function stopVoice(finalState='idle'){
     enabled=false;starting=false;
     const job=activeSpeechJob;
+    stopTiming('voice_mode_stopped');
     if(activeAudio){try{activeAudio.pause();activeAudio.currentTime=0}catch(_){}activeAudio=null}
     if(activePlaybackResolve){activePlaybackResolve('stopped');activePlaybackResolve=null}
     if(job)interruptTurn('voice_mode_stopped',finalState,{job_id:job});else turnState(finalState,{reason:'voice_mode_stopped'});
@@ -51,6 +56,7 @@ VOICE_SCRIPT = r"""
   async function interruptCurrentSpeech(){
     const job=activeSpeechJob;
     if(!activeAudio&&!job)return false;
+    stopTiming('user_interruption');
     if(activeAudio){try{activeAudio.pause();activeAudio.currentTime=0}catch(_){}activeAudio=null}
     if(activePlaybackResolve){activePlaybackResolve('interrupted');activePlaybackResolve=null}
     interruptTurn('user_interruption','listening',{job_id:job});
@@ -96,6 +102,8 @@ VOICE_SCRIPT = r"""
       // but precise phoneme/viseme frames remain unavailable until a timing-capable runtime supplies them.
       speechFrame({speaking:true,source:'tts_lifecycle',message_id:message.id,job_id:jobId});
       activeAudio=new Audio(`${api}/threads/${encodeURIComponent(current)}/messages/${encodeURIComponent(message.id)}/speech`);
+      const fallbackStarted=await timingHost()?.startAmplitudeFallback?.(activeAudio,jobId);
+      if(fallbackStarted===false)toast('Precise lip timing is unavailable; Rhiannon will speak without phoneme-accurate mouth motion.');
       const outcome=await new Promise((resolve,reject)=>{
         activePlaybackResolve=resolve;
         activeAudio.onended=()=>resolve('ended');
@@ -104,11 +112,13 @@ VOICE_SCRIPT = r"""
       });
       activePlaybackResolve=null;
       if(outcome==='interrupted'||outcome==='stopped')return;
+      stopTiming('speech_finished');
       activeAudio=null;
       finishSpeech(jobId,'listening',{message_id:message.id});
       activeSpeechJob=null;setButton();
       if(enabled)await listen();else turnState('idle',{reason:'voice_disabled_after_speech'});
     }catch(error){
+      stopTiming('speech_playback_failed');
       activePlaybackResolve=null;activeAudio=null;
       if(activeSpeechJob===jobId)interruptTurn('speech_playback_failed','error',{job_id:jobId,error:String(error)});
       activeSpeechJob=null;setButton();toast(error.message,true);stopVoice('error')
@@ -165,7 +175,7 @@ VOICE_SCRIPT = r"""
     const b=document.createElement('button');b.id='auraHandsFree';b.className='btn';b.textContent='◉ Rhiannon Voice';b.title='Hands-free listen → Rhiannon response → spoken reply loop';b.onclick=startVoice;foot.prepend(b);
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&enabled)stopVoice()});
-  window.addEventListener('beforeunload',()=>{enabled=false;if(activeSpeechJob)interruptTurn('page_unload',null,{job_id:activeSpeechJob});cleanupCapture()});
+  window.addEventListener('beforeunload',()=>{enabled=false;stopTiming('page_unload');if(activeSpeechJob)interruptTurn('page_unload',null,{job_id:activeSpeechJob});cleanupCapture()});
 })();
 """
 
@@ -176,7 +186,7 @@ def voice_conversation_script():
 
 
 class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
-    """Inject the canonical Rhiannon turn contract plus fallback and Realtime voice layers."""
+    """Inject the canonical Rhiannon turn, timing, fallback and Realtime voice layers."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -193,10 +203,11 @@ class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
         turn_marker = "<script src='/aura-intelligence/rhiannon-turn-state.js'></script>"
+        timing_marker = "<script src='/aura-intelligence/rhiannon-voice-timing.js'></script>"
         fallback_marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
         realtime_marker = "<script src='/aura-intelligence/realtime-voice.js'></script>"
-        markers = turn_marker + fallback_marker + realtime_marker
-        for marker in (turn_marker, fallback_marker, realtime_marker):
+        markers = turn_marker + timing_marker + fallback_marker + realtime_marker
+        for marker in (turn_marker, timing_marker, fallback_marker, realtime_marker):
             text = text.replace(marker, "")
         text = text.replace("</body>", markers + "</body>")
         encoded = text.encode("utf-8")
