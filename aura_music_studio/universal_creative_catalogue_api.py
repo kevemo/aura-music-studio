@@ -19,6 +19,19 @@ _ALLOWED_BANDS = {band.id: band.coin_price for band in EFFECT_BANDS}
 if _ALLOWED_BANDS != {"core": 0, "silver": 200, "gold": 500}:  # pragma: no cover
     raise RuntimeError("Universal effect-band prices drifted from the canonical catalogue contract")
 
+_EXECUTABLE_RUNTIME_KINDS = frozenset({"ffmpeg_audio"})
+_EXECUTABLE_STATUSES = frozenset(
+    {
+        "BACKEND_FUNCTIONAL",
+        "UI_FUNCTIONAL",
+        "WORKFLOW_FUNCTIONAL",
+        "INTEGRATED",
+        "TESTED",
+        "RELEASE_CANDIDATE",
+        "PRODUCTION_VERIFIED",
+    }
+)
+
 
 class RuntimePreviewRequest(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -74,23 +87,32 @@ def _validate_band(entitlement: str | None) -> Literal["core", "silver", "gold"]
     return selected  # type: ignore[return-value]
 
 
+def _item_backend_executable(item) -> bool:
+    """Return true only when both lifecycle evidence and a known executable runtime exist.
+
+    Catalogue metadata is descriptive. A mature-looking status must never promote a future
+    metadata-only runtime into executable truth. New runtimes therefore remain fail-closed
+    until this server-side allowlist is deliberately extended alongside a real compiler or
+    renderer and regression coverage.
+    """
+
+    return bool(
+        str(getattr(item, "runtime", "")) in _EXECUTABLE_RUNTIME_KINDS
+        and str(getattr(item, "status", "")) in _EXECUTABLE_STATUSES
+    )
+
+
 def _runtime_row(item, *, owned: bool | None = None) -> dict:
     row = item.public()
     expected_price = _ALLOWED_BANDS[item.entitlement]
     if item.ccc_price != expected_price:  # pragma: no cover
         raise RuntimeError(f"Effect Coin price drift for {item.id}")
+    executable = _item_backend_executable(item)
     row.update(
         {
-            "backend_executable": item.status in {
-                "BACKEND_FUNCTIONAL",
-                "UI_FUNCTIONAL",
-                "WORKFLOW_FUNCTIONAL",
-                "INTEGRATED",
-                "TESTED",
-                "RELEASE_CANDIDATE",
-                "PRODUCTION_VERIFIED",
-            },
-            "preview_compile_available": item.runtime == "ffmpeg_audio",
+            "backend_executable": executable,
+            "preview_compile_available": executable,
+            "execution_truth_contract": "allowlisted_runtime_and_lifecycle_status_v1",
             "entitlement_price_authoritative": True,
             "coin_unit": PUBLIC_COIN_UNIT,
         }
@@ -136,6 +158,7 @@ def universal_runtime_effects(request: Request, q: str = "", studio: str | None 
         "purchase_entitlement_separate_from_subscription": True,
         "owned_state_included": True,
         "individual_purchase_scope": "permanent_account_unlock",
+        "execution_truth_contract": "allowlisted_runtime_and_lifecycle_status_v1",
     }
 
 
@@ -151,6 +174,7 @@ def universal_owned_runtime_effects(request: Request):
         "coin_unit": PUBLIC_COIN_UNIT,
         "core_effects_implicitly_included": True,
         "individual_purchase_scope": "permanent_account_unlock",
+        "execution_truth_contract": "allowlisted_runtime_and_lifecycle_status_v1",
     }
 
 
@@ -223,9 +247,13 @@ def universal_runtime_effect_preview_plan(item_id: str, body: RuntimePreviewRequ
     user_id = _member_user_id(member)
     try:
         item = get_catalogue_item(item_id)
+        if not _item_backend_executable(item):
+            raise HTTPException(409, "Creative catalogue item has no allowlisted executable runtime")
         effect = item.build_effect(body.parameters, enabled=body.enabled, mix=body.mix)
         chain = item.preview_filter_chain(body.parameters) if body.enabled else ""
         entitlement = effect_entitlement_store.has_entitlement(user_id, item_id)
+    except HTTPException:
+        raise
     except KeyError as exc:
         raise HTTPException(404, "Creative catalogue item not found") from exc
     except (TypeError, ValueError) as exc:
@@ -237,6 +265,7 @@ def universal_runtime_effect_preview_plan(item_id: str, body: RuntimePreviewRequ
         "filter_chain": chain,
         "project_media_mutated": False,
         "backend_executable": True,
+        "execution_truth_contract": "allowlisted_runtime_and_lifecycle_status_v1",
         "owned": bool(entitlement["owned"]),
         "coin_unit": PUBLIC_COIN_UNIT,
         "preview_does_not_grant_apply_access": True,
