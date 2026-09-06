@@ -122,7 +122,7 @@ def test_shimmer_uses_existing_numeric_keyframe_runtime_for_motion():
 
 def test_hardened_effect_creator_resolves_rewritten_legacy_visual_concepts():
     glow = compile_effect_graph_hardened("Add a soft glow", "image")
-    bloom = compile_effect_graph_hardened("Add cinematic bloom", "image")
+    bloom = compile_effect_graph_hardened("Add bloom", "image")
     shimmer = compile_effect_graph_hardened("Add a shimmer", "image")
     assert glow["nodes"][0]["effect_id"] == "image.light.glow"
     assert bloom["nodes"][0]["effect_id"] == "image.light.bloom"
