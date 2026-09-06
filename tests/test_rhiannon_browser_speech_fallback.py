@@ -46,6 +46,33 @@ def test_browser_fallback_does_not_bypass_canonical_command_planning():
     assert "project_name:p||null" in body
 
 
+def test_voice_media_drives_existing_avatar_state_without_new_execution_authority():
+    body = _client().get("/rhiannon").text
+    assert "data-aura-speech-media='1'" in body
+    assert "window.AuraHost?.setState?." in body
+    assert "source:'rhiannon_voice'" in body
+    assert "auraState('listening'" in body
+    assert "auraState('thinking'" in body
+    assert "auraState('speaking'" in body
+    assert "configured_audio_ended" in body
+    assert "browser_fallback_ended" in body
+    assert "speech_stopped" in body
+    assert "eval(" not in body
+    assert "new Function" not in body
+    assert "WebSocket" not in body
+    assert "localStorage" not in body
+    assert "document.cookie" not in body
+    assert "Authorization" not in body
+
+
+def test_voice_object_urls_are_bounded_and_released():
+    body = _client().get("/rhiannon").text
+    assert "currentVoiceUrl" in body
+    assert "URL.createObjectURL(blob)" in body
+    assert "URL.revokeObjectURL(currentVoiceUrl)" in body
+    assert "releaseVoiceUrl();" in body
+
+
 def test_speech_api_uses_rhiannon_public_tag_while_internal_service_can_remain_compatible():
     app = FastAPI()
     app.include_router(speech_api_router)
