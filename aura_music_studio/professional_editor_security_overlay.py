@@ -70,7 +70,7 @@ def _install_routes_once(routes) -> None:
 
 
 def install_professional_editor_patch_guard() -> None:
-    """Install guarded editor, render, visual-effects, TV and cinema production surfaces."""
+    """Install guarded editor, render, proxy, visual-effects, TV and cinema production surfaces."""
     guarded_routes = list(router.routes)
     for guarded in reversed(guarded_routes):
         signature = (getattr(guarded, "path", None), frozenset(getattr(guarded, "methods", set())))
@@ -86,6 +86,7 @@ def install_professional_editor_patch_guard() -> None:
     from .legacy_visual_effects import install_legacy_visual_effects
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
+    from .professional_video_proxy import router as video_proxy_router
     from .tv_production import router as tv_production_router
     from .visual_effect_catalogue import router as visual_effect_router
     from .visual_effect_catalogue_hardening import (
@@ -99,6 +100,9 @@ def install_professional_editor_patch_guard() -> None:
     install_visual_effect_catalogue_hardening()
     _install_routes_once(render_router.routes)
     _install_routes_once(render_jobs_router.routes)
+    # Editing proxies are preview-only project assets; final renderers retain the original item
+    # source_ref, so proxy generation can never silently lower master/export quality.
+    _install_routes_once(video_proxy_router.routes)
     # TV and cinema metadata mount into the existing project/editor route family. Their handoff
     # endpoints prepare delivery metadata only; Shared Skies transmission remains Chat 5 authority.
     _install_routes_once(tv_production_router.routes)
