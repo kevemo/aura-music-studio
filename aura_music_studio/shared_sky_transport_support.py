@@ -19,6 +19,27 @@ from .shared_sky_transport_models import (
 
 class TransportSupport:
 
+    @staticmethod
+    def _heartbeat_event(event_type: str) -> bool:
+        clean = str(event_type or '').strip().lower()
+        return clean == 'heartbeat' or clean.endswith('_heartbeat')
+
+    @staticmethod
+    def _heartbeat_event_interval_seconds() -> int:
+        try:
+            configured = int(os.getenv('SHARED_SKY_HEARTBEAT_EVENT_INTERVAL_SECONDS', '5') or 5)
+        except ValueError:
+            configured = 5
+        return max(1, min(configured, 60))
+
+    @staticmethod
+    def _health_stale_after_seconds() -> int:
+        try:
+            configured = int(os.getenv('SHARED_SKY_HEALTH_STALE_AFTER_SECONDS', '15') or 15)
+        except ValueError:
+            configured = 15
+        return max(5, min(configured, 300))
+
     def _playback_capability(self) -> tuple[CapabilityState, str, str]:
         base = (os.getenv('SHARED_SKY_PLAYBACK_BASE_URL') or '').strip()
         secret = (os.getenv('SHARED_SKY_PLAYBACK_SIGNING_SECRET') or '').strip()
@@ -117,11 +138,46 @@ class TransportSupport:
     def report_health(self, user_id: str, broadcast_id: str, event_type: str, reason: str, metrics: dict, destination_id: str | None=None) -> dict:
         self.rate_limit(user_id, 'health_event', limit=240)
         self._session(user_id, broadcast_id)
-        self.emit(broadcast_id, event_type, reason, metrics, destination_id)
+        event = str(event_type or '')[:80]
+        reason_code = str(reason or '')[:80]
+        safe_metrics = {k: v for k, v in (metrics or {}).items() if k in METRICS}
+        stamp = iso()
+
+        should_emit = True
+        if self._heartbeat_event(event):
+            cutoff = iso(now() - timedelta(seconds=self._heartbeat_event_interval_seconds()))
+            with self.connect() as con:
+                if destination_id:
+                    recent = con.execute(
+                        'SELECT 1 FROM shared_sky_transport_events WHERE broadcast_id=? AND destination_id=? AND event_type=? AND reason_code=? AND created_at>=? LIMIT 1',
+                        (broadcast_id, destination_id, event, reason_code, cutoff),
+                    ).fetchone()
+                else:
+                    recent = con.execute(
+                        'SELECT 1 FROM shared_sky_transport_events WHERE broadcast_id=? AND destination_id IS NULL AND event_type=? AND reason_code=? AND created_at>=? LIMIT 1',
+                        (broadcast_id, event, reason_code, cutoff),
+                    ).fetchone()
+            should_emit = recent is None
+        if should_emit:
+            self.emit(broadcast_id, event, reason_code, safe_metrics, destination_id)
+
         with self.connect() as con:
-            con.execute('UPDATE shared_sky_transport_sessions SET health_state=?,updated_at=? WHERE broadcast_id=? AND user_id=?', (reason[:80], iso(), broadcast_id, user_id))
+            # Health observations are deliberately separate from transport transition freshness.
+            # Otherwise a heartbeat can keep a hung STARTING/STOPPING session alive forever and
+            # prevent cleanup_stale_sessions() from recovering it.
+            con.execute(
+                'UPDATE shared_sky_transport_sessions SET health_state=? WHERE broadcast_id=? AND user_id=?',
+                (reason_code, broadcast_id, user_id),
+            )
             if destination_id:
-                con.execute('UPDATE shared_sky_destination_runs SET health_json=?,updated_at=? WHERE broadcast_id=? AND destination_id=?', (json.dumps({k: v for k, v in metrics.items() if k in METRICS}), iso(), broadcast_id, destination_id))
+                snapshot = dict(safe_metrics)
+                snapshot['_observed_at'] = stamp
+                snapshot['_event_type'] = event
+                snapshot['_reason_code'] = reason_code
+                con.execute(
+                    'UPDATE shared_sky_destination_runs SET health_json=?,updated_at=? WHERE broadcast_id=? AND destination_id=?',
+                    (json.dumps(snapshot), stamp, broadcast_id, destination_id),
+                )
         return self.status(user_id, broadcast_id)
 
     def request_recording(self, user_id: str, broadcast_id: str, kind: str) -> dict:
@@ -162,8 +218,35 @@ class TransportSupport:
             runs = [dict(r) for r in con.execute('SELECT * FROM shared_sky_destination_runs WHERE broadcast_id=? ORDER BY destination_id', (broadcast_id,)).fetchall()]
             events = [dict(r) for r in con.execute('SELECT * FROM shared_sky_transport_events WHERE broadcast_id=? ORDER BY created_at DESC LIMIT 100', (broadcast_id,)).fetchall()]
             recs = [self._recording(dict(r)) for r in con.execute('SELECT * FROM shared_sky_recordings WHERE broadcast_id=? ORDER BY kind', (broadcast_id,)).fetchall()]
+        stale_after = self._health_stale_after_seconds()
+        observed_now = now()
         for item in runs:
-            item['health'] = jload(item.pop('health_json', '{}'), {})
+            health = jload(item.pop('health_json', '{}'), {})
+            if not isinstance(health, dict):
+                health = {}
+            observed_at = health.pop('_observed_at', None)
+            health_event = health.pop('_event_type', None)
+            health_reason = health.pop('_reason_code', None)
+            freshness = {
+                'state': 'unreported',
+                'observed_at': observed_at,
+                'age_seconds': None,
+                'stale_after_seconds': stale_after,
+                'event_type': health_event,
+                'reason_code': health_reason,
+            }
+            if observed_at:
+                try:
+                    observed = datetime.fromisoformat(str(observed_at).replace('Z', '+00:00'))
+                    if observed.tzinfo is None:
+                        observed = observed.replace(tzinfo=timezone.utc)
+                    age = max(0.0, (observed_now - observed.astimezone(timezone.utc)).total_seconds())
+                    freshness['age_seconds'] = round(age, 3)
+                    freshness['state'] = 'stale' if age > stale_after else 'fresh'
+                except (TypeError, ValueError):
+                    freshness['state'] = 'invalid'
+            item['health'] = health
+            item['health_freshness'] = freshness
         for item in events:
             item['metrics'] = jload(item.pop('metrics_json', '{}'), {})
         return {'session': session, 'destinations': runs, 'recordings': recs, 'events': events, 'playback': self.playback(user_id, broadcast_id), 'relay': relay.health().__dict__}
