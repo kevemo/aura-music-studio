@@ -104,7 +104,6 @@ def voice_convert(project_name: str, request: VoiceConvertRequest):
         raise HTTPException(503, f"Voice conversion unavailable: {type(exc).__name__}: {exc}") from exc
     return {
         "candidate_id": candidate.id,
-        "path": candidate.candidate_path,
         "state": candidate.state,
         "audition_required": True,
         "committed": False,
