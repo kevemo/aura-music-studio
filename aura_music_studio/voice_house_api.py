@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import shutil
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -11,6 +12,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from .request_context import current_user_id
 from .rights import RightsLedger, RightsRecord, VoiceProfile
 from .speech import AuraSpeechService
 from .tenant_storage import project_path
@@ -20,6 +22,7 @@ router = APIRouter(tags=["Voice House"])
 
 _ALLOWED_AUDIO = {".wav", ".flac", ".mp3", ".m4a", ".ogg", ".aac", ".webm"}
 _ALLOWED_USES = {"singing", "backing_harmony", "voice_conversion", "speech", "dubbing"}
+_ALLOWED_SUBJECT_RELATIONSHIPS = {"self", "other_authorized_person"}
 _CHALLENGE_WORDS = [
     "aurora", "cosmos", "frequency", "lantern", "harmony", "violet", "river", "silver",
     "studio", "pulsar", "melody", "ember", "orbit", "canvas", "signal", "starlight",
@@ -116,6 +119,9 @@ async def _save_upload(file: UploadFile, target: Path, *, maximum_mb: int = 100)
         raise
     finally:
         await file.close()
+    if size <= 0:
+        target.unlink(missing_ok=True)
+        raise HTTPException(400, "Voice sample is empty")
     return size
 
 
@@ -124,7 +130,10 @@ class RevokeVoiceRequest(BaseModel):
 
 
 @router.post("/projects/{project_name}/voice-house/challenge")
-def create_voice_challenge(project_name: str):
+def create_voice_challenge(project_name: str, subject_relationship: str = "self"):
+    relationship = (subject_relationship or "self").strip().lower()
+    if relationship not in _ALLOWED_SUBJECT_RELATIONSHIPS:
+        raise HTTPException(400, f"subject_relationship must be one of {sorted(_ALLOWED_SUBJECT_RELATIONSHIPS)}")
     project = _project(project_name)
     words = [secrets.choice(_CHALLENGE_WORDS) for _ in range(6)]
     nonce = secrets.randbelow(9000) + 1000
@@ -133,6 +142,7 @@ def create_voice_challenge(project_name: str):
     row = {
         "id": uuid4().hex,
         "phrase": phrase,
+        "subject_relationship": relationship,
         "created_at": _iso(now),
         "expires_at": _iso(now + timedelta(minutes=30)),
         "used_at": None,
@@ -140,11 +150,17 @@ def create_voice_challenge(project_name: str):
     rows = [item for item in _read_challenges(project) if str(item.get("expires_at") or "") > _iso(now - timedelta(days=1))]
     rows.append(row)
     _write_challenges(project, rows)
+    instruction = (
+        "Record yourself clearly reading this exact phrase. The recording is retained with the voice profile as consent evidence."
+        if relationship == "self"
+        else "The other authorised voice owner must clearly record themselves reading this exact phrase. Their recording is retained as consent evidence; do not record it on their behalf."
+    )
     return {
         "challenge_id": row["id"],
         "phrase": phrase,
+        "subject_relationship": relationship,
         "expires_at": row["expires_at"],
-        "instruction": "Record yourself clearly reading this exact phrase. The recording is retained with the voice profile as consent evidence.",
+        "instruction": instruction,
     }
 
 
@@ -177,33 +193,34 @@ async def create_voice_house_profile(
         challenge_rows, challenge = _challenge(project, challenge_id)
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
+    relationship = str(challenge.get("subject_relationship") or "self").strip().lower()
+    if relationship not in _ALLOWED_SUBJECT_RELATIONSHIPS:
+        raise HTTPException(409, "Voice verification challenge has an invalid subject relationship")
 
     profile_id = uuid4().hex
     sample_root = project / "input" / "voice_profiles" / profile_id
     saved_refs: list[Path] = []
     evidence: Path | None = None
     ledger = RightsLedger(project / ".aura_rights")
+    profile_saved = False
     try:
+        analysis: dict[str, dict] = {}
+        pending_reference_rights: list[tuple[str, Path]] = []
         for index, upload in enumerate(reference_files, 1):
-            suffix = Path(upload.filename or "sample.wav").suffix.lower()
+            original_name = Path(upload.filename or "sample.wav").name
+            suffix = Path(original_name).suffix.lower()
             target = sample_root / f"reference_{index:02d}{suffix}"
             await _save_upload(upload, target.with_suffix(""))
-            # _save_upload restores the source suffix after with_suffix("").
             saved = target
             if not saved.is_file():
                 candidates = list(sample_root.glob(f"reference_{index:02d}.*"))
                 if not candidates:
                     raise RuntimeError("Voice reference upload was not saved")
                 saved = candidates[0]
-            saved_refs.append(saved.resolve())
-            ledger.add_rights_record(
-                RightsRecord(
-                    asset_name=Path(upload.filename or saved.name).name,
-                    asset_sha256=ledger.sha256(saved),
-                    rights_basis="voice_owner_consent_or_authorized_voice_license",
-                    user_attestation=statement,
-                )
-            )
+            saved = saved.resolve()
+            analysis[str(saved)] = analyze_voice_sample(saved)
+            saved_refs.append(saved)
+            pending_reference_rights.append((original_name, saved))
 
         evidence_suffix = Path(verification_recording.filename or "verification.wav").suffix.lower()
         evidence_target = sample_root / f"consent_verification{evidence_suffix}"
@@ -214,14 +231,7 @@ async def create_voice_house_profile(
             if not candidates:
                 raise RuntimeError("Verification recording was not saved")
             evidence = candidates[0]
-        ledger.add_rights_record(
-            RightsRecord(
-                asset_name=Path(verification_recording.filename or evidence.name).name,
-                asset_sha256=ledger.sha256(evidence),
-                rights_basis="voice_consent_verification_recording",
-                user_attestation=statement,
-            )
-        )
+        evidence = evidence.resolve()
 
         verification_state = "attested"
         verification_method = "recorded_phrase_plus_consent_attestation"
@@ -237,13 +247,10 @@ async def create_voice_house_profile(
                 verification_state = "failed"
                 verification_method = "local_stt_phrase_mismatch"
         except RuntimeError:
-            # No STT engine configured: retain the recording and typed consent as evidence,
-            # but never mislabel it as biometric/high-confidence verification.
             verification_state = "attested"
 
         requested_similarity = max(0.0, min(1.0, float(similarity_limit)))
         effective_similarity = requested_similarity if verification_state == "verified" else min(requested_similarity, 0.8)
-        analysis = {str(path): analyze_voice_sample(path) for path in saved_refs}
         profile = VoiceProfile(
             id=profile_id,
             name=(name or "Voice Profile").strip()[:120],
@@ -251,8 +258,9 @@ async def create_voice_house_profile(
             reference_files=[str(path) for path in saved_refs],
             consent_confirmed=True,
             consent_statement=statement,
+            subject_relationship=relationship,
             verification_phrase=challenge["phrase"],
-            verification_recording=str(evidence.resolve()),
+            verification_recording=str(evidence),
             verification_state=verification_state,
             verification_method=verification_method,
             verification_confidence=verification_confidence,
@@ -264,15 +272,40 @@ async def create_voice_house_profile(
                 "verification_transcript": transcript,
                 "requested_similarity_limit": requested_similarity,
                 "reference_count": len(saved_refs),
+                "private_identity_profile": True,
             },
         )
+
+        for original_name, saved in pending_reference_rights:
+            ledger.add_rights_record(
+                RightsRecord(
+                    asset_name=original_name,
+                    asset_sha256=ledger.sha256(saved),
+                    rights_basis="voice_owner_consent_or_authorized_voice_license",
+                    user_attestation=statement,
+                )
+            )
+        ledger.add_rights_record(
+            RightsRecord(
+                asset_name=Path(verification_recording.filename or evidence.name).name,
+                asset_sha256=ledger.sha256(evidence),
+                rights_basis="voice_consent_verification_recording",
+                user_attestation=statement,
+            )
+        )
+
         ledger.save_voice(profile)
+        profile_saved = True
         challenge["used_at"] = _iso()
         challenge["profile_id"] = profile.id
         _write_challenges(project, challenge_rows)
     except HTTPException:
+        if not profile_saved:
+            shutil.rmtree(sample_root, ignore_errors=True)
         raise
     except Exception as exc:
+        if not profile_saved:
+            shutil.rmtree(sample_root, ignore_errors=True)
         raise HTTPException(422, f"Unable to create Voice Profile: {type(exc).__name__}: {exc}") from exc
 
     return {
@@ -280,19 +313,22 @@ async def create_voice_house_profile(
             "id": profile.id,
             "name": profile.name,
             "owner_label": profile.owner_label,
+            "subject_relationship": profile.subject_relationship,
             "verification_state": profile.verification_state,
             "verification_method": profile.verification_method,
             "verification_confidence": profile.verification_confidence,
             "allowed_uses": profile.allowed_uses,
             "similarity_limit": profile.similarity_limit,
+            "version": profile.version,
             "active": profile.active,
         },
         "consent_recorded": True,
+        "consent_recorded_at": profile.consent_recorded_at,
         "raw_reference_paths_exposed": False,
         "detail": (
-            "Voice ownership phrase verified through the configured local STT engine."
-            if profile.verification_state == "verified"
-            else "Consent evidence is stored as an attestation. Configure local STT and re-verification for high-confidence phrase matching."
+            "Voice ownership phrase matched through the configured local STT engine; speaker identity remains attested unless a speaker-verification method is configured."
+            if profile.verification_method == "local_stt_phrase_match"
+            else "Consent evidence is stored as an attestation. Configure local STT plus speaker verification for high-confidence identity verification."
         ),
     }
 
@@ -302,14 +338,19 @@ def revoke_voice_house_profile(project_name: str, profile_id: str, request: Revo
     project = _project(project_name)
     ledger = RightsLedger(project / ".aura_rights")
     try:
+        profile = ledger.get_voice(profile_id)
+        profile.assert_tenant(current_user_id())
         profile = ledger.revoke_voice(profile_id, request.reason)
     except KeyError as exc:
+        raise HTTPException(404, "Voice Profile not found") from exc
+    except PermissionError as exc:
         raise HTTPException(404, "Voice Profile not found") from exc
     return {
         "id": profile.id,
         "verification_state": profile.verification_state,
         "active": profile.active,
         "revoked_at": profile.revoked_at,
+        "version": profile.version,
         "detail": "Voice Profile revoked. Downstream singing/conversion/harmony calls now fail closed for this profile.",
     }
 
@@ -318,23 +359,35 @@ def revoke_voice_house_profile(project_name: str, profile_id: str, request: Revo
 def voice_house_profiles(project_name: str):
     project = _project(project_name)
     ledger = RightsLedger(project / ".aura_rights")
-    return {
-        "profiles": [
+    user_id = current_user_id()
+    profiles: list[dict] = []
+    for profile in ledger.list_voices():
+        try:
+            profile.assert_tenant(user_id)
+        except PermissionError:
+            continue
+        profiles.append(
             {
                 "id": profile.id,
                 "name": profile.name,
                 "owner_label": profile.owner_label,
+                "subject_relationship": profile.subject_relationship,
                 "verification_state": profile.verification_state,
                 "verification_method": profile.verification_method,
                 "verification_confidence": profile.verification_confidence,
+                "consent_recorded_at": profile.consent_recorded_at,
                 "allowed_uses": profile.allowed_uses,
                 "similarity_limit": profile.similarity_limit,
                 "active": profile.active,
+                "version": profile.version,
                 "created_at": profile.created_at,
                 "updated_at": profile.updated_at,
+                "last_used_at": profile.last_used_at,
                 "revoked_at": profile.revoked_at,
             }
-            for profile in ledger.list_voices()
-        ],
+        )
+    return {
+        "profiles": profiles,
+        "private_library": True,
         "raw_reference_paths_exposed": False,
     }
