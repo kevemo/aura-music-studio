@@ -136,7 +136,11 @@ def voice_runtime_truth(diagnostics: dict[str, Any] | None = None) -> dict[str, 
         "authorised_voice_profile_selection": {
             "state": "integration_required",
             "authority": "Chat 2 consent-gated Voice House / voice profile service",
-            "detail": "Shared Skies has no server-authoritative LIVE-to-Chat-2 profile binding yet, so it exposes no selectable profile list.",
+            "detail": (
+                "Tenant-scoped Chat 2 Voice Profiles can be discovered as LIVE selection candidates, "
+                "but Shared Skies still has no server-authoritative processor binding; discovery does "
+                "not prove executable or real-time voice processing."
+            ),
         },
         "private_spoken_auto_cue": {
             "state": "unavailable",
