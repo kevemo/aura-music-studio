@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -30,6 +31,9 @@ class AuraSpeechService:
     local ffmpeg before transcription. Studio actions remain entitlement-checked by the API.
     """
 
+    _FORBIDDEN_SHELL_SYNTAX = (";", "|", "&", "<", ">", "`", "$(", "\n", "\r")
+    _PLACEHOLDER_PATTERN = re.compile(r"\{[^{}]+\}")
+
     def __init__(self):
         self.stt_cmd = (os.getenv("AURA_STT_CMD") or "").strip()
         self.tts_cmd = (os.getenv("AURA_TTS_CMD") or "").strip()
@@ -37,12 +41,37 @@ class AuraSpeechService:
         self.whisper_model = (os.getenv("AURA_WHISPER_MODEL") or "").strip()
         self.piper_model = (os.getenv("AURA_PIPER_MODEL") or "").strip()
 
-    @staticmethod
-    def _run_template(template: str, values: dict[str, str]) -> subprocess.CompletedProcess:
-        rendered = template
-        for key, value in values.items():
-            rendered = rendered.replace("{" + key + "}", shlex.quote(value))
-        return subprocess.run(rendered, shell=True, check=True, capture_output=True, text=True)
+    @classmethod
+    def _run_template(cls, template: str, values: dict[str, str]) -> subprocess.CompletedProcess:
+        """Run a configured provider command without invoking a command shell.
+
+        Command configuration is parsed into argv before substitutions are applied so a
+        replacement containing whitespace remains one argument. Shell control syntax is
+        rejected even though ``shell=False`` makes it inert, keeping the production contract
+        fail-closed and preventing configuration from relying on shell semantics.
+        """
+
+        if not template or not template.strip():
+            raise RuntimeError("Configured speech command is empty")
+        if any(marker in template for marker in cls._FORBIDDEN_SHELL_SYNTAX):
+            raise RuntimeError("Configured speech command contains forbidden shell syntax")
+
+        try:
+            argv = shlex.split(template, posix=True)
+        except ValueError as exc:
+            raise RuntimeError("Configured speech command has invalid quoting") from exc
+        if not argv:
+            raise RuntimeError("Configured speech command is empty")
+
+        rendered: list[str] = []
+        for token in argv:
+            for key, value in values.items():
+                token = token.replace("{" + key + "}", value)
+            if cls._PLACEHOLDER_PATTERN.search(token):
+                raise RuntimeError("Configured speech command contains an unsupported placeholder")
+            rendered.append(token)
+
+        return subprocess.run(rendered, shell=False, check=True, capture_output=True, text=True)
 
     @staticmethod
     def _prepare_audio(source: Path, work_dir: Path) -> Path:
