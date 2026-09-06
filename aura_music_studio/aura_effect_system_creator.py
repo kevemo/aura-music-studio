@@ -10,6 +10,8 @@ from .effects import compile_ffmpeg_chain
 from .session import Effect
 
 MAX_EFFECT_NODES = 32
+MAX_CANONICAL_GRAPH_BYTES = 64 * 1024
+MAX_FFMPEG_FILTER_CHAIN_CHARS = 16 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +46,8 @@ class CompiledEffectSystem:
     effects: tuple[Effect, ...]
     ffmpeg_filter_chain: str
     fingerprint: str
+    canonical_graph_bytes: int
+    filter_chain_chars: int
 
     def public(self) -> dict:
         return {
@@ -55,6 +59,14 @@ class CompiledEffectSystem:
             "backend_executable": True,
             "source_media_mutated": False,
             "node_count": len(self.effects),
+            "resource_budget": {
+                "node_count": len(self.effects),
+                "max_node_count": MAX_EFFECT_NODES,
+                "canonical_graph_bytes": self.canonical_graph_bytes,
+                "max_canonical_graph_bytes": MAX_CANONICAL_GRAPH_BYTES,
+                "filter_chain_chars": self.filter_chain_chars,
+                "max_filter_chain_chars": MAX_FFMPEG_FILTER_CHAIN_CHARS,
+            },
         }
 
 
@@ -176,6 +188,12 @@ def compile_effect_system(spec: EffectSystemSpec) -> CompiledEffectSystem:
         )
 
     chain = compile_ffmpeg_chain(effects)
+    filter_chain_chars = len(chain)
+    if filter_chain_chars > MAX_FFMPEG_FILTER_CHAIN_CHARS:
+        raise ValueError(
+            f"Effect system exceeds maximum compiled filter-chain size of {MAX_FFMPEG_FILTER_CHAIN_CHARS} characters"
+        )
+
     canonical = {
         "id": spec.id,
         "name": spec.name,
@@ -183,15 +201,26 @@ def compile_effect_system(spec: EffectSystemSpec) -> CompiledEffectSystem:
         "version": spec.version,
         "nodes": canonical_nodes,
     }
-    fingerprint = hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    ).hexdigest()
+    canonical_blob = json.dumps(
+        canonical,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    canonical_graph_bytes = len(canonical_blob)
+    if canonical_graph_bytes > MAX_CANONICAL_GRAPH_BYTES:
+        raise ValueError(
+            f"Effect system exceeds maximum canonical graph size of {MAX_CANONICAL_GRAPH_BYTES} bytes"
+        )
+    fingerprint = hashlib.sha256(canonical_blob).hexdigest()
 
     return CompiledEffectSystem(
         spec=spec,
         effects=tuple(effects),
         ffmpeg_filter_chain=chain,
         fingerprint=fingerprint,
+        canonical_graph_bytes=canonical_graph_bytes,
+        filter_chain_chars=filter_chain_chars,
     )
 
 
@@ -226,7 +255,9 @@ __all__ = [
     "CompiledEffectSystem",
     "EffectNodeSpec",
     "EffectSystemSpec",
+    "MAX_CANONICAL_GRAPH_BYTES",
     "MAX_EFFECT_NODES",
+    "MAX_FFMPEG_FILTER_CHAIN_CHARS",
     "compile_effect_system",
     "compile_effect_system_payload",
     "make_effect_system",
