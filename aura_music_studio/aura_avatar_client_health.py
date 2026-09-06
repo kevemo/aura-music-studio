@@ -13,7 +13,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .aura_avatar_speech_sync import router as avatar_speech_sync_router
+
 router = APIRouter(tags=["Aura Avatar"])
+router.include_router(avatar_speech_sync_router)
 
 ClientClass = Literal["mobile", "tablet", "desktop", "unknown"]
 RendererErrorCode = Literal[
@@ -236,10 +239,15 @@ CLIENT_HEALTH_SCRIPT = r"""
 (()=>{
   const HEALTH='/aura-intelligence/api/avatar/client-health';
   const STATUS='/aura-intelligence/api/avatar/status';
+  const SPEECH_SYNC='/aura-intelligence/avatar-speech-sync.js';
   const started=performance.now();
   let rendererAttempted=false,rendererLoaded=false,modelLoaded=false,layered=false,modelLoadMs=null,errorCode='none';
   let frames=0,frameStart=null,frameEnd=null,submitted=false;
 
+  function loadSpeechSync(){
+    if(document.querySelector("script[data-aura-speech-sync='1']"))return;
+    const script=document.createElement('script');script.src=SPEECH_SYNC;script.async=false;script.dataset.auraSpeechSync='1';document.head.append(script);
+  }
   function classifyClient(){
     const mobileHint=!!navigator.userAgentData?.mobile;
     const width=Math.max(1,window.innerWidth||document.documentElement.clientWidth||1);
@@ -291,6 +299,7 @@ CLIENT_HEALTH_SCRIPT = r"""
     }catch(_){/* Client diagnostics must never interrupt Aura interaction. */}
   }
 
+  loadSpeechSync();
   document.addEventListener('aura:state',noteWarning);
   document.addEventListener('aura:3d-ready',event=>{
     rendererAttempted=true;rendererLoaded=true;modelLoaded=true;layered=!!event.detail?.layeredPerformanceSupported;modelLoadMs=Math.max(0,performance.now()-started);
