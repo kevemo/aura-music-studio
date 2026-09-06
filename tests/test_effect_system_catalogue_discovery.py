@@ -71,13 +71,19 @@ def test_catalogue_discovery_requires_active_member_context():
     assert missing_user.value.status_code == 401
 
 
-def test_catalogue_discovery_does_not_expose_execution_or_grant_authority():
+def test_catalogue_discovery_returns_canonical_metadata_without_granting_authority():
     payload = list_member_effect_catalogue(_request(), query="compressor", studio="music", limit=10)
     assert payload["items"]
     for item in payload["items"]:
         assert "parameters" in item
         assert "entitlement" in item
-        assert "backend_executable" in item
         assert "runtime" in item
+        assert "status" in item
+        assert "rights_status" in item
+        assert "runtime_requirements" in item
+        assert "provider_compatibility" in item
+        assert "model_compatibility" in item
+        assert "backend_executable" not in item
+        assert "execution_authorized" not in item
     assert payload["entitlement_granted"] is False
     assert payload["execution_authorized"] is False
