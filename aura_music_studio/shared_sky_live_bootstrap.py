@@ -86,8 +86,9 @@ def install_shared_sky_live_community(app: Any) -> None:
     authority without creating another clone/profile engine. Current readiness distinguishes batch
     speech processing from genuine real-time voice/caption paths, and emergency Programme muting is
     independent of any failing AI voice processor. Tenant-scoped authorised Voice House profile
-    discovery is a read-only candidate list only; no server-authoritative LIVE processor binding or
-    real-time processing capability is implied by discovery.
+    discovery is read-only; server-authoritative source/profile reference bindings remain non-
+    executable and never activate a processor, prove real-time processing or replace final Chat 2
+    re-authorisation and applicable Chat 6 entitlement checks.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -131,12 +132,14 @@ def install_shared_sky_live_community(app: Any) -> None:
     from .shared_skies_emergency_programme import install_shared_skies_emergency_programme
     from .shared_skies_live_assist import install_shared_skies_live_assist
     from .shared_skies_live_voice import install_shared_skies_live_voice
+    from .shared_skies_live_voice_bindings import install_shared_skies_live_voice_bindings
     from .shared_skies_live_voice_profiles import install_shared_skies_live_voice_profiles
 
     install_shared_skies_emergency_programme(app)
     install_shared_skies_live_assist(app)
     install_shared_skies_live_voice(app)
     install_shared_skies_live_voice_profiles(app)
+    install_shared_skies_live_voice_bindings(app)
 
 
 __all__ = ["install_shared_sky_live_community", "PUBLIC_LIVE_PREFIXES"]
