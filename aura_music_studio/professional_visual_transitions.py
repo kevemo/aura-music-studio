@@ -15,7 +15,7 @@ router = APIRouter(prefix="/creative", tags=["Professional Visual Transitions"])
 
 VISUAL_TRANSITIONS_KEY = "visual_transitions_v1"
 VisualTransitionKind = Literal["fade_in", "fade_out", "cross_dissolve"]
-VisualTransitionEasing = Literal["linear", "smooth"]
+VisualTransitionEasing = Literal["linear"]
 _VISUAL_ITEM_KINDS = {"video_clip", "image_layer"}
 
 
@@ -165,8 +165,10 @@ def validate_visual_transition(
             raise ValueError("Cross-dissolve duration cannot exceed either item duration")
 
         ordered = list(left_track.get("item_ids") or [])
-        if ordered.index(left["id"]) >= ordered.index(right["id"]):
-            raise ValueError("Incoming cross-dissolve item must follow the outgoing item in track order")
+        left_index = ordered.index(left["id"])
+        right_index = ordered.index(right["id"])
+        if right_index != left_index + 1:
+            raise ValueError("cross_dissolve requires adjacent outgoing and incoming items in track order")
 
         left_end = float(left.get("start") or 0.0) + float(left.get("duration") or 0.0)
         expected_right_start = left_end - duration
@@ -271,6 +273,7 @@ def list_visual_transitions(project_name: str, sequence_id: str, request: Reques
     return {
         "transitions": [row.model_dump(mode="json") for row in rows],
         "supported": ["fade_in", "fade_out", "cross_dissolve"],
+        "easing": ["linear"],
         "audio_crossfade": False,
         "arbitrary_filter_strings": False,
     }
