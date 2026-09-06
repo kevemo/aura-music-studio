@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field
 
 from .aura_effect_system_creator import EffectNodeSpec, EffectSystemSpec, compile_effect_system, make_effect_system
 from .aura_effect_system_portal import effect_system_creator_page
+from .aura_effect_system_preview_tokens import (
+    consume_effect_system_preview_token,
+    issue_effect_system_preview_token,
+)
 from .aura_effect_system_project import (
     apply_effect_system,
     list_saved_effect_systems,
@@ -49,6 +53,8 @@ class EffectSystemGraphRequest(BaseModel):
 
 
 class EffectSystemApplyRequest(EffectSystemGraphRequest):
+    # Compatibility name retained for the existing creator client. This field now carries an
+    # opaque one-time server-issued preview proof rather than a client-computable graph digest.
     expected_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-fA-F]{64}$")
 
 
@@ -218,6 +224,12 @@ def preview_member_effect_system(
             source_prompt_fingerprint=body.source_prompt_fingerprint,
             entitlement_store=effect_entitlement_store,
         )
+        proof = issue_effect_system_preview_token(
+            project,
+            user_id=user_id,
+            track_id=str(result["track_id"]),
+            fingerprint=str(result["fingerprint"]),
+        )
     except (FileNotFoundError, KeyError, OSError, PermissionError, RuntimeError, TypeError, ValueError) as exc:
         raise _http_project_error(exc) from exc
     return {
@@ -225,7 +237,11 @@ def preview_member_effect_system(
         "plan": member.plan.id,
         "editable_graph": True,
         "coin_unit": PUBLIC_COIN_UNIT,
-        "preview_token": result["fingerprint"],
+        "preview_token": proof["token"],
+        "preview_token_expires_in_seconds": proof["expires_in_seconds"],
+        "preview_token_one_time": True,
+        "preview_token_server_authoritative": True,
+        "preview_evidence_persisted": True,
         "apply_requires_matching_preview_token": True,
     }
 
@@ -241,10 +257,15 @@ def apply_member_effect_system(
     spec = _spec(body.system)
     try:
         compiled = compile_effect_system(spec)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if compiled.fingerprint.casefold() != body.expected_fingerprint.casefold():
-        raise HTTPException(409, "Effect-system graph changed after preview; preview the current graph again before apply")
+        consume_effect_system_preview_token(
+            project,
+            body.expected_fingerprint,
+            user_id=user_id,
+            track_id=track_id,
+            fingerprint=compiled.fingerprint,
+        )
+    except (OSError, PermissionError, RuntimeError, TypeError, ValueError) as exc:
+        raise _http_project_error(exc) from exc
     try:
         result = apply_effect_system(
             project,
@@ -262,6 +283,8 @@ def apply_member_effect_system(
         "plan": member.plan.id,
         "coin_unit": PUBLIC_COIN_UNIT,
         "preview_token_verified": True,
+        "preview_token_consumed": True,
+        "preview_token_server_authoritative": True,
         "entitlements_rechecked_at_apply": True,
     }
 
