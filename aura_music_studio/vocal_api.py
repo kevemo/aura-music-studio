@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assets import AssetLibrary
@@ -11,9 +12,13 @@ from .layers import generate_complementary_layer
 from .project import ProjectWorkspace
 from .rights import RightsLedger
 from .tenant_storage import project_path
-from .voice import convert_singing_voice
+from .voice_conversion_workflow import (
+    commit_voice_conversion_candidate,
+    generate_voice_conversion_candidate,
+    get_candidate,
+)
 
-router = APIRouter(tags=["Aura Vocals & Harmony"])
+router = APIRouter(tags=["Rhiannon Vocals & Harmony"])
 
 
 class VoiceConvertRequest(BaseModel):
@@ -21,6 +26,13 @@ class VoiceConvertRequest(BaseModel):
     voice_profile_id: str
     similarity: float = Field(default=0.8, ge=0.0, le=1.0)
     pitch_shift: int = Field(default=0, ge=-24, le=24)
+
+
+class VoiceConvertCommitRequest(BaseModel):
+    candidate_id: str = Field(min_length=1, max_length=120)
+    start_seconds: float = Field(default=0.0, ge=0.0, le=12 * 60 * 60)
+    target_track_id: str | None = Field(default=None, max_length=120)
+    track_name: str | None = Field(default=None, max_length=160)
 
 
 class HarmonyRequest(BaseModel):
@@ -71,40 +83,89 @@ def list_voice_profiles(project_name: str):
 
 @router.post("/projects/{project_name}/voice-convert")
 def voice_convert(project_name: str, request: VoiceConvertRequest):
+    """Generate a private real-audio conversion candidate; do not mutate the DAW yet."""
     project = _project(project_name)
-    source = _audio_asset(project, request.source_asset_id)
-    rights_root = project / ".aura_rights"
-    ledger = RightsLedger(rights_root)
+    _audio_asset(project, request.source_asset_id)
     try:
-        profile = ledger.get_voice(request.voice_profile_id)
-    except KeyError as exc:
-        raise HTTPException(404, "Aura Voice Profile not found") from exc
-    try:
-        profile.assert_usable("voice_conversion")
-    except PermissionError as exc:
-        raise HTTPException(403, str(exc)) from exc
-
-    output = project / "output" / "voices" / f"{Path(source.name).stem}_{profile.id[:8]}_converted.wav"
-    try:
-        path = convert_singing_voice(
-            project / source.path,
-            output,
-            rights_root=rights_root,
-            voice_profile_id=profile.id,
+        candidate = generate_voice_conversion_candidate(
+            project,
+            source_asset_id=request.source_asset_id,
+            voice_profile_id=request.voice_profile_id,
             similarity=request.similarity,
             pitch_shift=request.pitch_shift,
         )
+    except KeyError as exc:
+        raise HTTPException(404, "Audio asset or Voice Profile not found") from exc
     except PermissionError as exc:
-        # Consent may be withdrawn after request admission but before synthesis begins.
         raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(503, f"Voice conversion unavailable: {type(exc).__name__}: {exc}") from exc
     return {
-        "path": str(path),
-        "voice_profile_id": profile.id,
-        "voice_owner": profile.owner_label,
-        "consent_checked": True,
-        "consent_checked_at_execution": True,
+        "candidate_id": candidate.id,
+        "state": candidate.state,
+        "audition_required": True,
+        "committed": False,
+        "voice_profile_id": candidate.voice_profile_id,
+        "source_asset_id": candidate.source_asset_id,
+        "consent_checked_at_generation": True,
+        "authoritative_daw_mutated": False,
+        "audio_origin": "consent_gated_voice_conversion_candidate",
+    }
+
+
+@router.get("/projects/{project_name}/voice-convert")
+def audition_voice_conversion(project_name: str, candidate_id: str):
+    project = _project(project_name)
+    try:
+        candidate = get_candidate(project, candidate_id)
+        path = (project / candidate.candidate_path).resolve()
+        if project.resolve() not in path.parents or not path.is_file():
+            raise FileNotFoundError(candidate.candidate_path)
+    except (KeyError, FileNotFoundError):
+        raise HTTPException(404, "Voice conversion candidate not found")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return FileResponse(
+        path,
+        media_type="audio/wav",
+        filename=f"Rhiannon_Voice_Conversion_{candidate.id[:8]}.wav",
+        headers={"Cache-Control": "private, no-store"},
+    )
+
+
+@router.patch("/projects/{project_name}/voice-convert")
+def commit_voice_conversion(project_name: str, request: VoiceConvertCommitRequest):
+    """Commit an auditioned candidate only after a fresh consent/tenant authorization lookup."""
+    project = _project(project_name)
+    try:
+        candidate = commit_voice_conversion_candidate(
+            project,
+            candidate_id=request.candidate_id,
+            start_seconds=request.start_seconds,
+            target_track_id=request.target_track_id,
+            track_name=request.track_name,
+        )
+    except KeyError as exc:
+        raise HTTPException(404, "Voice conversion candidate or target track not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "candidate_id": candidate.id,
+        "state": candidate.state,
+        "committed": True,
+        "asset_id": candidate.committed_asset_id,
+        "track_id": candidate.committed_track_id,
+        "clip_id": candidate.committed_clip_id,
+        "pre_commit_revision_id": candidate.pre_commit_revision_id,
+        "voice_profile_id": candidate.voice_profile_id,
+        "source_asset_id": candidate.source_asset_id,
+        "consent_rechecked_at_commit": True,
         "audio_origin": "consent_gated_voice_conversion",
     }
 
@@ -151,7 +212,7 @@ def harmonies(project_name: str, request: HarmonyRequest):
             profile = ledger.get_voice(request.voice_profile_id)
             profile.assert_usable("backing_harmony")
         except KeyError as exc:
-            raise HTTPException(404, "Aura Voice Profile not found") from exc
+            raise HTTPException(404, "Rhiannon Voice Profile not found") from exc
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
 
