@@ -70,7 +70,7 @@ def _install_routes_once(routes) -> None:
 
 
 def install_professional_editor_patch_guard() -> None:
-    """Install guarded editor, render, proxy, visual-effects, TV and cinema production surfaces."""
+    """Install guarded editor, render, proxy, visual-effects, TV, cinema and transition surfaces."""
     guarded_routes = list(router.routes)
     for guarded in reversed(guarded_routes):
         signature = (getattr(guarded, "path", None), frozenset(getattr(guarded, "methods", set())))
@@ -82,12 +82,19 @@ def install_professional_editor_patch_guard() -> None:
         if not already_installed:
             professional_editor_router.routes.insert(0, guarded)
 
+    from . import professional_editor_render_api as render_api_module
+    from . import professional_editor_render_jobs as render_jobs_module
     from .cinema_production import router as cinema_production_router
     from .legacy_visual_effects import install_legacy_visual_effects
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
     from .professional_video_proxy import router as video_proxy_router
     from .professional_video_proxy_hardening import install_professional_video_proxy_hardening
+    from .professional_video_transition_compositor import (
+        TransitionAwareGroupedVideoCompositor,
+        TransitionAwareUniversalVisualVideoCompositor,
+    )
+    from .professional_visual_transitions import router as visual_transition_router
     from .tv_production import router as tv_production_router
     from .visual_effect_catalogue import router as visual_effect_router
     from .visual_effect_catalogue_hardening import (
@@ -100,6 +107,13 @@ def install_professional_editor_patch_guard() -> None:
     install_legacy_visual_effects()
     install_visual_effect_catalogue_hardening()
     install_professional_video_proxy_hardening()
+
+    # Transition-aware renderers wrap the existing canonical production renderers. They only
+    # consume strictly validated sequence transition resources and never accept caller-supplied
+    # FFmpeg/filter strings. The original renderer classes remain the delegated implementation.
+    render_api_module.UniversalVisualVideoCompositor = TransitionAwareUniversalVisualVideoCompositor
+    render_jobs_module.GroupedUnifiedAdvancedVideoCompositor = TransitionAwareGroupedVideoCompositor
+
     _install_routes_once(render_router.routes)
     _install_routes_once(render_jobs_router.routes)
     # Editing proxies are preview-only project assets; final renderers retain the original item
@@ -109,6 +123,7 @@ def install_professional_editor_patch_guard() -> None:
     # endpoints prepare delivery metadata only; Shared Skies transmission remains Chat 5 authority.
     _install_routes_once(tv_production_router.routes)
     _install_routes_once(cinema_production_router.routes)
+    _install_routes_once(visual_transition_router.routes)
     # Guarded duplicate signatures are intentionally installed first. The final route-integrity
     # pass retains the hardened endpoint and removes the later legacy signature exactly once.
     _install_routes_once(visual_effect_hardening_router.routes)
