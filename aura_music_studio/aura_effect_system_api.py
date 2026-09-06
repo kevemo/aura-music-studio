@@ -21,6 +21,7 @@ from .aura_effect_system_project import (
     save_effect_system,
 )
 from .aura_effect_system_prompt import compose_effect_system_from_prompt
+from .creative_catalogue import public_catalogue
 from .creative_effect_entitlements import PUBLIC_COIN_UNIT, store as effect_entitlement_store
 from .tenant_storage import project_path
 
@@ -113,6 +114,38 @@ def _http_project_error(exc: Exception) -> HTTPException:
     if isinstance(exc, RuntimeError):
         return HTTPException(409, str(exc))
     return HTTPException(400, str(exc))
+
+
+def list_member_effect_catalogue(
+    request: Request,
+    query: str = "",
+    studio: str = "music",
+    limit: int = 50,
+):
+    member, _user_id = _require_member(request)
+    query = str(query or "").strip()
+    studio = str(studio or "").strip().casefold()
+    if len(query) > 160:
+        raise HTTPException(400, "Catalogue search query is too long")
+    if not studio or len(studio) > 40 or not studio.replace("-", "").replace("_", "").isalnum():
+        raise HTTPException(400, "Invalid catalogue studio filter")
+    if limit < 1 or limit > 100:
+        raise HTTPException(400, "Catalogue result limit must be between 1 and 100")
+    rows = public_catalogue(query, studio=studio)
+    visible = rows[:limit]
+    return {
+        "items": visible,
+        "count": len(visible),
+        "total_matches": len(rows),
+        "query": query,
+        "studio": studio,
+        "limit": limit,
+        "plan": member.plan.id,
+        "public_metadata_only": True,
+        "project_mutated": False,
+        "entitlement_granted": False,
+        "execution_authorized": False,
+    }
 
 
 def compose_member_effect_system(body: EffectSystemPromptRequest, request: Request):
@@ -307,6 +340,7 @@ def effect_system_route_registrations(prefix: str) -> tuple[tuple[str, Any, str]
     base = f"{prefix}/effect-systems"
     return (
         ("/creative/effect-system-creator", effect_system_creator_page, "GET"),
+        (f"{base}/catalogue", list_member_effect_catalogue, "GET"),
         (f"{base}/compose", compose_member_effect_system, "POST"),
         (f"{base}/projects/{{project_name}}", list_member_effect_systems, "GET"),
         (f"{base}/projects/{{project_name}}/save", save_member_effect_system, "POST"),
@@ -327,6 +361,7 @@ __all__ = [
     "compose_member_effect_system",
     "effect_system_route_registrations",
     "get_member_effect_system",
+    "list_member_effect_catalogue",
     "list_member_effect_systems",
     "preview_member_effect_system",
     "restore_member_effect_system_revision",
