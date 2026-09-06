@@ -147,13 +147,18 @@ def test_save_list_and_load_round_trip_preserves_prompt_provenance(member_projec
     assert (project / "aura_session.json").is_file()
 
 
-def test_preview_is_non_mutating_and_issues_graph_fingerprint_token(member_project):
+def test_preview_is_non_mutating_and_issues_server_authoritative_one_time_proof(member_project):
     project, track_id = member_project
     before = (project / "aura_session.json").read_bytes()
     body = EffectSystemGraphRequest(system=_definition(), source_prompt_fingerprint=_prompt_hash())
     payload = preview_member_effect_system("song", track_id, body, _request())
     assert payload["can_apply"] is True
-    assert payload["preview_token"] == payload["fingerprint"]
+    assert len(payload["preview_token"]) == 64
+    assert payload["preview_token"] != payload["fingerprint"]
+    assert payload["preview_token_one_time"] is True
+    assert payload["preview_token_server_authoritative"] is True
+    assert payload["preview_evidence_persisted"] is True
+    assert payload["preview_token_expires_in_seconds"] > 0
     assert payload["apply_requires_matching_preview_token"] is True
     assert payload["project_mutated"] is False
     assert payload["source_media_mutated"] is False
@@ -161,18 +166,21 @@ def test_preview_is_non_mutating_and_issues_graph_fingerprint_token(member_proje
     assert (project / "aura_session.json").read_bytes() == before
 
 
-def test_apply_rejects_changed_graph_token_before_revision_or_mutation(member_project):
+def test_apply_rejects_changed_graph_preview_proof_before_revision_or_mutation(member_project):
     project, track_id = member_project
     before = (project / "aura_session.json").read_bytes()
+    preview_body = EffectSystemGraphRequest(system=_definition(), source_prompt_fingerprint=_prompt_hash())
+    preview = preview_member_effect_system("song", track_id, preview_body, _request())
+    changed = _definition(version=2)
     body = EffectSystemApplyRequest(
-        system=_definition(),
+        system=changed,
         source_prompt_fingerprint=_prompt_hash(),
-        expected_fingerprint="0" * 64,
+        expected_fingerprint=preview["preview_token"],
     )
     with pytest.raises(HTTPException) as exc:
         apply_member_effect_system("song", track_id, body, _request())
-    assert exc.value.status_code == 409
-    assert "preview" in str(exc.value.detail).casefold()
+    assert exc.value.status_code in {403, 409}
+    assert "preview" in str(exc.value.detail).casefold() or "graph changed" in str(exc.value.detail).casefold()
     assert (project / "aura_session.json").read_bytes() == before
     revision_root = project / "work" / "revisions"
     assert not revision_root.exists() or not any(revision_root.iterdir())
