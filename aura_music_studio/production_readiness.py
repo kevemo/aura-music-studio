@@ -30,6 +30,15 @@ def _stripe_readiness(
     )
 
 
+def _monitoring_authorized(
+    token: str | None,
+    environ: Mapping[str, str] | None = None,
+) -> tuple[bool, str]:
+    """Preserve the established monitoring-auth helper through the lazy facade."""
+
+    return _impl._monitoring_authorized(token, environ)
+
+
 def build_readiness_report(
     environ: Mapping[str, str] | None = None,
     *,
@@ -99,4 +108,4 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["_stripe_readiness", "build_readiness_report", "router"]
+__all__ = ["_monitoring_authorized", "_stripe_readiness", "build_readiness_report", "router"]
