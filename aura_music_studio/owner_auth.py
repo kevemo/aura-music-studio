@@ -14,6 +14,7 @@ from starlette.responses import Response
 
 OWNER_COOKIE = "lss_admin_session"
 OWNER_SESSION_HOURS = 12
+OWNER_SESSION_IDLE_MINUTES = 30
 
 
 def _now() -> datetime:
@@ -22,6 +23,18 @@ def _now() -> datetime:
 
 def _iso(value: datetime | None = None) -> str:
     return (value or _now()).isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _hash(value: str) -> str:
@@ -39,7 +52,9 @@ class OwnerSessionStore:
 
     The deployment owner key is used only to bootstrap a login. The browser never retains
     that deployment secret after authentication; only the SHA-256 hash of the random
-    session token is stored in SQLite.
+    session token is stored in SQLite. Owner sessions have both an absolute lifetime and
+    a bounded inactivity lifetime so an unattended/stolen session cannot remain valid for
+    the entire absolute window after use stops.
     """
 
     def __init__(self, db_path: str | Path | None = None):
@@ -93,15 +108,26 @@ class OwnerSessionStore:
     def valid(self, token: str | None, *, touch: bool = True) -> bool:
         if not token:
             return False
-        now = _iso()
+        now_dt = _now()
+        now = _iso(now_dt)
         with self._connect() as con:
             row = con.execute(
-                """SELECT id FROM owner_sessions
+                """SELECT id,last_seen_at FROM owner_sessions
                    WHERE token_hash=? AND revoked_at IS NULL AND expires_at>?""",
                 (_hash(token), now),
             ).fetchone()
             if not row:
                 return False
+
+            last_seen = _parse_iso(row["last_seen_at"])
+            idle_cutoff = now_dt - timedelta(minutes=OWNER_SESSION_IDLE_MINUTES)
+            if last_seen is None or last_seen <= idle_cutoff:
+                con.execute(
+                    "UPDATE owner_sessions SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                    (now, row["id"]),
+                )
+                return False
+
             if touch:
                 con.execute("UPDATE owner_sessions SET last_seen_at=? WHERE id=?", (now, row["id"]))
         return True
