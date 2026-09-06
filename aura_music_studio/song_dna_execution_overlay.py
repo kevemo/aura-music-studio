@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
 from .audio_fx_expansion import install_audio_fx_expansion
+from .audio_restoration_presets import install_audio_restoration_presets
 from .chord_intelligence import router as chord_intelligence_router
 from .chord_midi import router as chord_midi_router
 from .daw_fx_lab import router as daw_fx_lab_router
@@ -19,6 +20,7 @@ from .voice_house_portal import router as voice_house_portal_router
 from .voice_profile_lifecycle import router as voice_profile_lifecycle_router
 
 install_audio_fx_expansion()
+install_audio_restoration_presets()
 
 router = APIRouter()
 router.include_router(chord_intelligence_router)
