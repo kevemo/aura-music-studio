@@ -29,13 +29,16 @@ def test_voice_layer_injects_only_into_aura_html():
     client = TestClient(_app())
     aura = client.get("/aura-intelligence")
     assert aura.status_code == 200
+    assert "/aura-intelligence/rhiannon-turn-state.js" in aura.text
     assert "/aura-intelligence/voice-conversation.js" in aura.text
 
     other = client.get("/other")
+    assert "/aura-intelligence/rhiannon-turn-state.js" not in other.text
     assert "/aura-intelligence/voice-conversation.js" not in other.text
 
     api = client.get("/api-test")
     assert api.json() == {"ok": True}
+    assert "rhiannon-turn-state.js" not in api.text
     assert "voice-conversation.js" not in api.text
 
 
@@ -53,7 +56,7 @@ def test_voice_script_uses_vad_audited_endpoints_and_truthful_avatar_speech_life
     assert "source:'tts_lifecycle'" in script.text
     assert "speaking:true" in script.text
     assert "speaking:false,viseme:'sil'" in script.text
-    assert "do not invent phoneme or viseme timestamps" in script.text
+    assert "precise phoneme/viseme frames remain unavailable until a timing-capable runtime supplies them" in script.text
     # The generic fallback TTS is audio-only. It must not synthesize fake phoneme timing.
     assert "phonemeTimes" not in script.text
     assert "fakeViseme" not in script.text
