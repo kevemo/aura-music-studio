@@ -8,6 +8,28 @@ from . import _production_readiness_impl as _impl
 _original_build_readiness_report = _impl.build_readiness_report
 
 
+def _stripe_readiness(
+    env: Mapping[str, str],
+    *,
+    production: bool,
+    staging: bool = False,
+    nonproduction: bool | None = None,
+) -> tuple[bool, list[str], dict]:
+    """Compatibility facade for the hardened Stripe readiness helper.
+
+    Historical callers used ``staging=`` while the hardened implementation generalises the
+    safety boundary to every non-production environment. Preserve the old callable surface
+    without weakening that policy or duplicating payment authority.
+    """
+
+    effective_nonproduction = bool(staging) if nonproduction is None else bool(nonproduction)
+    return _impl._stripe_readiness(
+        env,
+        production=bool(production),
+        nonproduction=effective_nonproduction,
+    )
+
+
 def build_readiness_report(
     environ: Mapping[str, str] | None = None,
     *,
@@ -77,4 +99,4 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["build_readiness_report", "router"]
+__all__ = ["_stripe_readiness", "build_readiness_report", "router"]
