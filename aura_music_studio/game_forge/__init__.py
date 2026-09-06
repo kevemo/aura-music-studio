@@ -1,5 +1,18 @@
 """Canonical Game Forge Creative Labs runtime package."""
 
+from .procedural import (
+    DEFAULT_GENERATOR_REGISTRY,
+    DeterministicRng,
+    DuplicateGeneratorError,
+    GenerationError,
+    GenerationExecutionError,
+    GenerationInputError,
+    GenerationRequest,
+    GenerationResult,
+    GeneratorRegistry,
+    UnknownGeneratorError,
+    generate,
+)
 from .visual_logic import (
     DEFAULT_OPERATION_REGISTRY,
     ExecutionResult,
@@ -14,14 +27,25 @@ from .visual_logic import (
 )
 
 __all__ = [
+    "DEFAULT_GENERATOR_REGISTRY",
     "DEFAULT_OPERATION_REGISTRY",
+    "DeterministicRng",
+    "DuplicateGeneratorError",
     "ExecutionResult",
+    "GenerationError",
+    "GenerationExecutionError",
+    "GenerationInputError",
+    "GenerationRequest",
+    "GenerationResult",
+    "GeneratorRegistry",
     "GraphExecutionError",
     "GraphOutputRef",
     "GraphValidationError",
+    "UnknownGeneratorError",
     "ValueType",
     "VisualEdge",
     "VisualGraph",
     "VisualLogicRuntime",
     "VisualNode",
+    "generate",
 ]
