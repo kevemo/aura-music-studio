@@ -221,13 +221,13 @@ def test_transition_renderer_executes_real_alpha_fade_without_mutating_source(tm
     media = tmp_path / "media"
     media.mkdir(parents=True)
     source = media / "red.png"
-    Image.new("RGBA", (16, 16), (255, 0, 0, 255)).save(source)
+    Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(source)
     original = source.read_bytes()
 
     store = ProfessionalEditorStore(tmp_path)
     store.initialize("transition-render-test")
     sequence = store.create_sequence(
-        kind="video", name="Picture", width=16, height=16, fps=24.0, duration=2.0
+        kind="video", name="Picture", width=64, height=64, fps=24.0, duration=2.0
     )
     track = store.create_track(sequence.id, kind="video", name="V1")
     item = store.create_item(
@@ -272,8 +272,8 @@ def test_transition_renderer_executes_real_alpha_fade_without_mutating_source(tm
             check=True,
         )
         pixels = completed.stdout
-        assert len(pixels) == 16 * 16 * 4
-        return sum(pixels[3::4]) / (16 * 16 * 255.0)
+        assert len(pixels) == 64 * 64 * 4
+        return sum(pixels[3::4]) / (64 * 64 * 255.0)
 
     early = alpha_at(0.05)
     late = alpha_at(0.95)
