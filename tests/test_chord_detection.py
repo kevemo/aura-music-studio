@@ -20,7 +20,6 @@ from aura_music_studio.chord_detection import (
 )
 from aura_music_studio.chord_detection_portal import discover_project_audio_refs
 from aura_music_studio.plans import get_plan
-from aura_music_studio.song_dna_execution_overlay import router as execution_router
 
 
 def _triad(midi_notes: tuple[int, int, int], *, sr: int = 22050, seconds: float = 2.0) -> np.ndarray:
@@ -147,8 +146,12 @@ def test_candidate_integrity_rejects_tampering(tmp_path):
         _load_candidate(tmp_path, candidate_id, payload["candidate_sha256"])
 
 
-def test_detection_routes_are_mounted_in_song_dna_execution_overlay():
-    paths = {getattr(route, "path", "") for route in execution_router.routes}
+def test_detection_routes_are_mounted_in_production_application():
+    # The production entrypoint composes nested APIRouters and then deduplicates exact routes.
+    # Assert the final FastAPI surface rather than brittle intermediate router internals.
+    from app import app as production_app
+
+    paths = {getattr(route, "path", "") for route in production_app.routes}
     assert "/projects/{project_name}/song-dna/chords/detect-preview" in paths
     assert "/projects/{project_name}/song-dna/chords/detect-commit" in paths
     assert "/song-editor/{project_name}/chord-detection" in paths
