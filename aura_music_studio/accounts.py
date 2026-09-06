@@ -382,6 +382,12 @@ class AccountStore:
             self._record_login_failure(email)
             return None
 
+        # A disabled account must fail closed at the canonical credential boundary.
+        # Keep the same generic authentication result used for bad credentials.
+        if user.get("disabled_at"):
+            self._record_login_failure(email)
+            return None
+
         self.clear_login_throttle(email)
         if needs_upgrade:
             upgraded = _hash_password_argon2id(password)
@@ -395,6 +401,9 @@ class AccountStore:
         return user
 
     def create_session(self, user_id: str) -> str:
+        user = self.get_user(user_id)
+        if not user or user.get("disabled_at"):
+            raise PermissionError("Eligible account required")
         token = secrets.token_urlsafe(32)
         now = _utcnow()
         with self._connect() as con:
@@ -410,7 +419,8 @@ class AccountStore:
         with self._connect() as con:
             row = con.execute(
                 """SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-                   WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?""",
+                   WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
+                     AND u.disabled_at IS NULL""",
                 (_hash_secret(token), _iso()),
             ).fetchone()
         return dict(row) if row else None
