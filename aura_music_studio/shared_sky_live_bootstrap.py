@@ -81,6 +81,11 @@ def install_shared_sky_live_community(app: Any) -> None:
     existing moderation authority and never obtains independent moderation or provider-write power.
     Auto Cue is a creator-private browser-local prompter: script text is never posted to or persisted
     by Shared Skies.
+
+    LIVE voice integration consumes Chat 1 Rhiannon capability/provenance contracts and Chat 2 voice
+    authority without creating another clone/profile engine. Current readiness distinguishes batch
+    speech processing from genuine real-time voice/caption paths, and emergency Programme muting is
+    independent of any failing AI voice processor.
     """
 
     access_control.PUBLIC_EXACT.add("/live-now")
@@ -123,9 +128,11 @@ def install_shared_sky_live_community(app: Any) -> None:
     # creating a second Studio authority or an import cycle during module construction.
     from .shared_skies_emergency_programme import install_shared_skies_emergency_programme
     from .shared_skies_live_assist import install_shared_skies_live_assist
+    from .shared_skies_live_voice import install_shared_skies_live_voice
 
     install_shared_skies_emergency_programme(app)
     install_shared_skies_live_assist(app)
+    install_shared_skies_live_voice(app)
 
 
 __all__ = ["install_shared_sky_live_community", "PUBLIC_LIVE_PREFIXES"]
