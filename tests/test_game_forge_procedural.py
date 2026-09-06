@@ -194,9 +194,13 @@ def test_star_system_generator_supports_explicit_bounded_planet_count():
         generate(request("star_system", parameters={"planet_count": 13}))
 
 
-def test_default_registry_is_explicit_and_contains_only_initial_canonical_generators():
+def test_default_registry_is_explicit_and_contains_only_canonical_generators():
     assert DEFAULT_GENERATOR_REGISTRY.registered_generators() == (
         ("mission", "v1"),
+        ("planet", "v1"),
+        ("ship", "v1"),
+        ("skill_tree", "v1"),
         ("star_system", "v1"),
+        ("vehicle", "v1"),
         ("weapon", "v1"),
     )

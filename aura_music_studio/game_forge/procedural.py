@@ -553,10 +553,13 @@ def _generate_star_system(parameters: Mapping[str, Any], rng: DeterministicRng) 
 
 
 def build_default_generator_registry() -> GeneratorRegistry:
+    from .procedural_expansion import register_procedural_expansion
+
     registry = GeneratorRegistry()
     registry.register("weapon", "v1", _generate_weapon)
     registry.register("mission", "v1", _generate_mission)
     registry.register("star_system", "v1", _generate_star_system)
+    register_procedural_expansion(registry)
     return registry
 
 
