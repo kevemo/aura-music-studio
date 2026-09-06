@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -36,6 +37,7 @@ def test_preview_token_is_opaque_bound_and_one_time(tmp_path):
     assert len(token) == 64
     assert proof["one_time"] is True
     assert proof["server_authoritative"] is True
+    assert proof["raw_token_persisted"] is False
     assert proof["expires_in_seconds"] == PREVIEW_TOKEN_TTL_SECONDS
 
     result = consume_effect_system_preview_token(
@@ -48,6 +50,8 @@ def test_preview_token_is_opaque_bound_and_one_time(tmp_path):
     )
     assert result["consumed"] is True
     assert result["fingerprint"] == FINGERPRINT
+    assert result["raw_token_persisted"] is False
+    assert "token" not in result
 
     with pytest.raises(PermissionError, match="missing, expired or already consumed"):
         consume_effect_system_preview_token(
@@ -147,7 +151,7 @@ def test_preview_token_rejects_path_or_format_injection(tmp_path):
             )
 
 
-def test_preview_evidence_file_contains_no_token_or_secret_material(tmp_path):
+def test_preview_evidence_uses_hash_only_storage_key_and_contains_no_token(tmp_path):
     project = _project(tmp_path)
     proof = issue_effect_system_preview_token(
         project,
@@ -156,11 +160,20 @@ def test_preview_evidence_file_contains_no_token_or_secret_material(tmp_path):
         fingerprint=FINGERPRINT,
         now=6000.0,
     )
-    path = project / "work" / "effect_system_previews" / f"{proof['token']}.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    root = project / "work" / "effect_system_previews"
+    paths = list(root.glob("*.json"))
+    assert len(paths) == 1
+    path = paths[0]
 
+    expected_storage_key = hashlib.sha256(proof["token"].encode("ascii")).hexdigest()
+    assert path.name == f"{expected_storage_key}.json"
+    assert proof["token"] not in path.name
+
+    raw = path.read_text(encoding="utf-8")
+    payload = json.loads(raw)
     assert payload["fingerprint"] == FINGERPRINT
     assert payload["user_id"] == "member-1"
     assert payload["track_id"] == "track-1"
+    assert proof["token"] not in raw
     assert "token" not in payload
     assert "secret" not in payload
