@@ -8,6 +8,7 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
+from .archive_admission import require_safe_zip, structural_zip_policy
 from .request_context import reset_current_user_id, set_current_user_id
 from .tenant_storage import project_path
 
@@ -33,6 +34,17 @@ def _max_bytes() -> int:
         return max(64 * 1024 * 1024, int(os.getenv("LSS_NODE_MAX_BUNDLE_BYTES", str(2 * 1024**3))))
     except Exception:
         return 2 * 1024**3
+
+
+def _transfer_zip_policy():
+    limit = _max_bytes()
+    return structural_zip_policy(
+        max_archive_bytes=limit,
+        max_uncompressed_bytes=limit,
+        max_member_bytes=limit,
+        max_members=100_000,
+        max_compression_ratio=1000.0,
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -100,6 +112,9 @@ def build_project_bundle(job: dict, destination: Path) -> dict:
 
 def extract_project_bundle(bundle: Path, destination: Path) -> dict:
     """Safely extract and verify a coordinator-created project bundle on an ESP node."""
+    # Apply the cross-cutting Chat 7 structural archive gate before any member is opened.
+    # Domain-specific manifest, tenant and checksum verification below remains authoritative.
+    require_safe_zip(bundle, policy=_transfer_zip_policy())
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(bundle, "r") as archive:
         names = archive.namelist()
@@ -178,6 +193,8 @@ def build_result_bundle(project: Path, job_id: str, destination: Path) -> dict:
 
 def apply_result_bundle(job: dict, bundle: Path) -> dict:
     """Verify and merge a trusted node result into the correct tenant project."""
+    # A compromised or malformed node response is rejected structurally before tenant state is touched.
+    require_safe_zip(bundle, policy=_transfer_zip_policy())
     context = set_current_user_id(job["user_id"])
     staging_dir: Path | None = None
     try:
