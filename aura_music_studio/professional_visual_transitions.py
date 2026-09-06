@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 from . import visual_effect_catalogue as catalogue
 from . import visual_effect_catalogue_hardening as hardening
-from .professional_editor_renderer import EditorRenderUnsupported
 
 
 TRANSITION_EFFECT_IDS = frozenset(
@@ -75,6 +74,8 @@ def validate_transition_effect(effect: dict[str, Any], item: dict[str, Any]) -> 
     runtime_type = _runtime_type(effect)
     if runtime_type not in TRANSITION_RUNTIME_TYPES:
         raise ValueError("Unknown visual transition runtime")
+    if item.get("kind") != "video_clip":
+        raise ValueError("Visual transitions require a video_clip editor item")
     mix = _finite(effect.get("mix", 1.0), field="transition mix")
     if abs(mix - 1.0) > 1e-9:
         raise ValueError("Visual transitions execute directly and require mix=1")
@@ -98,8 +99,6 @@ def validate_transition_apply(
     target = items.get(target_id)
     if target is None:
         raise KeyError(target_id)
-    if target.get("kind") != "video_clip":
-        raise ValueError("Visual transitions require a video_clip editor item")
 
     candidate = {
         "type": runtime_type,
@@ -118,15 +117,31 @@ def validate_transition_apply(
     if existing:
         raise ValueError("A video item may have only one active visual transition")
 
-    track = tracks.get(str(target.get("track_id") or ""))
-    if track is None:
+    track = next(
+        (
+            row
+            for row in tracks.values()
+            if target_id in [str(item_id) for item_id in row.get("item_ids", [])]
+        ),
+        None,
+    )
+    if track is None or track.get("kind") != "video":
         raise ValueError("Visual transition target must belong to a current video track")
-    ordered = [items[item_id] for item_id in track.get("item_ids", []) if item_id in items]
-    ordered.append({**target, "effects": [candidate]})
-    deduped: dict[str, dict[str, Any]] = {}
-    for item in ordered:
-        deduped[str(item.get("id"))] = item
-    build_transition_envelopes(deduped.values())
+
+    ordered: list[dict[str, Any]] = []
+    for item_id in track.get("item_ids", []):
+        item = items.get(str(item_id))
+        if item is None:
+            continue
+        if str(item.get("id")) == target_id:
+            non_transition = [
+                effect
+                for effect in item.get("effects") or []
+                if not (effect.get("enabled", True) and is_transition_effect(effect))
+            ]
+            item = {**item, "effects": [*non_transition, candidate]}
+        ordered.append(item)
+    build_transition_envelopes(ordered)
 
 
 def _eligible_visual_items(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -145,8 +160,9 @@ def _eligible_visual_items(items: Iterable[dict[str, Any]]) -> list[dict[str, An
 def build_transition_envelopes(items: Iterable[dict[str, Any]]) -> dict[str, list[TransitionEnvelope]]:
     """Resolve bounded transition effects to absolute timeline alpha envelopes.
 
-    Cross dissolve lives on the incoming clip. The outgoing peer is inferred from the immediately
-    preceding visible item on the same track; users never provide raw peer ids or FFmpeg filters.
+    Cross dissolve lives on the incoming video clip. The outgoing peer is inferred from the
+    immediately preceding visible item on the same track; users never provide raw peer ids or
+    FFmpeg filters.
     """
     ordered = _eligible_visual_items(items)
     envelopes: dict[str, list[TransitionEnvelope]] = defaultdict(list)
