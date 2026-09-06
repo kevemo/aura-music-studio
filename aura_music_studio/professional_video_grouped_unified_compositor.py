@@ -22,10 +22,20 @@ from .professional_video_track_compositor import (
     _SUPPORTED_VIDEO_TRACK_BLEND_MODES,
 )
 from .professional_video_unified_compositor import UnifiedAdvancedVideoCompositor
+from .professional_visual_transitions import (
+    TRANSITION_RUNTIME_TYPES,
+    build_transition_envelopes,
+    is_transition_effect,
+)
 
 
 class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
-    """Render safe item-local state first, then compose complete visual tracks as groups."""
+    """Render safe item-local state first, then compose complete visual tracks as groups.
+
+    Normal effects/masks are converted to bounded transient media before grouped composition.
+    Visual transitions remain attached to the original timeline item so the grouped RGBA stage can
+    execute their alpha envelopes against real overlapping timeline items.
+    """
 
     def _validate_effect_state(self, state: dict[str, Any], sequence_id: str) -> None:
         sequences, tracks, items = self._branch_maps(state)
@@ -46,17 +56,25 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
             if track_blend not in _SUPPORTED_VIDEO_TRACK_BLEND_MODES:
                 raise EditorRenderUnsupported(f"Video track blend mode is not render-safe: {track_blend}")
 
-            for item_id in track.get("item_ids", []):
-                item = items.get(item_id)
-                if not item or not item.get("enabled", True):
-                    continue
+            track_items = [
+                items[item_id]
+                for item_id in track.get("item_ids", [])
+                if item_id in items and items[item_id].get("enabled", True)
+            ]
+            try:
+                build_transition_envelopes(track_items)
+            except ValueError as exc:
+                raise EditorRenderUnsupported(str(exc)) from exc
+
+            for item in track_items:
                 blend_mode = str(item.get("blend_mode") or "normal").strip().lower()
                 if blend_mode not in _SUPPORTED_VIDEO_ITEM_BLEND_MODES:
                     raise EditorRenderUnsupported(f"Video item blend mode is not render-safe: {blend_mode}")
 
                 effects = [effect for effect in item.get("effects") or [] if effect.get("enabled", True)]
+                render_effects = [effect for effect in effects if not is_transition_effect(effect)]
                 masks = [mask for mask in item.get("masks") or [] if mask.get("enabled", True)]
-                for effect in effects:
+                for effect in render_effects:
                     _video_effect_filter(effect)
                 for mask in masks:
                     shape = str(mask.get("shape") or "").lower()
@@ -68,7 +86,7 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
                         raise EditorRenderUnsupported("Keyframed video masks are not yet render-safe")
                 if masks and not _crop_is_default(item):
                     raise EditorRenderUnsupported("Video masks combined with crop are not yet render-safe")
-                if masks and effects and not _colour_is_default(item):
+                if masks and render_effects and not _colour_is_default(item):
                     raise EditorRenderUnsupported(
                         "Video masks combined with item effects and colour adjustments are not yet render-safe"
                     )
@@ -87,6 +105,7 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
         original_refs: set[str] = set()
         derived_count = 0
         masked_count = 0
+        transition_count = 0
         try:
             for track_id in sequence.get("track_ids", []):
                 track = tracks.get(track_id)
@@ -97,23 +116,30 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
                     if not item or not item.get("enabled", True):
                         continue
                     effects = [effect for effect in item.get("effects") or [] if effect.get("enabled", True)]
+                    transition_effects = [effect for effect in effects if is_transition_effect(effect)]
+                    render_effects = [effect for effect in effects if not is_transition_effect(effect)]
+                    transition_count += len(transition_effects)
                     masks = [mask for mask in item.get("masks") or [] if mask.get("enabled", True)]
                     pan = max(-1.0, min(1.0, _finite((item.get("audio") or {}).get("pan"), 0.0)))
                     source_ref = str(item.get("source_ref") or "").strip()
                     if source_ref:
                         original_refs.add(source_ref)
 
-                    if item.get("kind") in {"image_layer", "text"} and (effects or masks):
-                        item["source_ref"] = self._derive_still(item, derived_root)
+                    if item.get("kind") in {"image_layer", "text"} and (render_effects or masks):
+                        item_for_derive = deepcopy(item)
+                        item_for_derive["effects"] = render_effects
+                        item["source_ref"] = self._derive_still(item_for_derive, derived_root)
                         item["kind"] = "image_layer"
-                        item["effects"] = []
+                        item["effects"] = transition_effects
                         item["masks"] = []
                         derived_count += 1
                         masked_count += int(bool(masks))
-                    elif item.get("kind") == "video_clip" and (effects or masks or abs(pan) > 1e-8):
-                        item["source_ref"] = self._derive_video(item, derived_root, force_stereo=abs(pan) > 1e-8)
+                    elif item.get("kind") == "video_clip" and (render_effects or masks or abs(pan) > 1e-8):
+                        item_for_derive = deepcopy(item)
+                        item_for_derive["effects"] = render_effects
+                        item["source_ref"] = self._derive_video(item_for_derive, derived_root, force_stereo=abs(pan) > 1e-8)
                         item["source_in"] = 0.0
-                        item["effects"] = []
+                        item["effects"] = transition_effects
                         item["masks"] = []
                         derived_count += 1
                         masked_count += int(bool(masks))
@@ -121,7 +147,7 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
                         item["source_ref"] = self._derive_audio(item, derived_root)
                         item["source_in"] = 0.0
                         derived_count += 1
-                    elif effects or masks:
+                    elif render_effects or masks:
                         raise EditorRenderUnsupported(
                             f"Effects or masks are not render-safe for video item kind: {item.get('kind')}"
                         )
@@ -155,6 +181,9 @@ class GroupedUnifiedAdvancedVideoCompositor(UnifiedAdvancedVideoCompositor):
                 "track_effects_fail_closed": False,
                 "keyframed_track_effects_fail_closed": True,
                 "track_keyframes_fail_closed": True,
+                "supports_visual_transitions": sorted(TRANSITION_RUNTIME_TYPES),
+                "visual_transition_effects_preserved_for_grouped_composition": transition_count,
+                "visual_transition_user_filter_strings": False,
                 "source_media_mutated": False,
                 "unsupported_state_fails_closed": True,
             })
