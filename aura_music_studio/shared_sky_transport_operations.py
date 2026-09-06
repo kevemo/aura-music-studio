@@ -197,7 +197,7 @@ class TransportOperations:
             return {'destination_id': destination_id, 'state': 'live' if ok else 'reconnecting', 'failure': failure}
         return self._idem(user_id, broadcast_id, f'retry:{destination_id}', key, {}, run)
 
-    def _fail_destination(self, broadcast_id: str, destination_id: str, code: str, message: str, retryable: bool):
+    def _fail_destination(self, broadcast_id: str, destination_id: str, code: str, message: str, retryable: bool) -> DestinationState:
         with self.connect() as con:
             row = con.execute('SELECT retry_count FROM shared_sky_destination_runs WHERE broadcast_id=? AND destination_id=?', (broadcast_id, destination_id)).fetchone()
             count = int(row['retry_count'] or 0) if row else 0
@@ -205,8 +205,10 @@ class TransportOperations:
             retry = retryable and count < limit
             delay = min(300, 2 ** min(count, 8))
             next_at = iso(now() + timedelta(seconds=delay)) if retry else None
-            con.execute('UPDATE shared_sky_destination_runs SET state=?,retry_count=retry_count+1,next_retry_at=?,last_error_code=?,last_error_safe=?,updated_at=? WHERE broadcast_id=? AND destination_id=?', (DestinationState.RECONNECTING if retry else DestinationState.FAILED, next_at, code[:80], message[:500], iso(), broadcast_id, destination_id))
+            state = DestinationState.RECONNECTING if retry else DestinationState.FAILED
+            con.execute('UPDATE shared_sky_destination_runs SET state=?,retry_count=retry_count+1,next_retry_at=?,last_error_code=?,last_error_safe=?,updated_at=? WHERE broadcast_id=? AND destination_id=?', (state, next_at, code[:80], message[:500], iso(), broadcast_id, destination_id))
         self.emit(broadcast_id, 'destination_failure', code, {'retryable': retry}, destination_id)
+        return state
 
     def reconcile(self, user_id: str, broadcast_id: str) -> dict:
         session = self._session(user_id, broadcast_id)
@@ -216,8 +218,13 @@ class TransportOperations:
         for item in runs:
             state = item['state']
             if state == 'live' and item.get('output_id') and (not relay.output_state(item['output_id'])['running']):
-                self._fail_destination(broadcast_id, item['destination_id'], 'relay_process_exited', 'Relay process is no longer running', True)
-                state = 'reconnecting'
+                state = self._fail_destination(
+                    broadcast_id,
+                    item['destination_id'],
+                    'relay_process_exited',
+                    'Relay process is no longer running',
+                    True,
+                ).value
             live += state == 'live'
             reconnecting += state == 'reconnecting'
             failed += state == 'failed'
