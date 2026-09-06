@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -21,12 +22,23 @@ def _preview_root(project: Path) -> Path:
     return root
 
 
-def _token_path(project: Path, token: str) -> Path:
+def _normalize_token(token: str) -> str:
     normalized = str(token or "").strip().casefold()
     if not _TOKEN_PATTERN.fullmatch(normalized):
         raise ValueError("Effect-system preview token is invalid")
+    return normalized
+
+
+def _token_storage_key(token: str) -> str:
+    """Derive a non-reversible lookup key so raw bearer proofs are never persisted as filenames."""
+    normalized = _normalize_token(token)
+    return hashlib.sha256(normalized.encode("ascii")).hexdigest()
+
+
+def _token_path(project: Path, token: str) -> Path:
+    storage_key = _token_storage_key(token)
     root = _preview_root(project).resolve()
-    target = (root / f"{normalized}.json").resolve()
+    target = (root / f"{storage_key}.json").resolve()
     if root not in target.parents:
         raise ValueError("Effect-system preview token path escapes project storage")
     return target
@@ -109,6 +121,7 @@ def issue_effect_system_preview_token(
                 "expires_in_seconds": PREVIEW_TOKEN_TTL_SECONDS,
                 "one_time": True,
                 "server_authoritative": True,
+                "raw_token_persisted": False,
             }
         except FileExistsError:
             continue
@@ -125,7 +138,7 @@ def consume_effect_system_preview_token(
     now: float | None = None,
 ) -> dict[str, Any]:
     """Consume one preview proof exactly once and fail closed on any binding mismatch."""
-    normalized_token = str(token or "").strip().casefold()
+    normalized_token = _normalize_token(token)
     path = _token_path(project, normalized_token)
     if not path.is_file():
         raise PermissionError("Effect-system preview token is missing, expired or already consumed")
@@ -164,11 +177,11 @@ def consume_effect_system_preview_token(
         raise PermissionError("Effect-system graph changed after preview; preview the current graph again before apply")
     return {
         "consumed": True,
-        "token": normalized_token,
         "fingerprint": expected_fingerprint,
         "expires_at": expires_at,
         "server_authoritative": True,
         "one_time": True,
+        "raw_token_persisted": False,
     }
 
 
