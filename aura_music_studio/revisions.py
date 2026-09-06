@@ -12,6 +12,7 @@ TRACKED_ROOT_FILES = (
     "project.yml",
     "project.json",
     "aura_session.json",
+    "song_dna.json",
     "creative_manifest.json",
 )
 TRACKED_WORK_FILES = (
@@ -60,6 +61,8 @@ def _tracked_files(project: Path) -> list[tuple[str, Path]]:
 def _domain_for_path(path: str) -> str:
     if path == "aura_session.json":
         return "music_daw"
+    if path == "song_dna.json":
+        return "music_song_dna"
     if path == "creative_manifest.json":
         return "creative_manifest"
     if path == "work/pro_editor.json":
@@ -81,12 +84,12 @@ def _domain_summary(files: list[dict]) -> dict[str, dict]:
 
 
 def create_revision(project: Path, *, label: str, reason: str = "manual", actor: str = "Aura", keep: int = 100) -> dict:
-    """Snapshot DAW + creative-editor project metadata without duplicating media.
+    """Snapshot DAW + Song DNA + creative-editor metadata without duplicating media.
 
     Audio, video and image binaries remain immutable in input/work/output locations and are
-    referenced by project metadata. A revision captures the DAW session, Creative Manifest,
-    professional image/video edit graph and production-plan metadata together, keeping deep
-    cross-editor undo/version history inexpensive even for large projects.
+    referenced by project metadata. A revision captures the DAW session, Song DNA, Creative
+    Manifest, professional image/video edit graph and production-plan metadata together, keeping
+    deep cross-editor undo/version history inexpensive even for large projects.
     """
     project = project.resolve()
     rid = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid4().hex[:8]
@@ -112,6 +115,7 @@ def create_revision(project: Path, *, label: str, reason: str = "manual", actor:
         "domains": domains,
         "cross_editor_checkpoint": True,
         "daw_included": "music_daw" in domains,
+        "song_dna_included": "music_song_dna" in domains,
         "creative_manifest_included": "creative_manifest" in domains,
         "professional_editor_included": "professional_image_video_editor" in domains,
         "audio_copied": False,
@@ -138,6 +142,7 @@ def list_revisions(project: Path) -> list[dict]:
                 if "domains" not in item:
                     item["domains"] = _domain_summary(list(item.get("files") or []))
                 item.setdefault("cross_editor_checkpoint", "work/pro_editor.json" in {x.get("path") for x in item.get("files", []) if isinstance(x, dict)})
+                item.setdefault("song_dna_included", "song_dna.json" in {x.get("path") for x in item.get("files", []) if isinstance(x, dict)})
                 rows.append(item)
         except Exception:
             continue
@@ -184,6 +189,7 @@ def compare_revisions(project: Path, left_revision_id: str, right_revision_id: s
         "files": {"added": added, "removed": removed, "changed": changed, "unchanged": unchanged},
         "domains_changed": domains_changed,
         "daw_changed": "music_daw" in domains_changed,
+        "song_dna_changed": "music_song_dna" in domains_changed,
         "professional_editor_changed": "professional_image_video_editor" in domains_changed,
         "creative_manifest_changed": "creative_manifest" in domains_changed,
         "media_files_compared": False,
@@ -217,7 +223,8 @@ def restore_revision(project: Path, revision_id: str, *, create_backup: bool = T
         "restored_revision": revision_id,
         "restored_files": restored,
         "restored_domains": restored_domains,
-        "cross_editor_restore": "professional_image_video_editor" in restored_domains or "music_daw" in restored_domains,
+        "cross_editor_restore": bool({"professional_image_video_editor", "music_daw", "music_song_dna"} & set(restored_domains)),
+        "song_dna_restored": "music_song_dna" in restored_domains,
         "audio_restored": False,
         "media_restored": False,
         "source_media_mutated": False,
