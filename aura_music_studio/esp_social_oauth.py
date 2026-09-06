@@ -6,6 +6,7 @@ import re
 import secrets
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 from html import escape
 from pathlib import Path
 from typing import Literal
@@ -54,6 +55,9 @@ _PROVIDER_ADAPTERS = {
 }
 _OAUTH_REF = re.compile(r"^social-oauth://([A-Za-z0-9][A-Za-z0-9_-]{0,95})$")
 _RETRYABLE_HTTP = {408, 425, 429}
+_OAUTH_STATE_TTL = timedelta(minutes=15)
+_OAUTH_STATE_RETENTION = timedelta(minutes=30)
+_OAUTH_STATE_KEY_PREFIX = "sha256:"
 
 
 def _now() -> datetime:
@@ -75,6 +79,11 @@ def _parse_iso(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _oauth_state_key(state: str) -> str:
+    """Return the non-reversible database key for an OAuth continuation bearer."""
+    return _OAUTH_STATE_KEY_PREFIX + sha256(state.encode("utf-8")).hexdigest()
 
 
 def _db_path() -> Path:
@@ -224,6 +233,8 @@ class SocialOAuthVault:
             "encrypted_vault_ready": encrypted_vault_ready,
             "providers": providers,
             "tokens_exposed_to_browser": False,
+            "oauth_state_storage": "sha256_digest",
+            "oauth_state_single_use": True,
         }
 
     def create_state(
@@ -234,20 +245,21 @@ class SocialOAuthVault:
     ) -> tuple[str, str, str]:
         self._fernet()
         state = secrets.token_urlsafe(48)
+        state_key = _oauth_state_key(state)
         connection_id = f"conn_{uuid4().hex}"
         credential_id = f"socialcred_{uuid4().hex}"
         now = _now()
         with self._connect() as con:
             con.execute(
                 "DELETE FROM esp_social_oauth_state WHERE created_at<?",
-                (_iso(now - timedelta(minutes=30)),),
+                (_iso(now - _OAUTH_STATE_RETENTION),),
             )
             con.execute(
                 """INSERT INTO esp_social_oauth_state
                    (state,user_id,space_id,provider,connection_id,credential_id,scopes_json,created_at)
                    VALUES (?,?,?,?,?,?,?,?)""",
                 (
-                    state,
+                    state_key,
                     user_id,
                     space_id,
                     provider,
@@ -262,19 +274,28 @@ class SocialOAuthVault:
     def consume_state(self, user_id: str, provider: SocialOAuthProvider, state: str) -> dict:
         clean_state = (state or "").strip()
         if not clean_state or len(clean_state) > 512:
-            raise PermissionError("OAuth state is invalid or missing")
+            raise PermissionError("OAuth state is invalid or expired")
+        state_key = _oauth_state_key(clean_state)
+        now = _now()
         with self._connect() as con:
+            # Acquire the SQLite write reservation before reading. Without this, two callbacks can
+            # both SELECT the bearer before either DELETE executes and both appear successful.
+            con.execute("BEGIN IMMEDIATE")
             row = con.execute(
-                "SELECT * FROM esp_social_oauth_state WHERE state=? AND user_id=? AND provider=?",
-                (clean_state, user_id, provider),
+                """SELECT * FROM esp_social_oauth_state
+                   WHERE state IN (?, ?) AND user_id=? AND provider=?""",
+                (state_key, clean_state, user_id, provider),
             ).fetchone()
             if row:
-                con.execute("DELETE FROM esp_social_oauth_state WHERE state=?", (clean_state,))
+                # Delete the exact stored key while the write reservation is held. The raw-state
+                # fallback exists only so a callback created immediately before this deployment can
+                # finish; every newly created state is digest-only at rest.
+                con.execute("DELETE FROM esp_social_oauth_state WHERE state=?", (row["state"],))
         if not row:
-            raise PermissionError("OAuth state is invalid, expired, or belongs to another member")
+            raise PermissionError("OAuth state is invalid or expired")
         created = _parse_iso(row["created_at"])
-        if not created or created < _now() - timedelta(minutes=15):
-            raise PermissionError("OAuth state has expired")
+        if not created or created < now - _OAUTH_STATE_TTL:
+            raise PermissionError("OAuth state is invalid or expired")
         return {
             "space_id": row["space_id"],
             "connection_id": row["connection_id"],
