@@ -115,7 +115,7 @@ def _node(kind: str, text: str) -> ImageEffectNode:
     return ImageEffectNode(kind=kind)
 
 
-def compose_image_effect_system(prompt: str, *, name: str = "Aura Image FX") -> dict[str, Any]:
+def compose_image_effect_system(prompt: str, *, name: str = "Rhian Image FX") -> dict[str, Any]:
     """Convert bounded natural-language image instructions into an executable typed graph."""
     clean = _bounded_prompt(prompt)
     nodes: list[ImageEffectNode] = []
@@ -138,7 +138,7 @@ def compose_image_effect_system(prompt: str, *, name: str = "Aura Image FX") -> 
     if len(nodes) > _MAX_PROMPT_NODES:
         raise ValueError(f"Image effect prompt exceeds {_MAX_PROMPT_NODES} executable nodes")
 
-    graph = ImageEffectGraph(name=str(name or "Aura Image FX").strip()[:120] or "Aura Image FX", nodes=nodes)
+    graph = ImageEffectGraph(name=str(name or "Rhian Image FX").strip()[:120] or "Rhian Image FX", nodes=nodes)
     return {
         "graph": graph.model_dump(mode="json"),
         "fingerprint": graph.fingerprint(),
