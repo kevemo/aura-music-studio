@@ -45,11 +45,17 @@ def test_browser_editor_exposes_real_edit_preview_save_apply_undo_controls():
         'id="apply"',
         'id="undo"',
         'id="saved"',
+        'id="catalogueSearch"',
+        'id="catalogueSelection"',
+        'id="searchCatalogue"',
+        'id="addNode"',
     ):
         assert element_id in html
     assert "Apply previewed graph" in html
     assert "Save version" in html
-    assert "Add effect by ID" in html
+    assert "Search catalogue" in html
+    assert "Add selected effect" in html
+    assert "Catalogue discovery is read-only" in html
     assert "previewToken=''" in html
     assert "q('apply').disabled=true" in html
     assert "expected_fingerprint:previewToken" in html
