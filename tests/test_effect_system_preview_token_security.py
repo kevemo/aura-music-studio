@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 
@@ -50,6 +52,7 @@ def test_preview_token_is_opaque_bound_and_one_time(tmp_path):
     )
     assert result["consumed"] is True
     assert result["fingerprint"] == FINGERPRINT
+    assert result["atomic_claim"] is True
     assert result["raw_token_persisted"] is False
     assert "token" not in result
 
@@ -62,6 +65,46 @@ def test_preview_token_is_opaque_bound_and_one_time(tmp_path):
             fingerprint=FINGERPRINT,
             now=1002.0,
         )
+
+
+def test_preview_token_concurrent_consumers_admit_exactly_one(tmp_path):
+    project = _project(tmp_path)
+    token = issue_effect_system_preview_token(
+        project,
+        user_id="member-1",
+        track_id="track-1",
+        fingerprint=FINGERPRINT,
+        now=1500.0,
+    )["token"]
+    start = Barrier(8)
+
+    def consume_once():
+        start.wait(timeout=2)
+        try:
+            result = consume_effect_system_preview_token(
+                project,
+                token,
+                user_id="member-1",
+                track_id="track-1",
+                fingerprint=FINGERPRINT,
+                now=1501.0,
+            )
+        except PermissionError as exc:
+            return False, str(exc)
+        return True, result
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        outcomes = list(pool.map(lambda _index: consume_once(), range(8)))
+
+    successes = [payload for ok, payload in outcomes if ok]
+    failures = [payload for ok, payload in outcomes if not ok]
+    assert len(successes) == 1
+    assert successes[0]["atomic_claim"] is True
+    assert len(failures) == 7
+    assert all("missing, expired or already consumed" in message for message in failures)
+    root = project / "work" / "effect_system_previews"
+    assert not list(root.glob("*.json"))
+    assert not list(root.glob("*.claim"))
 
 
 def test_preview_token_fails_closed_for_different_member_and_is_consumed(tmp_path):
