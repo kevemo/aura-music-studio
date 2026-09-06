@@ -21,6 +21,14 @@ CatalogueStatus = Literal[
 ]
 EntitlementBand = Literal["core", "silver", "gold"]
 RuntimeKind = Literal["ffmpeg_audio"]
+SourceKind = Literal[
+    "esp_original_runtime_mapping",
+    "member_original",
+    "third_party",
+    "generated",
+    "unknown",
+]
+RightsMetadataStatus = Literal["not_asserted", "record_required", "record_linked"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,10 +71,57 @@ class CreativeCatalogueItem:
     entitlement: EntitlementBand
     ccc_price: int
     localization_key: str
+    metadata_schema_version: int = 1
+    source_kind: SourceKind = "unknown"
+    source_author: str = ""
+    license_id: str | None = None
+    rights_status: RightsMetadataStatus = "not_asserted"
+    rights_record_id: str | None = None
+    rights_notice: str = (
+        "Catalogue presence and entitlement do not establish copyright, licence, consent, or commercial-use rights."
+    )
+    runtime_requirements: tuple[str, ...] = ()
+    platform_requirements: tuple[str, ...] = ()
+    renderer_compatibility: tuple[str, ...] = ()
+    provider_compatibility: tuple[str, ...] = ()
+    model_compatibility: tuple[str, ...] = ()
+    example_commands: tuple[str, ...] = ()
+    deprecated: bool = False
+    replacement_id: str | None = None
+    deprecation_note: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.metadata_schema_version < 1:
+            raise ValueError("Catalogue metadata schema version must be positive")
+        if self.version < 1:
+            raise ValueError("Catalogue item version must be positive")
+        if self.ccc_price < 0:
+            raise ValueError("Catalogue item price cannot be negative")
+        if self.rights_status == "record_linked" and not self.rights_record_id:
+            raise ValueError("Linked catalogue rights metadata requires rights_record_id")
+        if self.rights_status != "record_linked" and self.rights_record_id:
+            raise ValueError("rights_record_id cannot be asserted without record_linked rights status")
+        if self.replacement_id == self.id:
+            raise ValueError("Deprecated catalogue item cannot replace itself")
+        if self.deprecated and not self.deprecation_note:
+            raise ValueError("Deprecated catalogue item requires a deprecation note")
+        if not self.deprecated and (self.replacement_id or self.deprecation_note):
+            raise ValueError("Active catalogue item cannot advertise deprecation migration metadata")
 
     def public(self) -> dict:
         row = asdict(self)
-        for key in ("input_types", "output_types", "tags", "search_aliases"):
+        for key in (
+            "input_types",
+            "output_types",
+            "tags",
+            "search_aliases",
+            "runtime_requirements",
+            "platform_requirements",
+            "renderer_compatibility",
+            "provider_compatibility",
+            "model_compatibility",
+            "example_commands",
+        ):
             row[key] = list(row[key])
         row["parameters"] = [parameter.public() for parameter in self.parameters]
         return row
@@ -146,6 +201,25 @@ def _audio_item(
         entitlement=entitlement,
         ccc_price=price,
         localization_key=f"catalogue.{id}",
+        metadata_schema_version=1,
+        source_kind="esp_original_runtime_mapping",
+        source_author="Elevate Souls Productions",
+        license_id=None,
+        rights_status="not_asserted",
+        rights_record_id=None,
+        rights_notice=(
+            "This catalogue record describes an ESP runtime mapping only. Entitlement or catalogue presence "
+            "does not establish copyright, licence, consent, or commercial-use rights for member inputs/outputs."
+        ),
+        runtime_requirements=("ffmpeg_audio_renderer",),
+        platform_requirements=("server",),
+        renderer_compatibility=("ffmpeg_audio",),
+        provider_compatibility=(),
+        model_compatibility=(),
+        example_commands=(f"Preview {label}", f"Apply {label}"),
+        deprecated=False,
+        replacement_id=None,
+        deprecation_note=None,
     )
 
 
@@ -312,6 +386,7 @@ def search_catalogue(
                 item.description,
                 item.category,
                 item.subcategory,
+                item.source_author,
                 *item.tags,
                 *item.search_aliases,
             )
@@ -331,6 +406,9 @@ __all__ = [
     "CreativeCatalogueItem",
     "EntitlementBand",
     "ParameterSpec",
+    "RightsMetadataStatus",
+    "RuntimeKind",
+    "SourceKind",
     "get_catalogue_item",
     "public_catalogue",
     "search_catalogue",
