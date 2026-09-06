@@ -10,6 +10,7 @@ from .chord_intelligence import router as chord_intelligence_router
 from .chord_midi import router as chord_midi_router
 from .daw_fx_lab import router as daw_fx_lab_router
 from .performance_generation_portal import router as performance_generation_router
+from .rhiannon_phrase_timing import router as rhiannon_phrase_timing_router
 from .song_dna_focus_locks import router as focus_locks_router
 from .song_dna_portal import song_editor_project as base_song_editor_project
 from .voice_house_api import router as voice_house_api_router
@@ -28,6 +29,7 @@ router.include_router(focus_locks_router)
 router.include_router(voice_house_api_router)
 router.include_router(voice_house_assets_router)
 router.include_router(voice_profile_lifecycle_router)
+router.include_router(rhiannon_phrase_timing_router)
 router.include_router(voice_house_portal_router)
 
 
