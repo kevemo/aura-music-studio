@@ -47,6 +47,10 @@ _VIDEO_COLOUR_IDS = frozenset({
 _ITEM_KIND_BY_MEDIA = {"image": "image_layer", "video": "video_clip"}
 
 
+def _requires_direct_full_mix(spec: base.EffectSpec) -> bool:
+    return spec.runtime == "item_color" or str(spec.runtime_type).startswith("transition_")
+
+
 def install_visual_effect_catalogue_hardening() -> None:
     """Harden media-specific compilation and advertised automation truth in-place."""
     for effect_id in _VIDEO_COLOUR_IDS:
@@ -106,8 +110,8 @@ def compile_effect_graph_hardened(
     mix_value = base._finite(mix, field="mix")
     if mix_value < 0.0 or mix_value > 1.0:
         raise ValueError("mix must be between 0 and 1")
-    if spec.runtime == "item_color" and abs(mix_value - 1.0) > 1e-9:
-        raise ValueError("Video colour controls execute directly and do not support effect mix")
+    if _requires_direct_full_mix(spec) and abs(mix_value - 1.0) > 1e-9:
+        raise ValueError(f"{spec.name} executes directly and requires mix=1")
     return {
         "schema_version": 1,
         "graph_type": "visual_effect",
@@ -180,6 +184,19 @@ def apply_visual_effect_hardened(
             updated = store.patch_item(target_id, {"color": color}, actor=base._actor(member))
             result = {"item": updated.model_dump(mode="json")}
         else:
+            if str(spec.runtime_type).startswith("transition_"):
+                if target_type != "item":
+                    raise ValueError("Visual transitions execute at item scope")
+                from .professional_visual_transitions import validate_transition_apply
+
+                validate_transition_apply(
+                    state,
+                    target_id,
+                    runtime_type=spec.runtime_type,
+                    parameters=parameters,
+                    mix=float(body.mix),
+                    keyframes=keyframes,
+                )
             effect = EditorEffect(
                 type=spec.runtime_type,
                 enabled=True,
@@ -238,8 +255,8 @@ def save_visual_effect_system_hardened(
         mix = base._finite(node.get("mix", 1.0), field="mix")
         if mix < 0.0 or mix > 1.0:
             raise ValueError("mix must be between 0 and 1")
-        if spec.runtime == "item_color" and abs(mix - 1.0) > 1e-9:
-            raise ValueError("Video colour controls execute directly and do not support effect mix")
+        if _requires_direct_full_mix(spec) and abs(mix - 1.0) > 1e-9:
+            raise ValueError(f"{spec.name} executes directly and requires mix=1")
         safe_node = {
             "id": f"fx_{uuid4().hex}",
             "effect_id": effect_id,
