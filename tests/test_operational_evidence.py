@@ -36,7 +36,7 @@ def _production_like_backup(tmp_path: Path) -> Path:
     return Path(manager.create()["backup"])
 
 
-def test_synthetic_restore_drill_is_verified_but_never_claims_production_backup(tmp_path):
+def test_synthetic_restore_drill_proves_mechanism_but_never_release_restore(tmp_path):
     evidence = run_restore_drill(tmp_path, environment="ci")
     assert evidence["result"] == "verified"
     assert evidence["database_integrity"] == "ok"
@@ -48,9 +48,12 @@ def test_synthetic_restore_drill_is_verified_but_never_claims_production_backup(
 
     output = write_restore_evidence(tmp_path / "evidence.json", evidence)
     loaded = load_restore_evidence(output)
-    assert loaded["verified"] is True
+    assert loaded["mechanism_verified"] is True
+    assert loaded["verified"] is False
+    assert loaded["state"] == "mechanism_verified"
     assert loaded["environment"] == "ci"
     assert loaded["production_backup_used"] is False
+    assert "no actual production backup" in str(loaded["reason"]).lower()
 
 
 def test_production_backup_cannot_verify_from_integrity_alone(tmp_path):
@@ -88,6 +91,15 @@ def test_production_backup_requires_explicit_application_level_validation(tmp_pa
     assert evidence["application_validation_source"] == "explicit_validator"
     assert evidence["result"] == "verified"
 
+    output = write_restore_evidence(tmp_path / "production-evidence.json", evidence)
+    loaded = load_restore_evidence(output)
+    assert loaded["mechanism_verified"] is True
+    assert loaded["verified"] is True
+    assert loaded["state"] == "verified"
+    assert loaded["production_backup_used"] is True
+    assert loaded["application_validation_source"] == "explicit_validator"
+    assert loaded["reason"] is None
+
 
 def test_restore_evidence_fails_closed_when_missing_invalid_or_stale(tmp_path):
     assert load_restore_evidence(None)["state"] == "not_configured"
@@ -112,6 +124,7 @@ def test_restore_evidence_fails_closed_when_missing_invalid_or_stale(tmp_path):
     stale_path = tmp_path / "stale.json"
     stale_path.write_text(json.dumps(stale), encoding="utf-8")
     loaded = load_restore_evidence(stale_path, max_age_hours=24)
+    assert loaded["mechanism_verified"] is False
     assert loaded["verified"] is False
     assert loaded["state"] == "unverified"
 

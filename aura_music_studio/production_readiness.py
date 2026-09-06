@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, Response
 from fastapi.responses import PlainTextResponse
 
 from .access_control import PUBLIC_EXACT
+from .operational_evidence import load_restore_evidence, probe_runtime_storage
 
 router = APIRouter(tags=["Operations"])
 _STARTED = time.monotonic()
@@ -32,6 +33,7 @@ _PLACEHOLDER_FRAGMENTS = (
     "replace-me",
     "your-secret",
 )
+_DEPLOYMENT_ENVIRONMENTS = {"local", "development", "test", "ci", "integration", "staging", "production"}
 
 
 def _value(env: Mapping[str, str], name: str, default: str = "") -> str:
@@ -88,7 +90,7 @@ def _storage_details(env: Mapping[str, str]) -> tuple[bool, dict, list[str]]:
     }, messages
 
 
-def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool) -> tuple[bool, list[str], dict]:
+def _stripe_readiness(env: Mapping[str, str], *, production: bool, nonproduction: bool) -> tuple[bool, list[str], dict]:
     names = (
         "STRIPE_SECRET_KEY",
         "STRIPE_WEBHOOK_SECRET",
@@ -115,10 +117,12 @@ def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool
         messages.append("Stripe credentials or server-authoritative subscription price IDs are incomplete, malformed or placeholders.")
     if production and configured["STRIPE_SECRET_KEY"] and not secret.startswith("sk_live_"):
         messages.append("Production Stripe must use a live secret key.")
-    if staging and configured["STRIPE_SECRET_KEY"] and not secret.startswith("sk_test_"):
-        messages.append("Staging must use a Stripe test secret key; live payment credentials are blocked.")
+    if nonproduction and configured["STRIPE_SECRET_KEY"] and secret.startswith("sk_live_"):
+        messages.append("Non-production environments must not use a Stripe live secret key.")
 
-    environment_ok = (not production or secret.startswith("sk_live_")) and (not staging or secret.startswith("sk_test_"))
+    environment_ok = (not production or secret.startswith("sk_live_")) and (
+        not nonproduction or not secret.startswith("sk_live_")
+    )
     ok = not missing and environment_ok
     return ok, messages, {
         "provider": "stripe",
@@ -137,31 +141,45 @@ def _stripe_readiness(env: Mapping[str, str], *, production: bool, staging: bool
     }
 
 
-def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
-    """Build a secret-free deployment readiness report without third-party network I/O."""
+def build_readiness_report(
+    environ: Mapping[str, str] | None = None,
+    *,
+    perform_runtime_probes: bool = False,
+) -> dict:
+    """Build a secret-free readiness report.
+
+    Configuration readiness, runtime dependency readiness and release/restore evidence are kept
+    separate. A config-only CI smoke can therefore validate fail-closed settings without ever
+    being described as proof that the deployed production system is healthy.
+    """
     env = environ or os.environ
     deployment = _value(env, "AURA_DEPLOYMENT_ENV", "development").lower()
-    if deployment not in {"development", "staging", "production"}:
+    if deployment not in _DEPLOYMENT_ENVIRONMENTS:
         deployment = "invalid"
     production = deployment == "production"
     staging = deployment == "staging"
+    nonproduction = deployment in (_DEPLOYMENT_ENVIRONMENTS - {"production"})
     categories: dict[str, dict] = {}
 
     provider = _value(env, "LSS_PAYMENT_PROVIDER", "paypal").lower()
     payment_mode = _value(env, "LSS_PAYMENT_MODE", "manual_invoice_link").lower()
-    paypal_environment = _value(env, "LSS_PAYPAL_ENVIRONMENT", "sandbox" if staging else "live").lower()
+    paypal_environment = _value(env, "LSS_PAYPAL_ENVIRONMENT", "live" if production else "sandbox").lower()
     paypal_names = ("LSS_PAYPAL_CLIENT_ID", "LSS_PAYPAL_CLIENT_SECRET", "LSS_PAYPAL_WEBHOOK_ID")
     paypal_creds_ok, paypal_missing = _secret_group(env, paypal_names)
     verified_mode = payment_mode in {"verified_paypal_invoice", "verified_paypal_webhook"}
 
     if provider == "stripe":
-        payment_ok, payment_messages, payment_details = _stripe_readiness(env, production=production, staging=staging)
+        payment_ok, payment_messages, payment_details = _stripe_readiness(
+            env,
+            production=production,
+            nonproduction=nonproduction,
+        )
     elif provider == "paypal":
         payment_messages = []
         if production and paypal_environment != "live":
             payment_messages.append("Production PayPal must use the live environment.")
-        if staging and paypal_environment != "sandbox":
-            payment_messages.append("Staging must use PayPal sandbox credentials; live payment credentials are blocked.")
+        if nonproduction and paypal_environment == "live":
+            payment_messages.append("Non-production environments must use PayPal sandbox credentials.")
         if (production or verified_mode or any(_value(env, name) for name in paypal_names)) and not paypal_creds_ok:
             payment_messages.append("Verified PayPal credentials are incomplete or placeholder values.")
         if production and not verified_mode:
@@ -169,7 +187,7 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
         payment_ok = (
             (not verified_mode or paypal_creds_ok)
             and (not production or (paypal_environment == "live" and paypal_creds_ok and verified_mode))
-            and (not staging or paypal_environment == "sandbox")
+            and (not nonproduction or paypal_environment != "live")
         )
         payment_details = {
             "provider": provider,
@@ -291,7 +309,18 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
             "retention_count": backup_keep,
             "encryption_recipient_configured": backup_age,
             "secrets_in_backup": False,
+            "configuration_is_restore_proof": False,
         },
+    )
+
+    restore_max_age = max(1, _int(env, "LSS_RESTORE_EVIDENCE_MAX_AGE_HOURS", 24 * 30))
+    restore = load_restore_evidence(_value(env, "LSS_RESTORE_EVIDENCE_PATH") or None, max_age_hours=restore_max_age)
+    restore_messages = [] if restore.get("verified") else [str(restore.get("reason") or "No verified restore-drill evidence is available.")]
+    categories["restore_evidence"] = _category(
+        ok=bool(restore.get("verified")),
+        required=False,
+        messages=restore_messages,
+        details={**restore, "max_age_hours": restore_max_age, "release_gate_only": True},
     )
 
     public_url = _value(env, "LSS_PUBLIC_BASE_URL", "http://127.0.0.1:8000")
@@ -332,27 +361,78 @@ def build_readiness_report(environ: Mapping[str, str] | None = None) -> dict:
     categories["storage"] = _category(ok=storage_ok, required=True, messages=storage_messages, details=storage_details)
 
     stripe_secret = _value(env, "STRIPE_SECRET_KEY")
-    deployment_ok = deployment != "invalid"
+    nonproduction_live_paypal = nonproduction and provider == "paypal" and paypal_environment == "live"
+    nonproduction_live_stripe = nonproduction and provider == "stripe" and stripe_secret.startswith("sk_live_")
+    deployment_valid = deployment != "invalid"
+    deployment_ok = deployment_valid and not nonproduction_live_paypal and not nonproduction_live_stripe
+    deployment_messages: list[str] = []
+    if not deployment_valid:
+        deployment_messages.append(
+            "AURA_DEPLOYMENT_ENV must be local, development, test, ci, integration, staging or production."
+        )
+    if nonproduction_live_paypal or nonproduction_live_stripe:
+        deployment_messages.append("Non-production environments are blocked from live payment credentials/endpoints.")
     categories["deployment"] = _category(
         ok=deployment_ok,
         required=True,
-        messages=[] if deployment_ok else ["AURA_DEPLOYMENT_ENV must be development, staging or production."],
+        messages=deployment_messages,
         details={
             "environment": deployment,
             "staging_uses_live_paypal": staging and provider == "paypal" and paypal_environment == "live",
             "staging_uses_live_stripe": staging and provider == "stripe" and stripe_secret.startswith("sk_live_"),
+            "nonproduction_uses_live_paypal": nonproduction_live_paypal,
+            "nonproduction_uses_live_stripe": nonproduction_live_stripe,
         },
     )
 
-    blocking = [name for name, item in categories.items() if item["required"] and not item["ok"]]
-    ready = not blocking
+    if perform_runtime_probes:
+        runtime = probe_runtime_storage(env)
+        runtime_ok = bool(runtime.get("verified"))
+        runtime_messages = [] if runtime_ok else ["One or more critical local durable-state dependencies are unavailable or degraded."]
+    else:
+        runtime = {
+            "verified": False,
+            "state": "unknown",
+            "external_provider_probes_performed": False,
+            "destructive_writes_performed": False,
+        }
+        runtime_ok = False
+        runtime_messages = ["Runtime dependency probes were not performed for this report."]
+    categories["runtime_dependencies"] = _category(
+        ok=runtime_ok,
+        required=False,
+        messages=runtime_messages,
+        details=runtime,
+    )
+
+    configuration_blocking = [name for name, item in categories.items() if item["required"] and not item["ok"]]
+    configuration_ready = not configuration_blocking
+    serving_blocking = list(configuration_blocking)
+    if perform_runtime_probes and not runtime_ok:
+        serving_blocking.append("runtime_dependencies")
+    serving_ready = configuration_ready and (runtime_ok if perform_runtime_probes else True)
+
+    release_blocking = list(serving_blocking)
+    if production and not perform_runtime_probes:
+        release_blocking.append("runtime_dependencies")
+    if production and not restore.get("verified"):
+        release_blocking.append("restore_evidence")
+    release_blocking = list(dict.fromkeys(release_blocking))
+    production_ready = bool(production and configuration_ready and runtime_ok and restore.get("verified"))
+
     return {
-        "ok": ready,
+        "ok": serving_ready,
+        "configuration_ready": configuration_ready,
+        "serving_ready": serving_ready,
         "environment": deployment,
-        "production_ready": production and ready,
-        "blocking_categories": blocking,
+        "production_ready": production_ready,
+        "blocking_categories": configuration_blocking,
+        "serving_blocking_categories": serving_blocking,
+        "release_blocking_categories": release_blocking,
         "categories": categories,
+        "runtime_probes_performed": perform_runtime_probes,
         "network_probes_performed": False,
+        "external_provider_runtime_verified": False,
         "secret_values_exposed": False,
     }
 
@@ -377,8 +457,8 @@ def health_live():
 
 @router.get("/health/ready")
 def health_ready(response: Response):
-    report = build_readiness_report()
-    response.status_code = 200 if report["ok"] else 503
+    report = build_readiness_report(perform_runtime_probes=True)
+    response.status_code = 200 if report["serving_ready"] else 503
     return report
 
 
@@ -391,18 +471,27 @@ def internal_metrics(x_aura_monitoring_token: str | None = Header(default=None))
             status_code=503 if reason in {"monitoring_disabled", "monitoring_token_unconfigured"} else 403,
             headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
         )
-    report = build_readiness_report()
+    report = build_readiness_report(perform_runtime_probes=True)
     rows = [
         "# HELP aura_process_up Process liveness.",
         "# TYPE aura_process_up gauge",
         "aura_process_up 1",
-        "# HELP aura_readiness Deployment readiness by category.",
+        "# HELP aura_readiness Deployment configuration readiness by category.",
         "# TYPE aura_readiness gauge",
     ]
     for name, item in sorted(report["categories"].items()):
         rows.append(f'aura_readiness{{category="{name}"}} {1 if item["ok"] else 0}')
     rows.extend([
-        "# HELP aura_production_ready Full production readiness gate.",
+        "# HELP aura_configuration_ready Required deployment configuration is valid.",
+        "# TYPE aura_configuration_ready gauge",
+        f'aura_configuration_ready {1 if report["configuration_ready"] else 0}',
+        "# HELP aura_serving_ready Critical local dependencies are available for serving traffic.",
+        "# TYPE aura_serving_ready gauge",
+        f'aura_serving_ready {1 if report["serving_ready"] else 0}',
+        "# HELP aura_restore_evidence_verified A fresh isolated restore drill has been verified.",
+        "# TYPE aura_restore_evidence_verified gauge",
+        f'aura_restore_evidence_verified {1 if report["categories"]["restore_evidence"]["ok"] else 0}',
+        "# HELP aura_production_ready Strict production release readiness including runtime and restore evidence.",
         "# TYPE aura_production_ready gauge",
         f'aura_production_ready {1 if report["production_ready"] else 0}',
         "# HELP aura_process_uptime_seconds Process uptime in seconds.",
@@ -419,7 +508,7 @@ def internal_metrics(x_aura_monitoring_token: str | None = Header(default=None))
 def main() -> int:
     report = build_readiness_report()
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if report["ok"] else 1
+    return 0 if report["configuration_ready"] else 1
 
 
 if __name__ == "__main__":
