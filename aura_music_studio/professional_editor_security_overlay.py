@@ -83,6 +83,7 @@ def install_professional_editor_patch_guard() -> None:
             professional_editor_router.routes.insert(0, guarded)
 
     from .cinema_production import router as cinema_production_router
+    from .legacy_visual_effects import install_legacy_visual_effects
     from .professional_editor_render_api import router as render_router
     from .professional_editor_render_jobs import router as render_jobs_router
     from .tv_production import router as tv_production_router
@@ -92,6 +93,9 @@ def install_professional_editor_patch_guard() -> None:
         router as visual_effect_hardening_router,
     )
 
+    # Recovered Aura visual modules are reference/provenance only. Register only rewritten,
+    # repository-backed bounded processors in the canonical catalogue/compositor path.
+    install_legacy_visual_effects()
     install_visual_effect_catalogue_hardening()
     _install_routes_once(render_router.routes)
     _install_routes_once(render_jobs_router.routes)
