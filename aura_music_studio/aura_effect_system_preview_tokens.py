@@ -44,6 +44,16 @@ def _token_path(project: Path, token: str) -> Path:
     return target
 
 
+def _claim_path(project: Path, token: str) -> Path:
+    """Allocate a same-directory private claim path used for atomic one-time consumption."""
+    storage_key = _token_storage_key(token)
+    root = _preview_root(project).resolve()
+    target = (root / f".{storage_key}.{secrets.token_hex(8)}.claim").resolve()
+    if root not in target.parents:
+        raise ValueError("Effect-system preview claim path escapes project storage")
+    return target
+
+
 def _clean_binding(value: str, *, label: str, max_length: int = 160) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -64,18 +74,19 @@ def _clean_fingerprint(value: str) -> str:
 
 def _cleanup_expired(root: Path, now: float) -> int:
     removed = 0
-    for path in root.glob("*.json"):
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            expires_at = float(payload.get("expires_at") or 0.0) if isinstance(payload, dict) else 0.0
-        except Exception:
-            expires_at = 0.0
-        if expires_at <= now:
+    for pattern in ("*.json", "*.claim"):
+        for path in root.glob(pattern):
             try:
-                path.unlink(missing_ok=True)
-                removed += 1
-            except OSError:
-                continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                expires_at = float(payload.get("expires_at") or 0.0) if isinstance(payload, dict) else 0.0
+            except Exception:
+                expires_at = 0.0
+            if expires_at <= now:
+                try:
+                    path.unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    continue
     return removed
 
 
@@ -137,18 +148,24 @@ def consume_effect_system_preview_token(
     fingerprint: str,
     now: float | None = None,
 ) -> dict[str, Any]:
-    """Consume one preview proof exactly once and fail closed on any binding mismatch."""
+    """Atomically claim and consume one preview proof exactly once, failing closed on mismatch."""
     normalized_token = _normalize_token(token)
     path = _token_path(project, normalized_token)
-    if not path.is_file():
-        raise PermissionError("Effect-system preview token is missing, expired or already consumed")
+    claimed_path = _claim_path(project, normalized_token)
     try:
-        raw = path.read_text(encoding="utf-8")
+        path.rename(claimed_path)
+    except FileNotFoundError as exc:
+        raise PermissionError("Effect-system preview token is missing, expired or already consumed") from exc
+    except OSError as exc:
+        raise PermissionError("Effect-system preview token could not be claimed for one-time use") from exc
+
+    try:
+        raw = claimed_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise PermissionError("Effect-system preview token could not be read") from exc
     finally:
         try:
-            path.unlink(missing_ok=True)
+            claimed_path.unlink(missing_ok=True)
         except OSError:
             pass
 
@@ -181,6 +198,7 @@ def consume_effect_system_preview_token(
         "expires_at": expires_at,
         "server_authoritative": True,
         "one_time": True,
+        "atomic_claim": True,
         "raw_token_persisted": False,
     }
 
