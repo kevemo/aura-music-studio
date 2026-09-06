@@ -170,5 +170,9 @@ def _install_image_effect_routes(app: Any) -> None:
 
 register_route_composition_hook("image_effect_routes", _install_image_effect_routes)
 
+# Import the browser editor only after the core API/router is defined. The editor owns a separate
+# final-composition hook and therefore cannot create a second core Image Effect dispatch authority.
+from . import image_effect_editor as _image_effect_editor  # noqa: E402,F401
+
 
 __all__ = ["router"]
