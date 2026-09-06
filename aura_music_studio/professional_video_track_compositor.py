@@ -28,6 +28,12 @@ from .professional_video_compositor import (
     _transform_default,
 )
 from .professional_video_effects_compositor import _SUPPORTED_VIDEO_EFFECTS, _video_effect_filter
+from .professional_visual_transitions import (
+    TRANSITION_RUNTIME_TYPES,
+    append_transition_filters,
+    build_transition_envelopes,
+    is_transition_effect,
+)
 
 _SUPPORTED_VIDEO_TRACK_BLEND_MODES = set(_SUPPORTED_VIDEO_ITEM_BLEND_MODES)
 
@@ -118,8 +124,8 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
 
     Item-local state is rendered inside a transparent track canvas first. Ordered whole-track
     effects are then applied to that completed group, followed by track opacity and the authored
-    track blend mode against the sequence canvas. This keeps effects at the correct group stage
-    instead of faking them as repeated per-item effects.
+    track blend mode against the sequence canvas. Bounded visual transitions remain in this final
+    RGBA composition stage so their alpha envelopes affect real timeline frames.
     """
 
     def _validate_video_state(self, sequence: dict[str, Any], tracks: dict, items: dict) -> None:
@@ -136,11 +142,20 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
             if track_blend not in _SUPPORTED_VIDEO_TRACK_BLEND_MODES:
                 raise EditorRenderUnsupported(f"Video track blend mode is not render-safe: {track_blend}")
 
-            for item_id in track.get("item_ids", []):
-                item = items.get(item_id)
-                if not item or not item.get("enabled", True):
-                    continue
-                if item.get("effects"):
+            track_items = [
+                items[item_id]
+                for item_id in track.get("item_ids", [])
+                if item_id in items and items[item_id].get("enabled", True)
+            ]
+            try:
+                build_transition_envelopes(track_items)
+            except ValueError as exc:
+                raise EditorRenderUnsupported(str(exc)) from exc
+
+            for item in track_items:
+                effects = [effect for effect in item.get("effects") or [] if effect.get("enabled", True)]
+                non_transition_effects = [effect for effect in effects if not is_transition_effect(effect)]
+                if non_transition_effects:
                     raise EditorRenderUnsupported("Video item effects must be pre-rendered before grouped composition")
                 if item.get("masks"):
                     raise EditorRenderUnsupported("Video masks must be pre-rendered before grouped composition")
@@ -245,8 +260,20 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
             sequence_current = "sequencebase0"
             layer_index = 0
             track_effects_applied = 0
+            transitions_applied = 0
 
             for track_index, (track, entries) in enumerate(visual_tracks, start=1):
+                try:
+                    transition_envelopes = build_transition_envelopes(item for item, _source, _kind in entries)
+                except ValueError as exc:
+                    raise EditorRenderUnsupported(str(exc)) from exc
+                transitions_applied += sum(
+                    1
+                    for item, _source, _kind in entries
+                    for effect in item.get("effects") or []
+                    if effect.get("enabled", True) and is_transition_effect(effect)
+                )
+
                 filters.append(
                     f"color=c=black@0.0:s={width}x{height}:r={self._ff(fps)}:d={self._ff(duration)},"
                     f"format=rgba[track{track_index}base0]"
@@ -312,6 +339,11 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                             "ow='hypot(iw,ih)':oh='hypot(iw,ih)',"
                         )
 
+                    chain = append_transition_filters(
+                        chain,
+                        transition_envelopes.get(str(item.get("id") or ""), ()),
+                        ff=self._ff,
+                    )
                     item_opacity = max(0.0, min(1.0, _finite(item.get("opacity"), 1.0)))
                     chain += f"colorchannelmixer=aa={self._ff(item_opacity)}[layer{layer_index}]"
                     filters.append(chain)
@@ -477,6 +509,10 @@ class GroupedTrackVideoCompositor(AdvancedVideoCompositor):
                     "track_effects_fail_closed": False,
                     "keyframed_track_effects_fail_closed": True,
                     "track_keyframes_fail_closed": True,
+                    "supports_visual_transitions": sorted(TRANSITION_RUNTIME_TYPES),
+                    "visual_transitions_applied": transitions_applied,
+                    "visual_transitions_use_bounded_alpha_envelopes": True,
+                    "visual_transition_user_filter_strings": False,
                     "source_media_mutated": False,
                     "unsupported_state_fails_closed": True,
                 })
