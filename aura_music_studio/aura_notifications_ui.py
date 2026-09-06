@@ -17,8 +17,8 @@ NOTIFICATIONS_SCRIPT = r"""
   function ensureBriefButton(){
     const foot=document.querySelector('.sideFoot');if(!foot||$('auraWorkspaceBriefButton'))return;
     const button=document.createElement('button');button.id='auraWorkspaceBriefButton';button.className='btn';button.textContent='☀ Workspace brief';
-    button.title='Ask Aura for a read-only briefing from connected Calendar, Gmail and an optional pinned-project Drive search.';
-    button.onclick=async()=>{try{if(typeof current==='undefined'||!current){if(typeof newThread!=='function')throw new Error('Open an Aura conversation first.');await newThread()}if(typeof send!=='function')throw new Error('Aura chat is not ready.');await send('Aura, give me my daily briefing')}catch(e){toast(e.message,true)}};
+    button.title='Ask Rhian for a read-only briefing from connected Calendar, Gmail and an optional pinned-project Drive search.';
+    button.onclick=async()=>{try{if(typeof current==='undefined'||!current){if(typeof newThread!=='function')throw new Error('Open a Rhian conversation first.');await newThread()}if(typeof send!=='function')throw new Error('Rhian chat is not ready.');await send('Rhian, give me my daily briefing')}catch(e){toast(e.message,true)}};
     foot.prepend(button);
   }
 
@@ -35,7 +35,7 @@ NOTIFICATIONS_SCRIPT = r"""
   function ensureDrawer(){
     let drawer=$('auraNotificationsDrawer');if(drawer)return drawer;
     drawer=document.createElement('div');drawer.id='auraNotificationsDrawer';drawer.className='drawer';
-    drawer.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Aura Notifications</b><div class="muted" style="font-size:.72rem">Task results, research completions and items that need attention</div></div><button class="btn" id="auraNotificationsClose">✕</button></div><div style="display:flex;gap:6px;margin:12px 0"><button class="mini" id="auraNotificationsRefresh">Refresh</button><button class="mini" id="auraNotificationsReadAll">Mark all read</button></div><div id="auraNotificationsRows"></div>`;
+    drawer.innerHTML=`<div style="display:flex;align-items:center;gap:8px"><div style="flex:1"><b>Rhian Notifications</b><div class="muted" style="font-size:.72rem">Task results, research completions and items that need attention</div></div><button class="btn" id="auraNotificationsClose">✕</button></div><div style="display:flex;gap:6px;margin:12px 0"><button class="mini" id="auraNotificationsRefresh">Refresh</button><button class="mini" id="auraNotificationsReadAll">Mark all read</button></div><div id="auraNotificationsRows"></div>`;
     document.body.append(drawer);
     $('auraNotificationsClose').onclick=()=>drawer.classList.remove('open');
     $('auraNotificationsRefresh').onclick=loadNotifications;
@@ -53,7 +53,7 @@ NOTIFICATIONS_SCRIPT = r"""
 
   function render(rows){
     const target=$('auraNotificationsRows');if(!target)return;
-    target.innerHTML=rows.length?rows.map(n=>`<div class="mem" data-notification-open="${esc(n.id)}" data-thread="${esc(n.thread_id||'')}" style="cursor:pointer;${n.unread?'border-color:#9b70ff66;background:#9b70ff0d':''}"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><b>${n.unread?'● ':''}${esc(n.title)}</b><div class="muted" style="font-size:.66rem;text-transform:capitalize">${esc(n.kind||'notification')} · ${esc(when(n.created_at))}</div></div><button class="mini" data-notification-delete="${esc(n.id)}">Delete</button></div><div style="font-size:.76rem;line-height:1.45;white-space:pre-wrap;margin-top:6px">${esc(n.body||'')}</div>${n.thread_id?'<div class="muted" style="font-size:.65rem;margin-top:6px">Open originating Aura conversation →</div>':''}</div>`).join(''):'<p class="muted">No Aura notifications yet.</p>';
+    target.innerHTML=rows.length?rows.map(n=>`<div class="mem" data-notification-open="${esc(n.id)}" data-thread="${esc(n.thread_id||'')}" style="cursor:pointer;${n.unread?'border-color:#9b70ff66;background:#9b70ff0d':''}"><div style="display:flex;align-items:flex-start;gap:8px"><div style="flex:1"><b>${n.unread?'● ':''}${esc(n.title)}</b><div class="muted" style="font-size:.66rem;text-transform:capitalize">${esc(n.kind||'notification')} · ${esc(when(n.created_at))}</div></div><button class="mini" data-notification-delete="${esc(n.id)}">Delete</button></div><div style="font-size:.76rem;line-height:1.45;white-space:pre-wrap;margin-top:6px">${esc(n.body||'')}</div>${n.thread_id?'<div class="muted" style="font-size:.65rem;margin-top:6px">Open originating Rhian conversation →</div>':''}</div>`).join(''):'<p class="muted">No Rhian notifications yet.</p>';
   }
 
   function setBadge(count){const badge=$('auraNotificationsBadge');if(!badge)return;const n=Number(count||0);badge.textContent=n>99?'99+':String(n);badge.style.display=n>0?'inline-block':'none'}

@@ -3,10 +3,11 @@ from __future__ import annotations
 import tomllib
 from pathlib import Path
 
+from aura_music_studio.branding import ENDORSEMENT
+
 
 ROOT = Path(__file__).resolve().parents[1]
 AUTHORITATIVE_BRAND = "Elevate Souls Productions Content Creation Command Center"
-ENDORSEMENT = "Powered by Aura AI"
 RETIRED_PUBLIC_BRAND = "Pulsar-Frequency House"
 
 

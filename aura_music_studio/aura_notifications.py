@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from .aura_chat_store import AuraChatStore
 
-router = APIRouter(tags=["Aura Notifications"])
+router = APIRouter(tags=["Rhian Notifications"])
 store = AuraChatStore()
 
 
@@ -68,11 +68,11 @@ class NotificationStore:
         resource_id: str | None = None,
     ) -> dict:
         if thread_id and not self.chat_store.thread(user_id, thread_id):
-            raise KeyError("Aura conversation not found")
+            raise KeyError("Rhian conversation not found")
         notification_id = uuid4().hex
         now = _iso_now()
         clean_kind = (kind or "general").strip().lower()[:60] or "general"
-        clean_title = " ".join((title or "Aura notification").split())[:200] or "Aura notification"
+        clean_title = " ".join((title or "Rhian notification").split())[:200] or "Rhian notification"
         clean_body = str(body or "").strip()[:5000]
         with self.chat_store._connect() as con:
             con.execute(
@@ -160,7 +160,7 @@ def mark_notification(notification_id: str, body: ReadRequest, request: Request)
     try:
         return notification_store.mark_read(member.user_id, notification_id, read=body.read)
     except KeyError as exc:
-        raise HTTPException(404, "Aura notification not found") from exc
+        raise HTTPException(404, "Rhian notification not found") from exc
 
 
 @router.post("/aura-intelligence/api/notifications/read-all")
@@ -173,7 +173,7 @@ def mark_all_notifications_read(request: Request):
 def delete_notification(notification_id: str, request: Request):
     member = _member(request)
     if not notification_store.delete(member.user_id, notification_id):
-        raise HTTPException(404, "Aura notification not found")
+        raise HTTPException(404, "Rhian notification not found")
     return {"deleted": True, "notification_id": notification_id}
 
 
