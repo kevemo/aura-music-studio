@@ -88,6 +88,18 @@ def _required_feature(path: str, method: str) -> str | None:
         return MULTITRACK_DAW
     if path.endswith("/harmonies"):
         return HARMONY_ARCHITECT
+
+    # Voice House identity creation is a server-authoritative premium operation. Keep these
+    # checks method-specific: an account downgrade must never prevent a user from listing,
+    # inspecting, revoking or deleting an existing private identity profile. Consent withdrawal
+    # and erasure are safety/privacy controls, not paid generation features.
+    if method == "POST" and (
+        path.endswith("/voice-house/challenge")
+        or path.endswith("/voice-house/profiles")
+    ):
+        return APPROVED_VOICE_DUPLICATION
+
+    # Preserve the established premium boundary for the legacy/current execution surfaces.
     if path.endswith("/voice-convert") or path.endswith("/voice-profiles") or path.endswith("/voices"):
         return APPROVED_VOICE_DUPLICATION
     if path.endswith("/restore"):
