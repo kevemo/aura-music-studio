@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .aura_effect_system_creator import EffectNodeSpec, EffectSystemSpec, compile_effect_system, make_effect_system
+from .creative_catalogue import get_catalogue_item
 from .creative_effect_entitlements import CreativeEffectEntitlementStore, store as default_entitlement_store
 from .daw import load_session, save_session
 from .revisions import create_revision, restore_revision
+
+_EFFECT_SYSTEM_RECORD_SCHEMA_VERSION = 2
 
 
 def _now() -> str:
@@ -66,6 +70,73 @@ def _system_path(project: Path, system_id: str) -> Path:
     return target
 
 
+def _catalogue_provenance_snapshot(spec: EffectSystemSpec) -> list[dict[str, Any]]:
+    """Capture canonical non-authorizing catalogue provenance for each referenced effect."""
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for node in spec.nodes:
+        item_id = str(node.catalogue_item_id)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        item = get_catalogue_item(item_id)
+        rows.append(
+            {
+                "catalogue_item_id": item.id,
+                "catalogue_item_version": item.version,
+                "metadata_schema_version": item.metadata_schema_version,
+                "provenance": item.provenance,
+                "source_kind": item.source_kind,
+                "source_author": item.source_author,
+                "license_id": item.license_id,
+                "rights_status": item.rights_status,
+                "rights_record_id": item.rights_record_id,
+                "rights_notice": item.rights_notice,
+                "source_asset_ids": [],
+                "entitlement_granted": False,
+                "execution_authorized": False,
+            }
+        )
+    return rows
+
+
+def _catalogue_provenance_fingerprint(rows: list[dict[str, Any]]) -> str:
+    blob = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def _validated_saved_provenance(payload: dict[str, Any], spec: EffectSystemSpec) -> tuple[list[dict[str, Any]], str | None]:
+    schema_version = int(payload.get("record_schema_version") or 1)
+    raw_rows = payload.get("catalogue_provenance")
+    raw_fingerprint = payload.get("catalogue_provenance_fingerprint")
+
+    # Preserve compatibility with records saved before canonical provenance snapshots existed.
+    if schema_version < _EFFECT_SYSTEM_RECORD_SCHEMA_VERSION and raw_rows is None and raw_fingerprint is None:
+        return [], None
+    if schema_version != _EFFECT_SYSTEM_RECORD_SCHEMA_VERSION:
+        raise ValueError("Saved effect-system record schema is unsupported")
+    if not isinstance(raw_rows, list) or not all(isinstance(row, dict) for row in raw_rows):
+        raise ValueError("Saved effect-system provenance is invalid")
+
+    fingerprint = str(raw_fingerprint or "").strip().casefold()
+    if len(fingerprint) != 64 or any(ch not in "0123456789abcdef" for ch in fingerprint):
+        raise ValueError("Saved effect-system provenance fingerprint is invalid")
+    if _catalogue_provenance_fingerprint(raw_rows) != fingerprint:
+        raise ValueError("Saved effect-system provenance integrity check failed")
+
+    expected_ids: list[str] = []
+    seen: set[str] = set()
+    for node in spec.nodes:
+        if node.catalogue_item_id not in seen:
+            seen.add(node.catalogue_item_id)
+            expected_ids.append(node.catalogue_item_id)
+    recorded_ids = [str(row.get("catalogue_item_id") or "") for row in raw_rows]
+    if recorded_ids != expected_ids:
+        raise ValueError("Saved effect-system provenance does not match the saved graph")
+
+    return [dict(row) for row in raw_rows], fingerprint
+
+
 def save_effect_system(
     project: Path,
     spec: EffectSystemSpec,
@@ -75,6 +146,8 @@ def save_effect_system(
     """Persist one reusable, validated effect-system definition inside the member project."""
     provenance = _prompt_fingerprint(source_prompt_fingerprint)
     compiled = compile_effect_system(spec)
+    catalogue_provenance = _catalogue_provenance_snapshot(spec)
+    catalogue_provenance_fingerprint = _catalogue_provenance_fingerprint(catalogue_provenance)
     path = _system_path(project, spec.id)
     existing: dict[str, Any] | None = None
     if path.is_file():
@@ -92,9 +165,12 @@ def save_effect_system(
             raise ValueError("Changing a saved effect system requires a version increment")
 
     payload = {
+        "record_schema_version": _EFFECT_SYSTEM_RECORD_SCHEMA_VERSION,
         "system": spec.public(),
         "fingerprint": compiled.fingerprint,
         "source_prompt_fingerprint": provenance or None,
+        "catalogue_provenance": catalogue_provenance,
+        "catalogue_provenance_fingerprint": catalogue_provenance_fingerprint,
         "runtime": "ffmpeg_audio",
         "saved_at": _now(),
         "backend_executable": True,
@@ -118,6 +194,7 @@ def load_effect_system(project: Path, system_id: str) -> EffectSystemSpec:
     compiled = compile_effect_system(spec)
     if str(payload.get("fingerprint") or "") != compiled.fingerprint:
         raise ValueError("Saved effect-system integrity check failed")
+    _validated_saved_provenance(payload, spec)
     return spec
 
 
@@ -133,6 +210,7 @@ def list_saved_effect_systems(project: Path) -> list[dict[str, Any]]:
             compiled = compile_effect_system(spec)
             if compiled.fingerprint != str(payload.get("fingerprint") or ""):
                 continue
+            catalogue_provenance, catalogue_provenance_fingerprint = _validated_saved_provenance(payload, spec)
             rows.append({
                 "id": spec.id,
                 "name": spec.name,
@@ -141,6 +219,9 @@ def list_saved_effect_systems(project: Path) -> list[dict[str, Any]]:
                 "node_count": len(spec.nodes),
                 "fingerprint": compiled.fingerprint,
                 "source_prompt_fingerprint": provenance or None,
+                "catalogue_provenance": catalogue_provenance,
+                "catalogue_provenance_fingerprint": catalogue_provenance_fingerprint,
+                "catalogue_provenance_recorded": catalogue_provenance_fingerprint is not None,
                 "runtime": "ffmpeg_audio",
                 "backend_executable": True,
             })
