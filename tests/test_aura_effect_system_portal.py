@@ -25,7 +25,7 @@ def test_effect_system_creator_page_is_private_no_store_and_uses_exact_api_contr
     assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["referrer-policy"] == "same-origin"
     assert "noindex,nofollow" in html
-    assert "Aura Effect/System Creator" in html
+    assert "Rhiannon Effect/System Creator" in html
     assert "__PLAN__" not in html
     assert "pro plan" in html
     assert "'/command-center/api/universal-library/effect-systems'" in html
