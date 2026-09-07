@@ -84,6 +84,7 @@ jobs:
         run: |
           LSS_DEPLOYMENT_MODE=selfhost \
           LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+          LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
           ACESTEP_API_KEY=ci-production-renderer-key-0123456789 \
           docker compose \
             -f docker-compose.yml \
@@ -92,6 +93,7 @@ jobs:
             config -q
           LSS_DEPLOYMENT_MODE=selfhost \
           LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+          LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
           ACESTEP_API_KEY=ci-production-renderer-key-0123456789 \
           docker compose \
             -f docker-compose.yml \
@@ -122,6 +124,7 @@ jobs:
             LSS_BACKUP_AGE_RECIPIENT=age1ci0123456789012345678901234567890 \
             LSS_PUBLIC_BASE_URL=https://ci.example.test \
             LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+            LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
             LSS_COOKIE_SECURE=true \
             LSS_PROVENANCE_SECRET=ci-provenance-secret-0123456789 \
             LSS_ADMIN_KEY=ci-owner-secret-0123456789 \
@@ -154,6 +157,7 @@ jobs:
         run: |
           docker run --rm \
             -e LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+            -e LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
