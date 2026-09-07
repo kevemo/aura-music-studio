@@ -49,13 +49,32 @@ def _producer(request: str, project_path: str):
         return f"ERROR: {type(exc).__name__}: {exc}"
 
 
-def _create_song(title, concept, lyrics, generate_lyrics, genre, subgenre, mood, instruments, energy, bpm, key, duration, vocal_mode, reference_file, extra_prompt):
+def _create_song(
+    title,
+    concept,
+    lyrics,
+    generate_lyrics,
+    lyrics_rights_confirmed,
+    genre,
+    subgenre,
+    mood,
+    instruments,
+    energy,
+    bpm,
+    key,
+    duration,
+    vocal_mode,
+    reference_file,
+    reference_rights_confirmed,
+    extra_prompt,
+):
     try:
         request = CreateSongRequest(
             title=title,
             concept=concept,
             lyrics=lyrics,
             generate_lyrics=bool(generate_lyrics),
+            lyrics_rights_confirmed=bool(lyrics_rights_confirmed),
             genre=genre,
             subgenre=subgenre,
             mood=mood,
@@ -66,15 +85,27 @@ def _create_song(title, concept, lyrics, generate_lyrics, genre, subgenre, mood,
             duration_seconds=int(duration),
             vocal_mode=vocal_mode,
             reference_audio=str(reference_file) if reference_file else None,
+            reference_audio_rights_confirmed=bool(reference_rights_confirmed),
             extra_prompt=extra_prompt or "",
         )
         project = build_song_project(request, Path("projects"))
         if reference_file:
-            record = AssetLibrary(project).ingest(Path(reference_file), kind="audio")
+            record = AssetLibrary(project).ingest(
+                Path(reference_file),
+                kind="audio",
+                rights_basis="user_owned_or_licensed",
+                attestation="I confirm I own or have permission/license to use this reference audio in this project.",
+                tags=["song_reference", "rights_confirmed"],
+            )
             import yaml
             manifest_path = project / "project.yaml"
             manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
             manifest["reference_audio"] = record.path
+            manifest.setdefault("rights_clearance", {})["reference_asset"] = {
+                "asset_id": record.id,
+                "rights_record_id": record.rights_record_id,
+                "sha256": record.sha256,
+            }
             manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8")
         return f"Created: {project}", str(project)
     except Exception as exc:
@@ -165,8 +196,13 @@ def build_ui() -> gr.Blocks:
             with gr.Row():
                 title = gr.Textbox(label="Song title")
                 concept = gr.Textbox(label="Song idea / concept")
-            lyrics = gr.Textbox(label="Lyrics", lines=14, placeholder="Paste your lyrics, or leave empty and enable AI lyrics.")
-            generate_lyrics = gr.Checkbox(label="Create lyrics with AI", value=False)
+            lyrics = gr.Textbox(label="Lyrics", lines=14, placeholder="Paste lyrics you wrote/have permission to use, or leave empty and enable AI lyrics.")
+            with gr.Row():
+                generate_lyrics = gr.Checkbox(label="Create lyrics with AI", value=False)
+                lyrics_rights = gr.Checkbox(
+                    label="I own or have permission/license to use any lyrics I pasted",
+                    value=False,
+                )
             with gr.Row():
                 genre = gr.Dropdown(["pop", "rock", "acoustic", "country", "R&B", "soul", "hip-hop", "EDM", "metal", "folk", "jazz", "blues", "classical", "cinematic", "ambient", "reggae", "latin", "indie"], value="pop", label="Genre", allow_custom_value=True)
                 subgenre = gr.Textbox(label="Subgenre / style")
@@ -178,12 +214,31 @@ def build_ui() -> gr.Blocks:
                 key = gr.Textbox(label="Key (optional)")
                 duration = gr.Slider(30, 600, value=210, step=10, label="Length (seconds)")
             vocal_mode = gr.Radio(["ai_vocal", "instrumental", "approved_voice"], value="ai_vocal", label="Vocals")
-            reference = gr.Audio(label="Optional style/reference audio you have the right to use", type="filepath")
-            extra = gr.Textbox(label="Extra production direction", lines=3)
+            reference = gr.Audio(label="Optional style/reference audio", type="filepath")
+            reference_rights = gr.Checkbox(
+                label="I own or have permission/license to use the uploaded reference audio",
+                value=False,
+            )
+            extra = gr.Textbox(
+                label="Extra production direction",
+                lines=3,
+                placeholder="Describe genre, tempo, instrumentation, mood, vocal range and production characteristics. Do not request direct imitation of a real artist or existing song.",
+            )
+            gr.Markdown(
+                "Copyright/IP safety: requests to reproduce existing songs/lyrics or directly imitate a real creator are blocked before generation. "
+                "Authorized voice cloning must use a consent-approved Aura Voice Profile."
+            )
             create_btn = gr.Button(f"Create {PRODUCT_NAME} Project", variant="primary")
             create_status = gr.Textbox(label="Status")
             created_path = gr.Textbox(label="Project folder")
-            create_btn.click(_create_song, [title, concept, lyrics, generate_lyrics, genre, subgenre, mood, instruments, energy, bpm, key, duration, vocal_mode, reference, extra], [create_status, created_path])
+            create_btn.click(
+                _create_song,
+                [
+                    title, concept, lyrics, generate_lyrics, lyrics_rights, genre, subgenre, mood,
+                    instruments, energy, bpm, key, duration, vocal_mode, reference, reference_rights, extra,
+                ],
+                [create_status, created_path],
+            )
 
         with gr.Tab("💬 Aura Producer"):
             producer_project = gr.Textbox(label="Current project", value="projects/nothings-gonna-stop-us-now")

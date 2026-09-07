@@ -10,11 +10,13 @@ from urllib.parse import quote
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from .esp_owner_network_intelligence import router as esp_owner_network_intelligence_router
 from .owner_identity import owner_session_authorized, owner_theme, request_owner_persona
 from .owner_user_control import OwnerUserControl
 from .owner_user_directory import user_detail as base_user_detail
 
 router = APIRouter(tags=["Owner User Intelligence"])
+router.include_router(esp_owner_network_intelligence_router)
 control = OwnerUserControl()
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
 
@@ -95,7 +97,7 @@ def owner_user_intelligence(user_id: str, request: Request):
         role = str(membership.get("status")).title()
     usage_html = "".join(f"<span class='pill'>{escape(str(row.get('event_type') or '').replace('_',' ').title())}: {int(row.get('n') or 0)}</span>" for row in data.get("usage", [])) or "<span class='muted'>No creative activity recorded.</span>"
     requests = data.get("esp_requests") or []
-    body = f"""<div class='top'><div><div class='eyebrow'>Mary / Kev · User Intelligence</div><h1>{escape(user.get('display_name') or user.get('email') or 'Member')}</h1><p class='muted'>{escape(user.get('email') or '')}</p></div><div><a class='btn' href='/owner/users/{quote(user_id, safe='')}'>Controls</a> <a class='btn' href='/owner/audit?user_id={quote(user_id, safe='')}'>Audit</a> <a class='btn' href='/owner/users'>Directory</a></div></div>
+    body = f"""<div class='top'><div><div class='eyebrow'>Mary / Kev · User Intelligence</div><h1>{escape(user.get('display_name') or user.get('email') or 'Member')}</h1><p class='muted'>{escape(user.get('email') or '')}</p></div><div><a class='btn primary' href='/owner/esp-intelligence'>ESP Network Intelligence</a> <a class='btn' href='/owner/users/{quote(user_id, safe='')}'>Controls</a> <a class='btn' href='/owner/audit?user_id={quote(user_id, safe='')}'>Audit</a> <a class='btn' href='/owner/users'>Directory</a></div></div>
 <section class='grid'><div class='metric'><span class='muted'>Creative plan</span><b>{escape(str(user.get('plan_id') or 'free').upper())}</b><small>{escape(str(user.get('billing_status') or ''))}</small></div><div class='metric'><span class='muted'>ESP authorization</span><b>{escape(role)}</b><small>{escape(str(membership.get('region') or ''))}</small></div><div class='metric'><span class='muted'>Creative activity</span><b>{usage_total}</b><small>{int(data.get('projects') or 0)} projects</small></div><div class='metric'><span class='muted'>Creator progress</span><b>{int(performance.get('total') or 0)}</b><small>{avg_training}% avg training</small></div></section>
 <section class='two'><div class='card'><div class='eyebrow'>Creator identity</div><h2>{escape(str((niche.get('catalog') or {}).get('title') or niche.get('niche') or 'Niche not selected'))}</h2><p class='muted'>Sub-niche: {escape(str(niche.get('sub_niche') or '—'))}<br>Mentor: {escape(str(owner_profile.get('mentor') or '—'))}<br>Sub-level: {escape(str(owner_profile.get('sub_level') or '—'))}<br>Network state: {escape(str(niche.get('network_status') or '—'))}</p><div>{''.join(f"<span class='pill'>{escape(str(item))}</span>" for item in (owner_profile.get('categories') or []))}</div></div><div class='card'><div class='eyebrow'>ESP access requests</div><h2>{len(requests)} recorded</h2><p class='muted'>Current membership state: {escape(str(membership.get('status') or 'none'))}. Subscription and ESP authorization are displayed as separate dimensions.</p></div></section>
 <section class='card'><div class='eyebrow'>Creative usage</div><h2>Creation & tool activity</h2>{usage_html}</section>
@@ -114,8 +116,9 @@ def user_detail_with_intelligence(user_id: str, request: Request, message: str =
         return response
     marker = "<a class='btn' href='/owner/users'>All Users</a>"
     link = f"<a class='btn primary' href='/owner/users/{quote(user_id, safe='')}/intelligence'>Intelligence</a>"
+    network_link = "<a class='btn' href='/owner/esp-intelligence'>ESP Network Intelligence</a>"
     if marker in html and "/intelligence'" not in html:
-        html = html.replace(marker, marker + link, 1)
+        html = html.replace(marker, marker + link + network_link, 1)
     return HTMLResponse(html, status_code=response.status_code, headers={"Cache-Control": "no-store"})
 
 

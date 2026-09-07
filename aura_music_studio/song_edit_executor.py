@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .acestep_api import ACE_TRACKS, AceStepClient
 from .editing import RegionEditRequest, generate_region_take
@@ -13,6 +13,11 @@ from .mixer import render_session, selected_audio_clips
 from .project import ProjectWorkspace
 from .release_quality import build_release_quality_report, enforce_release_quality
 from .revisions import create_revision
+from .section_regeneration import (
+    SectionCandidateBatch,
+    generate_section_candidate_batch,
+    stage_section_candidate_batch,
+)
 from .session import Clip, StudioSession
 from .song_dna import InstrumentLayer, LyricLine, SongDNA, SongDNAStore, SongEditDirective, _now
 
@@ -26,7 +31,7 @@ class EditExecutionResult(BaseModel):
     audition_required: bool = True
     committed: bool = False
     detail: str = ""
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 _ROLE_KEYWORDS = {
@@ -121,7 +126,14 @@ def _work_dir(project: Path, directive_id: str) -> Path:
     return root
 
 
-def _store_candidate(dna_store: SongDNAStore, directive: SongEditDirective, path: Path, *, kind: str, metadata: dict) -> SongDNA:
+def _store_candidate(
+    dna_store: SongDNAStore,
+    directive: SongEditDirective,
+    path: Path,
+    *,
+    kind: str,
+    metadata: dict,
+) -> SongDNA:
     dna = dna_store.load()
     current = _directive(dna, directive.id)
     current.status = "ready"
@@ -135,6 +147,37 @@ def _store_candidate(dna_store: SongDNAStore, directive: SongEditDirective, path
     }
     dna_store.save(dna)
     return dna
+
+
+def _section_batch_from_directive(dna: SongDNA, directive: SongEditDirective) -> SectionCandidateBatch:
+    raw = directive.metadata.get("section_candidate_batch")
+    if not isinstance(raw, dict):
+        raise RuntimeError("Section regeneration batch metadata is missing; generate the section again")
+    batch = SectionCandidateBatch.model_validate(raw)
+    if batch.directive_id != directive.id:
+        raise RuntimeError("Section regeneration batch belongs to a different directive")
+    if not directive.target_ids or batch.section_id != directive.target_ids[0]:
+        raise RuntimeError("Section regeneration target changed after candidate generation")
+    section = next((item for item in dna.sections if item.id == batch.section_id), None)
+    if section is None or section.start_seconds is None or section.end_seconds is None:
+        raise RuntimeError("Section timing is no longer available; regenerate the candidate batch")
+    if abs(float(section.start_seconds) - batch.section_start_seconds) > 1e-6 or abs(float(section.end_seconds) - batch.section_end_seconds) > 1e-6:
+        raise RuntimeError("Section timing changed after candidate generation; regenerate before commit")
+    return batch
+
+
+def _refresh_section_layer_sources(store: SongDNAStore, batch: SectionCandidateBatch) -> None:
+    dna = store.load()
+    by_id = {layer.id: layer for layer in dna.instruments}
+    for item in batch.tracks:
+        layer = by_id.get(item.layer_id)
+        if layer is None:
+            raise RuntimeError(f"Song DNA layer {item.layer_id!r} disappeared during section commit")
+        layer.track_id = item.track_id
+        layer.source_ref = item.candidate_path
+        layer.metadata["last_section_regeneration_directive"] = batch.directive_id
+        layer.metadata["last_section_regeneration_section"] = batch.section_id
+    store.save(dna)
 
 
 def generate_candidate(project: Path, directive_id: str) -> EditExecutionResult:
@@ -154,7 +197,7 @@ def generate_candidate(project: Path, directive_id: str) -> EditExecutionResult:
         elif directive.action == "replace_instrument":
             result = _generate_instrument_candidate(project, store, directive, work)
         elif directive.action == "regenerate_section":
-            result = _section_readiness(project, store, directive)
+            result = _generate_section_candidate(project, store, directive, work)
         else:
             raise RuntimeError(f"Audio execution for {directive.action} is not connected yet")
         return result
@@ -168,7 +211,12 @@ def generate_candidate(project: Path, directive_id: str) -> EditExecutionResult:
         raise
 
 
-def _generate_lyric_candidate(project: Path, store: SongDNAStore, directive: SongEditDirective, work: Path) -> EditExecutionResult:
+def _generate_lyric_candidate(
+    project: Path,
+    store: SongDNAStore,
+    directive: SongEditDirective,
+    work: Path,
+) -> EditExecutionResult:
     if not directive.target_ids:
         raise RuntimeError("Lyric edit has no target line")
     dna = store.load()
@@ -229,7 +277,12 @@ def _generate_lyric_candidate(project: Path, store: SongDNAStore, directive: Son
     )
 
 
-def _generate_instrument_candidate(project: Path, store: SongDNAStore, directive: SongEditDirective, work: Path) -> EditExecutionResult:
+def _generate_instrument_candidate(
+    project: Path,
+    store: SongDNAStore,
+    directive: SongEditDirective,
+    work: Path,
+) -> EditExecutionResult:
     if not directive.target_ids:
         raise RuntimeError("Instrument edit has no target layer")
     dna = store.load()
@@ -283,31 +336,57 @@ def _generate_instrument_candidate(project: Path, store: SongDNAStore, directive
     )
 
 
-def _section_readiness(project: Path, store: SongDNAStore, directive: SongEditDirective) -> EditExecutionResult:
+def _generate_section_candidate(
+    project: Path,
+    store: SongDNAStore,
+    directive: SongEditDirective,
+    work: Path,
+) -> EditExecutionResult:
     dna = store.load()
-    if not directive.target_ids:
-        raise RuntimeError("Section edit has no target section")
-    section = next((item for item in dna.sections if item.id == directive.target_ids[0]), None)
-    if section is None:
-        raise KeyError(directive.target_ids[0])
-    if section.start_seconds is None or section.end_seconds is None or section.end_seconds <= section.start_seconds:
-        raise RuntimeError("This section has no verified audio time range yet. Align or mark the section before local regeneration.")
-    current = _directive(dna, directive.id)
-    current.status = "planned"
-    current.updated_at = _now()
-    current.metadata = {
-        **current.metadata,
-        "execution_blocked_reason": (
-            "Multi-track section regeneration requires per-layer regional candidates. Flat-master repaint is intentionally not used because it would reduce editability."
-        ),
-    }
-    store.save(dna)
+    session, _ = _session(project)
+    batch = generate_section_candidate_batch(
+        project,
+        dna,
+        directive,
+        work_dir=work / "section_tracks",
+        session=session,
+    )
+    staged = stage_section_candidate_batch(session, batch, project=project)
+    preview = render_session(
+        staged,
+        project,
+        work / "section_regeneration_preview.wav",
+        work / "section_regeneration_preview_mix",
+    )
+    _store_candidate(
+        store,
+        directive,
+        Path(preview),
+        kind="multitrack_section_regeneration_preview",
+        metadata={
+            "section_candidate_batch": batch.model_dump(mode="json"),
+            "candidate_count": len(batch.tracks),
+            "candidate_track_ids": [item.track_id for item in batch.tracks],
+            "section_id": batch.section_id,
+            "preserve_instrument_identity": batch.preserve_instrument_identity,
+        },
+    )
     return EditExecutionResult(
         directive_id=directive.id,
         action=directive.action,
-        state="planned",
-        audition_required=False,
-        detail="Section timing is known, but multi-track regional regeneration is the next renderer stage; Aura will not flatten the project to fake completion.",
+        state="ready",
+        candidate_path=str(preview),
+        candidate_kind="multitrack_section_regeneration_preview",
+        audition_required=True,
+        detail=(
+            f"Generated {len(batch.tracks)} isolated section-regeneration takes and rendered one staged preview mix. "
+            "The authoritative DAW session is unchanged until this exact batch passes the commit quality gate."
+        ),
+        metadata={
+            "candidate_count": len(batch.tracks),
+            "track_ids": [item.track_id for item in batch.tracks],
+            "section_id": batch.section_id,
+        },
     )
 
 
@@ -321,80 +400,109 @@ def commit_candidate(project: Path, directive_id: str) -> EditExecutionResult:
     if candidate is None or not candidate.is_file():
         raise RuntimeError("Edit candidate file is missing")
     session, session_path = _session(project)
-    staged = session.model_copy(deep=True)
-    track_id = str(directive.metadata.get("track_id") or "")
-    if not track_id:
-        raise RuntimeError("Edit candidate is not linked to a DAW track")
-    track = staged.find_track(track_id)
-    base = _current_audio_clip(session, track_id)
+
+    section_batch: SectionCandidateBatch | None = None
+    committed_clip_ids: list[str] = []
+    committed_track_ids: list[str] = []
+    take: Clip | None = None
+    committed_track = None
+
+    if directive.action == "regenerate_section":
+        section_batch = _section_batch_from_directive(dna, directive)
+        staged = stage_section_candidate_batch(session, section_batch, project=project)
+        stage_history = staged.generation_history[-1] if staged.generation_history else {}
+        committed_clip_ids = list(stage_history.get("clip_ids") or [])
+        committed_track_ids = list(stage_history.get("track_ids") or [])
+    else:
+        staged = session.model_copy(deep=True)
+        track_id = str(directive.metadata.get("track_id") or "")
+        if not track_id:
+            raise RuntimeError("Edit candidate is not linked to a DAW track")
+        committed_track = staged.find_track(track_id)
+        base = _current_audio_clip(session, track_id)
+
+        if directive.action == "replace_lyric_line":
+            take = Clip(
+                name=f"Aura Lyric Repair — {directive.id[:8]}",
+                kind="audio",
+                source=str(candidate),
+                start=base.start,
+                duration=base.duration,
+                source_offset=base.source_offset,
+                gain_db=base.gain_db,
+                fade_in=base.fade_in,
+                fade_out=base.fade_out,
+                take_lane=max((clip.take_lane for clip in committed_track.clips), default=-1) + 1,
+                metadata={"real_audio": True, "committed": True, "song_dna_directive": directive.id},
+            )
+        elif directive.action == "replace_instrument":
+            replacement_role = str(directive.metadata.get("replacement_role") or committed_track.role)
+            if replacement_role == "keyboard":
+                session_role = "keyboard"
+            elif replacement_role in {
+                "vocals",
+                "backing_vocals",
+                "drums",
+                "bass",
+                "guitar",
+                "strings",
+                "synth",
+                "percussion",
+                "brass",
+                "woodwinds",
+                "fx",
+            }:
+                session_role = replacement_role
+            else:
+                session_role = "other"
+            committed_track.role = session_role
+            committed_track.name = str(directive.metadata.get("replacement_label") or committed_track.name)
+            take = Clip(
+                name=f"Aura Replacement — {committed_track.name}",
+                kind="audio",
+                source=str(candidate),
+                start=0.0,
+                duration=float(base.duration or 0.0),
+                take_lane=max((clip.take_lane for clip in committed_track.clips), default=-1) + 1,
+                metadata={"real_audio": True, "committed": True, "song_dna_directive": directive.id},
+            )
+        else:
+            raise RuntimeError(f"Commit is not implemented for {directive.action}")
+
+        for clip in committed_track.clips:
+            clip.metadata["committed"] = False
+        committed_track.clips.append(take)
+        committed_clip_ids = [take.id]
+        committed_track_ids = [committed_track.id]
+        staged.generation_history.append(
+            {
+                "action": "song_dna_edit_commit",
+                "directive_id": directive.id,
+                "edit_action": directive.action,
+                "track_id": committed_track.id,
+                "clip_id": take.id,
+                "candidate": str(candidate),
+            }
+        )
 
     try:
         create_revision(project, label=f"Before {directive.action} commit", reason="song_dna_edit", actor="Aura", keep=200)
     except Exception:
         pass
 
-    if directive.action == "replace_lyric_line":
-        take = Clip(
-            name=f"Aura Lyric Repair — {directive.id[:8]}",
-            kind="audio",
-            source=str(candidate),
-            start=base.start,
-            duration=base.duration,
-            source_offset=base.source_offset,
-            gain_db=base.gain_db,
-            fade_in=base.fade_in,
-            fade_out=base.fade_out,
-            take_lane=max((clip.take_lane for clip in track.clips), default=-1) + 1,
-            metadata={"real_audio": True, "committed": True, "song_dna_directive": directive.id},
-        )
-    elif directive.action == "replace_instrument":
-        replacement_role = str(directive.metadata.get("replacement_role") or track.role)
-        if replacement_role == "keyboard":
-            session_role = "keyboard"
-        elif replacement_role in {"vocals", "backing_vocals", "drums", "bass", "guitar", "strings", "synth", "percussion", "brass", "woodwinds", "fx"}:
-            session_role = replacement_role
-        else:
-            session_role = "other"
-        track.role = session_role
-        track.name = str(directive.metadata.get("replacement_label") or track.name)
-        take = Clip(
-            name=f"Aura Replacement — {track.name}",
-            kind="audio",
-            source=str(candidate),
-            start=0.0,
-            duration=float(base.duration or 0.0),
-            take_lane=max((clip.take_lane for clip in track.clips), default=-1) + 1,
-            metadata={"real_audio": True, "committed": True, "song_dna_directive": directive.id},
-        )
-    else:
-        raise RuntimeError(f"Commit is not implemented for {directive.action}")
-
-    # Only the new take is committed on this track. Older takes are retained for rollback/audition.
-    for clip in track.clips:
-        clip.metadata["committed"] = False
-    track.clips.append(take)
-    staged.generation_history.append({
-        "action": "song_dna_edit_commit",
-        "directive_id": directive.id,
-        "edit_action": directive.action,
-        "track_id": track.id,
-        "clip_id": take.id,
-        "candidate": str(candidate),
-    })
-
     work = _work_dir(project, directive.id)
     premaster = render_session(staged, project, work / "committed_mix.wav", work / "committed_mix")
     workspace = ProjectWorkspace(project)
+    manifest = workspace.load_manifest()
     candidate_master = work / "Aura_Edit_Master.wav"
     candidate_master, _master_report = master(
         premaster,
         candidate_master,
-        preset=workspace.load_manifest().mix.mastering_preset,
-        target_lufs=workspace.load_manifest().mix.target_lufs,
-        true_peak_db=workspace.load_manifest().mix.true_peak_db,
-        reference=(workspace.resolve_asset(workspace.load_manifest().mix.mastering_reference) if workspace.load_manifest().mix.mastering_reference else None),
+        preset=manifest.mix.mastering_preset,
+        target_lufs=manifest.mix.target_lufs,
+        true_peak_db=manifest.mix.true_peak_db,
+        reference=(workspace.resolve_asset(manifest.mix.mastering_reference) if manifest.mix.mastering_reference else None),
     )
-    manifest = workspace.load_manifest()
     quality = build_release_quality_report(
         project,
         exports={"master_wav": str(candidate_master), "stems": []},
@@ -414,20 +522,33 @@ def commit_candidate(project: Path, directive_id: str) -> EditExecutionResult:
     current.updated_at = _now()
     current.metadata = {
         **current.metadata,
-        "committed_clip_id": take.id,
+        "committed_clip_ids": committed_clip_ids,
+        "committed_track_ids": committed_track_ids,
         "committed_master": str(final_master),
         "technical_gate_passed": quality["technical_gate_passed"],
         "perceptual_review_required": quality["perceptual_review_required"],
     }
-    if directive.action == "replace_instrument":
+    if len(committed_clip_ids) == 1:
+        current.metadata["committed_clip_id"] = committed_clip_ids[0]
+    if directive.action == "replace_instrument" and committed_track is not None:
         layer = _layer(updated, directive.target_ids[0])
-        layer.role = track.role
-        layer.label = track.name
-        layer.track_id = track.id
+        layer.role = committed_track.role
+        layer.label = committed_track.name
+        layer.track_id = committed_track.id
         layer.source_ref = str(candidate)
     store.save(updated)
     store.sync_session(session_path)
+    if section_batch is not None:
+        _refresh_section_layer_sources(store, section_batch)
     store.sync_exports(str(final_master), [])
+
+    if section_batch is not None:
+        detail = (
+            f"The auditioned {len(section_batch.tracks)}-track section batch passed the render, mastering and technical release gate "
+            "and is now the active editable DAW take set."
+        )
+    else:
+        detail = "The auditioned candidate is now the active DAW take and the session was rendered/mastered through the technical release gate."
 
     return EditExecutionResult(
         directive_id=directive.id,
@@ -437,6 +558,11 @@ def commit_candidate(project: Path, directive_id: str) -> EditExecutionResult:
         candidate_kind=str(directive.metadata.get("candidate_kind") or ""),
         audition_required=True,
         committed=True,
-        detail="The auditioned candidate is now the active DAW take and the session was rendered/mastered through the technical release gate.",
-        metadata={"master": str(final_master), "technical_gate_passed": quality["technical_gate_passed"]},
+        detail=detail,
+        metadata={
+            "master": str(final_master),
+            "technical_gate_passed": quality["technical_gate_passed"],
+            "committed_clip_ids": committed_clip_ids,
+            "committed_track_ids": committed_track_ids,
+        },
     )

@@ -67,6 +67,11 @@ def test_approval_gate_blocks_future_autopublishing_until_approved(tmp_path: Pat
             account_label="Brand IG",
             state="connected",
             supports_auto_publish=True,
+            token_secret_ref="social-token://approval-test-instagram",
+            metadata={
+                "publishing_adapter": "instagram_graph",
+                "publishing_adapter_active": True,
+            },
         )
         store.connect_placeholder(house.id, connection)
         content = SocialContent(

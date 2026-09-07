@@ -1,0 +1,14 @@
+# Elevate Souls Productions Content Creation Command Center
+# Release-critical ownership. GitHub branch protection must require Code Owner review
+# for this file to become an enforced merge control.
+
+* @kevemo
+
+/.github/ @kevemo
+/app.py @kevemo
+/aura_music_studio/ @kevemo
+/config/ @kevemo
+/deploy/ @kevemo
+/docker-compose*.yml @kevemo
+/pyproject.toml @kevemo
+/README.md @kevemo

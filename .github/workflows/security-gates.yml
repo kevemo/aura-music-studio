@@ -1,0 +1,91 @@
+name: Elevate Souls Command Center Security Gates
+
+on:
+  push:
+    branches: [main, development/full-site-build]
+  pull_request:
+    branches: [main, development/full-site-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: command-center-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  committed-secrets:
+    name: Committed secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout full tracked tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Scan tracked files for production credentials
+        run: python scripts/scan_committed_secrets.py --root .
+
+      - name: Scanner regression tests
+        run: python -m pip install pytest && python -m pytest -q tests/test_committed_secret_scan.py
+
+  aura-sec-release-trust:
+    name: Aura Sec release trust gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout candidate tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused test dependency
+        run: python -m pip install pytest cryptography
+
+      - name: Verify signed-release and fail-closed readiness boundaries
+        run: >-
+          python -m pytest -q
+          tests/test_aura_sec_release.py
+          tests/test_aura_sec_release_key_trust.py
+          tests/test_aura_sec_release_trust.py
+          tests/test_aura_sec_platform_release.py
+          tests/test_aura_sec_release_readiness.py
+
+  aura-sec-native-execution:
+    name: Aura Sec native execution gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout candidate tree
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused native trust dependencies
+        run: python -m pip install pytest cryptography 'pydantic>=2,<3' argon2-cffi
+
+      - name: Verify signed sequence, exact command binding, device attestation, execute-once and native adapter boundaries
+        run: >-
+          python -m pytest -q
+          tests/test_aura_sec_command_sequence.py
+          tests/test_aura_sec_command_bound_attestation.py
+          tests/test_aura_sec_device_attestation.py
+          tests/test_aura_sec_native_execution_guard.py
+          tests/test_aura_sec_native_platform_execution.py

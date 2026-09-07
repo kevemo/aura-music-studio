@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 # Retained as a compatibility distribution identifier. The authoritative public
-# product brand is Pulsar-Frequency House.
+# product brand is Elevate Souls Productions Content Creation Command Center.
 name = "aura-music-studio"
 version = "0.20.0"
-description = "Pulsar-Frequency House — professional music, video, image, voice and creator intelligence powered by Elevate Souls Productions & Aura AI Systems"
+description = "Elevate Souls Productions Content Creation Command Center — professional music, video, image, voice and creator intelligence — Powered by Aura AI"
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.26",
@@ -18,6 +18,7 @@ dependencies = [
   "PyYAML>=6.0",
   "requests>=2.31",
   "cryptography>=42.0",
+  "argon2-cffi>=23.1",
   "gradio>=5.0",
   "gradio-client>=1.7",
   "typer>=0.12",
@@ -64,17 +65,14 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.6"]
 aura = "aura_music_studio.cli:app"
 aura-task-worker = "aura_music_studio.aura_task_worker:run_worker"
 aura-social-publish-worker = "aura_music_studio.esp_social_publish_worker:run_worker"
+shared-sky-worker = "aura_music_studio.shared_sky_worker:run_worker"
+shared-sky-battle-worker = "aura_music_studio.shared_sky_battle_worker:run_worker"
 
 [tool.setuptools.packages.find]
 include = ["aura_music_studio*"]
 
 [tool.setuptools.package-data]
 aura_music_studio = ["static/*.webp", "static/*.svg"]
-
-# Vercel must serve the real FastAPI application, not the static working-model HTML.
-# The bootstrap sets only serverless-safe writable path defaults before importing app.py.
-[tool.vercel]
-entrypoint = "vercel_bootstrap:app"
 
 [tool.ruff]
 line-length = 100

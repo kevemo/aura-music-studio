@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, model_validator
 
+from .request_context import current_user_id
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -23,6 +25,9 @@ class RightsRecord(BaseModel):
     created_at: str = Field(default_factory=_now)
 
 
+VoiceSubjectRelationship = Literal["self", "other_authorized_person", "legacy_unspecified"]
+
+
 class VoiceProfile(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     name: str
@@ -30,6 +35,10 @@ class VoiceProfile(BaseModel):
     reference_files: list[str] = Field(default_factory=list)
     consent_confirmed: bool = False
     consent_statement: str = ""
+    consent_recorded_at: str | None = None
+    subject_relationship: VoiceSubjectRelationship = "legacy_unspecified"
+    created_by_user_id: str | None = None
+    tenant_user_id: str | None = None
     verification_phrase: str | None = None
     verification_recording: str | None = None
     verification_state: Literal["unverified", "attested", "verified", "failed", "revoked"] = "unverified"
@@ -37,8 +46,10 @@ class VoiceProfile(BaseModel):
     verification_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     allowed_uses: list[str] = Field(default_factory=lambda: ["singing", "backing_harmony", "voice_conversion"])
     similarity_limit: float = Field(default=0.8, ge=0.0, le=1.0)
+    version: int = Field(default=1, ge=1)
     created_at: str = Field(default_factory=_now)
     updated_at: str = Field(default_factory=_now)
+    last_used_at: str | None = None
     revoked_at: str | None = None
     revoked_reason: str | None = None
     metadata: dict = Field(default_factory=dict)
@@ -47,6 +58,13 @@ class VoiceProfile(BaseModel):
     def require_consent_text(self):
         if self.consent_confirmed and len(self.consent_statement.strip()) < 10:
             raise ValueError("A meaningful consent statement is required before enabling a Voice Profile.")
+        if self.consent_confirmed and not self.consent_recorded_at:
+            # Backwards-compatible migration for profiles created before explicit consent timestamps.
+            object.__setattr__(self, "consent_recorded_at", self.created_at)
+        if self.subject_relationship == "legacy_unspecified" and self.metadata.get("challenge_id"):
+            # The current Voice House challenge explicitly instructs the submitting subject to
+            # record themselves. Older challenge-created rows predate this typed field.
+            object.__setattr__(self, "subject_relationship", "self")
         if self.revoked_at:
             object.__setattr__(self, "verification_state", "revoked")
             object.__setattr__(self, "consent_confirmed", False)
@@ -76,6 +94,11 @@ class VoiceProfile(BaseModel):
     @property
     def active(self) -> bool:
         return bool(self.consent_confirmed and not self.revoked_at and self.verification_state != "revoked")
+
+    def assert_tenant(self, user_id: str | None) -> None:
+        """Reject cross-user use when the profile carries an authoritative tenant binding."""
+        if self.tenant_user_id and user_id and self.tenant_user_id != user_id:
+            raise PermissionError("Voice Profile belongs to another tenant and cannot be accessed.")
 
     def assert_usable(self, purpose: str) -> None:
         if self.revoked_at or self.verification_state == "revoked":
@@ -110,6 +133,14 @@ class RightsLedger:
         return record
 
     def save_voice(self, profile: VoiceProfile) -> VoiceProfile:
+        user_id = current_user_id()
+        if user_id:
+            if profile.tenant_user_id and profile.tenant_user_id != user_id:
+                raise PermissionError("Voice Profile belongs to another tenant and cannot be modified.")
+            if not profile.tenant_user_id:
+                profile.tenant_user_id = user_id
+            if not profile.created_by_user_id:
+                profile.created_by_user_id = user_id
         profile.updated_at = _now()
         data = self._read_list(self.voices_path)
         data = [x for x in data if x.get("id") != profile.id]
@@ -126,6 +157,15 @@ class RightsLedger:
     def list_voices(self) -> list[VoiceProfile]:
         return [VoiceProfile.model_validate(x) for x in self._read_list(self.voices_path)]
 
+    def rename_voice(self, profile_id: str, name: str) -> VoiceProfile:
+        profile = self.get_voice(profile_id)
+        cleaned = (name or "").strip()
+        if not cleaned:
+            raise ValueError("Voice Profile name cannot be empty")
+        profile.name = cleaned[:120]
+        profile.version += 1
+        return self.save_voice(profile)
+
     def revoke_voice(self, profile_id: str, reason: str = "Consent withdrawn") -> VoiceProfile:
         profile = self.get_voice(profile_id)
         if not profile.revoked_at:
@@ -133,7 +173,25 @@ class RightsLedger:
         profile.revoked_reason = (reason or "Consent withdrawn").strip()[:1000]
         profile.verification_state = "revoked"
         profile.consent_confirmed = False
+        profile.version += 1
         return self.save_voice(profile)
+
+    def mark_voice_used(self, profile_id: str) -> VoiceProfile:
+        profile = self.get_voice(profile_id)
+        profile.last_used_at = _now()
+        return self.save_voice(profile)
+
+    def delete_voice(self, profile_id: str) -> VoiceProfile:
+        """Remove profile metadata from the active ledger and return the deleted record.
+
+        Callers that own reference/model artefacts must delete those separately before reporting
+        complete erasure. This method intentionally does not accept arbitrary filesystem paths.
+        """
+        profile = self.get_voice(profile_id)
+        profile.assert_tenant(current_user_id())
+        data = [x for x in self._read_list(self.voices_path) if x.get("id") != profile_id]
+        self._write_list(self.voices_path, data)
+        return profile
 
     @staticmethod
     def _read_list(path: Path) -> list[dict]:
@@ -150,3 +208,19 @@ class RightsLedger:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         tmp.replace(path)
+
+
+def authorize_voice_profile(rights_root: Path, profile_id: str, purpose: str) -> VoiceProfile:
+    """Reload and authorize a Voice Profile at the final execution boundary.
+
+    Callers must pass the authoritative project `.aura_rights` directory rather than
+    relying on a profile object serialized or loaded earlier in a queued workflow.
+    """
+    ledger = RightsLedger(Path(rights_root))
+    try:
+        profile = ledger.get_voice(profile_id)
+    except KeyError as exc:
+        raise PermissionError("Voice Profile is unavailable and cannot be used.") from exc
+    profile.assert_tenant(current_user_id())
+    profile.assert_usable(purpose)
+    return ledger.mark_voice_used(profile.id)

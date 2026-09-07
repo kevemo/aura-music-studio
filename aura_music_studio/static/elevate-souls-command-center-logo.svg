@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1200" role="img" aria-labelledby="title desc">
+  <title id="title">Elevate Souls Productions Content Creation Command Center</title>
+  <desc id="desc">Cosmic gold, purple and pink command-center emblem powered by Aura AI.</desc>
+  <defs>
+    <radialGradient id="space" cx="50%" cy="42%" r="75%"><stop offset="0" stop-color="#25104d"/><stop offset=".48" stop-color="#080514"/><stop offset="1" stop-color="#020208"/></radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fff1a8"/><stop offset=".2" stop-color="#f7c85a"/><stop offset=".5" stop-color="#9a5418"/><stop offset=".72" stop-color="#ffdf7a"/><stop offset="1" stop-color="#6a2f0b"/></linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#38c6ff"/><stop offset=".35" stop-color="#7a2cff"/><stop offset=".72" stop-color="#ef4cff"/><stop offset="1" stop-color="#ff9bdc"/></linearGradient>
+    <filter id="glow"><feGaussianBlur stdDeviation="10" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="soft"><feGaussianBlur stdDeviation="28"/></filter>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#space)"/>
+  <g opacity=".75" fill="#fff" filter="url(#glow)">
+    <circle cx="104" cy="96" r="2"/><circle cx="238" cy="148" r="3"/><circle cx="1020" cy="125" r="2"/><circle cx="1100" cy="265" r="3"/><circle cx="84" cy="430" r="2"/><circle cx="1115" cy="480" r="2"/><circle cx="170" cy="720" r="2"/><circle cx="1015" cy="745" r="3"/><circle cx="585" cy="76" r="4"/><circle cx="620" cy="190" r="2"/>
+  </g>
+  <ellipse cx="600" cy="520" rx="510" ry="400" fill="none" stroke="#8145ff" stroke-width="12" opacity=".16" filter="url(#soft)"/>
+  <ellipse cx="600" cy="520" rx="455" ry="348" fill="none" stroke="url(#gold)" stroke-width="4" opacity=".65"/>
+  <ellipse cx="600" cy="520" rx="410" ry="305" fill="none" stroke="#d7a43a" stroke-width="2" opacity=".55"/>
+  <g stroke="url(#gold)" stroke-width="10" fill="none" stroke-linecap="round" opacity=".92">
+    <path d="M360 515 C255 425 190 365 125 315 C182 450 190 555 112 620 C230 610 330 580 425 525"/>
+    <path d="M840 515 C945 425 1010 365 1075 315 C1018 450 1010 555 1088 620 C970 610 870 580 775 525"/>
+  </g>
+  <g fill="url(#violet)" opacity=".9">
+    <path d="M344 478 C275 414 218 378 168 350 C213 437 224 490 198 548 C251 530 305 503 365 468Z"/>
+    <path d="M856 478 C925 414 982 378 1032 350 C987 437 976 490 1002 548 C949 530 895 503 835 468Z"/>
+  </g>
+  <circle cx="600" cy="520" r="255" fill="#05040b" stroke="url(#gold)" stroke-width="18"/>
+  <circle cx="600" cy="520" r="220" fill="none" stroke="url(#violet)" stroke-width="7" opacity=".85" filter="url(#glow)"/>
+  <g filter="url(#glow)"><path d="M600 305 L618 470 L775 520 L620 548 L600 735 L575 550 L420 520 L575 488Z" fill="#b33cff" opacity=".55"/></g>
+  <text x="600" y="610" text-anchor="middle" font-family="Georgia,serif" font-size="310" font-weight="700" fill="url(#gold)" stroke="#3c1504" stroke-width="5" letter-spacing="-58">CC</text>
+  <g transform="translate(600 220)" fill="url(#gold)" stroke="#4b2108" stroke-width="5">
+    <path d="M-115 25 L-75 -65 L-28 5 L0 -105 L34 5 L78 -62 L118 28 L92 72 L-90 72Z"/>
+    <path d="M-90 72 H92 L82 105 H-80Z"/>
+    <path d="M0 -72 L19 -42 L0 -14 L-19 -42Z" fill="#a43cff"/>
+  </g>
+  <g fill="none" stroke="url(#gold)" stroke-width="4" opacity=".9">
+    <circle cx="247" cy="285" r="68"/><circle cx="953" cy="285" r="68"/><circle cx="247" cy="710" r="68"/><circle cx="953" cy="710" r="68"/>
+  </g>
+  <g font-family="Arial,sans-serif" font-weight="700" fill="#f8d16f" text-anchor="middle">
+    <text x="247" y="303" font-size="48">♫</text><text x="953" y="303" font-size="48">▶</text><text x="247" y="728" font-size="43">◉</text><text x="953" y="728" font-size="48">✦</text>
+  </g>
+  <text x="600" y="845" text-anchor="middle" font-family="Georgia,serif" font-size="83" font-weight="700" fill="url(#gold)" letter-spacing="3">ELEVATE SOULS</text>
+  <text x="600" y="910" text-anchor="middle" font-family="Georgia,serif" font-size="42" font-weight="700" fill="#f4d98c" letter-spacing="14">PRODUCTIONS</text>
+  <text x="600" y="982" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="800" fill="#f3efff" letter-spacing="5">CONTENT CREATION</text>
+  <text x="600" y="1036" text-anchor="middle" font-family="Arial,sans-serif" font-size="44" font-weight="800" fill="#e9bf68" letter-spacing="4">COMMAND CENTER</text>
+  <text x="600" y="1100" text-anchor="middle" font-family="Arial,sans-serif" font-size="31" font-weight="700" fill="#d9b5ff" letter-spacing="7">POWERED BY AURA AI</text>
+</svg>

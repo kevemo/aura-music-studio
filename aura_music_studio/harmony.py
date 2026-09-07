@@ -10,6 +10,8 @@ import librosa
 import mido
 import numpy as np
 
+from .rights import authorize_voice_profile
+
 
 @dataclass
 class HarmonySpec:
@@ -131,8 +133,17 @@ def render_harmony_voice(
     lyrics_file: Path,
     output: Path,
     *,
-    voice_profile_json: str = "",
+    rights_root: Path | None = None,
+    voice_profile_id: str | None = None,
 ) -> Path:
+    """Render harmony audio, reauthorizing any Voice Profile at execution time."""
+    voice_profile_json = ""
+    if voice_profile_id:
+        if rights_root is None:
+            raise PermissionError("Authoritative Voice Profile rights storage is required for synthesis.")
+        profile = authorize_voice_profile(rights_root, voice_profile_id, "backing_harmony")
+        voice_profile_json = profile.model_dump_json()
+
     command = os.getenv("AURA_DIFFSINGER_CMD")
     if not command:
         raise RuntimeError("AURA_DIFFSINGER_CMD is not configured")

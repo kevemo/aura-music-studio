@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 from .producer import llm_plan
 from .speech import AuraSpeechService
 
-router = APIRouter(prefix="/speech", tags=["Spoken Aura"])
+# AuraSpeechService remains an internal compatibility identifier. Public product/API language is
+# Rhiannon; the service implementation is migrated incrementally without creating a competing
+# speech stack.
+router = APIRouter(prefix="/speech", tags=["Rhiannon Voice"])
 
 
 class SpeakRequest(BaseModel):
@@ -39,18 +42,18 @@ def text_command(request: TextCommandRequest):
 
 @router.post("/synthesize")
 def synthesize(request: SpeakRequest, background_tasks: BackgroundTasks):
-    fd, filename = tempfile.mkstemp(prefix="aura-reply-", suffix=".wav")
+    fd, filename = tempfile.mkstemp(prefix="rhiannon-reply-", suffix=".wav")
     os.close(fd)
     target = Path(filename)
     try:
         AuraSpeechService().speak(request.text, target)
     except Exception as exc:
         target.unlink(missing_ok=True)
-        raise HTTPException(503, f"Aura speech synthesis is unavailable: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(503, f"Rhiannon speech synthesis is unavailable: {type(exc).__name__}: {exc}") from exc
     background_tasks.add_task(_delete, str(target))
     return FileResponse(
         target,
         media_type="audio/wav",
-        filename="Aura_Reply.wav",
+        filename="Rhiannon_Reply.wav",
         background=background_tasks,
     )

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .accounts import AccountStore
+from .aura_sec_dlp import redact_text, sanitize_audit_details
 
 
 def _now() -> str:
@@ -14,10 +15,13 @@ def _now() -> str:
 
 
 class AuditLedger:
-    """Append-only ESP administrative audit trail with hash chaining.
+    """Append-only ESP administrative audit trail with hash chaining and DLP persistence.
 
-    The chain is not a substitute for external immutable logging, but it makes silent row
-    modification detectable and gives ESP a provider-independent history from day one.
+    The local chain is not a substitute for external immutable logging, but it makes silent row
+    modification detectable and gives ESP a provider-independent history from day one. Every
+    append passes through AuraSec DLP at the persistence boundary so callers cannot accidentally
+    place credentials, direct personal data, binary payloads or non-standard JSON values into the
+    long-lived security ledger.
     """
 
     def __init__(self, store: AccountStore | None = None):
@@ -52,7 +56,13 @@ class AuditLedger:
 
     @staticmethod
     def _hash(payload: dict) -> str:
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        canonical = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def append(
@@ -64,6 +74,12 @@ class AuditLedger:
         details: dict | None = None,
     ) -> dict:
         occurred_at = _now()
+        safe_actor = redact_text(actor or "ESP administrator", max_length=160)
+        safe_action = redact_text(action or "unspecified", max_length=160)
+        safe_subject = (
+            redact_text(subject_user_id, max_length=160) if subject_user_id is not None else None
+        )
+        safe_details = sanitize_audit_details(details or {})
         with self._connect() as con:
             con.execute("BEGIN IMMEDIATE")
             previous = con.execute(
@@ -73,10 +89,10 @@ class AuditLedger:
             payload = {
                 "id": uuid4().hex,
                 "occurred_at": occurred_at,
-                "actor": (actor or "ESP administrator")[:160],
-                "action": action[:160],
-                "subject_user_id": subject_user_id,
-                "details": details or {},
+                "actor": safe_actor,
+                "action": safe_action,
+                "subject_user_id": safe_subject,
+                "details": safe_details,
                 "previous_hash": previous_hash,
             }
             entry_hash = self._hash(payload)
@@ -90,7 +106,7 @@ class AuditLedger:
                     payload["actor"],
                     payload["action"],
                     payload["subject_user_id"],
-                    json.dumps(payload["details"], ensure_ascii=False),
+                    json.dumps(payload["details"], ensure_ascii=False, allow_nan=False),
                     previous_hash,
                     entry_hash,
                 ),
@@ -121,7 +137,10 @@ class AuditLedger:
         previous_hash = None
         checked = 0
         for row in rows:
-            details = json.loads(row["details_json"] or "{}")
+            try:
+                details = json.loads(row["details_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return {"valid": False, "checked": checked, "broken_at": row["id"]}
             payload = {
                 "id": row["id"],
                 "occurred_at": row["occurred_at"],
@@ -131,7 +150,11 @@ class AuditLedger:
                 "details": details,
                 "previous_hash": row["previous_hash"],
             }
-            if row["previous_hash"] != previous_hash or self._hash(payload) != row["entry_hash"]:
+            try:
+                calculated_hash = self._hash(payload)
+            except (TypeError, ValueError):
+                return {"valid": False, "checked": checked, "broken_at": row["id"]}
+            if row["previous_hash"] != previous_hash or calculated_hash != row["entry_hash"]:
                 return {"valid": False, "checked": checked, "broken_at": row["id"]}
             previous_hash = row["entry_hash"]
             checked += 1

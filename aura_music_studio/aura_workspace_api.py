@@ -21,6 +21,12 @@ from .aura_scheduled_briefing import install_aura_scheduled_briefing
 from .aura_tasks import install_aura_task_tools, router as aura_tasks_router, task_store
 from .aura_workspace_briefing import install_aura_workspace_briefing
 from .creative_renderers import renderer_states
+from .rhiannon_voice_contracts import (
+    CapabilityState,
+    VoiceCapability,
+    public_voice_contract,
+    voice_capability_snapshot,
+)
 from .speech import AuraSpeechService
 from .web_access import AuraWebGateway
 
@@ -60,12 +66,28 @@ def _safe_renderers() -> dict:
 
 def _speech_status() -> dict:
     try:
-        value = AuraSpeechService().diagnostics()
+        diagnostics = AuraSpeechService().diagnostics()
     except Exception:
-        value = {}
+        diagnostics = {}
+
+    capability_rows = voice_capability_snapshot(diagnostics)
+    capabilities = {row.capability: row for row in capability_rows}
+    synthesis = capabilities[VoiceCapability.SPEECH_SYNTHESIS]
+    stt_configured = bool(
+        diagnostics.get("stt_command_configured")
+        or (diagnostics.get("whisper_cli") and diagnostics.get("whisper_model_configured"))
+    )
+    tts_configured = bool(
+        synthesis.local_runtime_configured or synthesis.remote_provider_configured
+    )
     return {
-        "stt_configured": bool(value.get("stt_command_configured") or (value.get("whisper_cli") and value.get("whisper_model_configured"))),
-        "tts_configured": bool(value.get("tts_command_configured") or value.get("tts_url_configured") or value.get("piper_model_configured")),
+        "stt_configured": stt_configured,
+        "tts_configured": tts_configured,
+        "tts_state": synthesis.state.value,
+        # Configuration alone is not health evidence. This remains false until the
+        # provider-neutral contract receives authenticated runtime health evidence.
+        "tts_ready": synthesis.state == CapabilityState.AVAILABLE,
+        "voice_contract": public_voice_contract(diagnostics),
     }
 
 
@@ -81,6 +103,13 @@ def _web_status() -> dict:
         "ssrf_private_network_blocking": bool(value.get("private_network_fetch_blocked")),
         "safe_redirect_validation": bool(value.get("safe_redirect_validation")),
     }
+
+
+@router.get("/aura-intelligence/api/voice/contracts")
+def rhiannon_voice_contract(request: Request, response: Response):
+    _member(request)
+    response.headers["Cache-Control"] = "private, no-store"
+    return _speech_status()["voice_contract"]
 
 
 @router.get("/aura-intelligence/api/capabilities")
@@ -141,6 +170,9 @@ def capabilities(request: Request):
             "voice_profile_inspection": True,
             "single_turn_voice_input": True,
             "hands_free_voice_conversation": True,
+            "rhiannon_voice_capability_contract": True,
+            "canonical_viseme_timing_contract": True,
+            "voice_asset_provenance_contract": True,
             "embodied_aura_state_runtime": True,
             "conversation_markdown_export": True,
         },
@@ -160,7 +192,9 @@ def capabilities(request: Request):
                 "tokens_exposed": False,
             },
             "deep_research_ready": bool(web.get("enabled") and web.get("search_configured")),
-            "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_configured")),
+            "hands_free_voice_configured": bool(speech.get("stt_configured") and speech.get("tts_configured")),
+            "hands_free_voice_ready": bool(speech.get("stt_configured") and speech.get("tts_ready")),
+            "rhiannon_speech_synthesis_state": speech.get("tts_state", CapabilityState.UNAVAILABLE.value),
             "image_generation_ready": bool((renderers.get("image") or {}).get("configured")),
             "video_generation_ready": bool((renderers.get("video") or {}).get("configured")),
             "production_3d_avatar_ready": bool(avatar.get("production_3d_ready")),
@@ -169,7 +203,7 @@ def capabilities(request: Request):
             "google_connector_ready": bool(connector_runtime.get("encrypted_vault_ready") and connector_runtime.get("google_oauth_configured")),
         },
         "tools": tools,
-        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service, isolated sandbox, task worker, OAuth provider or 3D rig remains unconfigured; Aura must report that state rather than pretending execution succeeded.",
+        "truthfulness_contract": "A software feature can be connected while its external/local model, renderer, speech service, isolated sandbox, task worker, OAuth provider or 3D rig remains unconfigured or unverified; Rhiannon must report that state rather than pretending execution succeeded.",
     }
 
 

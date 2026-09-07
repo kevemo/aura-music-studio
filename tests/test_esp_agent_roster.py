@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException
 
+import aura_music_studio.esp_agent_roster as roster_module
 from aura_music_studio.accounts import AccountStore
 from aura_music_studio.esp_agent_roster import AgentRosterStore, router
 from aura_music_studio.esp_command_center import EspStore
@@ -64,6 +66,62 @@ def test_followup_is_owned_by_agent_and_can_be_completed(tmp_path):
     row = next(item for item in roster_store.followups(agent["id"]) if item["id"] == followup["id"])
     assert row["status"] == "done"
     assert row["completed_at"]
+
+
+def test_role_change_immediately_invalidates_assignment_authority(tmp_path):
+    accounts = AccountStore(tmp_path / "accounts.sqlite3")
+    esp = EspStore(accounts)
+    EspNicheStore(esp)
+    agent = _active(accounts, esp, "agent-role-boundary@example.com", "agent")
+    creator = _active(accounts, esp, "creator-role-boundary@example.com", "creator")
+    assignment_store = EspAgentAssignmentStore(esp)
+    assignment_store.assign(agent["id"], creator["id"], actor="Owner")
+    roster_store = AgentRosterStore(esp, assignment_store)
+    followup = roster_store.add_followup(agent["id"], creator["id"], title="Before role change")
+
+    assert [row["creator_user_id"] for row in roster_store.roster(agent["id"])] == [creator["id"]]
+
+    # Assignment rows are retained for audit, but they must stop granting data/action access
+    # the instant the creator no longer holds Creator/Both ESP authorization.
+    esp.set_role(creator["id"], "agent", "Owner")
+
+    assert roster_store.roster(agent["id"]) == []
+    with pytest.raises(PermissionError, match="not actively assigned"):
+        roster_store.add_followup(agent["id"], creator["id"], title="Must be blocked")
+    with pytest.raises(PermissionError, match="not actively assigned"):
+        roster_store.complete_followup(agent["id"], followup["id"])
+
+
+def test_agent_role_change_also_invalidates_store_level_assignment_authority(tmp_path):
+    accounts = AccountStore(tmp_path / "accounts.sqlite3")
+    esp = EspStore(accounts)
+    EspNicheStore(esp)
+    agent = _active(accounts, esp, "agent-revoked-role@example.com", "agent")
+    creator = _active(accounts, esp, "creator-still-active@example.com", "creator")
+    assignment_store = EspAgentAssignmentStore(esp)
+    assignment_store.assign(agent["id"], creator["id"], actor="Owner")
+    roster_store = AgentRosterStore(esp, assignment_store)
+
+    esp.set_role(agent["id"], "creator", "Owner")
+
+    assert roster_store.roster(agent["id"]) == []
+    with pytest.raises(PermissionError, match="not actively assigned"):
+        roster_store.add_followup(agent["id"], creator["id"], title="Must be blocked")
+
+
+def test_creator_only_role_cannot_cross_agent_request_gate(monkeypatch):
+    member = type("Member", (), {"user_id": "creator-only"})()
+    monkeypatch.setattr(
+        roster_module,
+        "require_esp_hub_member",
+        lambda _request: (member, {"status": "active", "roles": "creator"}),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        roster_module._require_agent(object())
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail == "ESP Agent access is required"
 
 
 def test_agent_roster_router_exposes_private_roster_and_followups():

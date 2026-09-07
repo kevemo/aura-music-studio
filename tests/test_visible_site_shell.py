@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import aura_music_studio.member_dashboard as dashboard
 from aura_music_studio.brand_migration import rebrand_text
+from aura_music_studio.native_access import EffectiveNativeAccess
 
 
 def test_public_home_presentation_migration_is_current_truthful_and_idempotent():
@@ -49,12 +50,22 @@ def _client(monkeypatch, membership):
     }
     monkeypatch.setattr(dashboard.accounts, "resolve_session", lambda _cookie: user)
     monkeypatch.setattr(dashboard.esp, "membership", lambda _user_id: membership)
+    monkeypatch.setattr(
+        dashboard.native_access,
+        "resolve",
+        lambda user_id: EffectiveNativeAccess(
+            user_id=user_id,
+            membership_plan_id="free",
+            membership_entitlements=frozenset(),
+            purchased_entitlements=frozenset(),
+        ),
+    )
     app = FastAPI()
     app.include_router(dashboard.router)
     return TestClient(app)
 
 
-def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(monkeypatch):
+def test_regular_member_dashboard_surfaces_aura_core_game_forge_marketplace_and_truthful_aura_sec_product(monkeypatch):
     response = _client(monkeypatch, None).get("/dashboard")
     assert response.status_code == 200
     text = response.text
@@ -66,19 +77,57 @@ def test_regular_member_dashboard_surfaces_aura_core_but_not_esp_social_tools(mo
     assert "Connected Workspace" in text
     assert "Verified Workflows" in text
     assert "Open Aura Intelligence" in text
-    assert "social-management systems, niche training and creator/agent operations live only inside the separately owner-approved ESP Hub" in text
-    assert "ESP access is owner-approved only" in text
-    assert "does not recruit creators from other networks" in text
+    assert "Pulsar-Frequency House is one integrated creation platform" in text
+
+    assert "Game Forge" in text
+    assert "Open Game Forge" in text
+    assert "href='/game-creation'" in text
+
+    assert "Marketplace Account" in text
+    assert "Open Marketplace Account" in text
+    assert "href='/marketplace/account'" in text
+    assert "marketplace participation remains opt-in" in text
+
+    assert "Aura Sec Security Center" in text
+    assert "Aura Sec available · same account" in text
+    assert "included with Unlimited Pro" in text
+    assert "can also be purchased separately where offered" in text
+    assert "Commercial access never grants native device trust by itself" in text
+    assert "The browser is a member-safe control plane only" in text
+    assert "href='/aura-sec'" in text
+    assert "href='/account/native-products'" in text
+    assert text.count("<article class='tool'>") == 8
+    assert "<section class='security'>" in text
+
+    assert "ESP areas use the same account and site" in text
+    assert "access is owner-approved" in text
+    assert "cannot be obtained merely by purchasing a creative subscription" in text
     assert "href='/social-house'" not in text
     assert "Enter ESP Hub" not in text
 
 
-def test_approved_esp_member_gets_private_hub_entry_without_moving_it_into_regular_tools(monkeypatch):
+def test_dashboard_aura_sec_entry_never_exposes_native_authority_links(monkeypatch):
+    response = _client(monkeypatch, None).get("/dashboard")
+    assert response.status_code == 200
+    text = response.text
+    assert "href='/aura-sec'" in text
+    assert "href='/aura-sec/native/" not in text
+    assert "href='/aura-sec/sign'" not in text
+    assert "href='/aura-sec/approve'" not in text
+    assert "href='/aura-sec/actions/execute'" not in text
+    assert "cannot execute endpoint commands" in text
+    assert "cannot" in text and "access command-signing keys" in text
+
+
+def test_approved_esp_member_gets_private_hub_and_truthful_aura_sec_entry(monkeypatch):
     response = _client(monkeypatch, {"status": "active", "roles": "creator"}).get("/dashboard")
     assert response.status_code == 200
     text = response.text
-    assert "Private Elevate Souls Productions Hub" in text
-    assert "private social-management tools" in text
-    assert "not part of the normal Creative Studio membership" in text
+    assert "Aura Sec Security Center" in text
+    assert "Aura Sec available · same account" in text
+    assert "href='/aura-sec'" in text
+    assert "Private Elevate Souls Productions Area" in text
+    assert "additional areas inside this same Pulsar-Frequency House account" in text
+    assert "These areas remain hidden from ordinary public members" in text
     assert "Enter ESP Hub" in text
     assert "href='/social-house'" not in text

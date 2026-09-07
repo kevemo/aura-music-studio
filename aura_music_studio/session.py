@@ -9,6 +9,35 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+AutomationInterpolation = Literal["hold", "linear", "smooth"]
+
+
+def normalize_automation_parameter(value: str) -> tuple[str, tuple[float, float] | None]:
+    """Return the canonical automation path and safe renderer bounds.
+
+    Historical volume/pan aliases remain valid. Scoped paths let one track own automation for
+    clips, sends and effects without adding parallel automation stores that can drift apart.
+    Unknown paths are preserved for forward-compatible control metadata but receive no implicit
+    numeric clamp until a renderer explicitly supports them.
+    """
+    parameter = (value or "").strip().lower()
+    if parameter in {"volume", "volume_db", "fader", "gain_db"}:
+        return "volume_db", (-60.0, 18.0)
+    if parameter in {"pan", "balance"}:
+        return "pan", (-1.0, 1.0)
+
+    parts = parameter.split(":")
+    if len(parts) == 3 and parts[1]:
+        scope, resource_id, field = parts
+        if scope == "clip" and field in {"gain", "gain_db", "volume", "volume_db"}:
+            return f"clip:{resource_id}:gain_db", (-60.0, 18.0)
+        if scope == "send" and field in {"level", "level_db", "gain", "gain_db"}:
+            return f"send:{resource_id}:level_db", (-60.0, 12.0)
+        if scope in {"fx", "effect"} and field in {"mix", "wet", "wet_dry", "wetdry"}:
+            return f"fx:{resource_id}:mix", (0.0, 1.0)
+    return parameter, None
+
+
 class AutomationPoint(BaseModel):
     time: float
     value: float
@@ -19,18 +48,11 @@ class AutomationLane(BaseModel):
 
     parameter: str
     points: list[AutomationPoint] = Field(default_factory=list)
+    interpolation: AutomationInterpolation = "linear"
 
     @model_validator(mode="after")
     def normalize_lane(self):
-        parameter = (self.parameter or "").strip().lower()
-        if parameter in {"volume", "volume_db", "fader", "gain_db"}:
-            parameter = "volume_db"
-            bounds = (-60.0, 18.0)
-        elif parameter in {"pan", "balance"}:
-            parameter = "pan"
-            bounds = (-1.0, 1.0)
-        else:
-            bounds = None
+        parameter, bounds = normalize_automation_parameter(self.parameter)
 
         by_time: dict[float, AutomationPoint] = {}
         for point in self.points:
@@ -51,11 +73,14 @@ class AutomationLane(BaseModel):
 class Effect(BaseModel):
     id: str = Field(default_factory=lambda: uuid4().hex)
     type: Literal[
-        "gain", "eq", "highpass", "lowpass", "compressor", "limiter", "gate", "deesser",
-        "reverb", "delay", "distortion", "saturation", "exciter", "chorus", "flanger", "phaser",
-        "tremolo", "pitch_shift", "doubler", "convolution", "stereo_width", "custom_safe_chain"
+        "gain", "eq", "highpass", "lowpass", "bandpass", "notch", "low_shelf", "high_shelf",
+        "compressor", "limiter", "gate", "expander", "deesser", "reverb", "delay", "distortion",
+        "saturation", "exciter", "chorus", "flanger", "phaser", "tremolo", "pitch_shift", "doubler",
+        "convolution", "stereo_width", "custom_safe_chain"
     ]
     enabled: bool = True
+    # Static wet/dry balance. A scoped ``fx:<id>:mix`` lane can automate this in real audio.
+    mix: float = Field(default=1.0, ge=0.0, le=1.0)
     parameters: dict[str, float | str | bool] = Field(default_factory=dict)
 
 
@@ -148,3 +173,17 @@ class StudioSession(BaseModel):
     @classmethod
     def load(cls, path: Path) -> "StudioSession":
         return cls.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+__all__ = [
+    "AutomationInterpolation",
+    "AutomationLane",
+    "AutomationPoint",
+    "Clip",
+    "Effect",
+    "Marker",
+    "Send",
+    "StudioSession",
+    "Track",
+    "normalize_automation_parameter",
+]

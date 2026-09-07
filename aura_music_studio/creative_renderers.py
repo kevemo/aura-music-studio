@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import re
 from copy import deepcopy
@@ -12,7 +13,13 @@ import httpx
 from pydantic import BaseModel
 
 RendererKind = Literal["image", "video"]
+RendererQueueState = Literal["running", "pending", "not_queued"]
+RendererCancellationState = Literal["cancelled_running", "cancelled_pending", "not_queued"]
 _SAFE_WORKFLOW = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.json$")
+_SAFE_RENDERER_INPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$")
+_SAFE_RENDERER_SUBFOLDER_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$")
+_SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+_IMAGE_INPUT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"}
 
 
 class RendererOutput(BaseModel):
@@ -23,12 +30,26 @@ class RendererOutput(BaseModel):
     channel: str = "file"
 
 
+class RendererInput(BaseModel):
+    name: str
+    subfolder: str = ""
+    type: str = "input"
+    workflow_value: str
+
+
 class RendererSubmission(BaseModel):
     kind: RendererKind
     provider: str = "comfyui"
     prompt_id: str
     client_id: str
     workflow_name: str
+
+
+class RendererCancellation(BaseModel):
+    kind: RendererKind
+    provider: str = "comfyui"
+    prompt_id: str
+    state: RendererCancellationState
 
 
 class RendererState(BaseModel):
@@ -44,11 +65,10 @@ class RendererState(BaseModel):
 class ComfyUIRenderer:
     """Small provider-neutral bridge to a self-hosted ComfyUI server.
 
-    Workflow JSON remains operator-owned. Pulsar-Frequency House injects only declared
-    template variables, submits API-format workflows to `/prompt`, then reads execution
-    history from `/history/{prompt_id}`. This keeps model choice replaceable: an operator
-    can use an image workflow, LTX/Wan/Hunyuan video workflow or another compatible graph
-    without changing the public creative-project schema.
+    Workflow JSON remains operator-owned. The Command Center injects only declared template
+    variables, submits API-format workflows to `/prompt`, then reads execution history from
+    `/history/{prompt_id}`. This keeps model choice replaceable while privileged filesystem
+    locations and provider configuration remain server-side.
     """
 
     def __init__(self, kind: RendererKind):
@@ -66,6 +86,10 @@ class ComfyUIRenderer:
         self.max_output_bytes = max(
             16 * 1024 * 1024,
             int(float(os.getenv("AURA_CREATIVE_MAX_OUTPUT_MB", "4096")) * 1024 * 1024),
+        )
+        self.max_input_bytes = max(
+            1 * 1024 * 1024,
+            int(float(os.getenv("AURA_CREATIVE_MAX_INPUT_MB", "64")) * 1024 * 1024),
         )
 
     @property
@@ -119,6 +143,75 @@ class ComfyUIRenderer:
         workflow = self.load_workflow()
         return self._render_value(workflow, variables)
 
+    @staticmethod
+    def _renderer_input_value(name: str, subfolder: str) -> str:
+        if not _SAFE_RENDERER_INPUT_NAME.fullmatch(name):
+            raise ValueError("Renderer returned an unsafe input filename")
+        normalized = str(subfolder or "").replace("\\", "/").strip("/")
+        if normalized:
+            parts = normalized.split("/")
+            if any(
+                part in {"", ".", ".."} or not _SAFE_RENDERER_SUBFOLDER_PART.fullmatch(part)
+                for part in parts
+            ):
+                raise ValueError("Renderer returned an unsafe input subfolder")
+            return "/".join([*parts, name])
+        return name
+
+    @staticmethod
+    def _validate_prompt_id(prompt_id: str) -> str:
+        prompt_id = str(prompt_id or "").strip()
+        if not _SAFE_PROMPT_ID.fullmatch(prompt_id):
+            raise ValueError("Invalid ComfyUI prompt id")
+        return prompt_id
+
+    def upload_image_input(self, source: Path) -> RendererInput:
+        """Upload a server-validated local image as an opaque ComfyUI input token.
+
+        The caller controls neither the renderer-side filename nor the subfolder. This method
+        deliberately never returns the source filesystem path.
+        """
+
+        if not self.base_url:
+            raise RuntimeError("ComfyUI base URL is not configured")
+        source = Path(source)
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        suffix = source.suffix.lower()
+        if suffix not in _IMAGE_INPUT_EXTENSIONS:
+            raise ValueError("Unsupported image format for renderer input")
+        size = source.stat().st_size
+        if size <= 0:
+            raise ValueError("Renderer input image is empty")
+        if size > self.max_input_bytes:
+            raise ValueError("Renderer input image exceeds configured maximum size")
+
+        renderer_name = f"aura_{uuid4().hex}{suffix}"
+        media_type = mimetypes.guess_type(renderer_name)[0] or "application/octet-stream"
+        with source.open("rb") as handle:
+            with httpx.Client(timeout=self.download_timeout_seconds) as client:
+                response = client.post(
+                    f"{self.base_url}/upload/image",
+                    files={"image": (renderer_name, handle, media_type)},
+                    data={"type": "input", "overwrite": "false"},
+                )
+                response.raise_for_status()
+                value = response.json()
+        if not isinstance(value, dict):
+            raise RuntimeError("Unexpected ComfyUI input-upload response")
+        name = str(value.get("name") or "").strip()
+        subfolder = str(value.get("subfolder") or "").strip()
+        folder_type = str(value.get("type") or "input").strip().lower()
+        if folder_type != "input":
+            raise RuntimeError("ComfyUI did not register the source image as an input")
+        workflow_value = self._renderer_input_value(name, subfolder)
+        return RendererInput(
+            name=name,
+            subfolder=subfolder.replace("\\", "/").strip("/"),
+            type="input",
+            workflow_value=workflow_value,
+        )
+
     def probe(self) -> RendererState:
         if not self.configured:
             return RendererState(
@@ -171,9 +264,78 @@ class ComfyUIRenderer:
             workflow_name=self.workflow_name,
         )
 
+    def queue_state(self, prompt_id: str) -> RendererQueueState:
+        """Return only the queue position for one prompt without exposing workflow payloads."""
+
+        prompt_id = self._validate_prompt_id(prompt_id)
+        if not self.base_url:
+            raise RuntimeError("ComfyUI base URL is not configured")
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.get(f"{self.base_url}/queue")
+            response.raise_for_status()
+            value = response.json()
+        if not isinstance(value, dict):
+            raise RuntimeError("Unexpected ComfyUI queue response")
+        for state, key in (("running", "queue_running"), ("pending", "queue_pending")):
+            rows = value.get(key, [])
+            if not isinstance(rows, list):
+                raise RuntimeError("Unexpected ComfyUI queue response")
+            for row in rows:
+                if isinstance(row, (list, tuple)) and len(row) > 1 and str(row[1]) == prompt_id:
+                    return state
+        return "not_queued"
+
+    def cancel(self, prompt_id: str) -> RendererCancellation:
+        """Cancel one prompt without ever issuing a global renderer interrupt.
+
+        Pending jobs are deleted from the queue. Running jobs use the prompt-id-scoped
+        interrupt supported by current ComfyUI servers. A queued job can race into execution
+        between inspection and deletion, so the queue is checked again and interrupted only
+        when the exact same prompt id is then observed as running.
+        """
+
+        prompt_id = self._validate_prompt_id(prompt_id)
+        if not self.base_url:
+            raise RuntimeError("ComfyUI base URL is not configured")
+        state = self.queue_state(prompt_id)
+        if state == "not_queued":
+            return RendererCancellation(kind=self.kind, prompt_id=prompt_id, state="not_queued")
+
+        if state == "pending":
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.post(
+                    f"{self.base_url}/queue",
+                    json={"delete": [prompt_id]},
+                )
+                response.raise_for_status()
+            follow_up = self.queue_state(prompt_id)
+            if follow_up == "running":
+                state = "running"
+            elif follow_up == "pending":
+                raise RuntimeError("ComfyUI did not remove the requested pending prompt")
+            else:
+                return RendererCancellation(
+                    kind=self.kind,
+                    prompt_id=prompt_id,
+                    state="cancelled_pending",
+                )
+
+        # Never fall back to a body-less/global interrupt: doing so could terminate another
+        # member's work on a shared renderer if the queue changes concurrently.
+        with httpx.Client(timeout=self.timeout_seconds) as client:
+            response = client.post(
+                f"{self.base_url}/interrupt",
+                json={"prompt_id": prompt_id},
+            )
+            response.raise_for_status()
+        return RendererCancellation(
+            kind=self.kind,
+            prompt_id=prompt_id,
+            state="cancelled_running",
+        )
+
     def history(self, prompt_id: str) -> dict:
-        if not prompt_id or len(prompt_id) > 200:
-            raise ValueError("Invalid ComfyUI prompt id")
+        prompt_id = self._validate_prompt_id(prompt_id)
         if not self.base_url:
             raise RuntimeError("ComfyUI base URL is not configured")
         with httpx.Client(timeout=self.timeout_seconds) as client:
@@ -279,3 +441,18 @@ def renderer_states(*, probe: bool = False) -> dict[str, dict]:
             )
         rows[kind] = state.model_dump(mode="json")
     return rows
+
+
+__all__ = [
+    "ComfyUIRenderer",
+    "RendererCancellation",
+    "RendererCancellationState",
+    "RendererInput",
+    "RendererKind",
+    "RendererOutput",
+    "RendererQueueState",
+    "RendererState",
+    "RendererSubmission",
+    "renderer_for",
+    "renderer_states",
+]

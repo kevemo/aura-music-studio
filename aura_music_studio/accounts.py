@@ -11,11 +11,31 @@ from pathlib import Path
 from typing import Iterable
 from uuid import uuid4
 
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+
 from .plans import get_plan
 
+# PBKDF2 remains only for transparent verification/migration of existing accounts.
 PBKDF2_ITERATIONS = 310_000
+PASSWORD_SCHEME_ARGON2ID = "argon2id"
+PASSWORD_SCHEME_PBKDF2 = "pbkdf2_sha256"
 SESSION_DAYS = 30
 APPROVAL_HOURS = 72
+LOGIN_WINDOW_MINUTES = 15
+LOGIN_FAILURE_THRESHOLD = 5
+LOGIN_BLOCK_BASE_SECONDS = 30
+LOGIN_BLOCK_MAX_SECONDS = 15 * 60
+
+# OWASP-aligned Argon2id baseline: 19 MiB memory, 2 iterations, one lane.
+_PASSWORD_HASHER = PasswordHasher(
+    time_cost=2,
+    memory_cost=19 * 1024,
+    parallelism=1,
+    hash_len=32,
+    salt_len=16,
+)
+_DUMMY_ARGON2_HASH = _PASSWORD_HASHER.hash("pulsar-frequency-house-dummy-password")
 
 
 def _utcnow() -> datetime:
@@ -24,6 +44,15 @@ def _utcnow() -> datetime:
 
 def _iso(dt: datetime | None = None) -> str:
     return (dt or _utcnow()).isoformat()
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalize_email(email: str) -> str:
@@ -37,18 +66,49 @@ def _hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
-    if len(password) < 10:
+def _validate_password(password: str) -> str:
+    value = password or ""
+    if len(value) < 10:
         raise ValueError("Password must be at least 10 characters")
+    if len(value) > 512:
+        raise ValueError("Password is too long")
+    return value
+
+
+def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
+    """Legacy PBKDF2 helper retained for existing-account migration/tests only."""
+    value = _validate_password(password)
     salt = salt or secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
+    digest = hashlib.pbkdf2_hmac("sha256", value.encode("utf-8"), salt, PBKDF2_ITERATIONS)
     return salt.hex(), digest.hex()
 
 
 def _verify_password(password: str, salt_hex: str, digest_hex: str) -> bool:
-    salt = bytes.fromhex(salt_hex)
-    _, candidate = _hash_password(password, salt)
+    try:
+        salt = bytes.fromhex(salt_hex)
+        _, candidate = _hash_password(password, salt)
+    except (TypeError, ValueError):
+        return False
     return hmac.compare_digest(candidate, digest_hex)
+
+
+def _hash_password_argon2id(password: str) -> str:
+    return _PASSWORD_HASHER.hash(_validate_password(password))
+
+
+def _verify_password_argon2id(password: str, digest: str) -> bool:
+    try:
+        return bool(_PASSWORD_HASHER.verify(digest, password or ""))
+    except (VerifyMismatchError, VerificationError, InvalidHashError, TypeError):
+        return False
+
+
+def _dummy_password_verify(password: str) -> None:
+    """Reduce known-vs-unknown-account timing differences without storing a fake user."""
+    try:
+        _PASSWORD_HASHER.verify(_DUMMY_ARGON2_HASH, password or "")
+    except (VerifyMismatchError, VerificationError, InvalidHashError, TypeError):
+        pass
 
 
 @dataclass
@@ -85,6 +145,8 @@ class AccountStore:
                     display_name TEXT NOT NULL,
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
+                    password_scheme TEXT NOT NULL DEFAULT 'argon2id',
+                    password_updated_at TEXT,
                     status TEXT NOT NULL DEFAULT 'pending_approval',
                     plan_id TEXT NOT NULL DEFAULT 'free',
                     requested_plan_id TEXT NOT NULL DEFAULT 'free',
@@ -142,7 +204,91 @@ class AccountStore:
                     UNIQUE(user_id, project_id),
                     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS auth_login_throttle (
+                    identity_hash TEXT PRIMARY KEY,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    window_started_at TEXT NOT NULL,
+                    last_failed_at TEXT NOT NULL,
+                    blocked_until TEXT
+                );
                 """
+            )
+
+            # In-place migration for databases created before the Argon2id rollout.
+            columns = {row[1] for row in con.execute("PRAGMA table_info(users)").fetchall()}
+            if "password_scheme" not in columns:
+                con.execute(
+                    "ALTER TABLE users ADD COLUMN password_scheme TEXT NOT NULL DEFAULT 'pbkdf2_sha256'"
+                )
+            if "password_updated_at" not in columns:
+                con.execute("ALTER TABLE users ADD COLUMN password_updated_at TEXT")
+
+    @staticmethod
+    def _login_identity_hash(email: str) -> str:
+        try:
+            normalized = _normalize_email(email)
+        except ValueError:
+            normalized = (email or "").strip().lower()[:254]
+        return _hash_secret("login:" + normalized)
+
+    def login_throttle_status(self, email: str) -> dict:
+        identity = self._login_identity_hash(email)
+        now = _utcnow()
+        with self._connect() as con:
+            row = con.execute(
+                "SELECT failure_count,window_started_at,last_failed_at,blocked_until FROM auth_login_throttle WHERE identity_hash=?",
+                (identity,),
+            ).fetchone()
+        if not row:
+            return {"blocked": False, "failure_count": 0, "retry_after_seconds": 0}
+        blocked_until = _parse_iso(row["blocked_until"])
+        retry = max(0, int((blocked_until - now).total_seconds())) if blocked_until else 0
+        return {
+            "blocked": bool(blocked_until and blocked_until > now),
+            "failure_count": int(row["failure_count"]),
+            "retry_after_seconds": retry,
+        }
+
+    def _record_login_failure(self, email: str) -> None:
+        identity = self._login_identity_hash(email)
+        now = _utcnow()
+        with self._connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT failure_count,window_started_at,last_failed_at FROM auth_login_throttle WHERE identity_hash=?",
+                (identity,),
+            ).fetchone()
+            window_start = _parse_iso(row["window_started_at"]) if row else None
+            if not window_start or now - window_start > timedelta(minutes=LOGIN_WINDOW_MINUTES):
+                failures = 1
+                window_start = now
+            else:
+                failures = int(row["failure_count"]) + 1
+
+            blocked_until = None
+            if failures >= LOGIN_FAILURE_THRESHOLD:
+                exponent = min(failures - LOGIN_FAILURE_THRESHOLD, 5)
+                seconds = min(LOGIN_BLOCK_MAX_SECONDS, LOGIN_BLOCK_BASE_SECONDS * (2**exponent))
+                blocked_until = _iso(now + timedelta(seconds=seconds))
+
+            con.execute(
+                """INSERT INTO auth_login_throttle
+                   (identity_hash,failure_count,window_started_at,last_failed_at,blocked_until)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(identity_hash) DO UPDATE SET
+                     failure_count=excluded.failure_count,
+                     window_started_at=excluded.window_started_at,
+                     last_failed_at=excluded.last_failed_at,
+                     blocked_until=excluded.blocked_until""",
+                (identity, failures, _iso(window_start), _iso(now), blocked_until),
+            )
+
+    def clear_login_throttle(self, email: str) -> None:
+        with self._connect() as con:
+            con.execute(
+                "DELETE FROM auth_login_throttle WHERE identity_hash=?",
+                (self._login_identity_hash(email),),
             )
 
     def signup(self, email: str, display_name: str, password: str, requested_plan: str) -> SignupResult:
@@ -151,7 +297,7 @@ class AccountStore:
         if len(display_name) < 2:
             raise ValueError("Display name must contain at least 2 characters")
         plan = get_plan(requested_plan)
-        salt, digest = _hash_password(password)
+        digest = _hash_password_argon2id(password)
         user_id = uuid4().hex
         request_id = uuid4().hex
         token = secrets.token_urlsafe(32)
@@ -166,9 +312,21 @@ class AccountStore:
                 raise ValueError("An account already exists for this email address")
             con.execute(
                 """INSERT INTO users
-                   (id,email,display_name,password_salt,password_hash,status,plan_id,requested_plan_id,billing_status,created_at)
-                   VALUES (?,?,?,?,?,'pending_approval','free',?,?,?)""",
-                (user_id, email, display_name, salt, digest, plan.id, billing_status, _iso(created)),
+                   (id,email,display_name,password_salt,password_hash,password_scheme,password_updated_at,
+                    status,plan_id,requested_plan_id,billing_status,created_at)
+                   VALUES (?,?,?,?,?,?,?,'pending_approval','free',?,?,?)""",
+                (
+                    user_id,
+                    email,
+                    display_name,
+                    "",
+                    digest,
+                    PASSWORD_SCHEME_ARGON2ID,
+                    _iso(created),
+                    plan.id,
+                    billing_status,
+                    _iso(created),
+                ),
             )
             con.execute(
                 """INSERT INTO membership_requests
@@ -193,12 +351,59 @@ class AccountStore:
         return dict(row) if row else None
 
     def authenticate(self, email: str, password: str) -> dict | None:
-        user = self.get_user_by_email(email)
-        if not user or not _verify_password(password, user["password_salt"], user["password_hash"]):
+        # All login surfaces share this persistent account-level throttle, so switching
+        # between HTML and JSON login endpoints cannot bypass the attempt limit.
+        if self.login_throttle_status(email)["blocked"]:
             return None
+
+        user = self.get_user_by_email(email)
+        if not user:
+            _dummy_password_verify(password)
+            self._record_login_failure(email)
+            return None
+
+        scheme = str(user.get("password_scheme") or PASSWORD_SCHEME_PBKDF2).lower()
+        valid = False
+        needs_upgrade = False
+        if scheme == PASSWORD_SCHEME_ARGON2ID:
+            valid = _verify_password_argon2id(password, user["password_hash"])
+            if valid:
+                try:
+                    needs_upgrade = _PASSWORD_HASHER.check_needs_rehash(user["password_hash"])
+                except (InvalidHashError, TypeError):
+                    needs_upgrade = True
+        elif scheme == PASSWORD_SCHEME_PBKDF2:
+            valid = _verify_password(password, user["password_salt"], user["password_hash"])
+            needs_upgrade = valid
+        else:
+            _dummy_password_verify(password)
+
+        if not valid:
+            self._record_login_failure(email)
+            return None
+
+        # A disabled account must fail closed at the canonical credential boundary.
+        # Keep the same generic authentication result used for bad credentials.
+        if user.get("disabled_at"):
+            self._record_login_failure(email)
+            return None
+
+        self.clear_login_throttle(email)
+        if needs_upgrade:
+            upgraded = _hash_password_argon2id(password)
+            with self._connect() as con:
+                con.execute(
+                    """UPDATE users SET password_salt='',password_hash=?,password_scheme=?,password_updated_at=?
+                       WHERE id=?""",
+                    (upgraded, PASSWORD_SCHEME_ARGON2ID, _iso(), user["id"]),
+                )
+            return self.get_user(user["id"]) or user
         return user
 
     def create_session(self, user_id: str) -> str:
+        user = self.get_user(user_id)
+        if not user or user.get("disabled_at"):
+            raise PermissionError("Eligible account required")
         token = secrets.token_urlsafe(32)
         now = _utcnow()
         with self._connect() as con:
@@ -214,7 +419,8 @@ class AccountStore:
         with self._connect() as con:
             row = con.execute(
                 """SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id
-                   WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?""",
+                   WHERE s.token_hash=? AND s.revoked_at IS NULL AND s.expires_at>?
+                     AND u.disabled_at IS NULL""",
                 (_hash_secret(token), _iso()),
             ).fetchone()
         return dict(row) if row else None

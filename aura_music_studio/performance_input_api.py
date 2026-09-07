@@ -15,6 +15,7 @@ from .build_around_release import (
     install_release_gated_build_around,
 )
 from .content_safety import enforce_creation_policy
+from .groove_engine import load_groove_template, groove_template_from_performance_input
 from .performance_generation import generate_from_performance_guide
 from .performance_inputs import (
     PerformanceInputKind,
@@ -24,6 +25,7 @@ from .performance_inputs import (
     load_manifest,
     register_input,
 )
+from .tempo_engine import load_tempo_map, tempo_map_from_performance_input
 from .tenant_storage import project_path
 
 # The app imports this module during startup. Patch legacy dynamic Build Around imports so
@@ -85,6 +87,22 @@ def list_performance_inputs(project_name: str):
             "instrument": "Preserve the uploaded performance as a real-audio anchor and build an editable production around it.",
             "rhythm_beatbox_hum_melody": "Use the upload as neural timing/melody conditioning while keeping the raw guide muted in the final mix by default.",
             "reference_audio": "Reference-only. It is not automatically copied into generated release audio.",
+        },
+        "smart_warp": {
+            "tempo_maps": True,
+            "variable_tempo": True,
+            "natural_performance_follow": True,
+            "real_audio_conform": True,
+            "expensive_render_path": "shared background engineering queue",
+        },
+        "groove_timing": {
+            "reference_groove_extraction": True,
+            "sixteenth_note_profile": True,
+            "swing_detection": True,
+            "apply_to": ["drums", "bass", "guitar", "piano", "percussion", "other"],
+            "deterministic_humanisation": True,
+            "pitch_preserving_real_audio": True,
+            "expensive_render_path": "shared background engineering queue",
         },
     }
 
@@ -168,7 +186,117 @@ async def upload_performance_input(
     return {
         "input": item.model_dump(mode="json"),
         "asset": asset.model_dump(mode="json"),
-        "next_step": "Review the detected rhythm/melody guide, apply it to the project, then generate real editable audio around it.",
+        "next_step": "Review the detected rhythm/melody guide, build tempo or groove maps when natural timing matters, apply it to the project, then generate real editable audio around it.",
+    }
+
+
+@router.post("/projects/{project_name}/performance-inputs/{input_id}/tempo-map")
+def analyse_performance_tempo_map(project_name: str, input_id: str):
+    project = _project(project_name)
+    try:
+        item = get_input(project, input_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Performance input not found") from exc
+    if not item.rights_confirmed or not item.metadata.get("rights_record_id"):
+        raise HTTPException(409, "This performance input does not have a complete rights/provenance record")
+    try:
+        tempo_map, tempo_map_ref = tempo_map_from_performance_input(project, item)
+        item.metadata.update(
+            {
+                "tempo_map_ref": tempo_map_ref,
+                "tempo_map_id": tempo_map.id,
+                "tempo_mode": "variable" if tempo_map.variable else "fixed_detected",
+                "tempo_map_engine": tempo_map.analysis_engine,
+            }
+        )
+        register_input(project, item)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {
+        "performance_input_id": item.id,
+        "tempo_map_ref": tempo_map_ref,
+        "tempo_map": tempo_map.model_dump(mode="json"),
+        "source_paths_exposed": False,
+        "destructive_source_edit": False,
+        "next_step": "Submit an engineering smart_warp job with this performance input as the target to conform another project audio asset to the natural timing.",
+    }
+
+
+@router.get("/projects/{project_name}/performance-inputs/{input_id}/tempo-map")
+def get_performance_tempo_map(project_name: str, input_id: str):
+    project = _project(project_name)
+    try:
+        item = get_input(project, input_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Performance input not found") from exc
+    ref = str(item.metadata.get("tempo_map_ref") or "").strip()
+    if not ref:
+        raise HTTPException(404, "This performance input does not have a persisted tempo map")
+    try:
+        tempo_map = load_tempo_map(project, ref)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(409, "The stored tempo map is unavailable") from exc
+    return {
+        "performance_input_id": item.id,
+        "tempo_map_ref": ref,
+        "tempo_map": tempo_map.model_dump(mode="json"),
+        "source_paths_exposed": False,
+    }
+
+
+@router.post("/projects/{project_name}/performance-inputs/{input_id}/groove-template")
+def analyse_performance_groove_template(project_name: str, input_id: str):
+    project = _project(project_name)
+    try:
+        item = get_input(project, input_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Performance input not found") from exc
+    if not item.rights_confirmed or not item.metadata.get("rights_record_id"):
+        raise HTTPException(409, "This performance input does not have a complete rights/provenance record")
+    try:
+        template, template_ref = groove_template_from_performance_input(project, item)
+        item.metadata.update(
+            {
+                "groove_template_ref": template_ref,
+                "groove_template_id": template.id,
+                "groove_engine": template.analysis_engine,
+                "groove_swing_ratio": template.swing_ratio,
+                "groove_timing_variation_ms": template.timing_variation_ms,
+            }
+        )
+        register_input(project, item)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {
+        "performance_input_id": item.id,
+        "groove_template_ref": template_ref,
+        "groove_template": template.model_dump(mode="json"),
+        "source_paths_exposed": False,
+        "destructive_source_edit": False,
+        "final_audio_generated": False,
+        "next_step": "Submit an engineering groove_follow job to apply this performance feel to a project drum, bass, guitar, piano or percussion audio asset.",
+    }
+
+
+@router.get("/projects/{project_name}/performance-inputs/{input_id}/groove-template")
+def get_performance_groove_template(project_name: str, input_id: str):
+    project = _project(project_name)
+    try:
+        item = get_input(project, input_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Performance input not found") from exc
+    ref = str(item.metadata.get("groove_template_ref") or "").strip()
+    if not ref:
+        raise HTTPException(404, "This performance input does not have a persisted groove template")
+    try:
+        template = load_groove_template(project, ref)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(409, "The stored groove template is unavailable") from exc
+    return {
+        "performance_input_id": item.id,
+        "groove_template_ref": ref,
+        "groove_template": template.model_dump(mode="json"),
+        "source_paths_exposed": False,
     }
 
 

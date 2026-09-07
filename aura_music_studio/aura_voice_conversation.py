@@ -5,25 +5,59 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from .aura_realtime_voice import router as realtime_voice_router
+from .aura_realtime_voice_ui import router as realtime_voice_ui_router
+from .rhiannon_turn_state import router as rhiannon_turn_router
+
 router = APIRouter(include_in_schema=False)
+router.include_router(realtime_voice_router)
+router.include_router(realtime_voice_ui_router)
+router.include_router(rhiannon_turn_router)
 
 VOICE_SCRIPT = r"""
 (()=>{
   const api='/aura-intelligence/api';
   let enabled=false,stream=null,media=null,audioCtx=null,analyser=null,raf=null,activeAudio=null,starting=false;
-  let baselineSamples=[],heardVoice=false,lastVoiceAt=0,startedAt=0;
+  let baselineSamples=[],heardVoice=false,lastVoiceAt=0,startedAt=0,activeSpeechJob=null,activePlaybackResolve=null;
 
   function toast(message,bad=false){try{note(message,bad)}catch(_){console[bad?'error':'log'](message)}}
-  function hostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
+  function legacyHostState(state,detail={}){try{window.AuraHost?.setState(state,detail)}catch(_){}}
+  function turnHost(){return window.RhiannonTurnHost}
+  function turnState(state,detail={}){
+    const host=turnHost();if(host?.transition)return host.transition(state,detail);
+    const fallback={idle:'idle',ready:'welcoming',listening:'listening',processing:'thinking',thinking:'thinking',responding:'thinking',speaking:'speaking',interrupted:'warning',awaiting_permission:'warning',degraded:'warning',error:'warning',recovery:'thinking'};
+    legacyHostState(fallback[state]||'idle',{...detail,rhiannon_turn_state:state});return true
+  }
+  function beginSpeech(jobId,detail={}){const host=turnHost();if(host?.beginSpeech)return host.beginSpeech(jobId,detail);turnState('speaking',{...detail,job_id:jobId});return true}
+  function speechFrame(detail={}){const host=turnHost();if(host?.speechFrame)return host.speechFrame(detail);try{window.AuraHost?.performance?.speechFrame(detail)}catch(_){}return true}
+  function finishSpeech(jobId,next='listening',detail={}){const host=turnHost();if(host?.finishSpeech)return host.finishSpeech(jobId,next,detail);try{window.AuraHost?.performance?.speechFrame({speaking:false,viseme:'sil',job_id:jobId})}catch(_){}turnState(next,detail);return true}
+  function interruptTurn(reason='user_interruption',next='listening',detail={}){const host=turnHost();if(host?.interrupt)return host.interrupt(reason,next,detail);try{window.AuraHost?.performance?.speechFrame({speaking:false,viseme:'sil'})}catch(_){}turnState('interrupted',{...detail,reason});if(next)turnState(next,{...detail,reason:`${reason}:resume`});return null}
   function button(){return document.getElementById('auraHandsFree')}
-  function setButton(){const b=button();if(!b)return;b.textContent=enabled?'■ Stop Aura Voice':'◉ Aura Voice';b.style.borderColor=enabled?'#73e2aa66':''}
+  function setButton(){const b=button();if(!b)return;b.textContent=(activeAudio||activeSpeechJob)?'■ Interrupt Rhiannon':(enabled?'■ Stop Rhiannon Voice':'◉ Rhiannon Voice');b.style.borderColor=enabled?'#73e2aa66':''}
   function cleanupCapture(){
     if(raf)cancelAnimationFrame(raf);raf=null;
     if(media&&media.state!=='inactive'){try{media.stop()}catch(_){}}
     if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
     if(audioCtx){try{audioCtx.close()}catch(_){}}audioCtx=null;analyser=null;media=null;
   }
-  function stopVoice(){enabled=false;starting=false;if(activeAudio){try{activeAudio.pause()}catch(_){}activeAudio=null}cleanupCapture();setButton();hostState('idle');toast('Aura Voice Conversation stopped.')}
+  function stopVoice(finalState='idle'){
+    enabled=false;starting=false;
+    const job=activeSpeechJob;
+    if(activeAudio){try{activeAudio.pause();activeAudio.currentTime=0}catch(_){}activeAudio=null}
+    if(activePlaybackResolve){activePlaybackResolve('stopped');activePlaybackResolve=null}
+    if(job)interruptTurn('voice_mode_stopped',finalState,{job_id:job});else turnState(finalState,{reason:'voice_mode_stopped'});
+    activeSpeechJob=null;cleanupCapture();setButton();toast('Rhiannon Voice Conversation stopped.');
+  }
+  async function interruptCurrentSpeech(){
+    const job=activeSpeechJob;
+    if(!activeAudio&&!job)return false;
+    if(activeAudio){try{activeAudio.pause();activeAudio.currentTime=0}catch(_){}activeAudio=null}
+    if(activePlaybackResolve){activePlaybackResolve('interrupted');activePlaybackResolve=null}
+    interruptTurn('user_interruption','listening',{job_id:job});
+    activeSpeechJob=null;setButton();toast('Rhiannon stopped speaking. Listening…');
+    if(enabled)await listen();
+    return true
+  }
 
   function rmsLevel(){
     if(!analyser)return 0;const data=new Uint8Array(analyser.fftSize);analyser.getByteTimeDomainData(data);let total=0;
@@ -33,41 +67,63 @@ VOICE_SCRIPT = r"""
 
   async function transcribeAndSend(blob){
     if(!enabled||!current)return;
-    hostState('thinking',{phase:'transcription'});
-    const fd=new FormData();fd.append('file',blob,'aura-handsfree.webm');
+    turnState('processing',{phase:'transcription'});
+    const fd=new FormData();fd.append('file',blob,'rhiannon-handsfree.webm');
     try{
       const response=await fetch(`${api}/threads/${encodeURIComponent(current)}/voice-transcribe`,{method:'POST',credentials:'same-origin',body:fd});
       const body=await response.json();if(!response.ok)throw new Error(body.detail||'Voice transcription failed');
       const transcript=String(body.transcript||'').trim();
       if(!transcript){toast('I did not catch speech. Listening again…');return listen()}
       if(!enabled)return;
-      hostState('thinking',{phase:'reasoning'});await send(transcript);
+      turnState('thinking',{phase:'reasoning'});
+      turnState('responding',{phase:'assistant_response'});
+      await send(transcript);
       if(!enabled)return;
       await speakLatestThenListen();
-    }catch(error){hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
+    }catch(error){turnState('error',{error:String(error),reason:'voice_turn_failed'});toast(error.message,true);stopVoice('error')}
   }
 
   async function speakLatestThenListen(){
     if(!enabled||!current)return;
     const message=[...(messagesCache||[])].reverse().find(row=>row.role==='assistant'&&row.id&&!String(row.id).startsWith('local_'));
-    if(!message){return listen()}
+    if(!message){turnState('listening',{reason:'no_assistant_message'});return listen()}
+    const jobId=`speech_${String(message.id).slice(0,140)}`;
     try{
-      hostState('speaking',{message_id:message.id});
+      activeSpeechJob=jobId;
+      if(!beginSpeech(jobId,{message_id:message.id,reason:'tts_playback_started'}))throw new Error('Rhiannon speech job could not start');
+      setButton();
+      // This generic TTS endpoint returns completed audio only. The lifecycle is job-bound,
+      // but precise phoneme/viseme frames remain unavailable until a timing-capable runtime supplies them.
+      speechFrame({speaking:true,source:'tts_lifecycle',message_id:message.id,job_id:jobId});
       activeAudio=new Audio(`${api}/threads/${encodeURIComponent(current)}/messages/${encodeURIComponent(message.id)}/speech`);
-      await new Promise((resolve,reject)=>{activeAudio.onended=resolve;activeAudio.onerror=()=>reject(new Error('Aura speech output is unavailable'));activeAudio.play().catch(reject)});
-      activeAudio=null;if(enabled)await listen();else hostState('idle');
-    }catch(error){activeAudio=null;hostState('warning',{error:String(error)});toast(error.message,true);stopVoice()}
+      const outcome=await new Promise((resolve,reject)=>{
+        activePlaybackResolve=resolve;
+        activeAudio.onended=()=>resolve('ended');
+        activeAudio.onerror=()=>reject(new Error('Rhiannon speech output is unavailable'));
+        activeAudio.play().catch(reject);
+      });
+      activePlaybackResolve=null;
+      if(outcome==='interrupted'||outcome==='stopped')return;
+      activeAudio=null;
+      finishSpeech(jobId,'listening',{message_id:message.id});
+      activeSpeechJob=null;setButton();
+      if(enabled)await listen();else turnState('idle',{reason:'voice_disabled_after_speech'});
+    }catch(error){
+      activePlaybackResolve=null;activeAudio=null;
+      if(activeSpeechJob===jobId)interruptTurn('speech_playback_failed','error',{job_id:jobId,error:String(error)});
+      activeSpeechJob=null;setButton();toast(error.message,true);stopVoice('error')
+    }
   }
 
   async function listen(){
-    if(!enabled||starting||controller)return;starting=true;cleanupCapture();setButton();hostState('listening');
+    if(!enabled||starting||controller)return;starting=true;cleanupCapture();setButton();turnState('listening',{reason:'microphone_capture'});
     try{
       stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
       const mime=MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus':'audio/webm';
       media=new MediaRecorder(stream,{mimeType:mime});const chunks=[];media.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
       media.onstop=()=>{const blob=new Blob(chunks,{type:media?.mimeType||mime});cleanupCapture();if(enabled&&heardVoice&&blob.size>500)transcribeAndSend(blob);else if(enabled)setTimeout(()=>listen(),250)};
       audioCtx=new (window.AudioContext||window.webkitAudioContext)();const source=audioCtx.createMediaStreamSource(stream);analyser=audioCtx.createAnalyser();analyser.fftSize=1024;source.connect(analyser);
-      baselineSamples=[];heardVoice=false;lastVoiceAt=0;startedAt=performance.now();media.start(250);starting=false;toast('Aura is listening…');
+      baselineSamples=[];heardVoice=false;lastVoiceAt=0;startedAt=performance.now();media.start(250);starting=false;toast('Rhiannon is listening…');
       const monitor=()=>{
         if(!enabled||!media||media.state==='inactive')return;
         const now=performance.now(),level=rmsLevel();
@@ -82,39 +138,45 @@ VOICE_SCRIPT = r"""
         raf=requestAnimationFrame(monitor);
       };
       raf=requestAnimationFrame(monitor);
-    }catch(error){starting=false;cleanupCapture();hostState('warning',{error:String(error)});toast('Microphone access or Aura speech is unavailable.',true);stopVoice()}
+    }catch(error){starting=false;cleanupCapture();turnState('awaiting_permission',{error:String(error),reason:'microphone_permission_or_capture_failed'});toast('Microphone access or Rhiannon speech is unavailable.',true);stopVoice('awaiting_permission')}
   }
 
   async function startVoice(){
-    if(enabled)return stopVoice();
+    if(enabled){
+      if(activeAudio||activeSpeechJob)return interruptCurrentSpeech();
+      return stopVoice();
+    }
     if(!navigator.mediaDevices?.getUserMedia||typeof MediaRecorder==='undefined')return toast('Hands-free voice capture is not supported in this browser.',true);
-    if(typeof current==='undefined'||!current)return toast('Open an Aura conversation first.',true);
+    if(typeof current==='undefined'||!current)return toast('Open a Rhiannon conversation first.',true);
     try{
       const status=await fetch(`${api}/status`,{credentials:'same-origin'}).then(r=>r.json());
-      if(!status.speech?.available_to_plan)throw new Error('Aura Voice is not enabled for this membership.');
-      if(!status.speech?.stt_configured)throw new Error('Aura speech-to-text is not configured on this host.');
-      if(!status.speech?.tts_configured)throw new Error('Aura text-to-speech is not configured on this host.');
+      if(!status.speech?.available_to_plan)throw new Error('Rhiannon Voice is not enabled for this membership.');
+      if(!status.speech?.stt_configured)throw new Error('Rhiannon speech-to-text is not configured on this host.');
+      if(!status.speech?.tts_configured)throw new Error('Rhiannon text-to-speech is not configured on this host.');
+      const snapshot=turnHost()?.snapshot?.();
+      if(snapshot?.state==='error'||snapshot?.state==='degraded'||snapshot?.state==='awaiting_permission')turnState('recovery',{reason:'voice_restart'});
+      turnState('ready',{reason:'voice_enabled'});
       enabled=true;setButton();await listen();
-    }catch(error){enabled=false;setButton();hostState('warning',{error:String(error)});toast(error.message||'Aura Voice is unavailable.',true)}
+    }catch(error){enabled=false;setButton();turnState('error',{error:String(error),reason:'voice_start_failed'});toast(error.message||'Rhiannon Voice is unavailable.',true)}
   }
 
   const foot=document.querySelector('.sideFoot');
   if(foot&&!button()){
-    const b=document.createElement('button');b.id='auraHandsFree';b.className='btn';b.textContent='◉ Aura Voice';b.title='Hands-free listen → Aura response → spoken reply loop';b.onclick=startVoice;foot.prepend(b);
+    const b=document.createElement('button');b.id='auraHandsFree';b.className='btn';b.textContent='◉ Rhiannon Voice';b.title='Hands-free listen → Rhiannon response → spoken reply loop';b.onclick=startVoice;foot.prepend(b);
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden&&enabled)stopVoice()});
-  window.addEventListener('beforeunload',()=>{enabled=false;cleanupCapture()});
+  window.addEventListener('beforeunload',()=>{enabled=false;if(activeSpeechJob)interruptTurn('page_unload',null,{job_id:activeSpeechJob});cleanupCapture()});
 })();
 """
 
 
 @router.get("/aura-intelligence/voice-conversation.js")
 def voice_conversation_script():
-    return Response(content=VOICE_SCRIPT, media_type="application/javascript", headers={"Cache-Control": "no-store"})
+    return Response(content=VOICE_SCRIPT, media_type="application/javascript", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
-    """Inject the hands-free voice layer only into Aura's signed-in HTML workspace."""
+    """Inject the canonical Rhiannon turn contract plus fallback and Realtime voice layers."""
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -130,9 +192,13 @@ class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        turn_marker = "<script src='/aura-intelligence/rhiannon-turn-state.js'></script>"
+        fallback_marker = "<script src='/aura-intelligence/voice-conversation.js'></script>"
+        realtime_marker = "<script src='/aura-intelligence/realtime-voice.js'></script>"
+        markers = turn_marker + fallback_marker + realtime_marker
+        for marker in (turn_marker, fallback_marker, realtime_marker):
+            text = text.replace(marker, "")
+        text = text.replace("</body>", markers + "</body>")
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]
@@ -141,4 +207,4 @@ class AuraVoiceConversationMiddleware(BaseHTTPMiddleware):
         return migrated
 
 
-__all__ = ["router", "AuraVoiceConversationMiddleware"]
+__all__ = ["router", "AuraVoiceConversationMiddleware", "VOICE_SCRIPT"]

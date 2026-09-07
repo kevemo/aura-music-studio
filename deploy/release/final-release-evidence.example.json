@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "candidate": {"git_sha": "", "integration_branch": "development/full-site-build"},
+  "workflows": {
+    "Command Center CI": {"conclusion": "not_run", "head_sha": "", "evidence_ref": ""},
+    "Security Gates": {"conclusion": "not_run", "head_sha": "", "evidence_ref": ""},
+    "Self-Host Smoke": {"conclusion": "not_run", "head_sha": "", "evidence_ref": ""}
+  },
+  "gates": {
+    "source_route_integrity": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "database_migrations": {"status": "not_run", "head_sha": "", "evidence_ref": "", "rollback_documented": false},
+    "security_review": {"status": "not_run", "head_sha": "", "evidence_ref": "", "critical_findings_open": null, "secret_scan_passed": false},
+    "privacy_review": {"status": "not_run", "head_sha": "", "evidence_ref": "", "deletion_verified": false, "export_verified": false, "retention_verified": false, "breach_response_verified": false},
+    "restore_drill": {"status": "not_run", "head_sha": "", "evidence_ref": "", "encrypted_backup_restored": false, "restore_integrity_verified": false},
+    "observability": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "commercial_acceptance": {"status": "not_run", "head_sha": "", "evidence_ref": "", "server_authoritative_pricing_verified": false, "provider_payment_verified": false, "webhook_authenticity_verified": false, "entitlement_projection_verified": false, "refund_reversal_verified": false, "receipt_history_verified": false},
+    "standalone_acceptance": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "branding_acceptance": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "effects_systems_acceptance": {"status": "not_run", "head_sha": "", "evidence_ref": "", "metadata_required_coverage_met": false, "executable_required_coverage_met": false, "metadata_only_counted_as_executable": false},
+    "self_host_acceptance": {"status": "not_run", "head_sha": "", "evidence_ref": "", "claimed_capabilities_smoke_verified": false, "unverified_capabilities_claimed_ready": false}
+  },
+  "device_accessibility": {
+    "desktop": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "tablet": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "mobile": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "keyboard_only": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "reduced_motion": {"status": "not_run", "head_sha": "", "evidence_ref": ""},
+    "screen_reader_semantics": {"status": "not_run", "head_sha": "", "evidence_ref": ""}
+  },
+  "internal_gaps": {"open_count": null},
+  "duplicate_authority": {"consequential_duplicates_open": null, "audit_head_sha": "", "evidence_ref": ""},
+  "external_blockers": {"blocking": ["not yet assessed"], "non_blocking": []},
+  "release_controller": {"recommendation": "hold", "candidate_sha": "", "evidence_ref": ""}
+}

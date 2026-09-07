@@ -1,17 +1,17 @@
-name: Pulsar-Frequency House CI
+name: Elevate Souls Command Center CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development/full-site-build]
   pull_request:
-    branches: [main]
+    branches: [main, development/full-site-build]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: pulsar-frequency-house-ci-${{ github.workflow }}-${{ github.ref }}
+  group: elevate-souls-command-center-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,13 +32,19 @@ jobs:
       - name: System audio and self-host tools
         run: sudo apt-get update && sudo apt-get install -y ffmpeg libsndfile1 miniupnpc
 
-      - name: Install Pulsar-Frequency core + dev
+      - name: Install Command Center core + dev
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
+      - name: Production source completeness audit
+        run: python scripts/source_completeness_audit.py
+
       - name: Compile Python
-        run: python -m compileall -q aura_music_studio
+        run: python -m compileall -q aura_music_studio scripts
+
+      - name: Authoritative self-host release contract
+        run: python scripts/validate_selfhost_release_contract.py
 
       - name: Run test suite
         run: python -m pytest -q -ra
@@ -62,6 +68,79 @@ jobs:
         run: |
           docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.yue.yml config -q
 
+      - name: Staging deployment topology validation
+        run: |
+          docker compose \
+            -f docker-compose.yml \
+            -f deploy/staging/docker-compose.staging.yml \
+            config -q
+          ACESTEP_API_KEY=ci-staging-renderer-key-0123456789 docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.gpu.yml \
+            -f deploy/staging/docker-compose.staging.yml \
+            config -q
+
+      - name: Production deployment topology validation
+        run: |
+          LSS_DEPLOYMENT_MODE=selfhost \
+          LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+          LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
+          ACESTEP_API_KEY=ci-production-renderer-key-0123456789 \
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.gpu.yml \
+            -f deploy/production/docker-compose.production.yml \
+            config -q
+          LSS_DEPLOYMENT_MODE=selfhost \
+          LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+          LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
+          ACESTEP_API_KEY=ci-production-renderer-key-0123456789 \
+          docker compose \
+            -f docker-compose.yml \
+            -f docker-compose.gpu.yml \
+            -f deploy/production/docker-compose.production.yml \
+            --profile public config -q
+
+      - name: Production readiness fail-closed smoke
+        run: |
+          env \
+            AURA_DEPLOYMENT_ENV=production \
+            LSS_DEPLOYMENT_MODE=selfhost \
+            LSS_PAYMENT_PROVIDER=paypal \
+            LSS_PAYMENT_MODE=verified_paypal_webhook \
+            LSS_PAYPAL_ENVIRONMENT=live \
+            LSS_PAYPAL_CLIENT_ID=ci-paypal-client-0123456789 \
+            LSS_PAYPAL_CLIENT_SECRET=test-only-paypal-secret-0123456789 \
+            LSS_PAYPAL_WEBHOOK_ID=ci-paypal-webhook-0123456789 \
+            AURA_GPU_REQUIRED=true \
+            AURA_REQUIRE_LIVE_RENDERER=true \
+            AURA_ACESTEP_API_URL=http://ace-step:8001 \
+            ACESTEP_API_KEY=ci-renderer-secret-0123456789 \
+            AURA_MONITORING_ENABLED=true \
+            AURA_MONITORING_TOKEN=ci-monitoring-secret-0123456789 \
+            LSS_AUTO_BACKUP_ENABLED=true \
+            LSS_AUTO_BACKUP_INTERVAL_HOURS=12 \
+            LSS_AUTO_BACKUP_KEEP=14 \
+            LSS_BACKUP_AGE_RECIPIENT=age1ci0123456789012345678901234567890 \
+            LSS_PUBLIC_BASE_URL=https://ci.example.test \
+            LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+            LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
+            LSS_COOKIE_SECURE=true \
+            LSS_PROVENANCE_SECRET=ci-provenance-secret-0123456789 \
+            LSS_ADMIN_KEY=ci-owner-secret-0123456789 \
+            AURA_WEB_ALLOW_HTTP=false \
+            LSS_DB_PATH=/app/data/live_sound_studio.sqlite3 \
+            AURA_PROJECTS_ROOT=/app/projects \
+            LSS_BACKUP_DIR=/app/backups \
+            python -m aura_music_studio.production_readiness > /tmp/aura-production-readiness.json
+          python - <<'PY'
+          import json
+          report = json.load(open('/tmp/aura-production-readiness.json', encoding='utf-8'))
+          if not report.get('production_ready') or report.get('secret_values_exposed'):
+              raise SystemExit(f'FAIL: production readiness smoke failed: {report}')
+          print('PASS: production readiness contract is fail-closed and secret-free')
+          PY
+
       - name: ESP compute-node Compose validation
         run: |
           cat > .env.node <<'EOF'
@@ -77,7 +156,8 @@ jobs:
       - name: Caddy configuration validation
         run: |
           docker run --rm \
-            -e LSS_PUBLIC_SITE_ADDRESS=http://:80 \
+            -e LSS_PUBLIC_SITE_ADDRESS=https://ci.example.test \
+            -e LSS_TRUSTED_PROXY_TOKEN=ci-production-proxy-token-0123456789abcdef \
             -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 

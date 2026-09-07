@@ -1,9 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "vercel_bootstrap.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{tests/**,preview/**,docs/**,deploy/**,.github/**,docker-compose*.yml,*.md,*.pdf,*.docx}"
-    }
+  "git": {
+    "deploymentEnabled": false
   }
 }

@@ -18,6 +18,10 @@ def _clip(value, low, high):
     return max(low, min(float(value), high))
 
 
+def _linear_from_db(value: float) -> float:
+    return 10 ** (float(value) / 20.0)
+
+
 def compile_ffmpeg_chain(effects: list[Effect]) -> str:
     """Compile Aura track effects into a real-audio ffmpeg filter chain.
 
@@ -36,6 +40,24 @@ def compile_ffmpeg_chain(effects: list[Effect]) -> str:
             chain.append(f"highpass=f={_clip(p.get('hz', 70), 20, 1000):.2f}")
         elif fx.type == "lowpass":
             chain.append(f"lowpass=f={_clip(p.get('hz', 18000), 1000, 22000):.2f}")
+        elif fx.type == "bandpass":
+            center = _clip(p.get("frequency_hz", 1000), 20, 20000)
+            width = _clip(p.get("width_octaves", 1.0), 0.05, 6.0)
+            chain.append(f"bandpass=f={center:.2f}:width_type=o:width={width:.3f}")
+        elif fx.type == "notch":
+            center = _clip(p.get("frequency_hz", 60), 20, 20000)
+            width = _clip(p.get("width_octaves", 0.08), 0.01, 3.0)
+            chain.append(f"bandreject=f={center:.2f}:width_type=o:width={width:.3f}")
+        elif fx.type == "low_shelf":
+            gain = _clip(p.get("gain_db", 0.0), -18, 18)
+            hz = _clip(p.get("frequency_hz", 120), 20, 2000)
+            width = _clip(p.get("width", 0.7), 0.1, 4.0)
+            chain.append(f"bass=g={gain:.2f}:f={hz:.2f}:w={width:.3f}")
+        elif fx.type == "high_shelf":
+            gain = _clip(p.get("gain_db", 0.0), -18, 18)
+            hz = _clip(p.get("frequency_hz", 8500), 1000, 20000)
+            width = _clip(p.get("width", 0.6), 0.1, 4.0)
+            chain.append(f"treble=g={gain:.2f}:f={hz:.2f}:w={width:.3f}")
         elif fx.type == "eq":
             if p.get("low_db") is not None:
                 chain.append(f"bass=g={_db(p.get('low_db'))}:f={float(p.get('low_hz', 120))}:w=0.7")
@@ -56,6 +78,18 @@ def compile_ffmpeg_chain(effects: list[Effect]) -> str:
             chain.append(f"alimiter=limit={limit:.5f}:attack={float(p.get('attack_ms', 5))}:release={float(p.get('release_ms', 50))}")
         elif fx.type == "gate":
             chain.append(f"agate=threshold={float(p.get('threshold_db', -45))}dB:ratio={float(p.get('ratio', 8))}:attack={float(p.get('attack_ms', 10))}:release={float(p.get('release_ms', 120))}")
+        elif fx.type == "expander":
+            threshold = _clip(p.get("threshold_db", -36), -80, 0)
+            ratio = _clip(p.get("ratio", 2.0), 1.0, 20.0)
+            attack = _clip(p.get("attack_ms", 20), 0.1, 500)
+            release = _clip(p.get("release_ms", 220), 5, 3000)
+            range_db = _clip(p.get("range_db", -18), -60, 0)
+            range_linear = _clip(_linear_from_db(range_db), 0.0001, 1.0)
+            chain.append(
+                "agate="
+                f"threshold={threshold:.2f}dB:ratio={ratio:.3f}:attack={attack:.3f}:"
+                f"release={release:.3f}:range={range_linear:.6f}"
+            )
         elif fx.type == "deesser":
             # Portable de-essing approximation: narrow upper-presence attenuation.
             hz = _clip(p.get("frequency_hz", 6500), 3500, 11000)

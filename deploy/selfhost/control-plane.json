@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "product": "Elevate Souls Productions Content Creation Command Center",
+  "endorsement": "Powered by Aura AI",
+  "authoritative_runtime": "esp-self-host",
+  "vercel_role": "disabled-legacy-integration",
+  "release_model": "exact-git-sha-and-immutable-container-digest",
+  "current_safe_mode": {
+    "phase": 1,
+    "orchestrator": "docker-compose",
+    "database": "sqlite-local-filesystem",
+    "command_center_writer_hosts": 1,
+    "horizontal_web_scaling": false,
+    "gpu_renderer": "private-ace-step-service",
+    "aura_reasoning": "private-vllm-openai-compatible-local-weights",
+    "public_renderer_ports": false,
+    "public_aura_inference_ports": false
+  },
+  "target_platform": {
+    "orchestrator": "kubernetes-ha",
+    "network": "cilium-hubble",
+    "bare_metal_load_balancer": "metallb-or-equivalent-bgp",
+    "gitops": "argocd",
+    "tls_automation": "cert-manager",
+    "gpu_management": "nvidia-gpu-operator",
+    "autoscaling": "keda-plus-kubernetes-hpa",
+    "aura_inference": "vllm-openai-compatible-private-esp-model-storage",
+    "aura_gpu_pool": "dedicated-reasoning-nodes",
+    "database": "cloudnativepg-postgresql-ha",
+    "cache_queue_target": "valkey-ha",
+    "distributed_storage_target": "rook-ceph",
+    "oci_registry_target": "harbor-ha",
+    "registry_vulnerability_scanning": "trivy",
+    "telemetry": ["opentelemetry", "prometheus", "grafana", "loki", "tempo", "dcgm", "hubble"],
+    "admission_policy": "kyverno",
+    "image_signing": "cosign",
+    "image_build_provenance": "buildkit-sbom-and-slsa-provenance",
+    "secret_management": "openbao-ha-or-reviewed-compatible",
+    "runtime_dependency_on_vercel": false,
+    "runtime_dependency_on_external_llm_api": false
+  },
+  "scale_gates": [
+    {
+      "id": "postgresql-ha-migration",
+      "required": true,
+      "status": "blocked",
+      "reason": "Current application durability is SQLite-path based; multi-host writers are unsafe until full PostgreSQL parity is implemented and tested."
+    },
+    {
+      "id": "object-storage-asset-abstraction",
+      "required": true,
+      "status": "blocked",
+      "reason": "Creative assets currently rely on project/host storage paths; distributed workers need authorized object-storage-backed assets."
+    },
+    {
+      "id": "distributed-durable-job-queue",
+      "required": true,
+      "status": "blocked",
+      "reason": "Horizontal worker/GPU scaling requires durable shared queue semantics and idempotent job ownership."
+    },
+    {
+      "id": "aura-selfhost-llm-live-e2e",
+      "required": true,
+      "status": "blocked",
+      "reason": "A real ESP GPU host must load the approved local model, answer Aura chat, execute structured tool-routing tests and survive restart/failover before production inference is claimed live."
+    },
+    {
+      "id": "registry-ha-and-vulnerability-policy",
+      "required": true,
+      "status": "blocked",
+      "reason": "The ESP-owned Harbor registry, replication/backup, vulnerability policy and retention model must be provisioned and restore-tested before it becomes the production registry."
+    },
+    {
+      "id": "signed-image-admission",
+      "required": true,
+      "status": "blocked",
+      "reason": "Production Kubernetes promotion must reject unsigned/unapproved container images and require exact immutable digests."
+    },
+    {
+      "id": "dynamic-secrets-ha",
+      "required": true,
+      "status": "blocked",
+      "reason": "OpenBao or the reviewed equivalent must run in HA mode with audited policies, backup/recovery and least-privilege Kubernetes authentication before replacing deployment secret files."
+    },
+    {
+      "id": "restore-drills",
+      "required": true,
+      "status": "blocked",
+      "reason": "PostgreSQL PITR, object storage, registry, secrets/configuration and application backups must be restored successfully in a drill."
+    },
+    {
+      "id": "multi-node-chaos-and-e2e",
+      "required": true,
+      "status": "blocked",
+      "reason": "Pod/node loss, payment/provider connectivity, email, storage and live AI generation require staging E2E evidence."
+    }
+  ]
+}

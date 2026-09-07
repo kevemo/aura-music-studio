@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "git_sha": "",
+  "command_center_image": "",
+  "runtime_images": {
+    "ace_step": "",
+    "caddy": "",
+    "searxng": ""
+  },
+  "ace_step_upstream_commit": "",
+  "environment": "production",
+  "approved": false,
+  "supply_chain": {
+    "buildkit_provenance": false,
+    "buildkit_sbom": false,
+    "trivy_high_critical_gate": false,
+    "trivy_unfixed_high_critical_gate": false,
+    "runtime_images_trivy_high_critical_gate": false,
+    "cosign_signature_verified": false,
+    "ace_step_buildkit_provenance": false,
+    "ace_step_buildkit_sbom": false,
+    "ace_step_cosign_signature_verified": false
+  },
+  "notes": "Non-runnable template. build-release.sh must create the real digest-pinned manifest; production deployment refuses this file."
+}

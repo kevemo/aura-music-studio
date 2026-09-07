@@ -7,6 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from .assets import AssetLibrary
+from .image_effect_api import router as image_effect_router
 from .restoration import AudioRestorer
 from .spatial import SpatialRenderer
 from .speech import AuraSpeechService
@@ -187,3 +188,9 @@ def video_sync(project_name: str, request: VideoSyncRequest):
     except Exception as exc:
         raise HTTPException(500, f"Video sync analysis failed: {type(exc).__name__}: {exc}") from exc
     return result
+
+
+# The engineering router is already mounted once by the canonical API. Nest the bounded image
+# effect router here so its executable image tools inherit the same member/security middleware
+# without creating a second application-level dispatch authority.
+router.include_router(image_effect_router)

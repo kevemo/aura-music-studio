@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare ESP Live Sound Studio self-host settings before package installation."""
+"""Prepare Elevate Souls Productions Command Center self-host settings."""
 
 from __future__ import annotations
 
@@ -17,7 +17,9 @@ from aura_music_studio.self_host_setup import initialize_self_host  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Prepare ESP Live Sound Studio self-host configuration")
+    parser = argparse.ArgumentParser(
+        description="Prepare Elevate Souls Productions Content Creation Command Center self-host configuration"
+    )
     parser.add_argument("--provider", choices=["none", "direct", "freedns", "duckdns"], default="direct")
     parser.add_argument("--hostname", help="FreeDNS/other free hostname")
     parser.add_argument("--duckdns-subdomain", help="DuckDNS subdomain without .duckdns.org")

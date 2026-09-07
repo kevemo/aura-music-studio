@@ -8,11 +8,19 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .aura_avatar_validator import validate_aura_glb
+from .aura_avatar_client_health import router as avatar_client_health_router
+from .aura_avatar_validator import (
+    GAZE_ANIMATION_ALIASES,
+    GESTURE_ANIMATION_ALIASES,
+    VISEME_ANIMATION_ALIASES,
+    validate_aura_glb,
+)
 
 router = APIRouter(tags=["Aura Avatar"])
+router.include_router(avatar_client_health_router)
 
 BROWSER_3D_RENDERER_IMPLEMENTED = True
+LAYERED_PERFORMANCE_RUNTIME_IMPLEMENTED = True
 _DEFAULT_MODEL_VIEWER_MODULE = (
     "https://ajax.googleapis.com/ajax/libs/model-viewer/4.3.1/model-viewer.min.js"
 )
@@ -74,6 +82,10 @@ def _renderer_module_url() -> str | None:
     return value
 
 
+def _alias_payload(contract: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    return {name: list(aliases) for name, aliases in contract.items()}
+
+
 def avatar_status() -> dict:
     model = None
     config_error = None
@@ -90,9 +102,16 @@ def avatar_status() -> dict:
         "error": "Aura GLB asset is not installed",
         "warnings": [],
         "animations": [],
+        "animation_state_matches": {},
         "morph_target_names": [],
+        "viseme_animation_matches": {},
+        "gaze_animation_matches": {},
+        "gesture_animation_matches": {},
+        "production_rig_ready": False,
+        "layered_performance_clips_ready": False,
     }
     model_valid = bool(validation.get("valid_glb"))
+    production_rig_ready = bool(validation.get("production_rig_ready"))
 
     try:
         renderer_module = _renderer_module_url()
@@ -107,6 +126,7 @@ def avatar_status() -> dict:
     production_ready = bool(
         enabled
         and model_valid
+        and production_rig_ready
         and renderer_configured
         and operator_validated
     )
@@ -114,6 +134,8 @@ def avatar_status() -> dict:
         truthful_state = "production_3d_avatar_ready"
     elif model_installed and not model_valid:
         truthful_state = "model_asset_invalid"
+    elif model_valid and renderer_configured and operator_validated and not production_rig_ready:
+        truthful_state = "model_renderer_validated_performance_rig_incomplete"
     elif model_valid and renderer_configured:
         truthful_state = "model_and_renderer_configured_validation_pending"
     elif model_valid:
@@ -130,15 +152,27 @@ def avatar_status() -> dict:
         "skins": validation.get("skins", 0),
         "nodes": validation.get("nodes", 0),
         "meshes": validation.get("meshes", 0),
-        "animations": list(validation.get("animations") or [])[:120],
+        "animations": list(validation.get("animations") or [])[:240],
         "animation_state_matches": validation.get("animation_state_matches") or {},
-        "morph_target_names": list(validation.get("morph_target_names") or [])[:200],
+        "morph_target_names": list(validation.get("morph_target_names") or [])[:300],
         "morph_target_count": validation.get("morph_target_count", 0),
         "has_skin": bool(validation.get("has_skin")),
         "has_animations": bool(validation.get("has_animations")),
         "has_morph_targets": bool(validation.get("has_morph_targets")),
         "facial_rig_signal": bool(validation.get("facial_rig_signal")),
-        "warnings": list(validation.get("warnings") or [])[:30],
+        "base_state_animation_ready": bool(validation.get("base_state_animation_ready")),
+        "viseme_animation_matches": validation.get("viseme_animation_matches") or {},
+        "viseme_animation_coverage": validation.get("viseme_animation_coverage", 0),
+        "full_viseme_animation_set": bool(validation.get("full_viseme_animation_set")),
+        "gaze_animation_matches": validation.get("gaze_animation_matches") or {},
+        "gaze_animation_ready": bool(validation.get("gaze_animation_ready")),
+        "gesture_animation_matches": validation.get("gesture_animation_matches") or {},
+        "gesture_animation_ready": bool(validation.get("gesture_animation_ready")),
+        "layered_performance_clips_ready": bool(validation.get("layered_performance_clips_ready")),
+        "root_bone_signal": bool(validation.get("root_bone_signal")),
+        "lod_signal": bool(validation.get("lod_signal")),
+        "production_rig_ready": production_rig_ready,
+        "warnings": list(validation.get("warnings") or [])[:60],
         "error": validation.get("error"),
     }
 
@@ -153,6 +187,7 @@ def avatar_status() -> dict:
         "renderer_implemented": BROWSER_3D_RENDERER_IMPLEMENTED,
         "renderer_configured": renderer_configured,
         "renderer_connected": renderer_configured,
+        "layered_performance_runtime_implemented": LAYERED_PERFORMANCE_RUNTIME_IMPLEMENTED,
         "operator_validated": operator_validated,
         "production_3d_ready": production_ready,
         "model_url": "/aura-intelligence/avatar/model.glb" if model_valid else None,
@@ -164,6 +199,9 @@ def avatar_status() -> dict:
             "humanoid_skeleton": True,
             "facial_blendshapes_expected": True,
             "viseme_or_audio_driven_mouth_expected": True,
+            "full_layered_viseme_set_expected": list(VISEME_ANIMATION_ALIASES),
+            "layered_gaze_expected": list(GAZE_ANIMATION_ALIASES),
+            "layered_gestures_expected": list(GESTURE_ANIMATION_ALIASES),
             "lod_expected": True,
             "animations_expected": [
                 "idle",
@@ -178,14 +216,36 @@ def avatar_status() -> dict:
                 "studio_engineer",
             ],
         },
+        "performance_contract": {
+            "protocol": "AuraHost.performance/v1",
+            "viseme_aliases": _alias_payload(VISEME_ANIMATION_ALIASES),
+            "gaze_aliases": _alias_payload(GAZE_ANIMATION_ALIASES),
+            "gesture_aliases": _alias_payload(GESTURE_ANIMATION_ALIASES),
+            "input_events": [
+                "aura:viseme-input",
+                "aura:gaze-input",
+                "aura:gesture-input",
+                "aura:speech-frame",
+            ],
+            "output_event": "aura:performance",
+        },
         "renderer_contract": {
             "engine": "model-viewer",
             "module_pinned": True,
             "camera_controls": True,
             "animation_state_mapping": True,
+            "animation_crossfade": True,
             "client_load_health": True,
-            "direct_viseme_morph_driver": False,
-            "next_renderer_phase": "advanced facial/viseme control and gaze/gesture blending",
+            "durable_privacy_bounded_client_health_evidence": True,
+            "client_health_can_promote_production_readiness": False,
+            "layered_animation_api": True,
+            "rig_authored_viseme_layering": True,
+            "rig_authored_gaze_layering": True,
+            "rig_authored_gesture_layering": True,
+            "automatic_layered_blink": True,
+            "direct_raw_morph_driver": False,
+            "private_renderer_internals_used": False,
+            "next_renderer_phase": "final production rig asset, performance tuning and device validation",
         },
         "truthful_state": truthful_state,
     }
@@ -221,17 +281,32 @@ def avatar_model(request: Request):
 AVATAR_SCRIPT = r"""
 (()=>{
   const API='/aura-intelligence/api/avatar/status';
-  let currentState='idle', modelViewer=null, availableAnimations=[];
+  let currentState='idle',modelViewer=null,availableAnimations=[],layeredPerformanceSupported=false,blinkTimer=null;
+  let performanceContract={viseme_aliases:{},gaze_aliases:{},gesture_aliases:{}};
+  const activeLayers={viseme:null,gaze:null,gesture:null};
   const animationAliases={
     idle:['idle','breathing','stand'],welcoming:['welcome','welcoming','greet','greeting'],listening:['listen','listening','attentive'],
     thinking:['think','thinking','ponder'],tool_running:['think','working','work','typing'],speaking:['speak','speaking','talk','talking'],
     celebrating:['celebrate','celebrating','happy','cheer'],warning:['warn','warning','concerned'],recording_coach:['recording_coach','coach','listen'],studio_engineer:['studio_engineer','engineer','working']
   };
   function safeState(value){const allowed=['idle','welcoming','listening','thinking','tool_running','speaking','celebrating','warning','recording_coach','studio_engineer'];return allowed.includes(value)?value:'idle'}
-  function chooseAnimation(state){const names=animationAliases[state]||[];const lowered=availableAnimations.map(name=>String(name).toLowerCase());for(const wanted of names){let i=lowered.indexOf(wanted);if(i>=0)return availableAnimations[i];i=lowered.findIndex(name=>name.includes(wanted));if(i>=0)return availableAnimations[i]}return availableAnimations[0]||null}
+  function clamp(value,low=0,high=1){const n=Number(value);return Number.isFinite(n)?Math.max(low,Math.min(high,n)):low}
+  function chooseFromAliases(names=[]){const lowered=availableAnimations.map(name=>String(name).toLowerCase());for(const wantedRaw of names||[]){const wanted=String(wantedRaw).toLowerCase();let i=lowered.indexOf(wanted);if(i>=0)return availableAnimations[i];i=lowered.findIndex(name=>name.includes(wanted));if(i>=0)return availableAnimations[i]}return null}
+  function chooseAnimation(state){return chooseFromAliases(animationAliases[state]||[])||availableAnimations[0]||null}
   function applyAnimation(state){if(!modelViewer)return;const animation=chooseAnimation(state);if(!animation)return;try{if(modelViewer.animationName!==animation)modelViewer.animationName=animation;modelViewer.play?.({repetitions:Infinity})}catch(_){}}
-  function setState(value,detail={}){currentState=safeState(value);const dock=document.getElementById('auraAvatarDock');if(dock){dock.dataset.state=currentState;const label=dock.querySelector('[data-aura-state]');if(label)label.textContent=currentState.replace('_',' ')}applyAnimation(currentState);document.dispatchEvent(new CustomEvent('aura:state',{detail:{state:currentState,...detail}}))}
-  window.AuraHost={get state(){return currentState},setState,on(handler){document.addEventListener('aura:state',handler);return()=>document.removeEventListener('aura:state',handler)},get modelViewer(){return modelViewer}};
+  function emitPerformance(type,detail={}){document.dispatchEvent(new CustomEvent('aura:performance',{detail:{type,...detail}}))}
+  function layerAliases(group,key){return performanceContract?.[group]?.[key]||[]}
+  function clearLayer(channel,fade=.08){const animation=activeLayers[channel];if(!animation)return false;try{if(modelViewer&&typeof modelViewer.detachAnimation==='function')modelViewer.detachAnimation(animation,{fade});activeLayers[channel]=null;emitPerformance('layer_cleared',{channel,animation});return true}catch(_){activeLayers[channel]=null;return false}}
+  function applyLayer(channel,aliases,options={}){if(!modelViewer||!layeredPerformanceSupported)return false;const animation=chooseFromAliases(aliases);if(!animation)return false;const fade=clamp(options.fade??.08,0,2);clearLayer(channel,fade);try{modelViewer.appendAnimation(animation,{repetitions:options.repetitions??Infinity,weight:clamp(options.weight??1),timeScale:clamp(options.timeScale??1,.05,4),fade,pingpong:!!options.pingpong});activeLayers[channel]=animation;emitPerformance('layer_applied',{channel,animation,weight:clamp(options.weight??1)});return true}catch(error){emitPerformance('layer_error',{channel,animation,error:String(error)});return false}}
+  function setViseme(value='sil',options={}){const key=String(value||'sil').trim().toLowerCase();const aliases=layerAliases('viseme_aliases',key);if(!aliases.length){if(key==='sil')return clearLayer('viseme',options.fade??.05);return false}return applyLayer('viseme',aliases,{...options,repetitions:Infinity})}
+  function setGaze(value='center',options={}){const key=String(value||'center').trim().toLowerCase();const aliases=layerAliases('gaze_aliases',key);if(!aliases.length){if(key==='center')return clearLayer('gaze',options.fade??.12);return false}return applyLayer('gaze',aliases,{...options,repetitions:Infinity})}
+  function gesture(value,options={}){const key=String(value||'').trim().toLowerCase();const aliases=layerAliases('gesture_aliases',key);if(!aliases.length)return false;return applyLayer('gesture',aliases,{...options,repetitions:1,fade:options.fade??.1})}
+  function clearPerformance(){clearLayer('viseme',.05);clearLayer('gaze',.12);clearLayer('gesture',.08);emitPerformance('cleared',{})}
+  function speechFrame(detail={}){if(detail.speaking!==false&&currentState!=='speaking')setState('speaking',{phase:'performance_frame'});let applied=false;if(detail.viseme!=null)applied=setViseme(detail.viseme,{weight:detail.visemeWeight??detail.weight??1,fade:detail.fade??.04})||applied;if(detail.gaze!=null)applied=setGaze(detail.gaze,{weight:detail.gazeWeight??1,fade:detail.gazeFade??.12})||applied;if(detail.gesture)applied=gesture(detail.gesture,{weight:detail.gestureWeight??1,fade:detail.gestureFade??.1})||applied;if(detail.speaking===false){setViseme('sil',{fade:.05});if(currentState==='speaking')setState('idle',{phase:'performance_frame_end'})}emitPerformance('speech_frame',{applied,viseme:detail.viseme??null,gaze:detail.gaze??null,gesture:detail.gesture??null});return applied}
+  function performanceStatus(){return{supported:layeredPerformanceSupported,active:{...activeLayers},contract:performanceContract,animations:[...availableAnimations]}}
+  function scheduleBlink(){if(blinkTimer)clearTimeout(blinkTimer);blinkTimer=setTimeout(()=>{if(modelViewer&&layeredPerformanceSupported&&currentState!=='warning')gesture('blink',{weight:1,fade:.035});scheduleBlink()},3200+Math.random()*3600)}
+  function setState(value,detail={}){const previous=currentState;currentState=safeState(value);const dock=document.getElementById('auraAvatarDock');if(dock){dock.dataset.state=currentState;const label=dock.querySelector('[data-aura-state]');if(label)label.textContent=currentState.replace('_',' ')}if(previous==='speaking'&&currentState!=='speaking')setViseme('sil',{fade:.05});applyAnimation(currentState);document.dispatchEvent(new CustomEvent('aura:state',{detail:{state:currentState,...detail}}))}
+  window.AuraHost={get state(){return currentState},setState,on(handler){document.addEventListener('aura:state',handler);return()=>document.removeEventListener('aura:state',handler)},onPerformance(handler){document.addEventListener('aura:performance',handler);return()=>document.removeEventListener('aura:performance',handler)},get modelViewer(){return modelViewer},performance:{setViseme,setGaze,gesture,speechFrame,clear:clearPerformance,status:performanceStatus}};
 
   const style=document.createElement('style');style.textContent=`
     #auraAvatarDock{position:fixed;right:18px;bottom:142px;width:220px;z-index:54;border:1px solid #ffffff20;border-radius:22px;background:linear-gradient(160deg,#10162aef,#070914f4);box-shadow:0 18px 60px #000a;overflow:hidden;transition:.2s}
@@ -247,13 +322,18 @@ AVATAR_SCRIPT = r"""
   document.head.append(style);
 
   function loadModule(url){return new Promise((resolve,reject)=>{if(customElements.get('model-viewer'))return resolve();const s=document.createElement('script');s.type='module';s.src=url;s.onload=()=>customElements.whenDefined('model-viewer').then(resolve).catch(reject);s.onerror=()=>reject(new Error('Aura 3D renderer module failed to load'));document.head.append(s)})}
-  async function mount3D(body,status,meta){try{await loadModule(status.renderer_module_url);modelViewer=document.createElement('model-viewer');modelViewer.src=status.model_url;modelViewer.alt='Aura 3D AI host';modelViewer.setAttribute('camera-controls','');modelViewer.setAttribute('interaction-prompt','none');modelViewer.setAttribute('shadow-intensity','0.8');modelViewer.setAttribute('exposure','1');modelViewer.setAttribute('tone-mapping','neutral');modelViewer.setAttribute('autoplay','');modelViewer.setAttribute('disable-tap','');body.replaceChildren(modelViewer);const loading=document.createElement('div');loading.className='auraModelLoading';loading.textContent='Loading Aura 3D host…';body.append(loading);modelViewer.addEventListener('load',()=>{loading.remove();availableAnimations=Array.from(modelViewer.availableAnimations||[]);applyAnimation(currentState);meta.textContent=status.production_3d_ready?'Production 3D Aura · renderer validated':'Aura 3D model loaded · deployment validation pending';document.dispatchEvent(new CustomEvent('aura:3d-ready',{detail:{animations:availableAnimations,productionReady:!!status.production_3d_ready}}))});modelViewer.addEventListener('error',()=>{modelViewer=null;body.innerHTML='<div class="auraOrb" aria-label="Aura Core host state visual"></div>';meta.textContent='Aura Core state visual · 3D model failed to load';setState('warning',{reason:'3d_model_load_failed'})})}catch(error){body.innerHTML='<div class="auraOrb" aria-label="Aura Core host state visual"></div>';meta.textContent='Aura Core state visual · 3D renderer unavailable';setState('warning',{reason:String(error)})}}
+  async function mount3D(body,status,meta){try{await loadModule(status.renderer_module_url);modelViewer=document.createElement('model-viewer');modelViewer.src=status.model_url;modelViewer.alt='Aura 3D AI host';modelViewer.setAttribute('camera-controls','');modelViewer.setAttribute('interaction-prompt','none');modelViewer.setAttribute('shadow-intensity','0.8');modelViewer.setAttribute('exposure','1');modelViewer.setAttribute('tone-mapping','neutral');modelViewer.setAttribute('autoplay','');modelViewer.setAttribute('disable-tap','');modelViewer.animationCrossfadeDuration=180;body.replaceChildren(modelViewer);const loading=document.createElement('div');loading.className='auraModelLoading';loading.textContent='Loading Aura 3D host…';body.append(loading);modelViewer.addEventListener('load',()=>{loading.remove();availableAnimations=Array.from(modelViewer.availableAnimations||[]);layeredPerformanceSupported=typeof modelViewer.appendAnimation==='function'&&typeof modelViewer.detachAnimation==='function';applyAnimation(currentState);scheduleBlink();const rigReady=!!status.model_validation?.layered_performance_clips_ready;if(status.production_3d_ready)meta.textContent='Production 3D Aura · layered performance validated';else if(!rigReady)meta.textContent='Aura 3D model loaded · layered performance rig incomplete';else meta.textContent='Aura 3D model loaded · deployment validation pending';document.dispatchEvent(new CustomEvent('aura:3d-ready',{detail:{animations:availableAnimations,productionReady:!!status.production_3d_ready,layeredPerformanceSupported,performanceRigReady:rigReady}}))});modelViewer.addEventListener('error',()=>{if(blinkTimer)clearTimeout(blinkTimer);blinkTimer=null;clearPerformance();modelViewer=null;body.innerHTML='<div class="auraOrb" aria-label="Aura Core host state visual"></div>';meta.textContent='Aura Core state visual · 3D model failed to load';setState('warning',{reason:'3d_model_load_failed'})})}catch(error){body.innerHTML='<div class="auraOrb" aria-label="Aura Core host state visual"></div>';meta.textContent='Aura Core state visual · 3D renderer unavailable';setState('warning',{reason:String(error)})}}
 
-  async function mount(){let status={software_runtime_connected:true,model_valid:false,renderer_configured:false};try{status=await fetch(API,{credentials:'same-origin'}).then(r=>r.json())}catch(_){}if(status.enabled===false)return;let metaText='Aura Core state visual · production 3D rig pending';if(status.renderer_configured&&!status.model_installed)metaText='3D renderer ready · Aura rig asset pending';if(status.model_installed&&!status.model_valid)metaText='Aura GLB detected · structure validation failed';if(status.model_valid&&!status.renderer_configured)metaText='Valid Aura GLB · renderer unavailable';if(status.model_valid&&status.renderer_configured)metaText='Aura 3D host · loading';const dock=document.createElement('div');dock.id='auraAvatarDock';dock.dataset.state='idle';dock.innerHTML=`<div class="auraAvatarHead"><div class="auraAvatarTitle">Aura<small data-aura-state>idle</small></div><button class="auraAvatarToggle" title="Minimise Aura">−</button></div><div class="auraAvatarBody"><div class="auraOrb" aria-label="Aura Core host state visual"></div></div><div class="auraAvatarMeta"></div>`;document.body.append(dock);const body=dock.querySelector('.auraAvatarBody'),meta=dock.querySelector('.auraAvatarMeta');meta.textContent=metaText;dock.querySelector('.auraAvatarToggle').onclick=()=>dock.classList.toggle('min');if(status.model_valid&&status.renderer_configured&&status.model_url&&status.renderer_module_url)mount3D(body,status,meta);setState('welcoming');setTimeout(()=>setState('idle'),1100)}
+  async function mount(){let status={software_runtime_connected:true,model_valid:false,renderer_configured:false};try{status=await fetch(API,{credentials:'same-origin'}).then(r=>r.json())}catch(_){}if(status.enabled===false)return;performanceContract=status.performance_contract||performanceContract;let metaText='Aura Core state visual · production 3D rig pending';if(status.renderer_configured&&!status.model_installed)metaText='3D renderer ready · Aura rig asset pending';if(status.model_installed&&!status.model_valid)metaText='Aura GLB detected · structure validation failed';if(status.model_valid&&!status.renderer_configured)metaText='Valid Aura GLB · renderer unavailable';if(status.model_valid&&status.renderer_configured)metaText=status.model_validation?.layered_performance_clips_ready?'Aura 3D host · loading':'Aura 3D host · performance rig incomplete';const dock=document.createElement('div');dock.id='auraAvatarDock';dock.dataset.state='idle';dock.innerHTML=`<div class="auraAvatarHead"><div class="auraAvatarTitle">Aura<small data-aura-state>idle</small></div><button class="auraAvatarToggle" title="Minimise Aura">−</button></div><div class="auraAvatarBody"><div class="auraOrb" aria-label="Aura Core host state visual"></div></div><div class="auraAvatarMeta"></div>`;document.body.append(dock);const body=dock.querySelector('.auraAvatarBody'),meta=dock.querySelector('.auraAvatarMeta');meta.textContent=metaText;dock.querySelector('.auraAvatarToggle').onclick=()=>dock.classList.toggle('min');if(status.model_valid&&status.renderer_configured&&status.model_url&&status.renderer_module_url)mount3D(body,status,meta);setState('welcoming');setTimeout(()=>setState('idle'),1100)}
   mount();
+  document.addEventListener('aura:viseme-input',event=>setViseme(event.detail?.viseme??event.detail?.value??'sil',event.detail||{}));
+  document.addEventListener('aura:gaze-input',event=>setGaze(event.detail?.gaze??event.detail?.value??'center',event.detail||{}));
+  document.addEventListener('aura:gesture-input',event=>gesture(event.detail?.gesture??event.detail?.value,event.detail||{}));
+  document.addEventListener('aura:speech-frame',event=>speechFrame(event.detail||{}));
   if(typeof send==='function'){const baseSend=send;send=async function(...args){setState('thinking');try{return await baseSend(...args)}catch(error){setState('warning',{error:String(error)});throw error}finally{if(currentState!=='speaking')setState('idle')}}}
   if(typeof mic==='function'){const baseMic=mic;mic=async function(...args){setState(recording?'thinking':'listening');try{return await baseMic(...args)}finally{setTimeout(()=>{if(currentState==='listening')setState('idle')},500)}}}
   const observer=new MutationObserver(()=>{const tools=document.querySelector('.toolLine:not(:empty)'),thinking=document.querySelector('.thinking');if(tools)setState('tool_running');else if(thinking&&currentState!=='speaking')setState('thinking')});observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+  window.addEventListener('beforeunload',()=>{if(blinkTimer)clearTimeout(blinkTimer);blinkTimer=null;clearPerformance()});
 })();
 """
 
@@ -278,9 +358,13 @@ class AuraAvatarRuntimeMiddleware(BaseHTTPMiddleware):
             text = body.decode("utf-8")
         except UnicodeDecodeError:
             return Response(content=body, status_code=response.status_code, headers=dict(response.headers), background=response.background)
-        marker = "<script src='/aura-intelligence/avatar-runtime.js'></script>"
-        if marker not in text:
-            text = text.replace("</body>", marker + "</body>")
+        runtime_marker = "<script src='/aura-intelligence/avatar-runtime.js'></script>"
+        health_marker = "<script src='/aura-intelligence/avatar-client-health.js'></script>"
+        markers = runtime_marker + health_marker
+        if runtime_marker not in text:
+            text = text.replace("</body>", markers + "</body>")
+        elif health_marker not in text:
+            text = text.replace(runtime_marker, markers)
         encoded = text.encode("utf-8")
         migrated = Response(content=encoded, status_code=response.status_code, background=response.background)
         raw_headers = [(key, value) for key, value in response.raw_headers if key.lower() != b"content-length"]
@@ -297,4 +381,5 @@ __all__ = [
     "_model_path",
     "_renderer_module_url",
     "BROWSER_3D_RENDERER_IMPLEMENTED",
+    "LAYERED_PERFORMANCE_RUNTIME_IMPLEMENTED",
 ]

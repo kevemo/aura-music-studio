@@ -4,7 +4,8 @@ import json
 import os
 import time
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
+from uuid import uuid4
 
 import requests
 from pydantic import BaseModel, Field
@@ -13,6 +14,11 @@ ACE_TRACKS = {
     "vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard", "percussion",
     "strings", "synth", "fx", "brass", "woodwinds",
 }
+
+_PROVIDER_REDIRECTS = 5
+_DEFAULT_MAX_AUDIO_BYTES = 512 * 1024 * 1024
+_HARD_MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024
+_MIN_AUDIO_BYTES = 4096
 
 
 class AceStepRequest(BaseModel):
@@ -41,16 +47,61 @@ class AceStepRequest(BaseModel):
     reference_audio: str | None = None
 
 
+def _effective_port(parsed) -> int:
+    if parsed.port is not None:
+        return parsed.port
+    if parsed.scheme == "https":
+        return 443
+    if parsed.scheme == "http":
+        return 80
+    raise ValueError("ACE-Step provider URL must use HTTP(S)")
+
+
+def _provider_origin(url: str) -> tuple[str, str, int]:
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").lower()
+    if scheme not in {"http", "https"} or not host:
+        raise ValueError("ACE-Step provider URL must use HTTP(S) with a hostname")
+    if parsed.username or parsed.password:
+        raise ValueError("ACE-Step provider URLs must not contain embedded credentials")
+    return scheme, host, _effective_port(parsed)
+
+
+def _audio_download_limit() -> int:
+    raw = (os.getenv("AURA_ACESTEP_MAX_AUDIO_BYTES") or str(_DEFAULT_MAX_AUDIO_BYTES)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("AURA_ACESTEP_MAX_AUDIO_BYTES must be an integer") from exc
+    if value < _MIN_AUDIO_BYTES:
+        raise ValueError(f"AURA_ACESTEP_MAX_AUDIO_BYTES must be at least {_MIN_AUDIO_BYTES}")
+    return min(value, _HARD_MAX_AUDIO_BYTES)
+
+
 class AceStepClient:
     """Client for ACE-Step 1.5's documented async REST server (`uv run acestep-api`)."""
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None, timeout: int = 1800):
         self.base_url = (base_url or os.getenv("AURA_ACESTEP_API_URL") or "http://127.0.0.1:8001").rstrip("/") + "/"
+        _provider_origin(self.base_url)
         self.api_key = api_key or os.getenv("ACESTEP_API_KEY")
         self.timeout = int(os.getenv("AURA_ACESTEP_TIMEOUT", str(timeout)))
         self.session = requests.Session()
         if self.api_key:
             self.session.headers["Authorization"] = f"Bearer {self.api_key}"
+
+    def _provider_url(self, value: str) -> str:
+        raw = str(value or "").strip()
+        if not raw:
+            raise ValueError("ACE-Step provider returned an empty audio URL")
+        candidate = urljoin(self.base_url, raw.lstrip("/")) if not raw.startswith(("http://", "https://")) else raw
+        parsed = urlparse(candidate)
+        if parsed.fragment:
+            raise ValueError("ACE-Step provider download URLs must not contain fragments")
+        if _provider_origin(candidate) != _provider_origin(self.base_url):
+            raise PermissionError("ACE-Step provider response attempted a cross-origin audio download")
+        return candidate
 
     def health(self) -> bool:
         for endpoint in ("health", "v1/models"):
@@ -68,12 +119,14 @@ class AceStepClient:
         items = self.wait(task_id)
         outputs = []
         for i, item in enumerate(items, 1):
+            if not isinstance(item, dict):
+                raise RuntimeError(f"ACE-Step task {task_id} returned an invalid result item")
             file_url = item.get("file") or item.get("url")
             if not file_url:
                 continue
             suffix = "." + request.audio_format.replace("wav32", "wav")
             out = output_dir / f"ace_step_{request.task_type}_{i:02d}{suffix}"
-            self.download(file_url, out)
+            self.download(str(file_url), out)
             outputs.append(out)
         if not outputs:
             raise RuntimeError(f"ACE-Step task {task_id} succeeded but returned no downloadable audio")
@@ -141,15 +194,68 @@ class AceStepClient:
         raise TimeoutError(f"ACE-Step task timed out: {task_id}")
 
     def download(self, file_url: str, output: Path) -> Path:
-        url = file_url if file_url.startswith("http://") or file_url.startswith("https://") else urljoin(self.base_url, file_url.lstrip("/"))
+        current = self._provider_url(file_url)
+        max_bytes = _audio_download_limit()
+        response = None
+
+        for _ in range(_PROVIDER_REDIRECTS + 1):
+            current = self._provider_url(current)
+            response = self.session.get(
+                current,
+                stream=True,
+                timeout=180,
+                allow_redirects=False,
+            )
+            if response.status_code in {301, 302, 303, 307, 308}:
+                location = response.headers.get("location")
+                response.close()
+                response = None
+                if not location:
+                    raise ValueError("ACE-Step provider redirect did not include a Location header")
+                current = self._provider_url(urljoin(current, location))
+                continue
+            break
+        else:
+            raise ValueError("ACE-Step provider audio download exceeded the redirect limit")
+
+        if response is None:
+            raise RuntimeError("ACE-Step provider returned no audio response")
+
         output.parent.mkdir(parents=True, exist_ok=True)
-        with self.session.get(url, stream=True, timeout=180) as r:
-            r.raise_for_status()
-            with output.open("wb") as f:
-                for chunk in r.iter_content(1024 * 1024):
-                    if chunk:
-                        f.write(chunk)
-        return output
+        partial = output.with_name(f".{output.name}.{uuid4().hex}.part")
+        try:
+            with response:
+                response.raise_for_status()
+                length_header = response.headers.get("content-length")
+                if length_header:
+                    try:
+                        content_length = int(length_header)
+                    except ValueError as exc:
+                        raise ValueError("ACE-Step provider returned an invalid Content-Length") from exc
+                    if content_length < 0 or content_length > max_bytes:
+                        raise ValueError("ACE-Step provider audio exceeded AURA_ACESTEP_MAX_AUDIO_BYTES")
+
+                total = 0
+                with partial.open("xb") as handle:
+                    try:
+                        os.chmod(partial, 0o600)
+                    except OSError:
+                        pass
+                    for chunk in response.iter_content(1024 * 1024):
+                        if not chunk:
+                            continue
+                        total += len(chunk)
+                        if total > max_bytes:
+                            raise ValueError("ACE-Step provider audio exceeded AURA_ACESTEP_MAX_AUDIO_BYTES")
+                        handle.write(chunk)
+
+            if total < _MIN_AUDIO_BYTES:
+                raise RuntimeError("ACE-Step provider returned an empty/invalid audio file")
+            partial.replace(output)
+            return output
+        except Exception:
+            partial.unlink(missing_ok=True)
+            raise
 
     def repaint(self, source: Path, output_dir: Path, *, prompt: str, start: float, end: float, strength: float = .75, model: str | None = None) -> Path:
         return self.generate(AceStepRequest(

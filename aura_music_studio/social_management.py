@@ -453,6 +453,8 @@ class SocialHouseStore:
 
     @staticmethod
     def validate_content(content: SocialContent) -> None:
+        from .esp_social_publish_capabilities import implemented_content_types
+
         for variant in content.variants:
             capability = PLATFORM_CAPABILITIES.get(variant.platform)
             if capability is None:
@@ -468,37 +470,66 @@ class SocialHouseStore:
             max_media = capability.get("max_media")
             if max_media is not None and len(variant.media_refs) > int(max_media):
                 raise ValueError(f"{variant.platform} variant exceeds {max_media} media items")
-            if variant.auto_publish and capability.get("auto_publish") is False:
-                raise ValueError(f"{variant.platform} is planning-only in this deployment")
+            if variant.auto_publish:
+                if capability.get("auto_publish") is False:
+                    raise ValueError(f"{variant.platform} is planning-only in this deployment")
+                if variant.content_type not in implemented_content_types(variant.platform):
+                    raise ValueError(
+                        f"{variant.platform} {variant.content_type} is planning-only; no runtime publishing adapter implements that content type"
+                    )
 
     def publishing_readiness(self, space_id: str, content_id: str) -> dict:
+        from .esp_social_publish_capabilities import resolve_publish_capability
+
         house = self.load(space_id)
         content = next((item for item in house.content if item.id == content_id), None)
         if content is None:
             raise KeyError(content_id)
         self.validate_content(content)
-        connections_by_platform = {
-            item.platform: item for item in house.connections if item.state == "connected"
-        }
+        connections_by_platform = {item.platform: item for item in house.connections}
         rows = []
         ready = True
         for variant in content.variants:
             if not variant.auto_publish:
-                rows.append({"platform": variant.platform, "ready": True, "mode": "planning_only"})
+                rows.append({
+                    "platform": variant.platform,
+                    "content_type": variant.content_type,
+                    "ready": True,
+                    "mode": "planning_only",
+                })
                 continue
-            reasons = []
-            connection = connections_by_platform.get(variant.platform)
-            if connection is None or not connection.supports_auto_publish:
-                reasons.append("official publishing connection unavailable")
+            capability = resolve_publish_capability(
+                connections_by_platform.get(variant.platform),
+                platform=variant.platform,
+                content_type=variant.content_type,
+            )
+            reasons = list(capability.reasons)
             if not variant.scheduled_at:
                 reasons.append("scheduled_at is required")
             if content.approval_required and content.status not in {"approved", "scheduled"}:
                 reasons.append("approval gate not satisfied")
             row_ready = not reasons
             ready = ready and row_ready
-            rows.append({"platform": variant.platform, "ready": row_ready, "reasons": reasons})
+            rows.append({
+                "platform": variant.platform,
+                "content_type": variant.content_type,
+                "ready": row_ready,
+                "reasons": reasons,
+                "capability": capability.model_dump(mode="json"),
+            })
         return {"content_id": content.id, "ready": ready, "variants": rows}
 
 
 def platform_capabilities() -> dict:
-    return {key: dict(value) for key, value in PLATFORM_CAPABILITIES.items()}
+    from .esp_social_publish_capabilities import implementation_capabilities
+
+    implemented = implementation_capabilities()
+    result: dict[str, dict] = {}
+    for key, value in PLATFORM_CAPABILITIES.items():
+        row = dict(value)
+        runtime = implemented.get(key, {})
+        row["auto_publish_implemented"] = bool(runtime.get("auto_publish_implemented", False))
+        row["auto_publish_content_types"] = list(runtime.get("auto_publish_content_types", []))
+        row["publishing_adapters"] = list(runtime.get("publishing_adapters", []))
+        result[key] = row
+    return result

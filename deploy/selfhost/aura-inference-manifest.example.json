@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "vllm_image": "registry.example.invalid/elevate-souls/vllm-openai@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "served_model_name": "aura-reasoning",
+  "model_manifest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "approved": false,
+  "supply_chain": {
+    "trivy_high_critical_gate": false,
+    "trivy_unfixed_high_critical_gate": false,
+    "cosign_signature_verified": false,
+    "model_file_hashes_verified": false
+  },
+  "notes": "Template only. Mirror an exact reviewed vLLM image into the ESP registry, sign it with the ESP Cosign key using component=aura-selfhost-inference, seal locally held model weights, then use prepare-aura-inference.sh."
+}
