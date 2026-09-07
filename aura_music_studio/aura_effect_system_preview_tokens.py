@@ -64,15 +64,26 @@ def _issuance_lock_path(root: Path) -> Path:
     return target
 
 
+def _lock_owner(lock_path: Path) -> str:
+    try:
+        payload = json.loads(lock_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    return str(payload.get("owner") or "")
+
+
 @contextmanager
 def _issuance_lock(root: Path) -> Iterator[None]:
     """Serialize cleanup, quota admission and proof creation across concurrent issuers."""
     lock_path = _issuance_lock_path(root)
+    owner = secrets.token_hex(16)
     deadline = time.monotonic() + ISSUANCE_LOCK_WAIT_SECONDS
     while True:
         try:
             with lock_path.open("x", encoding="utf-8") as handle:
-                json.dump({"created_at": time.time()}, handle, separators=(",", ":"))
+                json.dump({"created_at": time.time(), "owner": owner}, handle, separators=(",", ":"))
             break
         except FileExistsError:
             try:
@@ -89,7 +100,8 @@ def _issuance_lock(root: Path) -> Iterator[None]:
         yield
     finally:
         try:
-            lock_path.unlink(missing_ok=True)
+            if _lock_owner(lock_path) == owner:
+                lock_path.unlink(missing_ok=True)
         except OSError:
             pass
 
