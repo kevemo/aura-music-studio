@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,18 @@ _AUTOSAVE_SCHEMA_VERSION = 1
 _MAX_AUTOSAVE_BYTES = 512 * 1024
 
 
-def _autosave_root(project: Path) -> Path:
-    root = project.resolve() / "work" / "effect_system_autosaves"
-    root.mkdir(parents=True, exist_ok=True)
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _autosave_root(project: Path, *, create: bool) -> Path:
+    project_root = project.resolve()
+    candidate = project_root / "work" / "effect_system_autosaves"
+    if create:
+        candidate.mkdir(parents=True, exist_ok=True)
+    root = candidate.resolve()
+    if root != project_root and project_root not in root.parents:
+        raise ValueError("Effect-system autosave root escapes project storage")
     return root
 
 
@@ -32,9 +42,9 @@ def _validated_system_id(system_id: str) -> str:
     ).id
 
 
-def _autosave_path(project: Path, system_id: str) -> Path:
+def _autosave_path(project: Path, system_id: str, *, create_root: bool) -> Path:
     validated = _validated_system_id(system_id)
-    root = _autosave_root(project).resolve()
+    root = _autosave_root(project, create=create_root)
     target = (root / f"{validated}.json").resolve()
     if root not in target.parents:
         raise ValueError("Effect-system autosave path escapes project storage")
@@ -65,6 +75,8 @@ def _decode_autosave(path: Path) -> dict[str, Any]:
         raise ValueError("Effect-system autosave schema is unsupported")
     if payload.get("recovery_draft") is not True:
         raise ValueError("Effect-system autosave recovery marker is invalid")
+    if not isinstance(payload.get("autosaved_at"), str) or not payload["autosaved_at"].strip():
+        raise ValueError("Effect-system autosave timestamp is invalid")
     return payload
 
 
@@ -80,7 +92,7 @@ def save_effect_system_autosave(
     catalogue_provenance = _catalogue_provenance_snapshot(spec)
     catalogue_provenance_fingerprint = _catalogue_provenance_fingerprint(catalogue_provenance)
     baseline = _canonical_state(project, spec.id)
-    path = _autosave_path(project, spec.id)
+    path = _autosave_path(project, spec.id, create_root=True)
 
     payload = {
         # Reuse the canonical record schema for provenance validation while keeping the
@@ -96,6 +108,7 @@ def save_effect_system_autosave(
         "baseline_saved_version": baseline["version"],
         "baseline_saved_fingerprint": baseline["fingerprint"],
         "runtime": "ffmpeg_audio",
+        "autosaved_at": _now(),
         "entitlement_granted": False,
         "execution_authorized": False,
         "canonical_saved_system_mutated": False,
@@ -117,7 +130,7 @@ def save_effect_system_autosave(
 
 
 def load_effect_system_autosave(project: Path, system_id: str) -> dict[str, Any]:
-    path = _autosave_path(project, system_id)
+    path = _autosave_path(project, system_id, create_root=False)
     payload = _decode_autosave(path)
     _prompt_fingerprint(payload.get("source_prompt_fingerprint"))
     spec = _spec_from_payload(payload["system"])
@@ -135,10 +148,7 @@ def load_effect_system_autosave(project: Path, system_id: str) -> dict[str, Any]
     if baseline_fingerprint is not None:
         baseline_fingerprint = str(baseline_fingerprint)
     current = _canonical_state(project, spec.id)
-    conflict = (
-        baseline_version != current["version"]
-        or baseline_fingerprint != current["fingerprint"]
-    )
+    conflict = baseline_version != current["version"] or baseline_fingerprint != current["fingerprint"]
 
     return {
         "system": spec.public(),
@@ -146,6 +156,7 @@ def load_effect_system_autosave(project: Path, system_id: str) -> dict[str, Any]
         "source_prompt_fingerprint": _prompt_fingerprint(payload.get("source_prompt_fingerprint")) or None,
         "catalogue_provenance": catalogue_provenance,
         "catalogue_provenance_fingerprint": catalogue_provenance_fingerprint,
+        "autosaved_at": payload["autosaved_at"],
         "baseline_saved_version": baseline_version,
         "baseline_saved_fingerprint": baseline_fingerprint,
         "current_saved_version": current["version"],
@@ -163,7 +174,7 @@ def load_effect_system_autosave(project: Path, system_id: str) -> dict[str, Any]
 
 
 def discard_effect_system_autosave(project: Path, system_id: str) -> dict[str, Any]:
-    path = _autosave_path(project, system_id)
+    path = _autosave_path(project, system_id, create_root=False)
     if not path.is_file():
         raise FileNotFoundError(system_id)
     path.unlink()
