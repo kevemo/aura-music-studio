@@ -30,9 +30,14 @@ def test_catalogue_selection_is_metadata_only_until_explicit_add() -> None:
 def test_catalogue_results_render_untrusted_metadata_without_html_injection() -> None:
     html = _EFFECT_SYSTEM_CREATOR_HTML
 
-    assert "title.textContent=String(item.name||id)" in html
+    assert "item.effect_id||item.catalogue_item_id||item.id" in html
+    assert "title.textContent=String(item.label||id)" in html
+    assert "summary.textContent=String(item.description||'Canonical catalogue effect.')" in html
     assert "idText.textContent=id" in html
-    assert "runtime.textContent=String(item.runtime)" in html
+    assert "item.entitlement" in html
+    assert "item.ccc_price" in html
+    assert "const runtimeName=String(item.runtime_name||item.runtime||'').trim()" in html
+    assert "runtime.textContent=runtimeName" in html
     assert "status.textContent=String(item.status)" in html
     assert ".innerHTML" not in html
 
