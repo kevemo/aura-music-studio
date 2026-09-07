@@ -29,4 +29,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Forwarded client identity is authenticated inside the application with the Caddy-to-app shared
+# proxy token. Disable Uvicorn's automatic X-Forwarded-* processing so untrusted headers can never
+# rewrite the ASGI peer before that application security boundary runs.
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]
