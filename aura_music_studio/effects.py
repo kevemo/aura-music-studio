@@ -91,10 +91,35 @@ def compile_ffmpeg_chain(effects: list[Effect]) -> str:
                 f"release={release:.3f}:range={range_linear:.6f}"
             )
         elif fx.type == "deesser":
-            # Portable de-essing approximation: narrow upper-presence attenuation.
             hz = _clip(p.get("frequency_hz", 6500), 3500, 11000)
             reduction = -abs(_clip(p.get("reduction_db", 4.0), 0, 12))
             chain.append(f"equalizer=f={hz:.1f}:width_type=o:width=1.2:g={reduction:.2f}")
+        elif fx.type == "denoise":
+            reduction = _clip(p.get("reduction_db", 12.0), 0.01, 40.0)
+            floor = _clip(p.get("noise_floor_db", -50.0), -80.0, -20.0)
+            chain.append(f"afftdn=nr={reduction:.3f}:nf={floor:.3f}")
+        elif fx.type == "declick":
+            window = _clip(p.get("window_ms", 55.0), 10.0, 100.0)
+            overlap = _clip(p.get("overlap_percent", 75.0), 50.0, 95.0)
+            ar_order = _clip(p.get("ar_order", 2.0), 0.0, 25.0)
+            threshold = _clip(p.get("threshold", 2.0), 1.0, 100.0)
+            burst = _clip(p.get("burst", 2.0), 0.0, 10.0)
+            chain.append(
+                "adeclick="
+                f"window={window:.3f}:overlap={overlap:.3f}:arorder={ar_order:.3f}:"
+                f"threshold={threshold:.3f}:burst={burst:.3f}"
+            )
+        elif fx.type == "declip":
+            window = _clip(p.get("window_ms", 55.0), 10.0, 100.0)
+            overlap = _clip(p.get("overlap_percent", 75.0), 50.0, 95.0)
+            ar_order = _clip(p.get("ar_order", 8.0), 0.0, 25.0)
+            threshold = _clip(p.get("threshold", 10.0), 1.0, 100.0)
+            histogram = int(_clip(p.get("histogram_size", 1000), 100, 9999))
+            chain.append(
+                "adeclip="
+                f"window={window:.3f}:overlap={overlap:.3f}:arorder={ar_order:.3f}:"
+                f"threshold={threshold:.3f}:hsize={histogram}"
+            )
         elif fx.type == "reverb":
             delay = int(_clip(p.get("predelay_ms", 30), 1, 500))
             decay = _clip(p.get("mix", .18), .01, .8)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 STANDARD_EXPANDED_TYPES = frozenset({"bandpass", "notch", "low_shelf", "high_shelf"})
-ADVANCED_EXPANDED_TYPES = frozenset({"expander"})
+ADVANCED_EXPANDED_TYPES = frozenset({"expander", "denoise", "declick", "declip"})
 
 EXPANDED_DEFAULTS: dict[str, dict[str, float]] = {
     "bandpass": {"frequency_hz": 1000.0, "width_octaves": 1.0},
@@ -16,6 +16,21 @@ EXPANDED_DEFAULTS: dict[str, dict[str, float]] = {
         "attack_ms": 20.0,
         "release_ms": 220.0,
         "range_db": -18.0,
+    },
+    "denoise": {"reduction_db": 12.0, "noise_floor_db": -50.0},
+    "declick": {
+        "window_ms": 55.0,
+        "overlap_percent": 75.0,
+        "ar_order": 2.0,
+        "threshold": 2.0,
+        "burst": 2.0,
+    },
+    "declip": {
+        "window_ms": 55.0,
+        "overlap_percent": 75.0,
+        "ar_order": 8.0,
+        "threshold": 10.0,
+        "histogram_size": 1000.0,
     },
 }
 
@@ -30,6 +45,21 @@ EXPANDED_BOUNDS: dict[str, dict[str, tuple[float, float]]] = {
         "attack_ms": (0.1, 500.0),
         "release_ms": (5.0, 3000.0),
         "range_db": (-60.0, 0.0),
+    },
+    "denoise": {"reduction_db": (0.01, 40.0), "noise_floor_db": (-80.0, -20.0)},
+    "declick": {
+        "window_ms": (10.0, 100.0),
+        "overlap_percent": (50.0, 95.0),
+        "ar_order": (0.0, 25.0),
+        "threshold": (1.0, 100.0),
+        "burst": (0.0, 10.0),
+    },
+    "declip": {
+        "window_ms": (10.0, 100.0),
+        "overlap_percent": (50.0, 95.0),
+        "ar_order": (0.0, 25.0),
+        "threshold": (1.0, 100.0),
+        "histogram_size": (100.0, 9999.0),
     },
 }
 
