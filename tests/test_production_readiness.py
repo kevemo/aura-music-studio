@@ -57,13 +57,17 @@ def _stripe_production_env() -> dict[str, str]:
     return env
 
 
-def test_complete_production_configuration_passes_without_network_probes():
+def test_complete_production_configuration_passes_but_does_not_fake_runtime_or_restore_proof():
     env = _production_env()
     report = build_readiness_report(env)
     assert report["ok"] is True
-    assert report["production_ready"] is True
+    assert report["configuration_ready"] is True
+    assert report["production_ready"] is False
     assert report["blocking_categories"] == []
+    assert report["runtime_probes_performed"] is False
     assert report["network_probes_performed"] is False
+    assert set(report["release_blocking_categories"]) == {"runtime_dependencies", "restore_evidence"}
+    assert report["categories"]["backups"]["details"]["configuration_is_restore_proof"] is False
     assert report["secret_values_exposed"] is False
 
     serialized = json.dumps(report)
@@ -84,7 +88,8 @@ def test_complete_stripe_production_configuration_passes_without_exposing_secret
     report = build_readiness_report(env)
     payment = report["categories"]["payments"]
     assert report["ok"] is True
-    assert report["production_ready"] is True
+    assert report["configuration_ready"] is True
+    assert report["production_ready"] is False
     assert payment["ok"] is True
     assert payment["details"]["provider"] == "stripe"
     assert payment["details"]["mode"] == "signed_stripe_webhook"
@@ -160,6 +165,23 @@ def test_staging_rejects_live_paypal_environment():
     assert report["categories"]["deployment"]["details"]["staging_uses_live_paypal"] is True
 
 
+def test_test_and_ci_environments_are_supported_and_default_to_paypal_sandbox():
+    for name in ("local", "test", "ci", "integration"):
+        report = build_readiness_report({"AURA_DEPLOYMENT_ENV": name})
+        assert report["environment"] == name
+        assert report["categories"]["deployment"]["ok"] is True
+        assert report["categories"]["payments"]["details"]["paypal_environment"] == "sandbox"
+
+
+def test_nonproduction_environment_blocks_live_payment_configuration():
+    env = _stripe_production_env()
+    env["AURA_DEPLOYMENT_ENV"] = "ci"
+    report = build_readiness_report(env)
+    assert report["ok"] is False
+    assert report["categories"]["deployment"]["details"]["nonproduction_uses_live_stripe"] is True
+    assert report["categories"]["payments"]["ok"] is False
+
+
 def test_required_provider_secret_names_are_reported_but_values_never_are():
     env = _production_env()
     env["AURA_PRODUCTION_REQUIRED_PROVIDER_SECRETS"] = "ELEVENLABS_API_KEY,MISSING_PROVIDER_KEY"
@@ -199,13 +221,16 @@ def test_monitoring_wrong_or_missing_token_is_forbidden(monkeypatch):
     assert client.get("/internal/metrics", headers={"X-Aura-Monitoring-Token": "definitely-wrong-token"}).status_code == 403
 
 
-def test_monitoring_correct_token_exposes_only_operational_metrics(monkeypatch):
+def test_monitoring_correct_token_exposes_truthful_operational_metrics(monkeypatch):
     env = _production_env()
     client = _client(monkeypatch, env)
     response = client.get("/internal/metrics", headers={"X-Aura-Monitoring-Token": env["AURA_MONITORING_TOKEN"]})
     assert response.status_code == 200
     assert "aura_process_up 1" in response.text
-    assert "aura_production_ready 1" in response.text
+    assert "aura_configuration_ready 1" in response.text
+    assert "aura_serving_ready 0" in response.text
+    assert "aura_restore_evidence_verified 0" in response.text
+    assert "aura_production_ready 0" in response.text
     assert env["AURA_MONITORING_TOKEN"] not in response.text
     assert env["LSS_PAYPAL_CLIENT_SECRET"] not in response.text
     assert response.headers["cache-control"] == "no-store"
