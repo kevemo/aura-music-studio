@@ -101,7 +101,7 @@ jobs:
             -f deploy/production/docker-compose.production.yml \
             --profile public config -q
 
-      - name: Production readiness fail-closed smoke
+      - name: Production readiness configuration-truth smoke
         run: |
           env \
             AURA_DEPLOYMENT_ENV=production \
@@ -136,9 +136,17 @@ jobs:
           python - <<'PY'
           import json
           report = json.load(open('/tmp/aura-production-readiness.json', encoding='utf-8'))
-          if not report.get('production_ready') or report.get('secret_values_exposed'):
-              raise SystemExit(f'FAIL: production readiness smoke failed: {report}')
-          print('PASS: production readiness contract is fail-closed and secret-free')
+          release_blocking = set(report.get('release_blocking_categories') or [])
+          if (
+              not report.get('configuration_ready')
+              or not report.get('serving_ready')
+              or report.get('production_ready')
+              or report.get('runtime_probes_performed')
+              or report.get('secret_values_exposed')
+              or not {'runtime_dependencies', 'restore_evidence'}.issubset(release_blocking)
+          ):
+              raise SystemExit(f'FAIL: production readiness truth smoke failed: {report}')
+          print('PASS: configuration is valid without fabricating runtime or restore-backed production readiness')
           PY
 
       - name: ESP compute-node Compose validation
