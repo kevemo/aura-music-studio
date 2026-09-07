@@ -7,6 +7,7 @@ from threading import Barrier
 
 import pytest
 
+import aura_music_studio.aura_effect_system_preview_tokens as preview_tokens
 from aura_music_studio.aura_effect_system_preview_tokens import (
     PREVIEW_TOKEN_TTL_SECONDS,
     consume_effect_system_preview_token,
@@ -40,6 +41,7 @@ def test_preview_token_is_opaque_bound_and_one_time(tmp_path):
     assert proof["one_time"] is True
     assert proof["server_authoritative"] is True
     assert proof["raw_token_persisted"] is False
+    assert proof["quota_admission_serialized"] is True
     assert proof["expires_in_seconds"] == PREVIEW_TOKEN_TTL_SECONDS
 
     result = consume_effect_system_preview_token(
@@ -105,6 +107,40 @@ def test_preview_token_concurrent_consumers_admit_exactly_one(tmp_path):
     root = project / "work" / "effect_system_previews"
     assert not list(root.glob("*.json"))
     assert not list(root.glob("*.claim"))
+
+
+def test_concurrent_preview_issuers_cannot_oversubscribe_project_quota(tmp_path, monkeypatch):
+    project = _project(tmp_path)
+    monkeypatch.setattr(preview_tokens, "MAX_ACTIVE_PREVIEW_TOKENS", 4)
+    start = Barrier(12)
+
+    def issue_once(index: int):
+        start.wait(timeout=3)
+        try:
+            proof = issue_effect_system_preview_token(
+                project,
+                user_id=f"member-{index}",
+                track_id=f"track-{index}",
+                fingerprint=FINGERPRINT,
+                now=1700.0,
+            )
+        except RuntimeError as exc:
+            return False, str(exc)
+        return True, proof
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        outcomes = list(pool.map(issue_once, range(12)))
+
+    successes = [payload for ok, payload in outcomes if ok]
+    failures = [payload for ok, payload in outcomes if not ok]
+    assert len(successes) == 4
+    assert all(payload["quota_admission_serialized"] is True for payload in successes)
+    assert len(failures) == 8
+    assert all("Too many active effect-system preview tokens" in message for message in failures)
+
+    root = project / "work" / "effect_system_previews"
+    assert len(list(root.glob("*.json"))) == 4
+    assert not (root / ".issue.lock").exists()
 
 
 def test_preview_token_fails_closed_for_different_member_and_is_consumed(tmp_path):
