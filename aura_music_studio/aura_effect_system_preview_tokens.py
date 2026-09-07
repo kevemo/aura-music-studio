@@ -5,11 +5,14 @@ import json
 import re
 import secrets
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 PREVIEW_TOKEN_TTL_SECONDS = 15 * 60
 MAX_ACTIVE_PREVIEW_TOKENS = 512
+ISSUANCE_LOCK_WAIT_SECONDS = 2.0
+ISSUANCE_LOCK_STALE_SECONDS = 10.0
 _TOKEN_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -52,6 +55,43 @@ def _claim_path(project: Path, token: str) -> Path:
     if root not in target.parents:
         raise ValueError("Effect-system preview claim path escapes project storage")
     return target
+
+
+def _issuance_lock_path(root: Path) -> Path:
+    target = (root.resolve() / ".issue.lock").resolve()
+    if root.resolve() not in target.parents:
+        raise ValueError("Effect-system preview issuance lock path escapes project storage")
+    return target
+
+
+@contextmanager
+def _issuance_lock(root: Path) -> Iterator[None]:
+    """Serialize cleanup, quota admission and proof creation across concurrent issuers."""
+    lock_path = _issuance_lock_path(root)
+    deadline = time.monotonic() + ISSUANCE_LOCK_WAIT_SECONDS
+    while True:
+        try:
+            with lock_path.open("x", encoding="utf-8") as handle:
+                json.dump({"created_at": time.time()}, handle, separators=(",", ":"))
+            break
+        except FileExistsError:
+            try:
+                age = max(0.0, time.time() - lock_path.stat().st_mtime)
+                if age > ISSUANCE_LOCK_STALE_SECONDS:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except OSError:
+                pass
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Effect-system preview issuance is busy; retry shortly")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        try:
+            lock_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _clean_binding(value: str, *, label: str, max_length: int = 160) -> str:
@@ -106,36 +146,39 @@ def issue_effect_system_preview_token(
     normalized_track = _clean_binding(track_id, label="Preview track id", max_length=160)
     normalized_fingerprint = _clean_fingerprint(fingerprint)
     root = _preview_root(project)
-    _cleanup_expired(root, issued_at)
-    active = sum(1 for path in root.glob("*.json") if path.is_file())
-    if active >= MAX_ACTIVE_PREVIEW_TOKENS:
-        raise RuntimeError("Too many active effect-system preview tokens; retry after existing previews expire")
 
-    expires_at = issued_at + PREVIEW_TOKEN_TTL_SECONDS
-    payload = {
-        "schema_version": 1,
-        "user_id": normalized_user,
-        "track_id": normalized_track,
-        "fingerprint": normalized_fingerprint,
-        "issued_at": issued_at,
-        "expires_at": expires_at,
-    }
-    for _attempt in range(4):
-        token = secrets.token_hex(32)
-        path = _token_path(project, token)
-        try:
-            with path.open("x", encoding="utf-8") as handle:
-                json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
-            return {
-                "token": token,
-                "expires_at": expires_at,
-                "expires_in_seconds": PREVIEW_TOKEN_TTL_SECONDS,
-                "one_time": True,
-                "server_authoritative": True,
-                "raw_token_persisted": False,
-            }
-        except FileExistsError:
-            continue
+    with _issuance_lock(root):
+        _cleanup_expired(root, issued_at)
+        active = sum(1 for path in root.glob("*.json") if path.is_file())
+        if active >= MAX_ACTIVE_PREVIEW_TOKENS:
+            raise RuntimeError("Too many active effect-system preview tokens; retry after existing previews expire")
+
+        expires_at = issued_at + PREVIEW_TOKEN_TTL_SECONDS
+        payload = {
+            "schema_version": 1,
+            "user_id": normalized_user,
+            "track_id": normalized_track,
+            "fingerprint": normalized_fingerprint,
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+        }
+        for _attempt in range(4):
+            token = secrets.token_hex(32)
+            path = _token_path(project, token)
+            try:
+                with path.open("x", encoding="utf-8") as handle:
+                    json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+                return {
+                    "token": token,
+                    "expires_at": expires_at,
+                    "expires_in_seconds": PREVIEW_TOKEN_TTL_SECONDS,
+                    "one_time": True,
+                    "server_authoritative": True,
+                    "raw_token_persisted": False,
+                    "quota_admission_serialized": True,
+                }
+            except FileExistsError:
+                continue
     raise RuntimeError("Unable to allocate unique effect-system preview token")
 
 
@@ -204,6 +247,8 @@ def consume_effect_system_preview_token(
 
 
 __all__ = [
+    "ISSUANCE_LOCK_STALE_SECONDS",
+    "ISSUANCE_LOCK_WAIT_SECONDS",
     "MAX_ACTIVE_PREVIEW_TOKENS",
     "PREVIEW_TOKEN_TTL_SECONDS",
     "consume_effect_system_preview_token",
